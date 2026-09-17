@@ -1,0 +1,115 @@
+# ==========================================
+# Android & Gradle
+# ==========================================
+.gradle/
+build/
+**/build/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# Android Build Outputs & Packages
+*.apk
+*.ap_
+*.aab
+*.dex
+mapping.txt
+
+# Keystores and Signing Secrets
+*.jks
+*.keystore
+
+# Google Services credentials (if used)
+google-services.json
+
+# ==========================================
+# Python Backend (FastAPI / Server)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+
+# Server Storage & Database State (server/storage)
+# Ignore uploaded frames and generated data, but keep directory structure
+server/storage/frames/*
+!server/storage/frames/.gitkeep
+server/storage/data/*
+!server/storage/data/.gitkeep
+
+# General Databases & SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# ==========================================
+# Web Frontend (Vite / React / TypeScript)
+# ==========================================
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+.vite/
+*.tsbuildinfo
+
+# Package Manager Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Local Web Environment Files
+.env.local
+.env.*.local
+
+# ==========================================
+# IDEs & Developer Tools
+# ==========================================
+# IntelliJ IDEA / Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Visual Studio Code
+# Ignore personal workspace settings but keep shared launch/tasks if needed
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.code-workspace
+
+# ==========================================
+# OS & Miscellaneous
+# ==========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
+*.bak
