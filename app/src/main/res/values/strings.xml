@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">MatrixCapture</string>
+    <string name="accessibility_service_desc">Automates document pagination, gesture dispatching, and gutter pitch calibration on external desktop displays for MatrixCapture.</string>
+</resources>

@@ -1,0 +1,60 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "MatrixCapture (Pixel 10 Pro XL)",
+            "type": "android",
+            "request": "launch",
+            "appSrcRoot": "${workspaceFolder}/app/src/main",
+            "apkFile": "${workspaceFolder}/app/build/outputs/apk/debug/app-debug.apk",
+            "target": "192.168.86.81:43677",
+            "preLaunchTask": "gradle: assembleDebug"
+        },
+        {
+            "name": "Attach Debugger (Pixel 10 Pro XL)",
+            "type": "android",
+            "request": "attach",
+            "appSrcRoot": "${workspaceFolder}/app/src/main",
+            "packageName": "com.matrixcapture.app",
+            "target": "192.168.86.81:43677"
+        },
+        {
+            "name": "FastAPI Studio Backend",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/server/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/server",
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            }
+        },
+        {
+            "name": "Web Studio (Browser)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "http://localhost:5173",
+            "webRoot": "${workspaceFolder}/web",
+            "preLaunchTask": "web: dev"
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Full Stack Studio (FastAPI + Web Studio)",
+            "configurations": [
+                "FastAPI Studio Backend",
+                "Web Studio (Browser)"
+            ],
+            "stopAll": true
+        },
+        {
+            "name": "Complete Pipeline (MatrixCapture App + Studio)",
+            "configurations": [
+                "MatrixCapture (Pixel 10 Pro XL)",
+                "FastAPI Studio Backend",
+                "Web Studio (Browser)"
+            ],
+            "stopAll": false
+        }
+    ]
+}
