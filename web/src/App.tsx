@@ -18,7 +18,17 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const getApiBase = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (!envUrl || envUrl === 'http://127.0.0.1:8000' || envUrl === 'http://localhost:8000') {
+    if (typeof window !== 'undefined' && window.location.port === '5173') {
+      return '';
+    }
+  }
+  return envUrl || '';
+};
+
+const API_BASE = getApiBase();
 const POLL_INTERVAL_MS = Number(import.meta.env.VITE_POLL_INTERVAL_MS) || 1200;
 const DEFAULT_TARGET_LINES = Number(import.meta.env.VITE_DEFAULT_TARGET_LINES) || 0;
 
@@ -160,6 +170,7 @@ export default function App() {
   const [scanStatusMsg, setScanStatusMsg] = useState('');
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
   const [wsConnected, setWsConnected] = useState(false);
+  const [backendConnected, setBackendConnected] = useState(true);
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +189,7 @@ export default function App() {
         ]);
 
         if (docRes.ok) {
+          setBackendConnected(true);
           const docJson = await docRes.json();
           setDocumentData(docJson);
           if (docJson.token_stats) {
@@ -215,8 +227,8 @@ export default function App() {
             setTokenStats(tJson.token_stats);
           }
         }
-      } catch (err) {
-        console.error('Failed to connect to FastAPI backend:', err);
+      } catch {
+        setBackendConnected(false);
       }
     };
 
@@ -232,11 +244,14 @@ export default function App() {
 
     const connectWs = () => {
       try {
-        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
+        const wsUrl = API_BASE 
+          ? API_BASE.replace(/^http/, 'ws') + '/ws'
+          : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
         ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
           setWsConnected(true);
+          setBackendConnected(true);
           console.log('[WebSocket] Connected to MatrixCapture server.');
         };
 
@@ -597,6 +612,24 @@ export default function App() {
           </a>
         </div>
       </header>
+
+      {!backendConnected && (
+        <div style={{
+          backgroundColor: '#ff7b7218',
+          borderBottom: '1px solid #ff7b7233',
+          color: '#ff7b72',
+          padding: '6px 16px',
+          fontSize: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          justifyContent: 'center',
+          fontWeight: 500
+        }}>
+          <AlertCircle size={14} />
+          <span>FastAPI backend unreachable. Retrying connection to port 8000... Ensure server is running with 'python main.py'.</span>
+        </div>
+      )}
 
       {/* Live Telemetry & Gutter Pacer Synchronization Banner */}
       <div className="telemetry-banner">
