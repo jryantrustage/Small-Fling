@@ -171,6 +171,7 @@ export default function App() {
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
+  const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -601,6 +602,19 @@ export default function App() {
           </button>
 
           <a 
+            href={`${API_BASE}/api/spliced-document-image`} 
+            className="btn btn-outline"
+            target="_blank" 
+            rel="noreferrer"
+            download="spliced_document.png"
+            title="Download full continuous stitched document PNG spliced from all frames"
+            style={{ borderColor: 'rgba(0, 255, 157, 0.4)', color: '#00ff9d' }}
+          >
+            <Download size={14} />
+            <span>Export Spliced PNG</span>
+          </a>
+
+          <a 
             href={`${API_BASE}/api/export-markdown`} 
             className="btn btn-primary"
             target="_blank" 
@@ -767,13 +781,35 @@ export default function App() {
         {/* Column 2: Synchronized 1080p Screenshot Viewer with Gutter Overlays */}
         <main className="frame-inspector-panel">
           <div className="panel-header">
-            <span>
-              {activeFrame 
-                ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` 
-                : '1080p Desktop Frame Inspector'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                <button
+                  className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`}
+                  onClick={() => setInspectorMode('single')}
+                  style={{ fontSize: '11px', padding: '3px 8px' }}
+                >
+                  Single Frame
+                </button>
+                <button
+                  className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`}
+                  onClick={() => setInspectorMode('spliced')}
+                  style={{ fontSize: '11px', padding: '3px 8px' }}
+                >
+                  Spliced Document ({frames.length})
+                </button>
+              </div>
+
+              <span>
+                {inspectorMode === 'spliced'
+                  ? `Spliced Stream: ${frames.length} Frames Spliced (${documentData.total_lines} Total Lines)`
+                  : activeFrame 
+                    ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` 
+                    : '1080p Desktop Frame Inspector'}
+              </span>
+            </div>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {activeFrame && (
+              {inspectorMode === 'single' && activeFrame && (
                 <button 
                   className="btn-scan-ocr"
                   onClick={handleScanFrameOcr}
@@ -819,98 +855,123 @@ export default function App() {
           </div>
 
           <div className={`inspector-view-container ${zoomMode === 'actual' ? 'actual-mode' : ''}`}>
-            {activeFrame && activeFrame.status.startsWith('error') && (
-              <div className="frame-error-banner">
-                <AlertCircle size={18} color="#f85149" />
-                <div className="frame-error-content">
-                  <div className="frame-error-title">OCR Transcription Error</div>
-                  <div className="frame-error-detail">{activeFrame.status}</div>
-                </div>
-                <button
-                  className="btn btn-sm btn-primary frame-error-retry-btn"
-                  onClick={() => handleReprocessFrame(activeFrame.frame_id)}
-                  disabled={reprocessingFrameId === activeFrame.frame_id}
-                >
-                  <RotateCw size={13} className={reprocessingFrameId === activeFrame.frame_id ? 'spinning' : ''} />
-                  <span>{reprocessingFrameId === activeFrame.frame_id ? 'Retrying...' : 'Retry OCR'}</span>
-                </button>
-              </div>
-            )}
-            {activeFrame ? (
-              <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-                {/* 1. START LINE NUMBER AT THE TOP */}
-                <div className="gutter-line-callout top">
-                  <span className="gutter-callout-icon">▲</span>
-                  <span className="gutter-callout-label">START LINE NUMBER (TOP GUTTER):</span>
-                  <span className="gutter-callout-value">
-                    {activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Awaiting / Detecting...'}
+            {inspectorMode === 'spliced' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Layers size={14} color="#00ff9d" />
+                    <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>
+                      CONTINUOUS SPLICED CANVAS · {frames.length} FRAMES CONCATENATED
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#8b949e', fontFamily: 'monospace' }}>
+                    Auto-spliced by first & last gutter lines
                   </span>
                 </div>
-
                 <div 
                   className={`source-image-wrapper ${zoomMode}`}
                   style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}
                 >
                   <img 
-                    src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
-                    alt={activeFrame.frame_id} 
+                    src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} 
+                    alt="Spliced Continuous Document"
+                    style={{ width: zoomMode === 'fit' ? '100%' : 'auto', display: 'block' }}
                   />
-                  {/* Bounding Box Overlays: Green on first line, Red on last line, Yellow on wrapped lines */}
-                  {activeFrame && frameBoundingBoxes[activeFrame.frame_id] && (
-                    <svg 
-                      className="bbox-svg-overlay"
-                      viewBox="0 0 1920 1080"
-                      preserveAspectRatio="none"
-                    >
-                      {/* Green bounding box on first line */}
-                      {frameBoundingBoxes[activeFrame.frame_id].first_line && (
-                        <rect
-                          x={frameBoundingBoxes[activeFrame.frame_id].first_line!.x}
-                          y={frameBoundingBoxes[activeFrame.frame_id].first_line!.y}
-                          width={frameBoundingBoxes[activeFrame.frame_id].first_line!.width}
-                          height={frameBoundingBoxes[activeFrame.frame_id].first_line!.height}
-                          className="bbox-rect-green"
-                        />
-                      )}
-                      {/* Red bounding box around space of last line */}
-                      {frameBoundingBoxes[activeFrame.frame_id].last_line && (
-                        <rect
-                          x={frameBoundingBoxes[activeFrame.frame_id].last_line!.x}
-                          y={frameBoundingBoxes[activeFrame.frame_id].last_line!.y}
-                          width={frameBoundingBoxes[activeFrame.frame_id].last_line!.width}
-                          height={frameBoundingBoxes[activeFrame.frame_id].last_line!.height}
-                          className="bbox-rect-red"
-                        />
-                      )}
-                      {/* Yellow bounding boxes on wrapped lines */}
-                      {frameBoundingBoxes[activeFrame.frame_id].wrapped_lines?.map((wb, idx) => (
-                        <rect
-                          key={idx}
-                          x={wb.x}
-                          y={wb.y}
-                          width={wb.width}
-                          height={wb.height}
-                          className="bbox-rect-yellow"
-                        />
-                      ))}
-                    </svg>
-                  )}
-                </div>
-
-                {/* 2. END LINE NUMBER AT THE BOTTOM */}
-                <div className="gutter-line-callout bottom">
-                  <span className="gutter-callout-icon">▼</span>
-                  <span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
-                  <span className="gutter-callout-value">
-                    {activeFrame.bottom_line > 0 ? `Line #${activeFrame.bottom_line}` : 'Awaiting / Detecting...'}
-                  </span>
                 </div>
               </div>
             ) : (
-              <div className="empty-inspector-state">
-                <Scan size={36} color="#30363d" />
-                <p>Select a frame from the feed or capture a screen on mobile to inspect line alignment.</p>
-              </div>
+              <>
+                {activeFrame && activeFrame.status.startsWith('error') && (
+                  <div className="frame-error-banner">
+                    <AlertCircle size={18} color="#f85149" />
+                    <div className="frame-error-content">
+                      <div className="frame-error-title">OCR Transcription Error</div>
+                      <div className="frame-error-detail">{activeFrame.status}</div>
+                    </div>
+                    <button
+                      className="btn btn-sm btn-primary frame-error-retry-btn"
+                      onClick={() => handleReprocessFrame(activeFrame.frame_id)}
+                      disabled={reprocessingFrameId === activeFrame.frame_id}
+                    >
+                      <RotateCw size={13} className={reprocessingFrameId === activeFrame.frame_id ? 'spinning' : ''} />
+                      <span>{reprocessingFrameId === activeFrame.frame_id ? 'Retrying...' : 'Retry OCR'}</span>
+                    </button>
+                  </div>
+                )}
+                {activeFrame ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+                    {/* 1. START LINE NUMBER AT THE TOP */}
+                    <div className="gutter-line-callout top">
+                      <span className="gutter-callout-icon">▲</span>
+                      <span className="gutter-callout-label">START LINE NUMBER (TOP GUTTER):</span>
+                      <span className="gutter-callout-value">
+                        {activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Awaiting / Detecting...'}
+                      </span>
+                    </div>
+
+                    <div 
+                      className={`source-image-wrapper ${zoomMode}`}
+                      style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}
+                    >
+                      <img 
+                        src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
+                        alt={activeFrame.frame_id} 
+                      />
+                      {/* Bounding Box Overlays */}
+                      {activeFrame && frameBoundingBoxes[activeFrame.frame_id] && (
+                        <svg 
+                          className="bbox-svg-overlay"
+                          viewBox="0 0 1920 1080"
+                          preserveAspectRatio="none"
+                        >
+                          {frameBoundingBoxes[activeFrame.frame_id].first_line && (
+                            <rect
+                              x={frameBoundingBoxes[activeFrame.frame_id].first_line!.x}
+                              y={frameBoundingBoxes[activeFrame.frame_id].first_line!.y}
+                              width={frameBoundingBoxes[activeFrame.frame_id].first_line!.width}
+                              height={frameBoundingBoxes[activeFrame.frame_id].first_line!.height}
+                              className="bbox-rect-green"
+                            />
+                          )}
+                          {frameBoundingBoxes[activeFrame.frame_id].last_line && (
+                            <rect
+                              x={frameBoundingBoxes[activeFrame.frame_id].last_line!.x}
+                              y={frameBoundingBoxes[activeFrame.frame_id].last_line!.y}
+                              width={frameBoundingBoxes[activeFrame.frame_id].last_line!.width}
+                              height={frameBoundingBoxes[activeFrame.frame_id].last_line!.height}
+                              className="bbox-rect-red"
+                            />
+                          )}
+                          {frameBoundingBoxes[activeFrame.frame_id].wrapped_lines?.map((wb, idx) => (
+                            <rect
+                              key={idx}
+                              x={wb.x}
+                              y={wb.y}
+                              width={wb.width}
+                              height={wb.height}
+                              className="bbox-rect-yellow"
+                            />
+                          ))}
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* 2. END LINE NUMBER AT THE BOTTOM */}
+                    <div className="gutter-line-callout bottom">
+                      <span className="gutter-callout-icon">▼</span>
+                      <span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
+                      <span className="gutter-callout-value">
+                        {activeFrame.bottom_line > 0 ? `Line #${activeFrame.bottom_line}` : 'Awaiting / Detecting...'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-inspector-state">
+                    <Scan size={36} color="#30363d" />
+                    <p>Select a frame from the feed or capture a screen on mobile to inspect line alignment.</p>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </main>
