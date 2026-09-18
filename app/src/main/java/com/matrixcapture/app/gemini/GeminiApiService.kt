@@ -138,7 +138,7 @@ class GeminiApiService(
         segmentIndex: Int,
         startLine: Int,
         endLine: Int,
-        modelName: String = "gemini-2.5-flash"
+        modelName: String = "gemini-3.6-flash"
     ): String = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider().trim()
         val generateUrl = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
@@ -182,6 +182,12 @@ class GeminiApiService(
                 throw IOException("Gemini generateContent error: HTTP ${response.code} - $body")
             }
             val result = json.decodeFromString<GenerateContentResponse>(body)
+            result.usageMetadata?.let { meta ->
+                mobilePromptTokens.addAndGet(meta.promptTokenCount)
+                mobileCandidatesTokens.addAndGet(meta.candidatesTokenCount)
+                mobileTotalTokens.addAndGet(meta.totalTokenCount)
+                Log.i(TAG, "Segment $segmentIndex Gemini tokens: ${meta.totalTokenCount} (Prompt: ${meta.promptTokenCount}, Output: ${meta.candidatesTokenCount})")
+            }
             result.candidates?.firstOrNull()?.content?.parts?.joinToString("\n") { it.text ?: "" } ?: ""
         }
 
@@ -257,9 +263,21 @@ class GeminiApiService(
         val maxOutputTokens: Int = 8192
     )
 
+    val mobilePromptTokens = java.util.concurrent.atomic.AtomicInteger(0)
+    val mobileCandidatesTokens = java.util.concurrent.atomic.AtomicInteger(0)
+    val mobileTotalTokens = java.util.concurrent.atomic.AtomicInteger(0)
+
     @Serializable
     data class GenerateContentResponse(
-        val candidates: List<Candidate>? = null
+        val candidates: List<Candidate>? = null,
+        val usageMetadata: UsageMetadata? = null
+    )
+
+    @Serializable
+    data class UsageMetadata(
+        val promptTokenCount: Int = 0,
+        val candidatesTokenCount: Int = 0,
+        val totalTokenCount: Int = 0
     )
 
     @Serializable

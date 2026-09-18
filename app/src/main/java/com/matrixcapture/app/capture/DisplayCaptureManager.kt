@@ -154,11 +154,18 @@ class DisplayCaptureManager(
         }
     }
 
+    var gutterTracker: GutterOcrTracker? = null
+
     /**
      * Grabs a pristine 1080p uncompressed screenshot Bitmap from the settled ImageReader surface.
      * Zero motion blur, zero video compression artifacts.
      */
     fun captureSettledSnapshot(): Bitmap? {
+        val cached = gutterTracker?.getLatestSettledFrameBitmap()
+        if (cached != null) {
+            return cached
+        }
+
         val reader = imageReader ?: return null
         val image = try {
             reader.acquireLatestImage()

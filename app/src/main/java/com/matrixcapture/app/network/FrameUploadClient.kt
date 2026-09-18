@@ -126,6 +126,59 @@ class FrameUploadClient(
         }
     }
 
+    data class TelemetryData(
+        val deviceId: String = "Pixel 10 Desktop",
+        val isPacing: Boolean = false,
+        val currentPage: Int = 0,
+        val currentTopLine: Int = 0,
+        val currentBottomLine: Int = 0,
+        val targetTotalLines: Int = 9487,
+        val dwellCountdownMs: Int = 0,
+        val phase: String = "IDLE",
+        val statusMessage: String = "",
+        val mobilePromptTokens: Int = 0,
+        val mobileCandidatesTokens: Int = 0,
+        val mobileTotalTokens: Int = 0,
+        val autoTuneFactor: Float = 1.0f,
+        val linePitchPx: Float = 32f,
+        val bottomToTopError: Int = 0,
+        val wrappedLinesDetected: Int = 0
+    )
+
+    suspend fun sendTelemetry(data: TelemetryData): Boolean = withContext(Dispatchers.IO) {
+        val url = "http://$serverHost/api/telemetry"
+        val json = JSONObject().apply {
+            put("device_id", data.deviceId)
+            put("is_pacing", data.isPacing)
+            put("current_page", data.currentPage)
+            put("current_top_line", data.currentTopLine)
+            put("current_bottom_line", data.currentBottomLine)
+            put("target_total_lines", data.targetTotalLines)
+            put("dwell_countdown_ms", data.dwellCountdownMs)
+            put("phase", data.phase)
+            put("status_message", data.statusMessage)
+            put("mobile_tokens", JSONObject().apply {
+                put("prompt_tokens", data.mobilePromptTokens)
+                put("candidates_tokens", data.mobileCandidatesTokens)
+                put("total_tokens", data.mobileTotalTokens)
+            })
+            put("pacer_calibration", JSONObject().apply {
+                put("auto_tune_factor", data.autoTuneFactor.toDouble())
+                put("line_pitch_px", data.linePitchPx.toDouble())
+                put("bottom_to_top_error", data.bottomToTopError)
+                put("wrapped_lines_detected", data.wrappedLinesDetected)
+            })
+        }
+
+        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder().url(url).post(requestBody).build()
+        try {
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     suspend fun testConnection(): Boolean = withContext(Dispatchers.IO) {
         val url = "http://$serverHost/api/health"
         val request = Request.Builder().url(url).get().build()

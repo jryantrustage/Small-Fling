@@ -75,6 +75,15 @@ class GutterOcrTracker(
         }
     }
 
+    @Volatile
+    private var latestSettledBitmap: Bitmap? = null
+
+    fun getLatestSettledFrameBitmap(): Bitmap? {
+        return synchronized(this) {
+            latestSettledBitmap?.copy(Bitmap.Config.ARGB_8888, false)
+        }
+    }
+
     /**
      * Extracts and crops the left 10% line gutter, then performs ML Kit text recognition.
      */
@@ -97,8 +106,17 @@ class GutterOcrTracker(
         )
         bitmap.copyPixelsFromBuffer(buffer)
 
+        val fullFrame = if (rowPadding == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0, width, height)
+        synchronized(this@GutterOcrTracker) {
+            latestSettledBitmap?.recycle()
+            latestSettledBitmap = fullFrame.copy(Bitmap.Config.ARGB_8888, false)
+        }
+
         // Crop specifically the left gutter region
-        val croppedGutter = Bitmap.createBitmap(bitmap, 0, 0, gutterWidth, height)
+        val croppedGutter = Bitmap.createBitmap(fullFrame, 0, 0, gutterWidth, height)
+        if (fullFrame !== bitmap) {
+            fullFrame.recycle()
+        }
         bitmap.recycle()
 
         val inputImage = InputImage.fromBitmap(croppedGutter, 0)
@@ -116,10 +134,12 @@ class GutterOcrTracker(
 
     /**
      * Parses recognized numbers in vertical order, updates line bounds,
-     * computes line height pitch, and checks the 1,200-line segment boundary.
+     * computes line height pitch, detects wrapped lines, and checks boundary triggers.
      */
     private fun parseGutterLines(visionText: Text, viewportHeight: Int) {
         val detectedNumbers = mutableListOf<DetectedGutterLine>()
+        val topToolbarThreshold = (viewportHeight * 0.08f).toInt()
+        val bottomStatusBarThreshold = (viewportHeight * 0.94f).toInt()
 
         for (block in visionText.textBlocks) {
             for (line in block.lines) {
@@ -127,6 +147,10 @@ class GutterOcrTracker(
                 val lineNumber = cleanedText.toIntOrNull()
                 val box = line.boundingBox
                 if (lineNumber != null && lineNumber > 0 && box != null) {
+                    // Ignore toolbar at top and status bar at bottom
+                    if (box.top < topToolbarThreshold || box.bottom > bottomStatusBarThreshold) {
+                        continue
+                    }
                     detectedNumbers.add(
                         DetectedGutterLine(
                             lineNumber = lineNumber,
@@ -144,7 +168,8 @@ class GutterOcrTracker(
         // Sort vertically by top coordinate
         detectedNumbers.sortBy { it.topY }
 
-        val topLine = detectedNumbers.first().lineNumber
+        val topLineItem = detectedNumbers.first()
+        val topLine = topLineItem.lineNumber
         val bottomItem = detectedNumbers.last()
         val bottomLine = bottomItem.lineNumber
 
@@ -163,21 +188,50 @@ class GutterOcrTracker(
         }
         val avgPitch = if (pitchSampleCount > 0) totalPitch / pitchSampleCount else 32.0f
 
+        // Detect wrapped line edge cases:
+        // If consecutive line numbers have vertical distance > 1.7 * pitch, line wraps!
+        var wrappedCount = 0
+        for (i in 0 until detectedNumbers.size - 1) {
+            val curr = detectedNumbers[i]
+            val next = detectedNumbers[i + 1]
+            if (next.lineNumber == curr.lineNumber + 1) {
+                val pyDelta = next.centerY - curr.centerY
+                val visualRows = Math.round(pyDelta / avgPitch).toInt()
+                if (visualRows > 1) {
+                    curr.isWrapped = true
+                    curr.wrappedVisualLines = visualRows
+                    wrappedCount++
+                }
+            }
+        }
+
+        // Extrapolate wrapped rows for bottom-most line if it extends towards the bottom
+        val spaceBelow = bottomStatusBarThreshold - bottomItem.bottomY
+        if (spaceBelow > avgPitch * 1.6f) {
+            val extraRows = Math.round(spaceBelow / avgPitch).toInt()
+            if (extraRows > 1) {
+                bottomItem.isWrapped = true
+                bottomItem.wrappedVisualLines = extraRows
+                wrappedCount++
+            }
+        }
+
         lastRecordedBottomLine = maxOf(lastRecordedBottomLine, bottomLine)
         val linesInSegment = lastRecordedBottomLine - segmentStartLine + 1
 
         _gutterState.value = GutterState(
             currentTopLine = topLine,
             currentBottomLine = bottomLine,
+            highestDetectedY = topLineItem.topY,
             lowestDetectedY = bottomItem.bottomY,
             linePitchPx = avgPitch,
             segmentStartLine = segmentStartLine,
             cumulativeSegmentLines = linesInSegment,
-            viewportHeight = viewportHeight
+            viewportHeight = viewportHeight,
+            wrappedLinesCount = wrappedCount
         )
 
         // 1,200-Line Segmentation Trigger:
-        // When span approaches 1,200 lines, trigger rotation with 5-10 lines overlap
         if (linesInSegment >= SEGMENT_TARGET_LINES) {
             val handoverLine = lastRecordedBottomLine
             val overlapStartLine = (handoverLine - OVERLAP_LINES).coerceAtLeast(1)
@@ -188,7 +242,6 @@ class GutterOcrTracker(
                         "Next segment starts with overlap at line $overlapStartLine."
             )
 
-            // Update bounds for next segment
             segmentStartLine = overlapStartLine
             onSegmentThresholdReached(handoverLine, overlapStartLine)
         }
@@ -219,23 +272,31 @@ class GutterOcrTracker(
 
     fun close() {
         recognizer.close()
+        synchronized(this) {
+            latestSettledBitmap?.recycle()
+            latestSettledBitmap = null
+        }
     }
 
     data class DetectedGutterLine(
         val lineNumber: Int,
         val centerY: Int,
         val topY: Int,
-        val bottomY: Int
+        val bottomY: Int,
+        var isWrapped: Boolean = false,
+        var wrappedVisualLines: Int = 1
     )
 
     data class GutterState(
         val currentTopLine: Int = 1,
         val currentBottomLine: Int = 1,
+        val highestDetectedY: Int = 0,
         val lowestDetectedY: Int = 0,
         val linePitchPx: Float = 32f,
         val segmentStartLine: Int = 1,
         val cumulativeSegmentLines: Int = 0,
-        val viewportHeight: Int = 1080
+        val viewportHeight: Int = 1080,
+        val wrappedLinesCount: Int = 0
     )
 
     companion object {

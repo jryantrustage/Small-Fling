@@ -346,6 +346,24 @@ fun FloatingHudOverlay(
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(
+                            text = "Auto-tune: ${String.format(java.util.Locale.US, "%.2f", telemetry.autoTuneFactor)}x (err: ${telemetry.bottomToTopError} ln)",
+                            color = if (telemetry.bottomToTopError == 0) Color(0xFF00FF9D) else Color(0xFFFFA657),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        if (telemetry.wrappedLinesDetected > 0) {
+                            Text(
+                                text = "Wrapped: ${telemetry.wrappedLinesDetected}",
+                                color = Color(0xFFD29922),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
                     // Dwell Timer
                     if (dwellRemainingMs > 0) {
                         Spacer(modifier = Modifier.height(4.dp))

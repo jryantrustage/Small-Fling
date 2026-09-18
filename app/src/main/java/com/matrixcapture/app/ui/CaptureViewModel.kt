@@ -75,6 +75,54 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        // Periodic telemetry publisher to FastAPI server
+        viewModelScope.launch {
+            while (isActive) {
+                delay(1200)
+                try {
+                    val pState = DesktopPaginationService.telemetry.value
+                    val geminiApi = SegmentRecorderService.instance?.getGeminiApiService()
+                    val pTokens = geminiApi?.mobilePromptTokens?.get() ?: 0
+                    val cTokens = geminiApi?.mobileCandidatesTokens?.get() ?: 0
+                    val tTokens = geminiApi?.mobileTotalTokens?.get() ?: 0
+
+                    _uiState.update {
+                        it.copy(
+                            mobilePromptTokens = pTokens,
+                            mobileCandidatesTokens = cTokens,
+                            mobileTotalTokens = tTokens,
+                            autoTuneFactor = pState.autoTuneFactor,
+                            bottomToTopError = pState.bottomToTopError,
+                            wrappedLinesDetected = pState.wrappedLinesDetected
+                        )
+                    }
+
+                    uploadClient.sendTelemetry(
+                        FrameUploadClient.TelemetryData(
+                            deviceId = "Pixel 10 Desktop (${_uiState.value.targetDisplay?.name ?: "Display 1"})",
+                            isPacing = DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running,
+                            currentPage = pState.currentPage,
+                            currentTopLine = pState.currentTopLine,
+                            currentBottomLine = pState.currentBottomLine,
+                            targetTotalLines = pState.targetTotalLines,
+                            dwellCountdownMs = pState.dwellRemainingMs.toInt(),
+                            phase = pState.phase,
+                            statusMessage = pState.statusMessage,
+                            mobilePromptTokens = pTokens,
+                            mobileCandidatesTokens = cTokens,
+                            mobileTotalTokens = tTokens,
+                            autoTuneFactor = pState.autoTuneFactor,
+                            linePitchPx = pState.linePitchPx,
+                            bottomToTopError = pState.bottomToTopError,
+                            wrappedLinesDetected = pState.wrappedLinesDetected
+                        )
+                    )
+                } catch (e: Exception) {
+                    // Ignore transient network errors
+                }
+            }
+        }
+
         // Real-time Display 1 / Desktop Mode Detection
         initDisplayDetection()
     }
@@ -363,6 +411,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val currentTopLine: Int = 1,
         val currentBottomLine: Int = 1,
         val linePitchPx: Float = 32f,
+        val mobilePromptTokens: Int = 0,
+        val mobileCandidatesTokens: Int = 0,
+        val mobileTotalTokens: Int = 0,
+        val autoTuneFactor: Float = 1.0f,
+        val bottomToTopError: Int = 0,
+        val wrappedLinesDetected: Int = 0,
         val targetDisplay: com.matrixcapture.app.capture.DisplayCaptureManager.ExternalDisplayInfo? = null,
         val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
         val assemblyResult: MarkdownAssembler.AssemblyResult? = null,

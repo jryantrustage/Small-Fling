@@ -186,6 +186,7 @@ class SegmentRecorderService : Service() {
                 gutterTracker = GutterOcrTracker(serviceScope) { handoverLine, overlapLine ->
                     onRotateSegment(handoverLine, overlapLine)
                 }
+                captureManager!!.gutterTracker = gutterTracker
 
                 captureManager!!.setupOcrVirtualDisplay(
                     width = width,
@@ -379,6 +380,7 @@ class SegmentRecorderService : Service() {
 
     fun getGutterTracker(): GutterOcrTracker? = gutterTracker
     fun getCaptureManager(): DisplayCaptureManager? = captureManager
+    fun getGeminiApiService(): GeminiApiService? = if (::geminiApiService.isInitialized) geminiApiService else null
 
     override fun onDestroy() {
         super.onDestroy()
