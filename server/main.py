@@ -387,6 +387,32 @@ async def get_token_stats():
     }
 
 
+def get_fresh_telemetry() -> Dict[str, Any]:
+    """
+    Returns telemetry with active heartbeat validation. If device heartbeat is older
+    than 4 seconds, mark is_pacing as False and phase as STANDBY.
+    """
+    telemetry_copy = dict(latest_telemetry)
+    heartbeat_str = telemetry_copy.get("last_heartbeat")
+    is_stale = True
+    if heartbeat_str:
+        try:
+            hb_time = datetime.fromisoformat(heartbeat_str)
+            age_sec = (datetime.now() - hb_time).total_seconds()
+            if age_sec < 4.0:
+                is_stale = False
+        except Exception:
+            is_stale = True
+
+    if is_stale:
+        telemetry_copy["is_pacing"] = False
+        telemetry_copy["dwell_countdown_ms"] = 0
+        telemetry_copy["phase"] = "STANDBY"
+        if telemetry_copy.get("status_message") in ["Testing Telemetry Sync", "Idle", "Ready"]:
+            telemetry_copy["status_message"] = "Pacer Standby / Awaiting Device Connection"
+    return telemetry_copy
+
+
 @app.get("/api/telemetry")
 async def get_telemetry():
     """
@@ -397,7 +423,7 @@ async def get_telemetry():
     issue_count = sum(1 for ln in sorted_lines if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
 
     return {
-        "telemetry": latest_telemetry,
+        "telemetry": get_fresh_telemetry(),
         "token_stats": token_stats,
         "document_summary": {
             "total_lines": len(document_lines),
@@ -578,7 +604,7 @@ async def get_document():
         "total_frames": len(captured_frames),
         "issue_count": len(issues),
         "token_stats": token_stats,
-        "latest_telemetry": latest_telemetry,
+        "latest_telemetry": get_fresh_telemetry(),
         "issues": issues,
         "lines": sorted_lines
     }
@@ -701,9 +727,9 @@ async def export_markdown():
 @app.post("/api/reset-state")
 async def reset_state():
     """
-    Resets document lines and frames for a clean capture session.
+    Resets document lines, frames, and telemetry for a clean capture session.
     """
-    global document_lines, captured_frames, recapture_queue, token_stats
+    global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
     document_lines = {}
     captured_frames = {}
     recapture_queue = []
@@ -719,8 +745,37 @@ async def reset_state():
             "total_tokens": 0
         }
     }
+    latest_telemetry = {
+        "device_id": "idle",
+        "is_pacing": False,
+        "current_page": 0,
+        "current_top_line": 0,
+        "current_bottom_line": 0,
+        "target_total_lines": config.TARGET_TOTAL_LINES,
+        "dwell_countdown_ms": 0,
+        "phase": "IDLE",
+        "status_message": "Matrix Capture Studio ready",
+        "last_heartbeat": None,
+        "pacer_calibration": {
+            "auto_tune_factor": config.PACER_AUTO_TUNE_FACTOR,
+            "line_pitch_px": config.PACER_LINE_PITCH_PX,
+            "bottom_to_top_error": 0,
+            "wrapped_lines_detected": 0
+        }
+    }
+
+    # Clean up stored frame images
+    try:
+        for f in FRAMES_DIR.glob("*.png"):
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Error cleaning frames directory: {e}")
+
     save_persisted_state()
-    return {"status": "success", "message": "Document state reset."}
+    return {"status": "success", "message": "Document state and telemetry reset to clean state."}
 
 
 if __name__ == "__main__":

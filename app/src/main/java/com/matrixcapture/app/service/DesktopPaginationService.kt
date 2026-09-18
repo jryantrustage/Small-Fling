@@ -377,12 +377,14 @@ class DesktopPaginationService : AccessibilityService() {
                             performScrollFallback(targetWindow)
                         }
 
-                        delay(450) // Wait for scroll to completely settle (Zero motion blur)
+                        delay(700) // Wait for scroll to completely settle (Zero motion blur with anti-fling deceleration)
 
                         // Ground-truth line numbers directly from Gutter OCR if detected
                         val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-                        if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
-                            currentTopLine = ocr.currentTopLine
+                        val hasRealOcr = ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine
+
+                        if (hasRealOcr) {
+                            currentTopLine = ocr!!.currentTopLine
                             currentBottomLine = ocr.currentBottomLine
 
                             // Auto-tune alignment error calculation:
@@ -399,8 +401,10 @@ class DesktopPaginationService : AccessibilityService() {
                             }
                             Log.i(TAG, "Auto-tune evaluated: prevBottom=$targetPreviousBottomLine, newTop=$currentTopLine, error=$error lines -> next factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)}")
                         } else {
+                            // When OCR is not active, advance conservatively and flag as UNCALIBRATED
                             currentTopLine += linesPerPage
                             currentBottomLine = currentTopLine + visibleLinesCount - 1
+                            lastAlignmentError = 0
                         }
 
                         // Trigger discrete settled snapshot grab
@@ -408,7 +412,12 @@ class DesktopPaginationService : AccessibilityService() {
                     }
 
                     val chunkProgress = currentBottomLine - currentChunkStartLine
-                    val statusMsg = "Page $pageIndex (Lines $currentTopLine-$currentBottomLine) • Dwell Freeze"
+                    val ocrActive = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value?.currentTopLine ?: 0 > 0
+                    val statusMsg = if (ocrActive) {
+                        "Page $pageIndex (Lines $currentTopLine-$currentBottomLine) • Dwell Freeze"
+                    } else {
+                        "Page $pageIndex (Est. Ln $currentTopLine-$currentBottomLine • UNCALIBRATED) • Dwell Freeze"
+                    }
 
                     val currentGutter = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                     _telemetry.value = PacingTelemetry(
@@ -533,48 +542,79 @@ class DesktopPaginationService : AccessibilityService() {
     }
 
     /**
-     * Injects a smooth swipe gesture via AccessibilityService on the specified display.
+     * Injects a deterministic zero-momentum swipe gesture via AccessibilityService on the specified display.
+     * Prevents Android VelocityTracker from triggering inertial flings by dragging smoothly
+     * and holding stationary for holdDurationMs (zero lift-off velocity) before sending ACTION_UP.
      */
     private suspend fun dispatchSwipe(
         startX: Float,
         startY: Float,
         endX: Float,
         endY: Float,
-        durationMs: Long,
+        durationMs: Long = 450L,
+        holdDurationMs: Long = 200L,
         displayId: Int = 0
     ): Boolean = suspendCancellableCoroutine { continuation ->
-        val path = Path().apply {
+        val dragPath = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
         }
 
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
-        val builder = GestureDescription.Builder().addStroke(stroke)
+        val stroke1 = GestureDescription.StrokeDescription(dragPath, 0L, durationMs, true)
+        val builder1 = GestureDescription.Builder().addStroke(stroke1)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.setDisplayId(displayId)
+            builder1.setDisplayId(displayId)
         }
-        val gesture = builder.build()
 
-        val dispatched = dispatchGesture(
-            gesture,
+        val dispatchedPhase1 = dispatchGesture(
+            builder1.build(),
             object : GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     super.onCompleted(gestureDescription)
-                    Log.d(TAG, "Gesture completed on Display $displayId: ($startX, $startY) -> ($endX, $endY)")
-                    if (continuation.isActive) continuation.resume(true) {}
+                    // Phase 2: Stationary dwell hold at (endX, endY) to kill momentum fling
+                    val holdPath = Path().apply {
+                        moveTo(endX, endY)
+                        lineTo(endX, endY)
+                    }
+                    val stroke2 = stroke1.continueStroke(holdPath, 0L, holdDurationMs, false)
+                    val builder2 = GestureDescription.Builder().addStroke(stroke2)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        builder2.setDisplayId(displayId)
+                    }
+                    val dispatchedPhase2 = dispatchGesture(
+                        builder2.build(),
+                        object : GestureResultCallback() {
+                            override fun onCompleted(gestureDescription: GestureDescription?) {
+                                super.onCompleted(gestureDescription)
+                                Log.d(TAG, "Anti-fling gesture completed on Display $displayId: ($startX, $startY) -> ($endX, $endY)")
+                                if (continuation.isActive) continuation.resume(true) {}
+                            }
+
+                            override fun onCancelled(gestureDescription: GestureDescription?) {
+                                super.onCancelled(gestureDescription)
+                                Log.w(TAG, "Anti-fling phase 2 cancelled on Display $displayId")
+                                if (continuation.isActive) continuation.resume(false) {}
+                            }
+                        },
+                        null
+                    )
+                    if (!dispatchedPhase2 && continuation.isActive) {
+                        Log.w(TAG, "Failed to dispatch anti-fling phase 2 on Display $displayId")
+                        continuation.resume(false) {}
+                    }
                 }
 
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     super.onCancelled(gestureDescription)
-                    Log.w(TAG, "Gesture cancelled on Display $displayId")
+                    Log.w(TAG, "Gesture phase 1 cancelled on Display $displayId")
                     if (continuation.isActive) continuation.resume(false) {}
                 }
             },
             null
         )
 
-        if (!dispatched && continuation.isActive) {
-            Log.w(TAG, "Failed to dispatch gesture on Display $displayId")
+        if (!dispatchedPhase1 && continuation.isActive) {
+            Log.w(TAG, "Failed to dispatch gesture phase 1 on Display $displayId")
             continuation.resume(false) {}
         }
     }

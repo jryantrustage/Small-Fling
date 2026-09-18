@@ -38,6 +38,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.matrixcapture.app.network.FrameUploadClient
 import com.matrixcapture.app.service.DesktopPaginationService
 import com.matrixcapture.app.service.SegmentRecorderService
 import kotlinx.coroutines.*
@@ -63,6 +64,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     private var composeView: ComposeView? = null
     private lateinit var layoutParams: WindowManager.LayoutParams
     private var wakeLock: PowerManager.WakeLock? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var telemetryJob: Job? = null
 
     private fun acquireWakeLock() {
         try {
@@ -114,6 +117,48 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         initOverlayView()
         _isOverlayRunning.value = true
+
+        // Persistent foreground telemetry dispatch directly to FastAPI server
+        telemetryJob = serviceScope.launch {
+            val prefs = getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+            val serverHost = prefs.getString("server_host", "10.0.2.2:8000") ?: "10.0.2.2:8000"
+            val uploadClient = FrameUploadClient(serverHost)
+
+            while (isActive) {
+                delay(1000)
+                try {
+                    val pState = DesktopPaginationService.telemetry.value
+                    val isRunning = DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running
+                    val geminiApi = SegmentRecorderService.instance?.getGeminiApiService()
+                    val pTokens = geminiApi?.mobilePromptTokens?.get() ?: 0
+                    val cTokens = geminiApi?.mobileCandidatesTokens?.get() ?: 0
+                    val tTokens = geminiApi?.mobileTotalTokens?.get() ?: 0
+
+                    uploadClient.sendTelemetry(
+                        FrameUploadClient.TelemetryData(
+                            deviceId = "Pixel 10 Desktop (HUD Active)",
+                            isPacing = isRunning,
+                            currentPage = pState.currentPage,
+                            currentTopLine = pState.currentTopLine,
+                            currentBottomLine = pState.currentBottomLine,
+                            targetTotalLines = pState.targetTotalLines,
+                            dwellCountdownMs = pState.dwellRemainingMs.toInt(),
+                            phase = pState.phase,
+                            statusMessage = pState.statusMessage,
+                            mobilePromptTokens = pTokens,
+                            mobileCandidatesTokens = cTokens,
+                            mobileTotalTokens = tTokens,
+                            autoTuneFactor = pState.autoTuneFactor,
+                            linePitchPx = pState.linePitchPx,
+                            bottomToTopError = pState.bottomToTopError,
+                            wrappedLinesDetected = pState.wrappedLinesDetected
+                        )
+                    )
+                } catch (e: Exception) {
+                    // Ignore transient network errors
+                }
+            }
+        }
     }
 
     @SuppressLint("RtlHardcoded")
@@ -162,6 +207,29 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     override fun onDestroy() {
         super.onDestroy()
         releaseWakeLock()
+        telemetryJob?.cancel()
+
+        // Notify server that HUD has stopped/is standby
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val prefs = getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                val serverHost = prefs.getString("server_host", "10.0.2.2:8000") ?: "10.0.2.2:8000"
+                val uploadClient = FrameUploadClient(serverHost)
+                uploadClient.sendTelemetry(
+                    FrameUploadClient.TelemetryData(
+                        deviceId = "Pixel 10 Desktop (Standby)",
+                        isPacing = false,
+                        phase = "STANDBY",
+                        statusMessage = "Pacer Standby / Closed"
+                    )
+                )
+            } catch (e: Exception) {
+                // Ignore
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
@@ -293,9 +361,9 @@ fun FloatingHudOverlay(
                                     .background(if (recorderState.isRecording) Color(0xFF00FF9D) else Color(0xFF8B949E))
                             )
                             Text(
-                                text = "MATRIX HUD",
-                                color = Color(0xFF00FF9D),
-                                fontSize = 12.sp,
+                                text = if (recorderState.isRecording) "MATRIX HUD [REC]" else "MATRIX HUD [TEST]",
+                                color = if (recorderState.isRecording) Color(0xFF00FF9D) else Color(0xFF58A6FF),
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -492,7 +560,7 @@ fun FloatingHudOverlay(
                                     DesktopPaginationService.instance?.startPacingEngine(
                                         totalLines = total,
                                         dwellTimeMs = 1500L,
-                                        phase = "TEST_PACING"
+                                        phase = if (recorderState.isRecording) "RECORDING_AND_PACING" else "TEST_PACING"
                                     )
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
@@ -503,7 +571,7 @@ fun FloatingHudOverlay(
                                 contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    text = "TEST PACER (1.5s)",
+                                    text = if (recorderState.isRecording) "START PACER" else "TEST PACER (1.5s)",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,

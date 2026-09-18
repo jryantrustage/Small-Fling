@@ -16,6 +16,7 @@ import {
   FileCode,
   Layers,
   RotateCw,
+  RotateCcw,
   AlertCircle
 } from 'lucide-react';
 
@@ -136,9 +137,11 @@ export default function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'issues'>('all');
+  const [zoomMode, setZoomMode] = useState<'fit' | 'actual' | 'custom'>('fit');
   const [imageZoom, setImageZoom] = useState(1);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -236,6 +239,45 @@ export default function App() {
     setIsDraggingOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       handleUploadFiles(e.dataTransfer.files);
+    }
+  };
+
+  // Handle session reset
+  const handleResetSession = async () => {
+    if (!window.confirm("Reset session? This will clear all captured frames, transcribed lines, and reset telemetry.")) {
+      return;
+    }
+    setIsResetting(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/reset-state`, { method: 'POST' });
+      if (res.ok) {
+        setSelectedFrameId(null);
+        setFrames([]);
+        setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+        setRecaptureQueue([]);
+        setTokenStats({
+          total_prompt_tokens: 0,
+          total_candidates_tokens: 0,
+          total_tokens: 0,
+          total_api_calls: 0,
+          estimated_cost_usd: 0,
+          mobile_tokens: { prompt_tokens: 0, candidates_tokens: 0, total_tokens: 0 }
+        });
+        setTelemetry(prev => ({
+          ...prev,
+          is_pacing: false,
+          current_page: 0,
+          current_top_line: 0,
+          current_bottom_line: 0,
+          dwell_countdown_ms: 0,
+          phase: 'STANDBY',
+          status_message: 'Session reset to clean state'
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to reset session:', err);
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -412,6 +454,17 @@ export default function App() {
             <span>Export VFS/Monaco JSON</span>
           </a>
 
+          <button 
+            className="btn btn-outline"
+            onClick={handleResetSession}
+            disabled={isResetting}
+            title="Reset session, clear test frames and start fresh"
+            style={{ borderColor: 'rgba(255, 123, 114, 0.4)', color: '#ff7b72' }}
+          >
+            <RotateCcw size={14} />
+            <span>{isResetting ? 'Resetting...' : 'Reset Session'}</span>
+          </button>
+
           <a 
             href={`${API_BASE}/api/export-markdown`} 
             className="btn btn-primary"
@@ -428,9 +481,13 @@ export default function App() {
       {/* Live Telemetry & Gutter Pacer Synchronization Banner */}
       <div className="telemetry-banner">
         <div className="telemetry-item">
-          <span className={`pacer-status-dot ${telemetry.is_pacing ? 'active' : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' ? 'connected' : 'idle')}`} />
+          <span className={`pacer-status-dot ${telemetry.is_pacing ? 'active' : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' && telemetry.phase !== 'STANDBY' ? 'connected' : 'idle')}`} />
           <span className="telemetry-label">PACER:</span>
-          <span className="telemetry-val">{telemetry.device_id}</span>
+          <span className="telemetry-val">
+            {telemetry.is_pacing 
+              ? telemetry.device_id 
+              : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' ? `${telemetry.device_id} (STANDBY)` : 'STANDBY')}
+          </span>
           {telemetry.is_pacing && <span className="pacing-badge">AUTO-PACING</span>}
         </div>
 
@@ -453,8 +510,8 @@ export default function App() {
           </span>
         </div>
 
-        {/* Dwell Freeze Countdown Bar */}
-        {telemetry.dwell_countdown_ms > 0 && (
+        {/* Dwell Freeze Countdown Bar (Only displayed during active pacing) */}
+        {telemetry.is_pacing && telemetry.dwell_countdown_ms > 0 && (
           <div className="dwell-progress-wrap">
             <span className="dwell-label">DWELL FREEZE: {telemetry.dwell_countdown_ms}ms</span>
             <div className="dwell-bar-bg">
@@ -562,29 +619,39 @@ export default function App() {
                 ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` 
                 : '1080p Desktop Frame Inspector'}
             </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button 
+                className={`btn btn-sm ${zoomMode === 'fit' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => { setZoomMode('fit'); setImageZoom(1); }}
+                title="Fit frame inside view"
+              >
+                Fit
+              </button>
+              <button 
+                className={`btn btn-sm ${zoomMode === 'actual' ? 'btn-primary' : 'btn-outline'}`}
+                onClick={() => { setZoomMode('actual'); setImageZoom(1); }}
+                title="100% Actual 1080p Resolution (1:1)"
+              >
+                100% (1080p)
+              </button>
               <button 
                 className="btn btn-outline btn-sm"
-                onClick={() => setImageZoom(prev => Math.max(0.6, prev - 0.2))}
+                onClick={() => { setZoomMode('custom'); setImageZoom(prev => Math.max(0.4, Number((prev - 0.2).toFixed(1)))); }}
+                title="Zoom Out"
               >
                 <ZoomOut size={12} />
               </button>
               <button 
                 className="btn btn-outline btn-sm"
-                onClick={() => setImageZoom(1)}
-              >
-                100%
-              </button>
-              <button 
-                className="btn btn-outline btn-sm"
-                onClick={() => setImageZoom(prev => Math.min(2.5, prev + 0.2))}
+                onClick={() => { setZoomMode('custom'); setImageZoom(prev => Math.min(3.0, Number((prev + 0.2).toFixed(1)))); }}
+                title="Zoom In"
               >
                 <ZoomIn size={12} />
               </button>
             </div>
           </div>
 
-          <div className="inspector-view-container">
+          <div className={`inspector-view-container ${zoomMode === 'actual' ? 'actual-mode' : ''}`}>
             {activeFrame && activeFrame.status.startsWith('error') && (
               <div className="frame-error-banner">
                 <AlertCircle size={18} color="#f85149" />
@@ -604,8 +671,8 @@ export default function App() {
             )}
             {activeFrame ? (
               <div 
-                className="source-image-wrapper"
-                style={{ transform: `scale(${imageZoom})`, transformOrigin: 'center center' }}
+                className={`source-image-wrapper ${zoomMode}`}
+                style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}
               >
                 <img 
                   src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
