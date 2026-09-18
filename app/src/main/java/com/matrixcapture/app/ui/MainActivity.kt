@@ -61,7 +61,9 @@ class MainActivity : ComponentActivity() {
                 val isOverlayActive by FloatingOverlayService.isOverlayRunning.collectAsState()
 
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .safeDrawingPadding(),
                     color = Color(0xFF0D1117)
                 ) {
                     MatrixCaptureDashboard(
@@ -115,6 +117,7 @@ fun MatrixCaptureDashboard(
     val scrollState = rememberScrollState()
     val segments by SegmentRecorderService.segmentDetails.collectAsState()
     val totalFinalLines by SegmentRecorderService.totalFinalLines.collectAsState()
+    val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
 
     Column(
         modifier = Modifier
@@ -263,11 +266,14 @@ fun MatrixCaptureDashboard(
 
         // Real-Time Gutter Telemetry Card
         TelemetryCard(title = "GUTTER OCR & LINE TRACKER", icon = Icons.Default.FormatListNumbered) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem("TOP LINE", "${uiState.currentTopLine}")
-                StatItem("BOTTOM LINE", "${uiState.currentBottomLine}")
-                StatItem("PITCH", "%.1f px/ln".format(uiState.linePitchPx))
-                StatItem("TOTAL DEDUCED", if (uiState.calculatedTotalLines > 0) "${uiState.calculatedTotalLines}" else "Scanning...")
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatItem("TOP LINE", "${uiState.currentTopLine}", modifier = Modifier.weight(1f))
+                StatItem("BOTTOM LINE", "${uiState.currentBottomLine}", modifier = Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatItem("PITCH", "%.1f px/ln".format(uiState.linePitchPx), modifier = Modifier.weight(1f))
+                StatItem("TOTAL DEDUCED", if (uiState.calculatedTotalLines > 0) "${uiState.calculatedTotalLines}" else "Scanning...", modifier = Modifier.weight(1f))
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -295,11 +301,14 @@ fun MatrixCaptureDashboard(
         // Video Segment & Chunking Progress Card
         TelemetryCard(title = "VIDEO CHUNK RECORDER (1,200 LINES / SEGMENT)", icon = Icons.Default.VideoCall) {
             val recState = uiState.recorderState
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem("ACTIVE SEGMENT", "#%03d".format(recState.currentSegmentIndex))
-                StatItem("START LINE", "${recState.currentStartLine}")
-                StatItem("CHUNKS MADE", "${recState.completedSegmentsCount}")
-                StatItem("EXTRACTED", "${recState.processedSegmentsCount}")
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatItem("ACTIVE SEGMENT", "#%03d".format(recState.currentSegmentIndex), modifier = Modifier.weight(1f))
+                StatItem("START LINE", "${recState.currentStartLine}", modifier = Modifier.weight(1f))
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth()) {
+                StatItem("CHUNKS MADE", "${recState.completedSegmentsCount}", modifier = Modifier.weight(1f))
+                StatItem("EXTRACTED", "${recState.processedSegmentsCount}", modifier = Modifier.weight(1f))
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -347,14 +356,12 @@ fun MatrixCaptureDashboard(
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     Text(
                         text = "FLOATING HUD OVERLAY",
                         color = Color(0xFF00FF9D),
@@ -362,28 +369,67 @@ fun MatrixCaptureDashboard(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 13.sp
                     )
-                    Text(
-                        text = "Runs a compact, draggable HUD with live line trackers & controls on Screen 0/1.",
-                        color = Color(0xFF8B949E),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
+                    Button(
+                        onClick = onToggleOverlay,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isOverlayActive) Color(0xFFDA3633) else Color(0xFF238636)
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = if (isOverlayActive) "Close HUD" else "Launch HUD",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = Color.White
+                        )
+                    }
                 }
-
-                Button(
-                    onClick = onToggleOverlay,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isOverlayActive) Color(0xFFDA3633) else Color(0xFF238636)
-                    ),
-                    shape = RoundedCornerShape(8.dp)
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Runs a compact, draggable HUD with live line trackers & controls on Screen 0/1.",
+                    color = Color(0xFF8B949E),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isOverlayActive) "Close HUD" else "Launch HUD",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = Color.White
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "ON-SCREEN KEYBOARD",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isKeyboardSuppressed) "Suppressed (External screen clear)" else "Auto (OS default)",
+                            color = if (isKeyboardSuppressed) Color(0xFF00FF9D) else Color(0xFF8B949E),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Button(
+                        onClick = { DesktopPaginationService.instance?.toggleSoftKeyboard() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
+                    ) {
+                        Text(
+                            text = if (isKeyboardSuppressed) "Restore KB" else "Hide KB",
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
@@ -401,7 +447,7 @@ fun MatrixCaptureDashboard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "FASTAPI STUDIO OCR BACKEND",
+                        text = "FASTAPI OCR BACKEND",
                         color = Color(0xFF58A6FF),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
@@ -439,29 +485,51 @@ fun MatrixCaptureDashboard(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.LightGray,
                         focusedBorderColor = Color(0xFF58A6FF),
-                        unfocusedBorderColor = Color(0xFF30363D)
+                        unfocusedBorderColor = Color(0xFF30363D),
+                        focusedLabelColor = Color(0xFF58A6FF),
+                        unfocusedLabelColor = Color(0xFF8B949E)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "Uploaded Frames: ${uiState.uploadedFramesCount}",
-                        color = Color(0xFF8B949E),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Text(
-                        text = "Web Studio: http://localhost:5173",
-                        color = Color(0xFF58A6FF),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Uploaded Frames:",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "${uiState.uploadedFramesCount}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Web Studio:",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "http://localhost:5173",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
         }
@@ -491,7 +559,9 @@ fun MatrixCaptureDashboard(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.LightGray,
                         focusedBorderColor = Color(0xFF00FF9D),
-                        unfocusedBorderColor = Color(0xFF30363D)
+                        unfocusedBorderColor = Color(0xFF30363D),
+                        focusedLabelColor = Color(0xFF00FF9D),
+                        unfocusedLabelColor = Color(0xFF8B949E)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -565,13 +635,23 @@ fun MatrixCaptureDashboard(
                     onValueChange = { str ->
                         str.filter { it.isDigit() }.toIntOrNull()?.let { onTargetLinesChange(it) }
                     },
-                    label = { Text("Total Lines (Matrix_main = 9487)") },
+                    label = { Text("Total Target Lines") },
+                    supportingText = {
+                        Text(
+                            text = "Reference: Matrix_main = 9487 lines",
+                            color = Color(0xFF8B949E),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.LightGray,
                         focusedBorderColor = Color(0xFF00FF9D),
-                        unfocusedBorderColor = Color(0xFF30363D)
+                        unfocusedBorderColor = Color(0xFF30363D),
+                        focusedLabelColor = Color(0xFF00FF9D),
+                        unfocusedLabelColor = Color(0xFF8B949E)
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
@@ -579,76 +659,154 @@ fun MatrixCaptureDashboard(
         }
 
         // Action Buttons
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         if (!uiState.isWorkflowRunning) {
             Button(
                 onClick = onTestPacer,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
+                    .defaultMinSize(minHeight = 52.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
             ) {
-                Icon(Icons.Default.Speed, contentDescription = null, tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "TEST PACER (1.5s Dwell - No Recording Prompt)",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Speed,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = "TEST PACER (1.5s Dwell)",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 13.sp
+                        )
+                        Text(
+                            text = "Test page scroll gestures without recording",
+                            color = Color(0xFFB4F0C0),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Button(
                 onClick = onStartWorkflow,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .defaultMinSize(minHeight = 60.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF9D))
             ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null, tint = Color.Black)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "START SETTLED CAPTURE & UPLOAD (Zero Blur)",
-                    color = Color.Black,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.CameraAlt,
+                        contentDescription = null,
+                        tint = Color.Black,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = "START SETTLED CAPTURE",
+                            color = Color.Black,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            letterSpacing = 0.5.sp
+                        )
+                        Text(
+                            text = "Capture & Upload • Zero Blur Pacer",
+                            color = Color(0xFF083C25),
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
             }
         } else {
             Button(
                 onClick = onStopWorkflow,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .defaultMinSize(minHeight = 56.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633))
             ) {
-                Icon(Icons.Default.Stop, contentDescription = null, tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "STOP WORKFLOW",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 16.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.Stop,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "STOP WORKFLOW",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 15.sp
+                    )
+                }
             }
         }
 
-        // Status Console Footer
-        Text(
-            text = "CONSOLE: ${uiState.workflowStatus}",
-            color = Color(0xFF8B949E),
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
+        // Status Console Footer Card
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF040D0A)),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+                .border(1.dp, Color(0xFF1F2E28), RoundedCornerShape(8.dp))
+        ) {
+            Row(
+                modifier = Modifier.padding(12.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "CONSOLE:",
+                    color = Color(0xFF00FF9D),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = uiState.workflowStatus,
+                    color = Color(0xFFC9D1D9),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
     }
 }
 
@@ -684,8 +842,8 @@ fun TelemetryCard(
 }
 
 @Composable
-fun StatItem(label: String, value: String) {
-    Column {
+fun StatItem(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
         Text(text = label, color = Color(0xFF6E7681), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         Text(
             text = value,

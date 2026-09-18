@@ -7,7 +7,7 @@
             "request": "launch",
             "appSrcRoot": "${workspaceFolder}/app/src/main",
             "apkFile": "${workspaceFolder}/app/build/outputs/apk/debug/app-debug.apk",
-            "target": "192.168.86.81:43677",
+            "targetDevice": "192.168.86.81:43677",
             "preLaunchTask": "gradle: assembleDebug"
         },
         {
@@ -16,7 +16,8 @@
             "request": "attach",
             "appSrcRoot": "${workspaceFolder}/app/src/main",
             "packageName": "com.matrixcapture.app",
-            "target": "192.168.86.81:43677"
+            "processId": "${command:PickAndroidProcess}",
+            "targetDevice": "192.168.86.81:43677"
         },
         {
             "name": "FastAPI Studio Backend",
