@@ -20,20 +20,17 @@ import com.matrixcapture.app.MatrixCaptureApp
 import com.matrixcapture.app.capture.DisplayCaptureManager
 import com.matrixcapture.app.capture.GutterOcrTracker
 import com.matrixcapture.app.gemini.GeminiApiService
-import com.matrixcapture.app.splicer.MarkdownAssembler
 import com.matrixcapture.app.ui.MainActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Module C: Foreground Recording & Video Segment Management Service.
+ * Foreground Capture Service for MatrixCapture.
  *
  * Runs with foregroundServiceType="mediaProjection".
- * Orchestrates display capture, real-time gutter OCR tracking, video rotation,
- * and background Gemini extraction & assembly.
+ * Holds the active MediaProjection session, binds the settled 1080p VirtualDisplay,
+ * and maintains real-time OCR tracking without any video recording overhead.
  */
 class SegmentRecorderService : Service() {
 
@@ -43,11 +40,7 @@ class SegmentRecorderService : Service() {
     private var captureManager: DisplayCaptureManager? = null
     private var gutterTracker: GutterOcrTracker? = null
     private var mediaProjection: MediaProjection? = null
-    private lateinit var geminiApiService: GeminiApiService
-    private lateinit var markdownAssembler: MarkdownAssembler
-
-    private val segmentCounter = AtomicInteger(0)
-    private val extractedSegments = mutableListOf<MarkdownAssembler.SegmentPayload>()
+    private var geminiApiService: GeminiApiService? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     private fun acquireWakeLock() {
@@ -56,15 +49,15 @@ class SegmentRecorderService : Service() {
                 val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                 wakeLock = pm.newWakeLock(
                     PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                    "MatrixCapture:RecorderWakeLock"
+                    "MatrixCapture:CaptureWakeLock"
                 )
             }
             if (wakeLock?.isHeld == false) {
                 wakeLock?.acquire(90 * 60 * 1000L) // 90 min max
-                Log.i(TAG, "Screen WakeLock acquired in SegmentRecorderService.")
+                Log.i(TAG, "Screen WakeLock acquired.")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to acquire wake lock in SegmentRecorderService", e)
+            Log.e(TAG, "Failed to acquire wake lock", e)
         }
     }
 
@@ -72,15 +65,11 @@ class SegmentRecorderService : Service() {
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
-                Log.i(TAG, "Screen WakeLock released in SegmentRecorderService.")
+                Log.i(TAG, "Screen WakeLock released.")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to release wake lock in SegmentRecorderService", e)
+            Log.e(TAG, "Failed to release wake lock", e)
         }
-    }
-
-    fun rotateSegment(handoverLine: Int, overlapLine: Int) {
-        onRotateSegment(handoverLine, overlapLine)
     }
 
     private val _serviceState = MutableStateFlow(RecorderState())
@@ -100,9 +89,8 @@ class SegmentRecorderService : Service() {
         if (saved.isNotEmpty() && apiKey.isEmpty()) {
             apiKey = saved
         }
-        markdownAssembler = MarkdownAssembler(applicationContext)
         geminiApiService = GeminiApiService { apiKey }
-        Log.i(TAG, "SegmentRecorderService created with API key present: ${apiKey.isNotEmpty()}")
+        Log.i(TAG, "SegmentRecorderService created.")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -133,18 +121,14 @@ class SegmentRecorderService : Service() {
 
         val notification: Notification = NotificationCompat.Builder(this, MatrixCaptureApp.CHANNEL_ID_RECORDER)
             .setContentTitle("MatrixCapture Active")
-            .setContentText("Recording Desktop Mode on Display 1 & running gutter OCR")
+            .setContentText("Capturing settled frames & streaming to Studio")
             .setSmallIcon(android.R.drawable.presence_video_online)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            }
+            val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             startForeground(MatrixCaptureApp.NOTIFICATION_ID_RECORDER, notification, type)
         } else {
             startForeground(MatrixCaptureApp.NOTIFICATION_ID_RECORDER, notification)
@@ -169,13 +153,9 @@ class SegmentRecorderService : Service() {
                     }
                 }, Handler(Looper.getMainLooper()))
 
-                val recordingsDir = File(cacheDir, "segments")
-                if (!recordingsDir.exists()) recordingsDir.mkdirs()
-
                 captureManager = DisplayCaptureManager(
                     context = applicationContext,
-                    mediaProjection = mediaProjection!!,
-                    outputDirectory = recordingsDir
+                    mediaProjection = mediaProjection!!
                 )
 
                 val displayInfo = captureManager!!.detectExternalDisplay()
@@ -183,21 +163,21 @@ class SegmentRecorderService : Service() {
                 val height = displayInfo?.height ?: 1080
                 val densityDpi = displayInfo?.densityDpi ?: 320
 
-                gutterTracker = GutterOcrTracker(serviceScope) { handoverLine, overlapLine ->
-                    onRotateSegment(handoverLine, overlapLine)
-                }
+                gutterTracker = GutterOcrTracker(serviceScope)
                 captureManager!!.gutterTracker = gutterTracker
 
+                // Set up VirtualDisplay directly to ImageReader
                 captureManager!!.setupOcrVirtualDisplay(
                     width = width,
                     height = height,
-                    densityDpi = densityDpi,
-                    frameListener = gutterTracker!!.createFrameListener()
+                    densityDpi = densityDpi
                 )
 
                 _serviceState.value = _serviceState.value.copy(
                     isReady = true,
-                    targetDisplayInfo = displayInfo
+                    isRecording = true,
+                    targetDisplayInfo = displayInfo,
+                    processingStatus = "Ready for settled capture"
                 )
                 Log.i(TAG, "Capture manager initialized successfully for Display ${displayInfo?.displayId}")
             } catch (e: Exception) {
@@ -207,166 +187,22 @@ class SegmentRecorderService : Service() {
         }
     }
 
-    /**
-     * Begins recording the first video chunk and arms the gutter tracker.
-     */
-    fun startCaptureSession(startLine: Int = 1) {
-        val cm = captureManager ?: run {
-            Log.e(TAG, "Cannot start capture session: captureManager is null")
-            return
-        }
-        try {
-            acquireWakeLock()
-            val currentIdx = segmentCounter.incrementAndGet()
-            cm.startNewSegment(currentIdx, startLine)
-            _serviceState.value = _serviceState.value.copy(
-                isRecording = true,
-                currentSegmentIndex = currentIdx,
-                currentStartLine = startLine
-            )
-            Log.i(TAG, "Started capture session segment $currentIdx starting at line $startLine")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start capture session", e)
-            _serviceState.value = _serviceState.value.copy(
-                errorMessage = "Failed to start recording: ${e.message}"
-            )
-        }
-    }
-
-    /**
-     * Invoked when GutterOcrTracker indicates ~1,200 lines have been reached.
-     */
-    private fun onRotateSegment(handoverLine: Int, overlapLine: Int) {
-        serviceScope.launch {
-            val cm = captureManager ?: return@launch
-            Log.i(TAG, "Rotating segment at line $handoverLine; next segment starts at $overlapLine.")
-
-            // 1. Finalize current segment
-            val completed = cm.finalizeSegment(handoverLine)
-
-            // 2. Immediately start next segment with overlap
-            val nextIdx = segmentCounter.incrementAndGet()
-            cm.startNewSegment(nextIdx, overlapLine)
-
-            _serviceState.value = _serviceState.value.copy(
-                currentSegmentIndex = nextIdx,
-                currentStartLine = overlapLine,
-                completedSegmentsCount = _serviceState.value.completedSegmentsCount + 1
-            )
-
-            // 3. Dispatch completed segment to Gemini File API pipeline
-            if (completed != null) {
-                processSegmentWithGemini(completed)
-            }
-        }
-    }
-
-    /**
-     * Uploads completed MP4 segment, polls for ACTIVE status, runs OCR inference, and removes remote video.
-     */
-    private fun processSegmentWithGemini(segment: DisplayCaptureManager.CompletedSegment) {
-        serviceScope.launch(Dispatchers.IO) {
-            _serviceState.value = _serviceState.value.copy(
-                processingStatus = "Uploading segment ${segment.segmentIndex} to Gemini..."
-            )
-
-            var remoteFileName: String? = null
-            try {
-                // Track segment status
-                updateSegmentDetail(segment.segmentIndex, segment.startLine, segment.endLine, SegmentStatus.UPLOADING, 0, "Uploading to Gemini File API...")
-
-                // Step 1: Upload
-                val uploaded = geminiApiService.uploadVideo(segment.videoFile)
-                remoteFileName = uploaded.name
-
-                // Step 2: Poll status until ACTIVE
-                updateSegmentDetail(segment.segmentIndex, segment.startLine, segment.endLine, SegmentStatus.PROCESSING, 0, "Gemini processing video...")
-                _serviceState.value = _serviceState.value.copy(
-                    processingStatus = "Awaiting Gemini processing for segment ${segment.segmentIndex}..."
-                )
-                val activeFile = geminiApiService.pollUntilActive(remoteFileName)
-
-                // Step 3: Inference
-                updateSegmentDetail(segment.segmentIndex, segment.startLine, segment.endLine, SegmentStatus.EXTRACTING, 0, "Gemini extracting OCR code...")
-                _serviceState.value = _serviceState.value.copy(
-                    processingStatus = "Extracting code for segment ${segment.segmentIndex} (Lines ${segment.startLine}-${segment.endLine})..."
-                )
-                val extractedMarkdown = geminiApiService.extractCodeFromSegment(
-                    fileUri = activeFile.uri ?: "",
-                    segmentIndex = segment.segmentIndex,
-                    startLine = segment.startLine,
-                    endLine = segment.endLine
-                )
-
-                val lineCount = extractedMarkdown.lines().size
-                updateSegmentDetail(segment.segmentIndex, segment.startLine, segment.endLine, SegmentStatus.EXTRACTED, lineCount, "Extracted $lineCount lines")
-
-                synchronized(extractedSegments) {
-                    extractedSegments.add(
-                        MarkdownAssembler.SegmentPayload(
-                            segmentIndex = segment.segmentIndex,
-                            startLine = segment.startLine,
-                            endLine = segment.endLine,
-                            rawContent = extractedMarkdown
-                        )
-                    )
-                }
-
-                _serviceState.value = _serviceState.value.copy(
-                    processedSegmentsCount = extractedSegments.size,
-                    processingStatus = "Segment ${segment.segmentIndex} extracted successfully ($lineCount lines)."
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing segment ${segment.segmentIndex} with Gemini", e)
-                updateSegmentDetail(segment.segmentIndex, segment.startLine, segment.endLine, SegmentStatus.FAILED, 0, "Failed: ${e.message}")
-                _serviceState.value = _serviceState.value.copy(
-                    errorMessage = "Gemini Segment ${segment.segmentIndex} Failed: ${e.message}"
-                )
-            } finally {
-                // Step 4: Cleanup remote file
-                if (remoteFileName != null) {
-                    geminiApiService.deleteRemoteFile(remoteFileName)
-                }
-            }
-        }
-    }
-
-    /**
-     * Concludes the session: finalizes any recording in flight, processes the last segment,
-     * and triggers markdown assembly.
-     */
-    fun finishSessionAndAssemble(finalEndLine: Int, onComplete: (MarkdownAssembler.AssemblyResult) -> Unit) {
-        serviceScope.launch {
-            _serviceState.value = _serviceState.value.copy(processingStatus = "Finalizing last segment...")
-
-            val lastSegment = captureManager?.finalizeSegment(finalEndLine)
-            if (lastSegment != null) {
-                processSegmentWithGemini(lastSegment)
-            }
-
-            // Wait for in-flight Gemini extractions to complete
-            val expectedTotal = segmentCounter.get()
-            var waitedMs = 0L
-            while (synchronized(extractedSegments) { extractedSegments.size } < expectedTotal && waitedMs < 300_000L) {
-                delay(1500)
-                waitedMs += 1500
-                _serviceState.value = _serviceState.value.copy(
-                    processingStatus = "Waiting for all segments to extract (${extractedSegments.size}/$expectedTotal)..."
-                )
-            }
-
-            _serviceState.value = _serviceState.value.copy(processingStatus = "Stitching markdown segments...")
-            val result = markdownAssembler.assembleAndSave(extractedSegments.toList())
-            if (result.isSuccessful) {
-                _totalFinalLines.value = result.totalLines
-            }
-
-            _serviceState.value = _serviceState.value.copy(
-                processingStatus = if (result.isSuccessful) "Assembly Complete (${result.totalLines} lines)" else "Assembly Failed",
-                assemblyResult = result
-            )
-            onComplete(result)
-        }
+    fun reportFrameUploaded(pageIndex: Int, topLine: Int, bottomLine: Int, success: Boolean) {
+        val currentList = _segmentDetails.value.toMutableList()
+        val item = SegmentDetail(
+            segmentIndex = pageIndex,
+            startLine = topLine,
+            endLine = bottomLine,
+            status = if (success) SegmentStatus.EXTRACTED else SegmentStatus.FAILED,
+            markdownLineCount = if (bottomLine >= topLine) bottomLine - topLine + 1 else 0,
+            statusMessage = if (success) "Uploaded to Studio ✔" else "Upload Failed"
+        )
+        currentList.add(0, item) // Most recent first
+        _segmentDetails.value = currentList
+        _serviceState.value = _serviceState.value.copy(
+            completedSegmentsCount = currentList.count { it.status == SegmentStatus.EXTRACTED },
+            processingStatus = "Page $pageIndex (Lines $topLine-$bottomLine) Uploaded ✔"
+        )
     }
 
     fun stopWorkflow() {
@@ -380,7 +216,7 @@ class SegmentRecorderService : Service() {
 
     fun getGutterTracker(): GutterOcrTracker? = gutterTracker
     fun getCaptureManager(): DisplayCaptureManager? = captureManager
-    fun getGeminiApiService(): GeminiApiService? = if (::geminiApiService.isInitialized) geminiApiService else null
+    fun getGeminiApiService(): GeminiApiService? = geminiApiService
 
     override fun onDestroy() {
         super.onDestroy()
@@ -390,32 +226,6 @@ class SegmentRecorderService : Service() {
         mediaProjection?.stop()
         instance = null
         Log.i(TAG, "SegmentRecorderService destroyed.")
-    }
-
-    private fun updateSegmentDetail(
-        segmentIndex: Int,
-        startLine: Int,
-        endLine: Int,
-        status: SegmentStatus,
-        lineCount: Int,
-        message: String
-    ) {
-        val currentList = _segmentDetails.value.toMutableList()
-        val existingIdx = currentList.indexOfFirst { it.segmentIndex == segmentIndex }
-        val updatedItem = SegmentDetail(
-            segmentIndex = segmentIndex,
-            startLine = startLine,
-            endLine = endLine,
-            status = status,
-            markdownLineCount = if (lineCount > 0) lineCount else (currentList.getOrNull(existingIdx)?.markdownLineCount ?: 0),
-            statusMessage = message
-        )
-        if (existingIdx >= 0) {
-            currentList[existingIdx] = updatedItem
-        } else {
-            currentList.add(updatedItem)
-        }
-        _segmentDetails.value = currentList
     }
 
     enum class SegmentStatus {
@@ -445,8 +255,7 @@ class SegmentRecorderService : Service() {
         val processedSegmentsCount: Int = 0,
         val processingStatus: String = "Idle",
         val errorMessage: String? = null,
-        val targetDisplayInfo: DisplayCaptureManager.ExternalDisplayInfo? = null,
-        val assemblyResult: MarkdownAssembler.AssemblyResult? = null
+        val targetDisplayInfo: DisplayCaptureManager.ExternalDisplayInfo? = null
     )
 
     companion object {

@@ -1,10 +1,6 @@
 package com.matrixcapture.app.capture
 
 import android.graphics.Bitmap
-import android.graphics.PixelFormat
-import android.graphics.Rect
-import android.media.Image
-import android.media.ImageReader
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
@@ -14,19 +10,17 @@ import com.matrixcapture.app.service.DesktopPaginationService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Module C: Real-Time Gutter Tracker using Google ML Kit.
+ * Real-Time Gutter Tracker using Google ML Kit.
  *
- * Receives frames from VirtualDisplay via ImageReader, crops the left 10% (gutter),
- * extracts sequential line numbers, measures vertical line pitch, and signals
- * 1,200-line video chunking thresholds with overlap handover.
+ * Receives settled 1080p bitmaps directly from DisplayCaptureManager,
+ * crops the left gutter margin (15%), extracts sequential line numbers,
+ * and measures vertical line pitch for pacing alignment.
  */
 class GutterOcrTracker(
-    private val scope: CoroutineScope,
-    private val onSegmentThresholdReached: (handoverLine: Int, overlapLine: Int) -> Unit
+    private val scope: CoroutineScope
 ) {
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     private val isProcessingFrame = AtomicBoolean(false)
@@ -34,93 +28,48 @@ class GutterOcrTracker(
     private val _gutterState = MutableStateFlow(GutterState())
     val gutterState = _gutterState.asStateFlow()
 
-    private var segmentStartLine = 1
-    private var lastRecordedBottomLine = 1
     private var frameCounter = 0
-
     var isPaused = false
 
     /**
-     * Connects to an ImageReader configured for RGBA_8888 or YUV.
+     * Called by DisplayCaptureManager whenever a new frame is rendered.
      */
-    fun createFrameListener(): ImageReader.OnImageAvailableListener {
-        return ImageReader.OnImageAvailableListener { reader ->
-            val image = try {
-                reader.acquireLatestImage()
-            } catch (e: Exception) {
-                null
-            } ?: return@OnImageAvailableListener
+    fun onFrameCaptured(bitmap: Bitmap) {
+        if (isPaused || bitmap.isRecycled) return
 
-            frameCounter++
-            // Sample during dwell time or every 4th frame (sufficient for gutter tracking at 30fps)
-            if (isPaused || frameCounter % 3 != 0 || isProcessingFrame.get()) {
-                image.close()
-                return@OnImageAvailableListener
-            }
+        frameCounter++
+        // Process every 3rd frame to avoid saturating ML Kit during rapid scroll
+        if (frameCounter % 3 != 0 || isProcessingFrame.get()) {
+            return
+        }
 
-            if (isProcessingFrame.compareAndSet(false, true)) {
-                scope.launch(Dispatchers.Default) {
-                    try {
-                        processGutterFrame(image)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error during OCR processing", e)
-                    } finally {
-                        image.close()
-                        isProcessingFrame.set(false)
-                    }
+        if (isProcessingFrame.compareAndSet(false, true)) {
+            scope.launch(Dispatchers.Default) {
+                try {
+                    processGutterBitmap(bitmap)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error during gutter OCR processing", e)
+                } finally {
+                    isProcessingFrame.set(false)
                 }
-            } else {
-                image.close()
             }
         }
     }
 
-    @Volatile
-    private var latestSettledBitmap: Bitmap? = null
+    private fun processGutterBitmap(fullFrame: Bitmap) {
+        val width = fullFrame.width
+        val height = fullFrame.height
+        // Safe 15% crop covering gutter line numbers even with display scaling
+        val gutterWidth = (width * GUTTER_WIDTH_RATIO).toInt().coerceIn(120, width / 2)
 
-    fun getLatestSettledFrameBitmap(): Bitmap? {
-        return synchronized(this) {
-            latestSettledBitmap?.copy(Bitmap.Config.ARGB_8888, false)
+        val croppedGutter = try {
+            Bitmap.createBitmap(fullFrame, 0, 0, gutterWidth, height)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to crop gutter from full frame", e)
+            return
         }
-    }
-
-    /**
-     * Extracts and crops the left 10% line gutter, then performs ML Kit text recognition.
-     */
-    private suspend fun processGutterFrame(image: Image) = withContext(Dispatchers.Default) {
-        val width = image.width
-        val height = image.height
-        val gutterWidth = (width * GUTTER_WIDTH_RATIO).toInt().coerceAtLeast(60)
-
-        // Convert planes to bitmap crop (RGBA_8888 format from VirtualDisplay ImageReader)
-        val planes = image.planes
-        val buffer: ByteBuffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * width
-
-        val bitmap = Bitmap.createBitmap(
-            width + rowPadding / pixelStride,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
-
-        val fullFrame = if (rowPadding == 0) bitmap else Bitmap.createBitmap(bitmap, 0, 0, width, height)
-        synchronized(this@GutterOcrTracker) {
-            latestSettledBitmap?.recycle()
-            latestSettledBitmap = fullFrame.copy(Bitmap.Config.ARGB_8888, false)
-        }
-
-        // Crop specifically the left gutter region
-        val croppedGutter = Bitmap.createBitmap(fullFrame, 0, 0, gutterWidth, height)
-        if (fullFrame !== bitmap) {
-            fullFrame.recycle()
-        }
-        bitmap.recycle()
 
         val inputImage = InputImage.fromBitmap(croppedGutter, 0)
-
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
                 parseGutterLines(visionText, height)
@@ -134,12 +83,12 @@ class GutterOcrTracker(
 
     /**
      * Parses recognized numbers in vertical order, updates line bounds,
-     * computes line height pitch, detects wrapped lines, and checks boundary triggers.
+     * computes line height pitch, and detects wrapped lines.
      */
     private fun parseGutterLines(visionText: Text, viewportHeight: Int) {
         val detectedNumbers = mutableListOf<DetectedGutterLine>()
-        val topToolbarThreshold = (viewportHeight * 0.08f).toInt()
-        val bottomStatusBarThreshold = (viewportHeight * 0.94f).toInt()
+        val topToolbarThreshold = (viewportHeight * 0.05f).toInt()
+        val bottomStatusBarThreshold = (viewportHeight * 0.95f).toInt()
 
         for (block in visionText.textBlocks) {
             for (line in block.lines) {
@@ -147,7 +96,7 @@ class GutterOcrTracker(
                 val lineNumber = cleanedText.toIntOrNull()
                 val box = line.boundingBox
                 if (lineNumber != null && lineNumber > 0 && box != null) {
-                    // Ignore toolbar at top and status bar at bottom
+                    // Ignore toolbar elements at the very top and status bar at bottom
                     if (box.top < topToolbarThreshold || box.bottom > bottomStatusBarThreshold) {
                         continue
                     }
@@ -188,8 +137,7 @@ class GutterOcrTracker(
         }
         val avgPitch = if (pitchSampleCount > 0) totalPitch / pitchSampleCount else 32.0f
 
-        // Detect wrapped line edge cases:
-        // If consecutive line numbers have vertical distance > 1.7 * pitch, line wraps!
+        // Detect wrapped line edge cases
         var wrappedCount = 0
         for (i in 0 until detectedNumbers.size - 1) {
             val curr = detectedNumbers[i]
@@ -205,46 +153,15 @@ class GutterOcrTracker(
             }
         }
 
-        // Extrapolate wrapped rows for bottom-most line if it extends towards the bottom
-        val spaceBelow = bottomStatusBarThreshold - bottomItem.bottomY
-        if (spaceBelow > avgPitch * 1.6f) {
-            val extraRows = Math.round(spaceBelow / avgPitch).toInt()
-            if (extraRows > 1) {
-                bottomItem.isWrapped = true
-                bottomItem.wrappedVisualLines = extraRows
-                wrappedCount++
-            }
-        }
-
-        lastRecordedBottomLine = maxOf(lastRecordedBottomLine, bottomLine)
-        val linesInSegment = lastRecordedBottomLine - segmentStartLine + 1
-
         _gutterState.value = GutterState(
             currentTopLine = topLine,
             currentBottomLine = bottomLine,
             highestDetectedY = topLineItem.topY,
             lowestDetectedY = bottomItem.bottomY,
             linePitchPx = avgPitch,
-            segmentStartLine = segmentStartLine,
-            cumulativeSegmentLines = linesInSegment,
             viewportHeight = viewportHeight,
             wrappedLinesCount = wrappedCount
         )
-
-        // 1,200-Line Segmentation Trigger:
-        if (linesInSegment >= SEGMENT_TARGET_LINES) {
-            val handoverLine = lastRecordedBottomLine
-            val overlapStartLine = (handoverLine - OVERLAP_LINES).coerceAtLeast(1)
-
-            Log.i(
-                TAG,
-                "Triggering segment rotation at line $handoverLine (Segment span: $linesInSegment lines). " +
-                        "Next segment starts with overlap at line $overlapStartLine."
-            )
-
-            segmentStartLine = overlapStartLine
-            onSegmentThresholdReached(handoverLine, overlapStartLine)
-        }
     }
 
     /**
@@ -264,18 +181,12 @@ class GutterOcrTracker(
     }
 
     fun reset() {
-        segmentStartLine = 1
-        lastRecordedBottomLine = 1
         frameCounter = 0
         _gutterState.value = GutterState()
     }
 
     fun close() {
         recognizer.close()
-        synchronized(this) {
-            latestSettledBitmap?.recycle()
-            latestSettledBitmap = null
-        }
     }
 
     data class DetectedGutterLine(
@@ -288,21 +199,17 @@ class GutterOcrTracker(
     )
 
     data class GutterState(
-        val currentTopLine: Int = 1,
-        val currentBottomLine: Int = 1,
+        val currentTopLine: Int = 0,
+        val currentBottomLine: Int = 0,
         val highestDetectedY: Int = 0,
         val lowestDetectedY: Int = 0,
         val linePitchPx: Float = 32f,
-        val segmentStartLine: Int = 1,
-        val cumulativeSegmentLines: Int = 0,
         val viewportHeight: Int = 1080,
         val wrappedLinesCount: Int = 0
     )
 
     companion object {
         private const val TAG = "GutterOcrTracker"
-        const val GUTTER_WIDTH_RATIO = 0.10f // Crop the left 10% margin
-        const val SEGMENT_TARGET_LINES = 1200 // Max lines per chunk
-        const val OVERLAP_LINES = 8 // 5–10 lines overlap to prevent boundary loss
+        const val GUTTER_WIDTH_RATIO = 0.15f // Crop the left 15% margin
     }
 }

@@ -205,6 +205,15 @@ class DesktopPaginationService : AccessibilityService() {
 
         val bounds = getDisplayOrWindowBounds(resolvedDisplay)
 
+        // 3-second focus delay so user can activate Teams window on external screen
+        for (sec in 3 downTo 1) {
+            _calibrationState.value = "Calibrating in $sec... (Focus Teams window on external display)"
+            _telemetry.value = _telemetry.value.copy(
+                statusMessage = "Focus Teams window! Starting calibration in $sec..."
+            )
+            delay(1000)
+        }
+
         // Rapid fling down (upward swipes) until end of document is detected
         var lastLineSeen = -1
         var bottomUnchangedCount = 0
@@ -247,7 +256,7 @@ class DesktopPaginationService : AccessibilityService() {
 
         // Read OCR gutter metrics at bottom
         val metrics = getGutterMetrics()
-        val totalLines = if (metrics != null && metrics.linePitchPx > 0) {
+        val totalLines = if (metrics != null && metrics.linePitchPx > 0 && metrics.lowestLineNumber > 0) {
             // Teams bottom status bar / offline banner height
             // Calculate obscured distance from lowest detected line to bottom of window
             val lowestLineBottomY = metrics.lowestLineBottomY
@@ -264,10 +273,11 @@ class DesktopPaginationService : AccessibilityService() {
                         "obscuredHeight = ${obscuredHeight}px, deduced total = $deducedTotal"
             )
             deducedTotal
+        } else if (lastLineSeen > 0) {
+            lastLineSeen
         } else {
-            val fallback = metrics?.lowestLineNumber ?: (if (lastLineSeen > 0) lastLineSeen else _calculatedTotalLines.value)
-            Log.w(TAG, "Pitch calculation unavailable; fallback lines: $fallback")
-            fallback
+            Log.w(TAG, "OCR could not detect document bottom; using dynamic open-ended discovery (0 lines).")
+            0
         }
 
         _calibrationState.value = "Calibrating: Returning to line 1..."
@@ -382,6 +392,14 @@ class DesktopPaginationService : AccessibilityService() {
 
                 Log.i(TAG, "Starting pacing engine on Display $resolvedDisplay: Initial=$initialTarget lines, Dwell=${dwellTimeMs}ms, Phase=$phase")
 
+                // 3-second focus countdown so user can ensure Teams is focused
+                for (sec in 3 downTo 1) {
+                    _telemetry.value = _telemetry.value.copy(
+                        statusMessage = "Focus Teams window! Starting capture in $sec..."
+                    )
+                    delay(1000)
+                }
+
                 while (isActive && isPaginating.get()) {
                     pageIndex++
                     _currentPage.value = pageIndex
@@ -398,7 +416,7 @@ class DesktopPaginationService : AccessibilityService() {
                             currentBottomLine = visibleLinesCount
                         }
                         Log.i(TAG, "Page 1 initial frame settling (Lines $currentTopLine-$currentBottomLine)...")
-                        delay(400) // Initial settle
+                        delay(500) // Initial settle
                         onFrameCaptureNeeded?.invoke(pageIndex, currentTopLine, currentBottomLine)
                     } else {
                         targetPreviousBottomLine = currentBottomLine
@@ -462,7 +480,6 @@ class DesktopPaginationService : AccessibilityService() {
                             }
 
                             // Auto-tune alignment error calculation:
-                            // Goal: newTopLine == targetPreviousBottomLine (or 1 line safety overlap)
                             val error = currentTopLine - targetPreviousBottomLine
                             lastAlignmentError = error
 
@@ -475,9 +492,8 @@ class DesktopPaginationService : AccessibilityService() {
                             }
                             Log.i(TAG, "Auto-tune evaluated: prevBottom=$targetPreviousBottomLine, newTop=$currentTopLine, error=$error lines -> next factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)}")
                         } else {
-                            // When OCR is not active, advance conservatively and flag as UNCALIBRATED
-                            currentTopLine += linesPerPage
-                            currentBottomLine = currentTopLine + visibleLinesCount - 1
+                            // When OCR is not active, DO NOT fabricate arbitrary line numbers!
+                            Log.w(TAG, "OCR did not detect line numbers on Page $pageIndex. Swiping based on viewport.")
                             lastAlignmentError = 0
                         }
 
@@ -486,11 +502,12 @@ class DesktopPaginationService : AccessibilityService() {
                     }
 
                     val chunkProgress = currentBottomLine - currentChunkStartLine
-                    val ocrActive = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value?.currentTopLine ?: 0 > 0
+                    val ocrState = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+                    val ocrActive = ocrState != null && ocrState.currentTopLine > 0
                     val statusMsg = if (ocrActive) {
                         "Page $pageIndex (Lines $currentTopLine-$currentBottomLine) • Dwell Freeze"
                     } else {
-                        "Page $pageIndex (Est. Ln $currentTopLine-$currentBottomLine • UNCALIBRATED) • Dwell Freeze"
+                        "Page $pageIndex (Gutter Uncalibrated) • Dwell Freeze"
                     }
 
                     val currentGutter = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
