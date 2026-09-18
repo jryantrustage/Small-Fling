@@ -500,19 +500,24 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun sendCapturesToPythonApi() {
         viewModelScope.launch {
+            _uiState.update { it.copy(workflowStatus = "Capturing desktop screen...") }
+
             val snapshot = DesktopPaginationService.latestCapturedBitmap
+                ?: DesktopPaginationService.instance?.captureScreenshot()
                 ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
 
             if (snapshot == null) {
                 _uiState.update {
-                    it.copy(workflowStatus = "No capture in buffer. Tap CAPTURE on Floating HUD first.")
+                    it.copy(workflowStatus = "Capture failed: No screen image available.")
                 }
                 return@launch
             }
 
+            DesktopPaginationService.latestCapturedBitmap = snapshot
+
             val page = _uiState.value.currentPage.coerceAtLeast(1)
-            val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 225
-            val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 268
+            val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 1
+            val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 46
 
             _uiState.update {
                 it.copy(workflowStatus = "Sending capture to Python API (Page $page, Lines $top-$bot)...")
@@ -523,7 +528,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                 topLine = top,
                 bottomLine = bot,
                 pageIndex = page,
-                sync = false
+                sync = true
             )
 
             if (result.success) {

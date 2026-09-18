@@ -3,11 +3,13 @@ package com.matrixcapture.app.service
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.PowerManager
+import kotlin.coroutines.resume
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
@@ -134,6 +136,77 @@ class DesktopPaginationService : AccessibilityService() {
         val resolved = external?.displayId ?: 0
         Log.i(TAG, "Resolved target display ID: $resolved (name=${external?.name})")
         return resolved
+    }
+
+    /**
+     * Captures a screenshot of the specified or active desktop display via AccessibilityService API.
+     */
+    suspend fun captureScreenshot(targetDisplayId: Int? = null): Bitmap? = suspendCancellableCoroutine { cont ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val displayId = resolveTargetDisplayId(targetDisplayId)
+            Log.i(TAG, "Attempting Accessibility takeScreenshot on display $displayId")
+            try {
+                takeScreenshot(
+                    displayId,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(screenshotResult: ScreenshotResult) {
+                            try {
+                                val hwBuffer = screenshotResult.hardwareBuffer
+                                val colorSpace = screenshotResult.colorSpace
+                                val bmp = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
+                                    ?.copy(Bitmap.Config.ARGB_8888, false)
+                                hwBuffer.close()
+                                if (bmp != null) {
+                                    latestCapturedBitmap = bmp
+                                    Log.i(TAG, "Accessibility screenshot succeeded: ${bmp.width}x${bmp.height}")
+                                }
+                                if (cont.isActive) cont.resume(bmp)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error wrapping hardware buffer to Bitmap", e)
+                                if (cont.isActive) cont.resume(null)
+                            }
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            Log.w(TAG, "takeScreenshot failed on display $displayId with code $errorCode. Retrying on default display...")
+                            if (displayId != Display.DEFAULT_DISPLAY) {
+                                takeScreenshot(
+                                    Display.DEFAULT_DISPLAY,
+                                    mainExecutor,
+                                    object : TakeScreenshotCallback {
+                                        override fun onSuccess(res: ScreenshotResult) {
+                                            try {
+                                                val hw = res.hardwareBuffer
+                                                val bmp = Bitmap.wrapHardwareBuffer(hw, res.colorSpace)
+                                                    ?.copy(Bitmap.Config.ARGB_8888, false)
+                                                hw.close()
+                                                if (bmp != null) latestCapturedBitmap = bmp
+                                                if (cont.isActive) cont.resume(bmp)
+                                            } catch (ex: Exception) {
+                                                if (cont.isActive) cont.resume(null)
+                                            }
+                                        }
+
+                                        override fun onFailure(err: Int) {
+                                            Log.e(TAG, "takeScreenshot fallback also failed with code: $err")
+                                            if (cont.isActive) cont.resume(null)
+                                        }
+                                    }
+                                )
+                            } else {
+                                if (cont.isActive) cont.resume(null)
+                            }
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception calling takeScreenshot", e)
+                if (cont.isActive) cont.resume(null)
+            }
+        } else {
+            if (cont.isActive) cont.resume(null)
+        }
     }
 
     /**

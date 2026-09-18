@@ -221,6 +221,7 @@ class FrameUploadClient(
         try {
             client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
+            Log.e(TAG, "sendTelemetry failed for $url", e)
             false
         }
     }
@@ -246,6 +247,7 @@ class FrameUploadClient(
         try {
             client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
+            Log.e(TAG, "testConnection failed for $url", e)
             false
         }
     }
