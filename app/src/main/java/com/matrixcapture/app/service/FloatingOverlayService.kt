@@ -121,7 +121,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         // Persistent foreground telemetry dispatch directly to FastAPI server
         telemetryJob = serviceScope.launch {
             val prefs = getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-            val serverHost = prefs.getString("server_host", "10.0.2.2:8000") ?: "10.0.2.2:8000"
+            val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
             val uploadClient = FrameUploadClient(serverHost)
 
             while (isActive) {
@@ -134,7 +134,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                     val cTokens = geminiApi?.mobileCandidatesTokens?.get() ?: 0
                     val tTokens = geminiApi?.mobileTotalTokens?.get() ?: 0
 
-                    uploadClient.sendTelemetry(
+                    val ok = uploadClient.sendTelemetry(
                         FrameUploadClient.TelemetryData(
                             deviceId = "Pixel 10 Desktop (HUD Active)",
                             isPacing = isRunning,
@@ -154,8 +154,9 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                             wrappedLinesDetected = pState.wrappedLinesDetected
                         )
                     )
+                    isBackendOnline.value = ok
                 } catch (e: Exception) {
-                    // Ignore transient network errors
+                    isBackendOnline.value = false
                 }
             }
         }
@@ -213,7 +214,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val prefs = getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                val serverHost = prefs.getString("server_host", "10.0.2.2:8000") ?: "10.0.2.2:8000"
+                val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
                 val uploadClient = FrameUploadClient(serverHost)
                 uploadClient.sendTelemetry(
                     FrameUploadClient.TelemetryData(
@@ -246,6 +247,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         private val _isOverlayRunning = MutableStateFlow(false)
         val isOverlayRunning = _isOverlayRunning.asStateFlow()
 
+        val isBackendOnline = MutableStateFlow(false)
+
         fun start(context: Context) {
             val intent = Intent(context, FloatingOverlayService::class.java)
             context.startService(intent)
@@ -275,6 +278,9 @@ fun FloatingHudOverlay(
     val calculatedTotalLines by DesktopPaginationService.calculatedTotalLines.collectAsState()
     val dwellRemainingMs by DesktopPaginationService.dwellCountdownMs.collectAsState()
     val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
+
+    val isBackendOnline by FloatingOverlayService.isBackendOnline.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val isPaused = paginationState == DesktopPaginationService.PaginationState.Idle && recorderState.isRecording
 
@@ -382,13 +388,38 @@ fun FloatingHudOverlay(
                     Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
 
                     // Overall Document Progress
-                    Text(
-                        text = "STATUS: ${telemetry.statusMessage.ifEmpty { "Idle" }}",
-                        color = Color(0xFF58A6FF),
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "STATUS: ${telemetry.statusMessage.ifEmpty { "Ready" }}",
+                            color = Color(0xFF58A6FF),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isBackendOnline) Color(0xFF00FF9D) else Color(0xFFFF7B72))
+                            )
+                            Text(
+                                text = if (isBackendOnline) "API ON" else "API OFF",
+                                color = if (isBackendOnline) Color(0xFF00FF9D) else Color(0xFFFF7B72),
+                                fontSize = 9.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
@@ -398,7 +429,7 @@ fun FloatingHudOverlay(
                             fontFamily = FontFamily.Monospace
                         )
                         Text(
-                            text = "Target: ${if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 9487)}",
+                            text = "Target: ${if (telemetry.targetTotalLines > 0) "${telemetry.targetTotalLines}" else (if (calculatedTotalLines > 0) "$calculatedTotalLines" else "Auto-Detect")}",
                             color = Color(0xFF00FF9D),
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
@@ -556,7 +587,8 @@ fun FloatingHudOverlay(
                         } else {
                             Button(
                                 onClick = {
-                                    val total = if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 9487)
+                                    val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                    val total = prefs.getInt("target_total_lines", if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else 0)
                                     DesktopPaginationService.instance?.startPacingEngine(
                                         totalLines = total,
                                         dwellTimeMs = 1500L,
@@ -566,12 +598,12 @@ fun FloatingHudOverlay(
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(1.2f)
                                     .height(34.dp),
                                 contentPadding = PaddingValues(0.dp)
                             ) {
                                 Text(
-                                    text = if (recorderState.isRecording) "START PACER" else "TEST PACER (1.5s)",
+                                    text = if (recorderState.isRecording) "START PACER" else "TEST PACER",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
@@ -582,13 +614,92 @@ fun FloatingHudOverlay(
 
                         Button(
                             onClick = {
+                                CoroutineScope(Dispatchers.Default).launch {
+                                    val activeService = SegmentRecorderService.instance
+                                    val measured = DesktopPaginationService.instance?.performLineCalibration {
+                                        val gState = activeService?.getGutterTracker()?.gutterState?.value
+                                        if (gState != null && gState.currentBottomLine > 0) {
+                                            DesktopPaginationService.GutterMetricsSnapshot(
+                                                lowestLineNumber = gState.currentBottomLine,
+                                                lowestLineBottomY = gState.lowestDetectedY,
+                                                linePitchPx = gState.linePitchPx
+                                            )
+                                        } else null
+                                    } ?: 0
+                                    if (measured > 10) {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        prefs.edit().putInt("target_total_lines", measured).apply()
+                                        val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val client = FrameUploadClient(host)
+                                        val ok = client.resetServerState(measured)
+                                        FloatingOverlayService.isBackendOnline.value = ok
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = "CALIB",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                val target = prefs.getInt("target_total_lines", 0)
+                                val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                DesktopPaginationService.resetToStart(target)
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    try {
+                                        val client = FrameUploadClient(host)
+                                        val ok = client.resetServerState(target)
+                                        FloatingOverlayService.isBackendOnline.value = ok
+                                    } catch (e: Exception) {
+                                        FloatingOverlayService.isBackendOnline.value = false
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE36209)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1.1f)
+                                .height(34.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = "RESET LN 1",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Button(
+                            onClick = {
                                 DesktopPaginationService.instance?.stopPagination()
                                 SegmentRecorderService.instance?.stopWorkflow()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
-                                .weight(1f)
+                                .weight(0.9f)
                                 .height(34.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {

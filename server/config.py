@@ -72,8 +72,8 @@ if _raw_cors == "*":
 else:
     CORS_ALLOWED_ORIGINS: List[str] = [origin.strip() for origin in _raw_cors.split(",") if origin.strip()]
 
-# 3. Pacer & Document Defaults
-TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9487"))
+# 3. Pacer & Document Defaults (0 = Auto-detect / Uncalibrated)
+TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "0"))
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
 
