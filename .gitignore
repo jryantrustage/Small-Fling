@@ -45,6 +45,7 @@ venv.bak/
 .env
 .env.*
 *.env
+!.env.example
 
 # Server Storage & Database State (server/storage)
 # Ignore uploaded frames and generated data, but keep directory structure

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
   Scan, 
-  RefreshCw, 
   Download, 
   Settings, 
   Smartphone, 
@@ -10,17 +9,31 @@ import {
   ZoomOut, 
   Search, 
   Check, 
-  X 
+  X,
+  UploadCloud,
+  Cpu,
+  Coins,
+  FileCode,
+  Layers,
+  RotateCw,
+  AlertCircle
 } from 'lucide-react';
 
-const API_BASE = 'http://127.0.0.1:8000';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+const POLL_INTERVAL_MS = Number(import.meta.env.VITE_POLL_INTERVAL_MS) || 1200;
+const DEFAULT_TARGET_LINES = Number(import.meta.env.VITE_DEFAULT_TARGET_LINES) || 9487;
 
 interface LineData {
   line_number: number;
+  gutter_number?: number;
   text: string;
   is_blank: boolean;
+  is_wrapped?: boolean;
+  wrapped_line_count?: number;
   status: string; // 'ok' | 'flagged' | 'missing' | 'verified_overlap' | 'overlap_conflict' | 'manually_edited' | 'recapturing'
   frame_id: string;
+  sources?: string[];
+  confidence?: number;
   notes: string;
   updated_at: string;
 }
@@ -35,12 +48,50 @@ interface FrameData {
   status: string;
   created_at: string;
   extracted_line_count: number;
+  model_used?: string;
+  token_usage?: {
+    prompt_tokens: number;
+    candidates_tokens: number;
+    total_tokens: number;
+  };
 }
 
 interface RecaptureItem {
   line_number: number;
   reason: string;
   requested_at: string;
+}
+
+interface TokenStats {
+  total_prompt_tokens: number;
+  total_candidates_tokens: number;
+  total_tokens: number;
+  total_api_calls: number;
+  estimated_cost_usd: number;
+  mobile_tokens?: {
+    prompt_tokens: number;
+    candidates_tokens: number;
+    total_tokens: number;
+  };
+}
+
+interface TelemetryState {
+  device_id: string;
+  is_pacing: boolean;
+  current_page: number;
+  current_top_line: number;
+  current_bottom_line: number;
+  target_total_lines: number;
+  dwell_countdown_ms: number;
+  phase: string;
+  status_message: string;
+  last_heartbeat: string | null;
+  pacer_calibration?: {
+    auto_tune_factor: number;
+    line_pitch_px: number;
+    bottom_to_top_error: number;
+    wrapped_lines_detected: number;
+  };
 }
 
 export default function App() {
@@ -54,6 +105,27 @@ export default function App() {
 
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
+  const [tokenStats, setTokenStats] = useState<TokenStats>({
+    total_prompt_tokens: 0,
+    total_candidates_tokens: 0,
+    total_tokens: 0,
+    total_api_calls: 0,
+    estimated_cost_usd: 0.0
+  });
+
+  const [telemetry, setTelemetry] = useState<TelemetryState>({
+    device_id: 'Standby',
+    is_pacing: false,
+    current_page: 0,
+    current_top_line: 0,
+    current_bottom_line: 0,
+    target_total_lines: DEFAULT_TARGET_LINES,
+    dwell_countdown_ms: 0,
+    phase: 'IDLE',
+    status_message: 'Matrix Capture Studio ready',
+    last_heartbeat: null
+  });
+
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<LineData | null>(null);
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
@@ -65,23 +137,30 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'issues'>('all');
   const [imageZoom, setImageZoom] = useState(1);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const lineListRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Poll backend every 1.5s
+  // Poll backend every 1.2s for document, telemetry, frames, and tokens
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [docRes, framesRes, queueRes, cfgRes] = await Promise.all([
+        const [docRes, framesRes, queueRes, cfgRes, telemetryRes] = await Promise.all([
           fetch(`${API_BASE}/api/document`),
           fetch(`${API_BASE}/api/frames`),
           fetch(`${API_BASE}/api/recapture-queue`),
-          fetch(`${API_BASE}/api/config`)
+          fetch(`${API_BASE}/api/config`),
+          fetch(`${API_BASE}/api/telemetry`)
         ]);
 
         if (docRes.ok) {
           const docJson = await docRes.json();
           setDocumentData(docJson);
+          if (docJson.token_stats) {
+            setTokenStats(docJson.token_stats);
+          }
         }
 
         if (framesRes.ok) {
@@ -101,15 +180,64 @@ export default function App() {
           const cfgJson = await cfgRes.json();
           setApiKeyConfigured(cfgJson.api_key_configured);
         }
+
+        if (telemetryRes.ok) {
+          const tJson = await telemetryRes.json();
+          if (tJson.telemetry) {
+            setTelemetry(tJson.telemetry);
+          }
+          if (tJson.token_stats) {
+            setTokenStats(tJson.token_stats);
+          }
+        }
       } catch (err) {
         console.error('Failed to connect to FastAPI backend:', err);
       }
     };
 
     fetchData();
-    const interval = setInterval(fetchData, 1500);
+    const interval = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [selectedFrameId]);
+
+  // Handle direct file uploads (drag-and-drop or file picker)
+  const handleUploadFiles = async (fileList: FileList | File[]) => {
+    setIsUploading(true);
+    try {
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('page_index', (frames.length + i + 1).toString());
+        formData.append('top_line', '0');
+        formData.append('bottom_line', '0');
+
+        const res = await fetch(`${API_BASE}/api/upload-frame`, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (res.ok) {
+          const resJson = await res.json();
+          if (resJson.frame_id) {
+            setSelectedFrameId(resJson.frame_id);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Upload failed:', err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleUploadFiles(e.dataTransfer.files);
+    }
+  };
 
   // Handle requesting recapture
   const handleRequestRecapture = async (lineNum: number) => {
@@ -154,6 +282,33 @@ export default function App() {
     }
   };
 
+  // Reprocess frame with Gemini OCR
+  const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
+
+  const handleReprocessFrame = async (frameId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setReprocessingFrameId(frameId);
+    try {
+      await fetch(`${API_BASE}/api/frames/${frameId}/reprocess`, {
+        method: 'POST'
+      });
+    } catch (err) {
+      console.error('Failed to reprocess frame:', err);
+    } finally {
+      setTimeout(() => setReprocessingFrameId(null), 800);
+    }
+  };
+
+  const handleReprocessAllFailed = async () => {
+    try {
+      await fetch(`${API_BASE}/api/reprocess-failed`, {
+        method: 'POST'
+      });
+    } catch (err) {
+      console.error('Failed to reprocess failed frames:', err);
+    }
+  };
+
   // Filter lines
   const filteredLines = documentData.lines.filter(item => {
     if (filterMode === 'issues') {
@@ -172,6 +327,7 @@ export default function App() {
   });
 
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId);
+  const totalCombinedTokens = tokenStats.total_tokens + (tokenStats.mobile_tokens?.total_tokens || 0);
 
   return (
     <div className="app-container">
@@ -182,10 +338,11 @@ export default function App() {
             <Scan size={18} />
           </div>
           <span className="brand-title">
-            MATRIX CAPTURE <span className="brand-badge">STUDIO</span>
+            MATRIX CAPTURE <span className="brand-badge">STUDIO 2.5</span>
           </span>
         </div>
 
+        {/* Realtime Metrics & Token Utilization Pill */}
         <div className="header-metrics">
           <div className="metric-pill">
             <span className="label">FRAMES:</span>
@@ -199,15 +356,41 @@ export default function App() {
             <span className="label">ISSUES:</span>
             <span className="value">{documentData.issue_count}</span>
           </div>
-          <div className="metric-pill">
-            <span className="label">RECAPTURE QUEUE:</span>
-            <span className="value" style={{ color: recaptureQueue.length > 0 ? '#bc8cff' : '#8b949e' }}>
-              {recaptureQueue.length}
-            </span>
+          {recaptureQueue.length > 0 && (
+            <div className="metric-pill" style={{ borderColor: '#bc8cff44' }}>
+              <span className="label">RECAPTURE:</span>
+              <span className="value" style={{ color: '#bc8cff' }}>{recaptureQueue.length}</span>
+            </div>
+          )}
+
+          {/* Gemini Token Utilization Badge */}
+          <div className="metric-pill token-pill" title={`Prompt: ${tokenStats.total_prompt_tokens.toLocaleString()} | Completion: ${tokenStats.total_candidates_tokens.toLocaleString()}`}>
+            <Coins size={13} color="#00ff9d" />
+            <span className="label">TOKENS:</span>
+            <span className="value">{totalCombinedTokens.toLocaleString()}</span>
+            <span className="cost-tag">${tokenStats.estimated_cost_usd.toFixed(4)}</span>
           </div>
         </div>
 
         <div className="header-actions">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            style={{ display: 'none' }} 
+            multiple 
+            accept="image/*"
+            onChange={(e) => e.target.files && handleUploadFiles(e.target.files)}
+          />
+
+          <button 
+            className="btn btn-outline"
+            onClick={() => fileInputRef.current?.click()}
+            title="Upload screenshots directly into studio"
+          >
+            <UploadCloud size={14} />
+            <span>Upload Frame</span>
+          </button>
+
           <button 
             className="btn btn-outline" 
             onClick={() => setShowConfigModal(true)}
@@ -215,6 +398,19 @@ export default function App() {
             <Settings size={14} />
             <span>{apiKeyConfigured ? 'Gemini API Key ✔' : 'Configure API Key'}</span>
           </button>
+
+          {/* Monaco / VFS Ready JSON Export */}
+          <a 
+            href={`${API_BASE}/api/export-json`} 
+            className="btn btn-outline"
+            target="_blank" 
+            rel="noreferrer"
+            download
+            title="Export complete JSON preserving gutter line numbers and text for Virtual File System & Monaco"
+          >
+            <FileCode size={14} color="#58a6ff" />
+            <span>Export VFS/Monaco JSON</span>
+          </a>
 
           <a 
             href={`${API_BASE}/api/export-markdown`} 
@@ -224,44 +420,133 @@ export default function App() {
             download
           >
             <Download size={14} />
-            <span>Export Spliced MD</span>
+            <span>Export Code</span>
           </a>
         </div>
       </header>
 
+      {/* Live Telemetry & Gutter Pacer Synchronization Banner */}
+      <div className="telemetry-banner">
+        <div className="telemetry-item">
+          <span className={`pacer-status-dot ${telemetry.is_pacing ? 'active' : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' ? 'connected' : 'idle')}`} />
+          <span className="telemetry-label">PACER:</span>
+          <span className="telemetry-val">{telemetry.device_id}</span>
+          {telemetry.is_pacing && <span className="pacing-badge">AUTO-PACING</span>}
+        </div>
+
+        <div className="telemetry-item">
+          <Layers size={13} color="#8b949e" />
+          <span className="telemetry-label">PAGE:</span>
+          <span className="telemetry-val">#{telemetry.current_page}</span>
+          <span className="telemetry-sub">(Ln {telemetry.current_top_line} → {telemetry.current_bottom_line})</span>
+        </div>
+
+        {/* Auto-tuning Calibration Indicator */}
+        <div className="telemetry-item" title="Adaptive closed-loop pacer calibration factor and alignment error">
+          <Cpu size={13} color="#00ff9d" />
+          <span className="telemetry-label">AUTO-TUNE:</span>
+          <span className="telemetry-val" style={{ color: '#00ff9d' }}>
+            {telemetry.pacer_calibration?.auto_tune_factor ? `${telemetry.pacer_calibration.auto_tune_factor.toFixed(2)}x` : '1.00x'}
+          </span>
+          <span className="telemetry-sub">
+            (Err: {telemetry.pacer_calibration?.bottom_to_top_error ?? 0} ln | Pitch: {telemetry.pacer_calibration?.line_pitch_px?.toFixed(1) ?? 32}px)
+          </span>
+        </div>
+
+        {/* Dwell Freeze Countdown Bar */}
+        {telemetry.dwell_countdown_ms > 0 && (
+          <div className="dwell-progress-wrap">
+            <span className="dwell-label">DWELL FREEZE: {telemetry.dwell_countdown_ms}ms</span>
+            <div className="dwell-bar-bg">
+              <div 
+                className="dwell-bar-fill" 
+                style={{ width: `${Math.min(100, (telemetry.dwell_countdown_ms / 1500) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="telemetry-status-msg">
+          {telemetry.status_message}
+        </div>
+      </div>
+
       {/* 3-Column Studio Workspace */}
-      <div className="studio-body">
-        {/* Column 1: Captured Frame Feed */}
+      <div 
+        className={`studio-body ${isDraggingOver ? 'drag-over' : ''}`}
+        onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }}
+        onDragLeave={() => setIsDraggingOver(false)}
+        onDrop={handleDrop}
+      >
+        {/* Column 1: Captured Frame Feed with drag-and-drop */}
         <aside className="frames-feed-panel">
           <div className="panel-header">
             <span>Captured Frames ({frames.length})</span>
-            <RefreshCw size={12} style={{ opacity: 0.6 }} />
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {frames.some(f => f.status.startsWith('error')) && (
+                <button 
+                  className="btn btn-sm btn-outline btn-warning-outline" 
+                  onClick={handleReprocessAllFailed}
+                  title="Retry OCR on all failed frames"
+                >
+                  <RotateCw size={11} /> Retry Failed
+                </button>
+              )}
+              <button 
+                className="btn btn-sm btn-outline" 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                title="Add frames"
+              >
+                {isUploading ? 'Uploading...' : '+ Add Frame'}
+              </button>
+            </div>
           </div>
 
           <div className="frames-list">
             {frames.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: '#6e7681', fontSize: '11px', fontFamily: 'monospace' }}>
-                Waiting for settled frames from Pixel 10 Desktop Mode...
+              <div className="drop-zone-placeholder" onClick={() => fileInputRef.current?.click()}>
+                <UploadCloud size={28} color="#00ff9d" />
+                <span style={{ fontWeight: 600, color: '#e6edf3' }}>Drop 1080p Screenshots Here</span>
+                <span style={{ fontSize: '11px', color: '#8b949e' }}>or click to upload frames manually</span>
+                <span style={{ fontSize: '10px', color: '#58a6ff', marginTop: '6px' }}>Settled Pixel 10 frames stream here automatically</span>
               </div>
             ) : (
               frames.map(f => (
                 <div
                   key={f.frame_id}
-                  className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''}`}
+                  className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
                   onClick={() => setSelectedFrameId(f.frame_id)}
                 >
                   <div className="frame-card-preview">
                     <img src={`${API_BASE}/api/frames/${f.frame_id}/image`} alt={f.frame_id} />
                     <span className="frame-badge">Pg {f.page_index}</span>
+                    {f.token_usage && f.token_usage.total_tokens > 0 && (
+                      <span className="frame-token-badge">
+                        <Coins size={9} /> {f.token_usage.total_tokens}
+                      </span>
+                    )}
                   </div>
                   <div className="frame-card-info">
                     <span className="frame-lines-badge">
                       Ln {f.top_line} → {f.bottom_line}
                     </span>
-                    <span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
-                      {f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : f.status}
-                    </span>
+                      <span className="frame-status-text" title={f.status}>
+                        {f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}
+                      </span>
+                      {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
+                        <button
+                          className="frame-retry-btn"
+                          onClick={(e) => handleReprocessFrame(f.frame_id, e)}
+                          title="Retry Gemini OCR"
+                          disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}
+                        >
+                          <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -269,12 +554,12 @@ export default function App() {
           </div>
         </aside>
 
-        {/* Column 2: Synchronized 1080p Screenshot Viewer */}
+        {/* Column 2: Synchronized 1080p Screenshot Viewer with Gutter Overlays */}
         <main className="frame-inspector-panel">
           <div className="panel-header">
             <span>
               {activeFrame 
-                ? `1080p Desktop Capture: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line}` 
+                ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` 
                 : '1080p Desktop Frame Inspector'}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -300,6 +585,23 @@ export default function App() {
           </div>
 
           <div className="inspector-view-container">
+            {activeFrame && activeFrame.status.startsWith('error') && (
+              <div className="frame-error-banner">
+                <AlertCircle size={18} color="#f85149" />
+                <div className="frame-error-content">
+                  <div className="frame-error-title">OCR Transcription Error</div>
+                  <div className="frame-error-detail">{activeFrame.status}</div>
+                </div>
+                <button
+                  className="btn btn-sm btn-primary frame-error-retry-btn"
+                  onClick={() => handleReprocessFrame(activeFrame.frame_id)}
+                  disabled={reprocessingFrameId === activeFrame.frame_id}
+                >
+                  <RotateCw size={13} className={reprocessingFrameId === activeFrame.frame_id ? 'spinning' : ''} />
+                  <span>{reprocessingFrameId === activeFrame.frame_id ? 'Retrying...' : 'Retry OCR'}</span>
+                </button>
+              </div>
+            )}
             {activeFrame ? (
               <div 
                 className="source-image-wrapper"
@@ -311,8 +613,9 @@ export default function App() {
                 />
               </div>
             ) : (
-              <div style={{ color: '#484f58', fontFamily: 'monospace', fontSize: '13px' }}>
-                Select a captured frame from the feed to inspect the 1080p source image
+              <div className="empty-inspector-state">
+                <Scan size={36} color="#30363d" />
+                <p>Select a frame from the feed or drag a 1080p screenshot to inspect line alignment.</p>
               </div>
             )}
           </div>
@@ -321,7 +624,7 @@ export default function App() {
         {/* Column 3: Line-by-Line Code Inspector & Verification */}
         <section className="line-inspector-panel">
           <div className="panel-header">
-            <span>Verified Markdown Lines ({filteredLines.length})</span>
+            <span>Verified Lines ({filteredLines.length})</span>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button 
                 className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`}
@@ -352,7 +655,10 @@ export default function App() {
           <div className="lines-table-container" ref={lineListRef}>
             {filteredLines.length === 0 ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}>
-                No lines transcribed yet. Upload settled frames from Pixel 10 to transcribe!
+                <p>No lines transcribed yet.</p>
+                <p style={{ fontSize: '11px', marginTop: '6px', color: '#8b949e' }}>
+                  Upload a 1080p frame screenshot above or run the mobile pacer to transcribe lines with Gemini Vision OCR!
+                </p>
               </div>
             ) : (
               filteredLines.map(line => (
@@ -366,7 +672,12 @@ export default function App() {
                     }
                   }}
                 >
-                  <div className="gutter-cell">{line.line_number}</div>
+                  <div className="gutter-cell">
+                    <span>{line.gutter_number || line.line_number}</span>
+                    {line.is_wrapped && (
+                      <span className="wrap-indicator" title={`Wrapped across ${line.wrapped_line_count || 2} visual rows`}>↵</span>
+                    )}
+                  </div>
                   <div className="text-cell">
                     {line.text || <span style={{ color: '#484f58', fontStyle: 'italic' }}>(blank line)</span>}
                   </div>
@@ -411,7 +722,7 @@ export default function App() {
         <div className="modal-overlay" onClick={() => setEditingLine(null)}>
           <div className="modal-card" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span>Edit Line #{editingLine.line_number}</span>
+              <span>Edit Line #{editingLine.line_number} (Gutter: #{editingLine.gutter_number || editingLine.line_number})</span>
               <button 
                 onClick={() => setEditingLine(null)} 
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer' }}

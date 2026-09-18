@@ -310,22 +310,22 @@ class DesktopPaginationService : AccessibilityService() {
                 val targetWindow = findTargetWindow(resolvedDisplay)
                 val bounds = getDisplayOrWindowBounds(resolvedDisplay)
 
-                // Calibrated, controlled swipe parameters:
-                // Advances ~26-28 lines per flip to guarantee a 12-16 line overlap with the ~42 visible lines.
-                // Stays within the middle 50% of the screen to eliminate inertial fling overshoot.
                 val centerY = bounds.centerY().toFloat()
-                val travelDistance = (bounds.height() * 0.44f).coerceAtLeast(350f)
-                val startY = centerY + (travelDistance / 2f)
-                val endY = centerY - (travelDistance / 2f)
                 val centerX = bounds.centerX().toFloat()
-                val durationMs = 380L
+                val durationMs = 360L
 
                 val linesPerPage = 28
                 val visibleLinesCount = 44
                 var pageIndex = 0
                 var currentTopLine = 1
+                var currentBottomLine = visibleLinesCount
                 var currentChunkIndex = 1
                 var currentChunkStartLine = 1
+
+                // Adaptive Closed-Loop Auto-Tune State
+                var autoTuneFactor = 1.0f
+                var lastAlignmentError = 0
+                var targetPreviousBottomLine = 1
 
                 Log.i(TAG, "Starting pacing engine on Display $resolvedDisplay: Total=$totalLines lines, Dwell=${dwellTimeMs}ms, Phase=$phase")
 
@@ -333,7 +333,6 @@ class DesktopPaginationService : AccessibilityService() {
                     pageIndex++
                     _currentPage.value = pageIndex
 
-                    val currentBottomLine: Int
                     if (pageIndex == 1) {
                         // Check if real OCR lines are available on initial frame
                         val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
@@ -348,8 +347,22 @@ class DesktopPaginationService : AccessibilityService() {
                         delay(400) // Initial settle
                         onFrameCaptureNeeded?.invoke(pageIndex, currentTopLine, currentBottomLine)
                     } else {
-                        // Advance page via calibrated swipe with guaranteed overlap
-                        Log.i(TAG, "Swiping to Page $pageIndex on Display $resolvedDisplay...")
+                        targetPreviousBottomLine = currentBottomLine
+                        val ocrBefore = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+                        val prevBottomY = if (ocrBefore != null && ocrBefore.lowestDetectedY > 0) {
+                            ocrBefore.lowestDetectedY.toFloat()
+                        } else {
+                            bounds.height() * 0.86f
+                        }
+                        val topTargetY = (bounds.height() * 0.12f).coerceAtLeast(100f)
+                        val targetDisplacementPx = (prevBottomY - topTargetY).coerceAtLeast(220f)
+                        val adaptiveTravel = (targetDisplacementPx * autoTuneFactor).coerceIn(200f, bounds.height() * 0.70f)
+
+                        val startY = centerY + (adaptiveTravel / 2f)
+                        val endY = centerY - (adaptiveTravel / 2f)
+
+                        Log.i(TAG, "Auto-tune flip to Page $pageIndex: targetBottomLine=$targetPreviousBottomLine, travel=${adaptiveTravel}px (factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)})...")
+
                         val gestureSucceeded = dispatchSwipe(
                             startX = centerX,
                             startY = startY,
@@ -368,9 +381,23 @@ class DesktopPaginationService : AccessibilityService() {
 
                         // Ground-truth line numbers directly from Gutter OCR if detected
                         val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-                        if (ocr != null && ocr.currentTopLine > currentTopLine && ocr.currentBottomLine >= ocr.currentTopLine) {
+                        if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
                             currentTopLine = ocr.currentTopLine
                             currentBottomLine = ocr.currentBottomLine
+
+                            // Auto-tune alignment error calculation:
+                            // Goal: newTopLine == targetPreviousBottomLine (or 1 line safety overlap)
+                            val error = currentTopLine - targetPreviousBottomLine
+                            lastAlignmentError = error
+
+                            // If error > 0: overshot! We scrolled too far and skipped lines.
+                            // If error < -1: undershot! Too much overlap.
+                            if (error > 0) {
+                                autoTuneFactor = (autoTuneFactor - 0.05f * error).coerceIn(0.65f, 1.35f)
+                            } else if (error < -1) {
+                                autoTuneFactor = (autoTuneFactor + 0.03f * (-error)).coerceIn(0.65f, 1.35f)
+                            }
+                            Log.i(TAG, "Auto-tune evaluated: prevBottom=$targetPreviousBottomLine, newTop=$currentTopLine, error=$error lines -> next factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)}")
                         } else {
                             currentTopLine += linesPerPage
                             currentBottomLine = currentTopLine + visibleLinesCount - 1
@@ -383,6 +410,7 @@ class DesktopPaginationService : AccessibilityService() {
                     val chunkProgress = currentBottomLine - currentChunkStartLine
                     val statusMsg = "Page $pageIndex (Lines $currentTopLine-$currentBottomLine) • Dwell Freeze"
 
+                    val currentGutter = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                     _telemetry.value = PacingTelemetry(
                         phase = phase,
                         currentPage = pageIndex,
@@ -394,7 +422,11 @@ class DesktopPaginationService : AccessibilityService() {
                         segmentTargetLines = 1200,
                         statusMessage = statusMsg,
                         dwellRemainingMs = dwellTimeMs,
-                        isDwellActive = true
+                        isDwellActive = true,
+                        autoTuneFactor = autoTuneFactor,
+                        bottomToTopError = lastAlignmentError,
+                        linePitchPx = currentGutter?.linePitchPx ?: 32f,
+                        wrappedLinesDetected = currentGutter?.wrappedLinesCount ?: 0
                     )
 
                     // Strict Freeze Dwell Time (Crucial for Gemini 1 FPS video ingestion)
@@ -589,7 +621,11 @@ class DesktopPaginationService : AccessibilityService() {
         val segmentTargetLines: Int = 1200,
         val statusMessage: String = "Ready",
         val dwellRemainingMs: Long = 0L,
-        val isDwellActive: Boolean = false
+        val isDwellActive: Boolean = false,
+        val autoTuneFactor: Float = 1.0f,
+        val bottomToTopError: Int = 0,
+        val linePitchPx: Float = 32f,
+        val wrappedLinesDetected: Int = 0
     )
 
     companion object {
