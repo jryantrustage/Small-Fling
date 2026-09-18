@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
@@ -143,7 +143,7 @@ class TelemetryUpdateRequest(BaseModel):
     current_page: Optional[int] = 0
     current_top_line: Optional[int] = 0
     current_bottom_line: Optional[int] = 0
-    target_total_lines: Optional[int] = 9487
+    target_total_lines: Optional[int] = 0
     dwell_countdown_ms: Optional[int] = 0
     phase: Optional[str] = "IDLE"
     status_message: Optional[str] = ""
@@ -724,12 +724,19 @@ async def export_markdown():
     })
 
 
+class ResetStateRequest(BaseModel):
+    target_total_lines: Optional[int] = 0
+
+
 @app.post("/api/reset-state")
-async def reset_state():
+async def reset_state(payload: Optional[ResetStateRequest] = None):
     """
     Resets document lines, frames, and telemetry for a clean capture session.
+    Accepts optional JSON body with target_total_lines.
     """
     global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
+    target_lines = payload.target_total_lines if payload and payload.target_total_lines is not None else config.TARGET_TOTAL_LINES
+
     document_lines = {}
     captured_frames = {}
     recapture_queue = []
@@ -751,7 +758,7 @@ async def reset_state():
         "current_page": 0,
         "current_top_line": 0,
         "current_bottom_line": 0,
-        "target_total_lines": config.TARGET_TOTAL_LINES,
+        "target_total_lines": target_lines,
         "dwell_countdown_ms": 0,
         "phase": "IDLE",
         "status_message": "Matrix Capture Studio ready",
@@ -775,7 +782,7 @@ async def reset_state():
         print(f"Error cleaning frames directory: {e}")
 
     save_persisted_state()
-    return {"status": "success", "message": "Document state and telemetry reset to clean state."}
+    return {"status": "success", "message": f"Document state and telemetry reset to clean state (target {target_lines} lines)."}
 
 
 if __name__ == "__main__":

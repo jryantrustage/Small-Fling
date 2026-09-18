@@ -38,6 +38,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val savedHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
         uploadClient.serverHost = savedHost
         _uiState.update { it.copy(serverHost = savedHost) }
+
+        // Load persisted Target Total Lines (0 = Auto-detect / Calibrate)
+        val savedLines = prefs.getInt("target_total_lines", 0)
+        _uiState.update { it.copy(targetTotalLines = savedLines, calculatedTotalLines = savedLines) }
+        DesktopPaginationService.resetToStart(savedLines)
+
         viewModelScope.launch {
             val ok = uploadClient.testConnection()
             _uiState.update { it.copy(isBackendConnected = ok) }
@@ -97,7 +103,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                         )
                     }
 
-                    uploadClient.sendTelemetry(
+                    val ok = uploadClient.sendTelemetry(
                         FrameUploadClient.TelemetryData(
                             deviceId = "Pixel 10 Desktop (${_uiState.value.targetDisplay?.name ?: "Display 1"})",
                             isPacing = DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running,
@@ -117,8 +123,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                             wrappedLinesDetected = pState.wrappedLinesDetected
                         )
                     )
+                    _uiState.update { it.copy(isBackendConnected = ok) }
                 } catch (e: Exception) {
-                    // Ignore transient network errors
+                    _uiState.update { it.copy(isBackendConnected = false) }
                 }
             }
         }
@@ -259,19 +266,40 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                 ?: paginationService.resolveTargetDisplayId()
             Log.i(TAG, "Targeting Display $targetDisplayId (${externalDisplay?.name ?: "Dynamic"}) for capture and automation")
 
-            val totalLines = _uiState.value.targetTotalLines
             _uiState.update {
                 it.copy(
-                    workflowStatus = "Starting discrete screenshot capture & upload for $totalLines lines on Display $targetDisplayId...",
-                    calculatedTotalLines = totalLines,
+                    workflowStatus = "Calibrating document: scrolling to bottom to detect true line count...",
                     uploadedFramesCount = 0
+                )
+            }
+
+            // Rapid fling down to measure ground-truth lines, then scroll back cleanly to line 1
+            val measuredTotal = paginationService.performLineCalibration(targetDisplayId) {
+                val gState = gutterTracker?.gutterState?.value
+                if (gState != null && gState.currentBottomLine > 0) {
+                    DesktopPaginationService.GutterMetricsSnapshot(
+                        lowestLineNumber = gState.currentBottomLine,
+                        lowestLineBottomY = gState.lowestDetectedY,
+                        linePitchPx = gState.linePitchPx
+                    )
+                } else null
+            }
+
+            val dynamicTotal = if (measuredTotal > 10) measuredTotal else _uiState.value.targetTotalLines
+            setTargetTotalLines(dynamicTotal)
+
+            _uiState.update {
+                it.copy(
+                    workflowStatus = "Document calibrated: $dynamicTotal lines detected. Starting settled capture from Line 1...",
+                    calculatedTotalLines = dynamicTotal,
+                    targetTotalLines = dynamicTotal
                 )
             }
 
             // Run Pacing Engine with discrete settled snapshot capture on each settled page
             paginationService.startPacingEngine(
                 targetDisplayId = targetDisplayId,
-                totalLines = totalLines,
+                totalLines = dynamicTotal,
                 dwellTimeMs = 1200L,
                 phase = "SETTLED_CAPTURE_AND_UPLOAD",
                 onFrameCaptureNeeded = { pageIndex, topLine, bottomLine ->
@@ -336,7 +364,31 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setTargetTotalLines(lines: Int) {
-        _uiState.update { it.copy(targetTotalLines = lines.coerceAtLeast(10)) }
+        val valid = lines.coerceAtLeast(0)
+        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putInt("target_total_lines", valid).apply()
+        _uiState.update { it.copy(targetTotalLines = valid, calculatedTotalLines = valid) }
+        DesktopPaginationService.resetToStart(valid)
+        viewModelScope.launch {
+            uploadClient.resetServerState(valid)
+        }
+    }
+
+    fun resetSession() {
+        val lines = _uiState.value.targetTotalLines
+        DesktopPaginationService.resetToStart(lines)
+        viewModelScope.launch {
+            uploadClient.resetServerState(lines)
+            _uiState.update {
+                it.copy(
+                    currentPage = 1,
+                    currentTopLine = 1,
+                    currentBottomLine = 44,
+                    workflowStatus = "Session reset to Page 1, Line 1 (Target $lines lines)",
+                    errorMessage = null
+                )
+            }
+        }
     }
 
     fun setServerHost(host: String) {
@@ -375,6 +427,52 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    fun calibrateDocument() {
+        val paginationService = DesktopPaginationService.instance
+        if (paginationService == null) {
+            _uiState.update { it.copy(errorMessage = "Accessibility Service is not enabled. Please enable it in Settings.") }
+            return
+        }
+        viewModelScope.launch {
+            val targetDisplayId = paginationService.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
+            _uiState.update {
+                it.copy(
+                    isWorkflowRunning = true,
+                    workflowStatus = "Calibrating: Flinging down to detect document line count..."
+                )
+            }
+            val activeService = SegmentRecorderService.instance
+            val measured = paginationService.performLineCalibration(targetDisplayId) {
+                val gState = activeService?.getGutterTracker()?.gutterState?.value
+                if (gState != null && gState.currentBottomLine > 0) {
+                    DesktopPaginationService.GutterMetricsSnapshot(
+                        lowestLineNumber = gState.currentBottomLine,
+                        lowestLineBottomY = gState.lowestDetectedY,
+                        linePitchPx = gState.linePitchPx
+                    )
+                } else null
+            }
+            if (measured > 10) {
+                setTargetTotalLines(measured)
+                _uiState.update {
+                    it.copy(
+                        isWorkflowRunning = false,
+                        workflowStatus = "Calibration complete: $measured lines detected. Ready on Page 1.",
+                        targetTotalLines = measured,
+                        calculatedTotalLines = measured
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isWorkflowRunning = false,
+                        workflowStatus = "Calibration completed. Document lines: ${_uiState.value.targetTotalLines}"
+                    )
+                }
+            }
+        }
+    }
+
     fun stopWorkflow() {
         viewModelScope.launch {
             DesktopPaginationService.instance?.stopPagination()
@@ -402,14 +500,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val serverHost: String = "192.168.86.83:8000",
         val isBackendConnected: Boolean = false,
         val uploadedFramesCount: Int = 0,
-        val targetTotalLines: Int = 9487,
-        val workflowStatus: String = "Ready to start",
+        val targetTotalLines: Int = 0,
+        val workflowStatus: String = "Ready on Page 1 (Auto-Detect / Calibrate)",
         val calibrationStatus: String = "Uncalibrated",
-        val calculatedTotalLines: Int = 9487,
-        val currentPage: Int = 0,
+        val calculatedTotalLines: Int = 0,
+        val currentPage: Int = 1,
         val dwellCountdownMs: Long = 0L,
         val currentTopLine: Int = 1,
-        val currentBottomLine: Int = 1,
+        val currentBottomLine: Int = 44,
         val linePitchPx: Float = 32f,
         val mobilePromptTokens: Int = 0,
         val mobileCandidatesTokens: Int = 0,

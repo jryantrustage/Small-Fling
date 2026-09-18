@@ -72,6 +72,8 @@ class MainActivity : ComponentActivity() {
                         onApiKeyChange = { viewModel.setApiKey(it) },
                         onServerHostChange = { viewModel.setServerHost(it) },
                         onTargetLinesChange = { viewModel.setTargetTotalLines(it) },
+                        onResetSession = { viewModel.resetSession() },
+                        onCalibrate = { viewModel.calibrateDocument() },
                         onTestPacer = { viewModel.startPacingOnly() },
                         onStartWorkflow = {
                             val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -108,6 +110,8 @@ fun MatrixCaptureDashboard(
     onApiKeyChange: (String) -> Unit,
     onServerHostChange: (String) -> Unit,
     onTargetLinesChange: (Int) -> Unit,
+    onResetSession: () -> Unit,
+    onCalibrate: () -> Unit,
     onTestPacer: () -> Unit,
     onStartWorkflow: () -> Unit,
     onStopWorkflow: () -> Unit,
@@ -631,14 +635,19 @@ fun MatrixCaptureDashboard(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = "${uiState.targetTotalLines}",
+                    value = if (uiState.targetTotalLines > 0) "${uiState.targetTotalLines}" else "",
                     onValueChange = { str ->
-                        str.filter { it.isDigit() }.toIntOrNull()?.let { onTargetLinesChange(it) }
+                        val parsed = str.filter { it.isDigit() }.toIntOrNull() ?: 0
+                        onTargetLinesChange(parsed)
                     },
+                    placeholder = { Text("0 (Auto-Detect via Bottom Fling)") },
                     label = { Text("Total Target Lines") },
                     supportingText = {
                         Text(
-                            text = "Reference: Matrix_main = 9487 lines",
+                            text = if (uiState.targetTotalLines > 0)
+                                "Current Target: ${uiState.targetTotalLines} lines"
+                            else
+                                "Auto-detects document length via bottom fling calibration or dynamic EOF detection",
                             color = Color(0xFF8B949E),
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
@@ -661,6 +670,70 @@ fun MatrixCaptureDashboard(
         // Action Buttons
         Spacer(modifier = Modifier.height(4.dp))
         if (!uiState.isWorkflowRunning) {
+            Button(
+                onClick = onResetSession,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 44.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE36209))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "RESET SESSION (PAGE 1, LINE 1)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Button(
+                onClick = onCalibrate,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 44.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.Straighten,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "AUTO-CALIBRATE (FLING TO BOTTOM & DETECT LINES)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             Button(
                 onClick = onTestPacer,
                 modifier = Modifier

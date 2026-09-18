@@ -205,21 +205,45 @@ class DesktopPaginationService : AccessibilityService() {
 
         val bounds = getDisplayOrWindowBounds(resolvedDisplay)
 
-        // Rapid fling down (upward swipes) to reach end of document
-        repeat(12) {
+        // Rapid fling down (upward swipes) until end of document is detected
+        var lastLineSeen = -1
+        var bottomUnchangedCount = 0
+        val maxDownFlings = 150
+
+        for (i in 0 until maxDownFlings) {
             dispatchSwipe(
                 startX = bounds.centerX().toFloat(),
-                startY = bounds.bottom * 0.80f,
+                startY = bounds.bottom * 0.85f,
                 endX = bounds.centerX().toFloat(),
-                endY = bounds.top * 0.20f,
-                durationMs = 120,
+                endY = bounds.top * 0.15f,
+                durationMs = 90,
                 displayId = resolvedDisplay
             )
-            delay(180)
+            delay(120)
+
+            // Check OCR progression every 3 flings
+            if (i % 3 == 0) {
+                delay(180)
+                val m = getGutterMetrics()
+                val line = m?.lowestLineNumber ?: -1
+                if (line > 0) {
+                    _calibrationState.value = "Calibrating: Flinging down (Line $line)..."
+                    if (line == lastLineSeen) {
+                        bottomUnchangedCount++
+                        if (bottomUnchangedCount >= 2) {
+                            Log.i(TAG, "Calibration: End of document detected at line $line (bottom reached after $i flings).")
+                            break
+                        }
+                    } else {
+                        bottomUnchangedCount = 0
+                        lastLineSeen = line
+                    }
+                }
+            }
         }
 
-        // Allow UI to settle
-        delay(600)
+        // Allow UI to completely settle at bottom
+        delay(700)
 
         // Read OCR gutter metrics at bottom
         val metrics = getGutterMetrics()
@@ -241,38 +265,48 @@ class DesktopPaginationService : AccessibilityService() {
             )
             deducedTotal
         } else {
-            val fallback = metrics?.lowestLineNumber ?: 9487 // Matches user document header fallback
-            Log.w(TAG, "Pitch calculation unavailable; fallback estimated lines: $fallback")
+            val fallback = metrics?.lowestLineNumber ?: (if (lastLineSeen > 0) lastLineSeen else _calculatedTotalLines.value)
+            Log.w(TAG, "Pitch calculation unavailable; fallback lines: $fallback")
             fallback
         }
 
-        _calibrationState.value = "Calibrating: Resetting to line 1..."
+        _calibrationState.value = "Calibrating: Returning to line 1..."
 
-        // Safe, controlled scrolling back to top (downward swipes strictly within middle body zone).
+        // Controlled scrolling back to top (downward swipes strictly within middle body zone).
         // Keeps startY >= 42% of screen to NEVER trigger Teams pull-down-to-dismiss gesture.
         val upStartY = bounds.centerY() - (bounds.height() * 0.05f) // ~45% of height
         val upEndY = bounds.centerY() + (bounds.height() * 0.35f)   // ~85% of height
-        for (i in 0 until 12) {
+        var reachedTopCount = 0
+        for (i in 0 until 80) {
             val metricsNow = getGutterMetrics()
             if (metricsNow != null && metricsNow.lowestLineNumber <= 46) {
-                Log.i(TAG, "Line 1 reached during upward scroll at iteration $i; stopping to avoid container dismiss.")
-                break
+                reachedTopCount++
+                if (reachedTopCount >= 2) {
+                    Log.i(TAG, "Line 1 reached during upward scroll at iteration $i; stopping.")
+                    break
+                }
+            } else {
+                reachedTopCount = 0
             }
             dispatchSwipe(
                 startX = bounds.centerX().toFloat(),
                 startY = upStartY,
                 endX = bounds.centerX().toFloat(),
                 endY = upEndY,
-                durationMs = 280,
+                durationMs = 180,
                 displayId = resolvedDisplay
             )
-            delay(220)
+            delay(150)
         }
 
         // Settle at top of document
         delay(800)
         _calibrationState.value = "Calibration Complete: $totalLines lines"
         _calculatedTotalLines.value = totalLines
+        _telemetry.value = _telemetry.value.copy(
+            targetTotalLines = totalLines,
+            statusMessage = "Calibrated: $totalLines lines detected"
+        )
         totalLines
     }
 
@@ -284,7 +318,7 @@ class DesktopPaginationService : AccessibilityService() {
      */
     fun startPacingEngine(
         targetDisplayId: Int = 0,
-        totalLines: Int = 9487,
+        totalLines: Int = 0,
         dwellTimeMs: Long = DWELL_TIME_MS,
         phase: String = "RECORDING_AND_PACING",
         onSegmentBoundary: (suspend (chunkIndex: Int, handoverLine: Int, overlapLine: Int) -> Unit)? = null,
@@ -298,10 +332,26 @@ class DesktopPaginationService : AccessibilityService() {
         }
 
         val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
-        _calculatedTotalLines.value = totalLines
+        val initialTarget = if (totalLines > 0) totalLines else _calculatedTotalLines.value
+        _calculatedTotalLines.value = initialTarget
+        _currentPage.value = 1
+        _telemetry.value = PacingTelemetry(
+            phase = phase,
+            currentPage = 1,
+            currentTopLine = 1,
+            currentBottomLine = 44,
+            targetTotalLines = initialTarget,
+            currentSegmentIndex = 1,
+            segmentProgressLines = 0,
+            segmentTargetLines = 1200,
+            statusMessage = "Starting Page 1 (Lines 1-44)...",
+            dwellRemainingMs = dwellTimeMs,
+            isDwellActive = true
+        )
         acquireWakeLock()
 
         automationJob = serviceScope.launch {
+            var dynamicTotalLines = initialTarget
             try {
                 // Auto-suppress on-screen soft keyboard during capture session
                 setSoftKeyboardHidden(true)
@@ -322,12 +372,15 @@ class DesktopPaginationService : AccessibilityService() {
                 var currentChunkIndex = 1
                 var currentChunkStartLine = 1
 
+                var bottomStaticCount = 0
+                var prevBottomRead = -1
+
                 // Adaptive Closed-Loop Auto-Tune State
                 var autoTuneFactor = 1.0f
                 var lastAlignmentError = 0
                 var targetPreviousBottomLine = 1
 
-                Log.i(TAG, "Starting pacing engine on Display $resolvedDisplay: Total=$totalLines lines, Dwell=${dwellTimeMs}ms, Phase=$phase")
+                Log.i(TAG, "Starting pacing engine on Display $resolvedDisplay: Initial=$initialTarget lines, Dwell=${dwellTimeMs}ms, Phase=$phase")
 
                 while (isActive && isPaginating.get()) {
                     pageIndex++
@@ -339,6 +392,7 @@ class DesktopPaginationService : AccessibilityService() {
                         if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
                             currentTopLine = ocr.currentTopLine
                             currentBottomLine = ocr.currentBottomLine
+                            prevBottomRead = currentBottomLine
                         } else {
                             currentTopLine = 1
                             currentBottomLine = visibleLinesCount
@@ -387,6 +441,26 @@ class DesktopPaginationService : AccessibilityService() {
                             currentTopLine = ocr!!.currentTopLine
                             currentBottomLine = ocr.currentBottomLine
 
+                            // Dynamic document total line expansion: never clip if document is longer than expected
+                            if (currentBottomLine > dynamicTotalLines) {
+                                dynamicTotalLines = currentBottomLine
+                                _calculatedTotalLines.value = dynamicTotalLines
+                            }
+
+                            // Dynamic end-of-document detection: if bottom line stops advancing after swipe
+                            if (pageIndex > 1 && currentBottomLine == prevBottomRead) {
+                                bottomStaticCount++
+                                if (bottomStaticCount >= 2) {
+                                    Log.i(TAG, "End of document reached dynamically at line $currentBottomLine (pacing complete).")
+                                    dynamicTotalLines = currentBottomLine
+                                    _calculatedTotalLines.value = dynamicTotalLines
+                                    break
+                                }
+                            } else {
+                                bottomStaticCount = 0
+                                prevBottomRead = currentBottomLine
+                            }
+
                             // Auto-tune alignment error calculation:
                             // Goal: newTopLine == targetPreviousBottomLine (or 1 line safety overlap)
                             val error = currentTopLine - targetPreviousBottomLine
@@ -425,7 +499,7 @@ class DesktopPaginationService : AccessibilityService() {
                         currentPage = pageIndex,
                         currentTopLine = currentTopLine,
                         currentBottomLine = currentBottomLine,
-                        targetTotalLines = totalLines,
+                        targetTotalLines = dynamicTotalLines,
                         currentSegmentIndex = currentChunkIndex,
                         segmentProgressLines = chunkProgress.coerceAtLeast(0),
                         segmentTargetLines = 1200,
@@ -464,8 +538,12 @@ class DesktopPaginationService : AccessibilityService() {
                     }
 
                     // Stop criteria: reached end of document
-                    if (currentTopLine >= totalLines || isFinishedCheck?.invoke() == true) {
-                        Log.i(TAG, "Pacing engine reached end of document (topLine=$currentTopLine, total=$totalLines).")
+                    val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+                    val hasRealOcr = ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine
+                    if ((hasRealOcr && currentBottomLine >= dynamicTotalLines && bottomStaticCount >= 1) ||
+                        (!hasRealOcr && currentTopLine >= dynamicTotalLines) ||
+                        isFinishedCheck?.invoke() == true) {
+                        Log.i(TAG, "Pacing engine reached end of document (topLine=$currentTopLine, bottomLine=$currentBottomLine, total=$dynamicTotalLines).")
                         break
                     }
                 }
@@ -480,9 +558,10 @@ class DesktopPaginationService : AccessibilityService() {
                 _paginationState.value = PaginationState.Idle
                 _telemetry.value = _telemetry.value.copy(
                     phase = "COMPLETED",
+                    targetTotalLines = dynamicTotalLines,
                     isDwellActive = false,
                     dwellRemainingMs = 0L,
-                    statusMessage = "Pacing Complete at line ${_telemetry.value.currentTopLine}"
+                    statusMessage = "Pacing Complete at line ${_telemetry.value.currentBottomLine} (Total: $dynamicTotalLines lines)"
                 )
             }
         }
@@ -652,14 +731,14 @@ class DesktopPaginationService : AccessibilityService() {
 
     data class PacingTelemetry(
         val phase: String = "IDLE", // "IDLE", "PACING_TEST", "RECORDING_AND_PACING", "COMPLETED"
-        val currentPage: Int = 0,
+        val currentPage: Int = 1,
         val currentTopLine: Int = 1,
-        val currentBottomLine: Int = 46,
-        val targetTotalLines: Int = 9487,
+        val currentBottomLine: Int = 44,
+        val targetTotalLines: Int = 0,
         val currentSegmentIndex: Int = 1,
         val segmentProgressLines: Int = 0,
         val segmentTargetLines: Int = 1200,
-        val statusMessage: String = "Ready",
+        val statusMessage: String = "Ready on Page 1 (Auto-Detect / Calibrate)",
         val dwellRemainingMs: Long = 0L,
         val isDwellActive: Boolean = false,
         val autoTuneFactor: Float = 1.0f,
@@ -682,16 +761,16 @@ class DesktopPaginationService : AccessibilityService() {
         private val _paginationState = MutableStateFlow<PaginationState>(PaginationState.Idle)
         val paginationState = _paginationState.asStateFlow()
 
-        private val _currentPage = MutableStateFlow(0)
+        private val _currentPage = MutableStateFlow(1)
         val currentPage = _currentPage.asStateFlow()
 
         private val _dwellCountdownMs = MutableStateFlow(0L)
         val dwellCountdownMs = _dwellCountdownMs.asStateFlow()
 
-        private val _calculatedTotalLines = MutableStateFlow(9487)
+        private val _calculatedTotalLines = MutableStateFlow(0)
         val calculatedTotalLines = _calculatedTotalLines.asStateFlow()
 
-        private val _calibrationState = MutableStateFlow("Direct Pacing (Total: 9,487 lines)")
+        private val _calibrationState = MutableStateFlow("Uncalibrated (Auto-detect active)")
         val calibrationState = _calibrationState.asStateFlow()
 
         private val _telemetry = MutableStateFlow(PacingTelemetry())
@@ -699,5 +778,27 @@ class DesktopPaginationService : AccessibilityService() {
 
         private val _isSoftKeyboardSuppressed = MutableStateFlow(false)
         val isSoftKeyboardSuppressed = _isSoftKeyboardSuppressed.asStateFlow()
+
+        fun resetToStart(targetLines: Int = 0) {
+            instance?.stopPagination()
+            _currentPage.value = 1
+            _dwellCountdownMs.value = 0L
+            _calculatedTotalLines.value = targetLines
+            _calibrationState.value = if (targetLines > 0) "Ready (Target: $targetLines lines)" else "Ready (Auto-detect document length)"
+            _telemetry.value = PacingTelemetry(
+                phase = "READY",
+                currentPage = 1,
+                currentTopLine = 1,
+                currentBottomLine = 44,
+                targetTotalLines = targetLines,
+                currentSegmentIndex = 1,
+                segmentProgressLines = 0,
+                segmentTargetLines = 1200,
+                statusMessage = if (targetLines > 0) "Ready on Page 1 (Target: $targetLines lines)" else "Ready on Page 1 (Auto-detecting lines)",
+                dwellRemainingMs = 0L,
+                isDwellActive = false
+            )
+            Log.i(TAG, "Reset to Page 1 with target lines: $targetLines")
+        }
     }
 }

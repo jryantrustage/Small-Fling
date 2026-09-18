@@ -132,7 +132,7 @@ class FrameUploadClient(
         val currentPage: Int = 0,
         val currentTopLine: Int = 0,
         val currentBottomLine: Int = 0,
-        val targetTotalLines: Int = 9487,
+        val targetTotalLines: Int = 0,
         val dwellCountdownMs: Int = 0,
         val phase: String = "IDLE",
         val statusMessage: String = "",
@@ -175,6 +175,21 @@ class FrameUploadClient(
         try {
             client.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
+            false
+        }
+    }
+
+    suspend fun resetServerState(targetTotalLines: Int = 0): Boolean = withContext(Dispatchers.IO) {
+        val url = "http://$serverHost/api/reset-state"
+        val json = JSONObject().apply {
+            put("target_total_lines", targetTotalLines)
+        }
+        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder().url(url).post(requestBody).build()
+        try {
+            client.newCall(request).execute().use { it.isSuccessful }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error calling reset-state on $url", e)
             false
         }
     }
