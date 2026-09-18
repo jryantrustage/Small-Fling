@@ -313,11 +313,11 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                     val cm = activeService.getCaptureManager()
                     val snapshot = cm?.captureSettledSnapshot()
                     if (snapshot != null) {
-                        val ok = uploadClient.uploadFrame(snapshot, topLine, bottomLine, pageIndex)
-                        activeService.reportFrameUploaded(pageIndex, topLine, bottomLine, ok)
-                        if (ok) {
+                        val res = uploadClient.uploadFrame(snapshot, topLine, bottomLine, pageIndex)
+                        activeService.reportFrameUploaded(pageIndex, topLine, bottomLine, res.success)
+                        if (res.success) {
                             _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1) }
-                            Log.i(TAG, "Uploaded settled 1080p frame $pageIndex (Lines $topLine-$bottomLine)")
+                            Log.i(TAG, "Uploaded settled 1080p frame $pageIndex (Lines ${res.topLine}-${res.bottomLine})")
                         }
                     } else {
                         Log.w(TAG, "Snapshot from ImageReader was null for page $pageIndex")

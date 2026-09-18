@@ -155,9 +155,10 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
     """
     Calls Gemini Vision API with structured JSON output schema
     to transcribe exact line numbers and text verbatim while tracking token utilization.
+    Reads the first and last line number on the left side gutter.
     """
-    global document_lines, captured_frames, token_stats
-    print(f"Processing frame {frame_id} (Lines {top_line} -> {bottom_line}) with Gemini...")
+    global document_lines, captured_frames, token_stats, latest_telemetry
+    print(f"Processing frame {frame_id} with Gemini Vision OCR...")
 
     if not config.GEMINI_API_KEY:
         print("Warning: Gemini API Key is not set. Frame saved but not transcribed.")
@@ -168,28 +169,34 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
     try:
         client = genai.Client(api_key=config.GEMINI_API_KEY)
 
-        prompt = f"""
+        prompt = """
 You are an uncompromising, bit-level OCR code extraction and gutter line tracking engine.
 You are given a high-resolution screenshot of a code document displayed in Microsoft Teams Markdown / Code viewer.
-The left gutter displays line numbers. This view covers approximately lines {top_line if top_line > 0 else 'start'} through {bottom_line if bottom_line > 0 else 'end'}.
+The left vertical gutter displays line numbers.
 
 CRITICAL INSTRUCTIONS:
-1. Identify the left gutter line numbers and transcribe EVERY visible line VERBATIM, preserving exact indentation, whitespace, punctuation, brackets, comments, and empty lines.
-2. Note that lines may WRAP. When a line wraps, the gutter line number only appears on the FIRST visual line of that code line. Subsequent wrapped lines have a blank gutter. Mark wrapped lines accordingly.
-3. Ignore header toolbars and footer status bars. Focus strictly on the editor body and gutter.
-4. Output MUST be a valid JSON array of objects with the exact schema:
-[
-  {{
-    "line_number": <int, the true logical line number>,
-    "gutter_number": <int, line number shown in left gutter>,
-    "text": "<verbatim line content without the line number prefix>",
-    "is_blank": <boolean>,
-    "is_wrapped": <boolean, true if line wraps to multiple visual rows>,
-    "wrapped_line_count": <int, number of visual rows this line occupies, default 1>,
-    "flagged": <boolean, true if line is partially cut off at viewport edge or ambiguous>
-  }}
-]
-Do not omit any lines. Do not truncate or use placeholders. Return ONLY the valid JSON array.
+1. Examine the left vertical gutter:
+   - Identify the TOPMOST (first visible) line number in the left gutter.
+   - Identify the BOTTOMMOST (last visible) line number in the left gutter.
+2. Transcribe EVERY visible line VERBATIM, preserving exact indentation, whitespace, punctuation, brackets, comments, and empty lines.
+3. Note that lines may WRAP. When a line wraps, the gutter line number only appears on the FIRST visual line of that code line. Subsequent wrapped lines have a blank gutter. Mark wrapped lines accordingly.
+4. Output MUST be valid JSON with this exact schema:
+{
+  "top_gutter_line": <int, the first visible line number in the left gutter>,
+  "bottom_gutter_line": <int, the last visible line number in the left gutter>,
+  "lines": [
+    {
+      "line_number": <int, the true logical line number matching the gutter>,
+      "gutter_number": <int, line number shown in left gutter>,
+      "text": "<verbatim line content without line number prefix>",
+      "is_blank": <boolean>,
+      "is_wrapped": <boolean, true if line wraps to multiple visual rows>,
+      "wrapped_line_count": <int, number of visual rows this line occupies, default 1>,
+      "flagged": <boolean, true if line is partially cut off at viewport edge or ambiguous>
+    }
+  ]
+}
+Do not omit any lines. Do not truncate or use placeholders. Return ONLY the valid JSON object.
 """
 
         pil_image = Image.open(image_path)
@@ -255,15 +262,27 @@ Do not omit any lines. Do not truncate or use placeholders. Return ONLY the vali
         }
         captured_frames[frame_id]["model_used"] = model_used
 
-        raw_text = (response.text or "[]").strip()
+        raw_text = (response.text or "{}").strip()
         if raw_text.startswith("```"):
             raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
             raw_text = re.sub(r"\s*```$", "", raw_text)
-        parsed_lines = json.loads(raw_text)
+        
+        parsed_payload = json.loads(raw_text)
+        top_gutter_detected = None
+        bottom_gutter_detected = None
+
+        if isinstance(parsed_payload, dict):
+            top_gutter_detected = parsed_payload.get("top_gutter_line")
+            bottom_gutter_detected = parsed_payload.get("bottom_gutter_line")
+            parsed_lines = parsed_payload.get("lines", [])
+        elif isinstance(parsed_payload, list):
+            parsed_lines = parsed_payload
+        else:
+            parsed_lines = []
 
         lines_added = 0
-        min_detected = 999999
-        max_detected = 0
+        min_detected = int(top_gutter_detected) if top_gutter_detected and int(top_gutter_detected) > 0 else 999999
+        max_detected = int(bottom_gutter_detected) if bottom_gutter_detected and int(bottom_gutter_detected) > 0 else 0
 
         for item in parsed_lines:
             ln = item.get("line_number")
@@ -307,13 +326,22 @@ Do not omit any lines. Do not truncate or use placeholders. Return ONLY the vali
             }
             lines_added += 1
 
-        if min_detected <= max_detected:
+        if min_detected <= max_detected and min_detected < 999999:
             captured_frames[frame_id]["top_line"] = min_detected
             captured_frames[frame_id]["bottom_line"] = max_detected
+            latest_telemetry["current_top_line"] = min_detected
+            latest_telemetry["current_bottom_line"] = max_detected
+            latest_telemetry["status_message"] = f"Gutter OCR Verified: Ln {min_detected} → {max_detected}"
+        elif top_gutter_detected and bottom_gutter_detected:
+            captured_frames[frame_id]["top_line"] = int(top_gutter_detected)
+            captured_frames[frame_id]["bottom_line"] = int(bottom_gutter_detected)
+            latest_telemetry["current_top_line"] = int(top_gutter_detected)
+            latest_telemetry["current_bottom_line"] = int(bottom_gutter_detected)
+            latest_telemetry["status_message"] = f"Gutter OCR Verified: Ln {top_gutter_detected} → {bottom_gutter_detected}"
 
         captured_frames[frame_id]["status"] = "processed"
         captured_frames[frame_id]["extracted_line_count"] = lines_added
-        print(f"Frame {frame_id} processed: {lines_added} lines extracted. Tokens: {total_tokens} (Prompt: {prompt_tokens}, Output: {candidates_tokens})")
+        print(f"Frame {frame_id} processed: {lines_added} lines extracted (Gutter: Ln {captured_frames[frame_id].get('top_line', 0)} -> {captured_frames[frame_id].get('bottom_line', 0)}). Tokens: {total_tokens}")
 
         # Check for gaps between min and max lines
         if document_lines:
@@ -468,11 +496,12 @@ async def upload_frame(
     file: UploadFile = File(...),
     top_line: Optional[int] = Form(0),
     bottom_line: Optional[int] = Form(0),
-    page_index: Optional[int] = Form(0)
+    page_index: Optional[int] = Form(0),
+    sync: Optional[bool] = Form(True)
 ):
     """
     Accepts settled 1080p frame from mobile app or drag-and-drop web UI
-    and initiates structured Gemini extraction.
+    and executes Gemini extraction to read gutter line bounds.
     """
     contents = await file.read()
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
@@ -503,15 +532,33 @@ async def upload_frame(
     }
     save_persisted_state()
 
-    # Launch Gemini OCR in background
-    background_tasks.add_task(process_frame_with_gemini, frame_id, target_path, top_line or 0, bottom_line or 0)
-
-    return {
-        "status": "success",
-        "frame_id": frame_id,
-        "page_index": page_idx,
-        "message": f"Frame stored. Analyzing lines {top_line or 0} -> {bottom_line or 0}."
-    }
+    if sync:
+        # Await Gemini OCR directly so client receives actual gutter line numbers immediately
+        await process_frame_with_gemini(frame_id, target_path, top_line or 0, bottom_line or 0)
+        detected_top = captured_frames[frame_id].get("top_line", 0)
+        detected_bottom = captured_frames[frame_id].get("bottom_line", 0)
+        detected_lines = captured_frames[frame_id].get("extracted_line_count", 0)
+        return {
+            "status": "success",
+            "frame_id": frame_id,
+            "page_index": page_idx,
+            "top_line": detected_top,
+            "bottom_line": detected_bottom,
+            "extracted_line_count": detected_lines,
+            "message": f"Frame stored and verified via Gutter OCR: Lines {detected_top} → {detected_bottom}."
+        }
+    else:
+        # Launch Gemini OCR in background
+        background_tasks.add_task(process_frame_with_gemini, frame_id, target_path, top_line or 0, bottom_line or 0)
+        return {
+            "status": "success",
+            "frame_id": frame_id,
+            "page_index": page_idx,
+            "top_line": top_line or 0,
+            "bottom_line": bottom_line or 0,
+            "extracted_line_count": 0,
+            "message": f"Frame stored. Analyzing lines in background."
+        }
 
 
 @app.get("/api/frames")

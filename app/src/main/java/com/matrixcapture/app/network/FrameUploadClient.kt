@@ -31,15 +31,24 @@ class FrameUploadClient(
         val reason: String
     )
 
+    data class UploadResult(
+        val success: Boolean,
+        val topLine: Int = 0,
+        val bottomLine: Int = 0,
+        val extractedLineCount: Int = 0,
+        val message: String = ""
+    )
+
     /**
      * Compresses the 1080p snapshot to PNG and uploads to FastAPI with gutter line bounds.
+     * Returns server-detected gutter line numbers from Gemini AI OCR.
      */
     suspend fun uploadFrame(
         bitmap: Bitmap,
-        topLine: Int,
-        bottomLine: Int,
-        pageIndex: Int
-    ): Boolean = withContext(Dispatchers.IO) {
+        topLine: Int = 0,
+        bottomLine: Int = 0,
+        pageIndex: Int = 1
+    ): UploadResult = withContext(Dispatchers.IO) {
         val stream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
         val byteArray = stream.toByteArray()
@@ -49,9 +58,10 @@ class FrameUploadClient(
             .addFormDataPart("top_line", topLine.toString())
             .addFormDataPart("bottom_line", bottomLine.toString())
             .addFormDataPart("page_index", pageIndex.toString())
+            .addFormDataPart("sync", "true")
             .addFormDataPart(
                 "file",
-                "frame_${topLine}_${bottomLine}.png",
+                "frame_p${pageIndex}_${System.currentTimeMillis()}.png",
                 byteArray.toRequestBody("image/png".toMediaTypeOrNull(), 0, byteArray.size)
             )
             .build()
@@ -65,16 +75,28 @@ class FrameUploadClient(
         try {
             client.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    Log.i(TAG, "Uploaded frame $pageIndex (lines $topLine-$bottomLine) successfully to $url")
-                    true
+                    val bodyStr = response.body?.string() ?: "{}"
+                    val json = JSONObject(bodyStr)
+                    val detectedTop = json.optInt("top_line", 0)
+                    val detectedBottom = json.optInt("bottom_line", 0)
+                    val count = json.optInt("extracted_line_count", 0)
+                    val msg = json.optString("message", "")
+                    Log.i(TAG, "Uploaded frame $pageIndex successfully. Server OCR detected: Ln $detectedTop -> $detectedBottom ($count lines)")
+                    UploadResult(
+                        success = true,
+                        topLine = detectedTop,
+                        bottomLine = detectedBottom,
+                        extractedLineCount = count,
+                        message = msg
+                    )
                 } else {
                     Log.e(TAG, "Failed to upload frame: ${response.code} - ${response.message}")
-                    false
+                    UploadResult(success = false, message = "HTTP ${response.code}")
                 }
             }
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             Log.e(TAG, "Network error uploading frame to $url", e)
-            false
+            UploadResult(success = false, message = e.message ?: "Network error")
         }
     }
 

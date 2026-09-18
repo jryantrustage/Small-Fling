@@ -852,3 +852,135 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Prominent Top and Bottom Gutter Line Callouts */
+.gutter-line-callout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 6px;
+  margin: 6px 12px;
+  flex-shrink: 0;
+}
+
+.gutter-line-callout.top {
+  background: rgba(0, 255, 157, 0.08);
+  border: 1px solid rgba(0, 255, 157, 0.4);
+  color: var(--color-primary);
+}
+
+.gutter-line-callout.bottom {
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  color: var(--color-cyan);
+}
+
+.gutter-callout-icon {
+  font-size: 14px;
+}
+
+.gutter-callout-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.gutter-callout-value {
+  font-size: 14px;
+  font-weight: 800;
+  margin-left: auto;
+}
+
+/* Simple Clean Table: "Line #" and "text" */
+.clean-lines-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.clean-lines-table thead {
+  position: sticky;
+  top: 0;
+  background: #161b22;
+  z-index: 5;
+  box-shadow: 0 1px 0 var(--border-color);
+}
+
+.clean-lines-table th {
+  padding: 8px 12px;
+  text-align: left;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.clean-lines-table th.th-line-num {
+  width: 90px;
+  text-align: right;
+  border-right: 1px solid var(--border-color);
+}
+
+.clean-lines-table th.th-line-text {
+  padding-left: 16px;
+}
+
+.clean-lines-table .table-line-row {
+  cursor: pointer;
+  transition: background 0.1s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.clean-lines-table .table-line-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.clean-lines-table .table-line-row.selected {
+  background: rgba(0, 255, 157, 0.07);
+}
+
+.clean-lines-table td.td-line-num {
+  width: 90px;
+  text-align: right;
+  padding: 4px 12px;
+  color: #8b949e;
+  -webkit-user-select: none;
+  user-select: none;
+  font-weight: 600;
+  border-right: 1px solid var(--border-color);
+  background: rgba(22, 27, 34, 0.4);
+}
+
+.clean-lines-table td.td-line-text {
+  padding: 4px 16px;
+  vertical-align: middle;
+}
+
+.table-code-text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e6edf3;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.blank-line-tag {
+  color: #484f58;
+  font-style: italic;
+  font-size: 11px;
+}
+
+.wrap-tag {
+  color: var(--color-cyan);
+  font-size: 11px;
+  font-weight: bold;
+}
+
