@@ -40,7 +40,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(serverHost = savedHost) }
 
         // Load persisted Target Total Lines (0 = Auto-detect / Calibrate)
-        val savedLines = prefs.getInt("target_total_lines", 0)
+        val savedLinesRaw = prefs.getInt("target_total_lines", 0)
+        // Eradicate stale hardcoded values like 9487 or 9994
+        val savedLines = if (savedLinesRaw in listOf(9487, 9994)) {
+            prefs.edit().putInt("target_total_lines", 0).apply()
+            0
+        } else {
+            savedLinesRaw
+        }
         _uiState.update { it.copy(targetTotalLines = savedLines, calculatedTotalLines = savedLines) }
         DesktopPaginationService.resetToStart(savedLines)
 
@@ -307,6 +314,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                     val snapshot = cm?.captureSettledSnapshot()
                     if (snapshot != null) {
                         val ok = uploadClient.uploadFrame(snapshot, topLine, bottomLine, pageIndex)
+                        activeService.reportFrameUploaded(pageIndex, topLine, bottomLine, ok)
                         if (ok) {
                             _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1) }
                             Log.i(TAG, "Uploaded settled 1080p frame $pageIndex (Lines $topLine-$bottomLine)")
@@ -375,16 +383,20 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resetSession() {
-        val lines = _uiState.value.targetTotalLines
-        DesktopPaginationService.resetToStart(lines)
+        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putInt("target_total_lines", 0).apply()
+        DesktopPaginationService.resetToStart(0)
         viewModelScope.launch {
-            uploadClient.resetServerState(lines)
+            uploadClient.resetServerState(0)
             _uiState.update {
                 it.copy(
+                    targetTotalLines = 0,
+                    calculatedTotalLines = 0,
                     currentPage = 1,
-                    currentTopLine = 1,
-                    currentBottomLine = 44,
-                    workflowStatus = "Session reset to Page 1, Line 1 (Target $lines lines)",
+                    currentTopLine = 0,
+                    currentBottomLine = 0,
+                    uploadedFramesCount = 0,
+                    workflowStatus = "Session reset to Page 1, Line 1 (Target: Auto-Detect)",
                     errorMessage = null
                 )
             }

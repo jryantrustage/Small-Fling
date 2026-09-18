@@ -302,19 +302,13 @@ fun MatrixCaptureDashboard(
             )
         }
 
-        // Video Segment & Chunking Progress Card
-        TelemetryCard(title = "VIDEO CHUNK RECORDER (1,200 LINES / SEGMENT)", icon = Icons.Default.VideoCall) {
+        // Settled Frame Capture & Studio Ingestion Card
+        TelemetryCard(title = "SETTLED FRAME STREAM (STUDIO INGESTION)", icon = Icons.Default.CameraAlt) {
             val recState = uiState.recorderState
             Row(modifier = Modifier.fillMaxWidth()) {
-                StatItem("ACTIVE SEGMENT", "#%03d".format(recState.currentSegmentIndex), modifier = Modifier.weight(1f))
-                StatItem("START LINE", "${recState.currentStartLine}", modifier = Modifier.weight(1f))
+                StatItem("FRAMES CAPTURED", "${uiState.uploadedFramesCount}", modifier = Modifier.weight(1f))
+                StatItem("SERVER SYNC", if (uiState.isBackendConnected) "ONLINE" else "OFFLINE", modifier = Modifier.weight(1f))
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth()) {
-                StatItem("CHUNKS MADE", "${recState.completedSegmentsCount}", modifier = Modifier.weight(1f))
-                StatItem("EXTRACTED", "${recState.processedSegmentsCount}", modifier = Modifier.weight(1f))
-            }
-
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
@@ -327,7 +321,7 @@ fun MatrixCaptureDashboard(
             if (segments.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "SEGMENT TRACKING & OCR VERIFICATION:",
+                    text = "LIVE FRAME UPLOADS:",
                     color = Color(0xFF8B949E),
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
@@ -335,22 +329,10 @@ fun MatrixCaptureDashboard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (seg in segments) {
+                    for (seg in segments.take(5)) {
                         SegmentItemRow(seg)
                     }
                 }
-            }
-
-            val finalLines = totalFinalLines
-            if (finalLines != null && finalLines > 0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "✔ FINALIZED STITCHED MARKDOWN: $finalLines total lines",
-                    color = Color(0xFF00FF9D),
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
 

@@ -39,8 +39,6 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.matrixcapture.app.network.FrameUploadClient
-import com.matrixcapture.app.service.DesktopPaginationService
-import com.matrixcapture.app.service.SegmentRecorderService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,15 +46,12 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Floating Overlay Service for MatrixCapture.
  *
- * Displays a lightweight, draggable HUD on top of any active screen (Screen 0 or Screen 1)
- * providing real-time telemetry:
- * - Video count (active chunk and total chunks)
- * - Start line & end line for each video segment
- * - Overall document progress (start page, line # begin and end targeted)
- * - Gemini upload and inference status per segment
- * - Result markdown line count per video
- * - Final stitched total line count upon completion
- * - Compact controls (Pause / Resume / Stop / Expand / Collapse)
+ * Displays a lightweight, non-jumping, draggable HUD providing real-time telemetry:
+ * - Current Page, Top Line, Bottom Line
+ * - Live Settled Screenshot upload status to FastAPI Studio
+ * - Non-jumping fixed-height Dwell Freeze indicator
+ * - Auto-tune calibration & line error
+ * - Pacing Controls (Start / Pause / Reset / Soft Keyboard)
  */
 class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -210,7 +205,6 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         releaseWakeLock()
         telemetryJob?.cancel()
 
-        // Notify server that HUD has stopped/is standby
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val prefs = getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
@@ -224,8 +218,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                         statusMessage = "Pacer Standby / Closed"
                     )
                 )
-            } catch (e: Exception) {
-                // Ignore
+            } catch (_: Exception) {
             } finally {
                 serviceScope.cancel()
             }
@@ -268,9 +261,7 @@ fun FloatingHudOverlay(
 ) {
     var isExpanded by remember { mutableStateOf(false) }
 
-    // Collect telemetry flows
     val segments by SegmentRecorderService.segmentDetails.collectAsState()
-    val totalFinalLines by SegmentRecorderService.totalFinalLines.collectAsState()
     val recorderState by (SegmentRecorderService.instance?.serviceState ?: MutableStateFlow(SegmentRecorderService.RecorderState())).collectAsState()
     val paginationState by DesktopPaginationService.paginationState.collectAsState()
     val telemetry by DesktopPaginationService.telemetry.collectAsState()
@@ -278,11 +269,8 @@ fun FloatingHudOverlay(
     val calculatedTotalLines by DesktopPaginationService.calculatedTotalLines.collectAsState()
     val dwellRemainingMs by DesktopPaginationService.dwellCountdownMs.collectAsState()
     val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
-
     val isBackendOnline by FloatingOverlayService.isBackendOnline.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
-
-    val isPaused = paginationState == DesktopPaginationService.PaginationState.Idle && recorderState.isRecording
 
     Box(
         modifier = Modifier
@@ -312,17 +300,17 @@ fun FloatingHudOverlay(
                         modifier = Modifier
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(if (recorderState.isRecording) Color(0xFF00FF9D) else Color.Yellow)
+                            .background(if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF8B949E))
                     )
                     Text(
-                        text = "VID #${recorderState.currentSegmentIndex}",
+                        text = "Pg #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage}",
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = "LN: ${recorderState.currentStartLine}..",
+                        text = if (telemetry.currentTopLine > 0) "Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine}" else "Ln Scanning...",
                         color = Color(0xFF00FF9D),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
@@ -344,7 +332,7 @@ fun FloatingHudOverlay(
                 }
             }
         } else {
-            // Expanded HUD Window
+            // Expanded HUD Window - Stable Fixed Width
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.96f)),
                 shape = RoundedCornerShape(14.dp),
@@ -364,11 +352,11 @@ fun FloatingHudOverlay(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(if (recorderState.isRecording) Color(0xFF00FF9D) else Color(0xFF8B949E))
+                                    .background(if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF8B949E))
                             )
                             Text(
-                                text = if (recorderState.isRecording) "MATRIX HUD [REC]" else "MATRIX HUD [TEST]",
-                                color = if (recorderState.isRecording) Color(0xFF00FF9D) else Color(0xFF58A6FF),
+                                text = if (paginationState == DesktopPaginationService.PaginationState.Running) "MATRIX PACER [ACTIVE]" else "MATRIX PACER [IDLE]",
+                                color = if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF58A6FF),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
@@ -387,14 +375,14 @@ fun FloatingHudOverlay(
 
                     Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
 
-                    // Overall Document Progress
+                    // Status & API Connection
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "STATUS: ${telemetry.statusMessage.ifEmpty { "Ready" }}",
+                            text = telemetry.statusMessage.ifEmpty { "Ready" },
                             color = Color(0xFF58A6FF),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
@@ -420,10 +408,13 @@ fun FloatingHudOverlay(
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Page and Line Bounds
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = "Page: ${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine})",
+                            text = "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine})",
                             color = Color.White,
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
@@ -435,17 +426,10 @@ fun FloatingHudOverlay(
                             fontFamily = FontFamily.Monospace
                         )
                     }
-                    if (telemetry.segmentTargetLines > 0) {
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = "Chunk Progress: ${telemetry.segmentProgressLines}/${telemetry.segmentTargetLines} lines",
-                            color = Color(0xFF8B949E),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Auto-tuning & Pitch
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
                             text = "Auto-tune: ${String.format(java.util.Locale.US, "%.2f", telemetry.autoTuneFactor)}x (err: ${telemetry.bottomToTopError} ln)",
@@ -453,146 +437,133 @@ fun FloatingHudOverlay(
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
                         )
-                        if (telemetry.wrappedLinesDetected > 0) {
-                            Text(
-                                text = "Wrapped: ${telemetry.wrappedLinesDetected}",
-                                color = Color(0xFFD29922),
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-
-                    // Dwell Timer
-                    if (dwellRemainingMs > 0) {
-                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "1.5s Dwell Freeze: ${dwellRemainingMs}ms",
-                            color = Color(0xFF58A6FF),
+                            text = "Pitch: ${String.format(java.util.Locale.US, "%.1f", telemetry.linePitchPx)}px",
+                            color = Color(0xFF8B949E),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace
                         )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // STABLE FIXED-HEIGHT DWELL INDICATOR (Never causes HUD to jump)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (dwellRemainingMs > 0) "Dwell: ${dwellRemainingMs}ms" else "Dwell: Settled",
+                            color = if (dwellRemainingMs > 0) Color(0xFF00FF9D) else Color(0xFF8B949E),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.width(110.dp)
+                        )
                         LinearProgressIndicator(
-                            progress = { (dwellRemainingMs.toFloat() / 1500f).coerceIn(0f, 1f) },
+                            progress = {
+                                if (dwellRemainingMs > 0) (dwellRemainingMs.toFloat() / 1500f).coerceIn(0f, 1f) else 0f
+                            },
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .weight(1f)
                                 .height(4.dp)
                                 .clip(RoundedCornerShape(2.dp)),
-                            color = Color(0xFF58A6FF),
+                            color = Color(0xFF00FF9D),
                             trackColor = Color(0xFF21262D)
                         )
                     }
 
                     Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
 
-                    // Video Count & Segment Progress Table
+                    // Live Settled Frame Upload Telemetry
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "VIDEO SEGMENTS (${segments.size} Total)",
+                            text = "CAPTURED FRAMES",
                             color = Color(0xFF8B949E),
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Uploaded: ${segments.count { it.status == SegmentRecorderService.SegmentStatus.EXTRACTED }}",
+                            text = "Uploaded: ${recorderState.completedSegmentsCount}",
                             color = Color(0xFF00FF9D),
                             fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Scrollable list of video segments
+                    // Scrollable list of verified uploads
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 140.dp),
+                            .heightIn(max = 100.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         if (segments.isEmpty()) {
                             item {
                                 Text(
-                                    text = "No segments recorded yet. Session starting...",
+                                    text = if (recorderState.isRecording) "Awaiting Page 1 dwell capture..." else "Pacer standby. Tap START PACER below.",
                                     color = Color(0xFF6E7681),
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
                         } else {
-                            items(segments.reversed()) { seg ->
-                                SegmentHudRow(seg)
-                            }
-                        }
-                    }
-
-                    // Final Stitching Result
-                    if (totalFinalLines != null && totalFinalLines!! > 0) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D281E)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text(
-                                    text = "✔ FINALIZED SPLICED DOCUMENT",
-                                    color = Color(0xFF00FF9D),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = "Total Final Lines: $totalFinalLines lines",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                            items(segments) { seg ->
+                                FrameUploadRow(seg)
                             }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Controls in Overlay
+                    // Row 1 Controls: Pause/Start & Calibrate
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         if (paginationState == DesktopPaginationService.PaginationState.Running) {
                             Button(
-                                onClick = {
-                                    DesktopPaginationService.instance?.stopPagination()
-                                },
+                                onClick = { DesktopPaginationService.instance?.stopPagination() },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD29922)),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier
-                                    .weight(1f)
+                                    .weight(1.2f)
                                     .height(34.dp),
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text(
-                                    text = "PAUSE PACER",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Text("PAUSE PACER", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                             }
                         } else {
                             Button(
                                 onClick = {
                                     val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                    val total = prefs.getInt("target_total_lines", if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else 0)
+                                    val total = prefs.getInt("target_total_lines", 0)
+                                    val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                    val client = FrameUploadClient(host)
+
                                     DesktopPaginationService.instance?.startPacingEngine(
                                         totalLines = total,
                                         dwellTimeMs = 1500L,
-                                        phase = if (recorderState.isRecording) "RECORDING_AND_PACING" else "TEST_PACING"
+                                        phase = "SETTLED_CAPTURE_AND_UPLOAD",
+                                        onFrameCaptureNeeded = { pageIndex, topLine, bottomLine ->
+                                            val activeService = SegmentRecorderService.instance
+                                            val cm = activeService?.getCaptureManager()
+                                            val snapshot = cm?.captureSettledSnapshot()
+                                            if (snapshot != null) {
+                                                val ok = client.uploadFrame(snapshot, topLine, bottomLine, pageIndex)
+                                                activeService.reportFrameUploaded(pageIndex, topLine, bottomLine, ok)
+                                            } else {
+                                                Log.w("FloatingOverlayService", "Settled snapshot was null on Page $pageIndex")
+                                            }
+                                        }
                                     )
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
@@ -602,13 +573,7 @@ fun FloatingHudOverlay(
                                     .height(34.dp),
                                 contentPadding = PaddingValues(0.dp)
                             ) {
-                                Text(
-                                    text = if (recorderState.isRecording) "START PACER" else "TEST PACER",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Text("START PACER", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                             }
                         }
 
@@ -643,34 +608,30 @@ fun FloatingHudOverlay(
                                 .height(34.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
-                            Text(
-                                text = "CALIB",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Text("CALIB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
 
+                    // Row 2 Controls: Reset, Stop, Soft Keyboard Toggle
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
                             onClick = {
+                                // Completely clear target_total_lines from SharedPreferences
                                 val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                val target = prefs.getInt("target_total_lines", 0)
+                                prefs.edit().putInt("target_total_lines", 0).apply()
                                 val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-                                DesktopPaginationService.resetToStart(target)
+                                DesktopPaginationService.resetToStart(0)
                                 CoroutineScope(Dispatchers.IO).launch {
                                     try {
                                         val client = FrameUploadClient(host)
-                                        val ok = client.resetServerState(target)
+                                        val ok = client.resetServerState(0)
                                         FloatingOverlayService.isBackendOnline.value = ok
-                                    } catch (e: Exception) {
+                                    } catch (_: Exception) {
                                         FloatingOverlayService.isBackendOnline.value = false
                                     }
                                 }
@@ -682,13 +643,7 @@ fun FloatingHudOverlay(
                                 .height(34.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
-                            Text(
-                                text = "RESET LN 1",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Text("RESET LN 1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
 
                         Button(
@@ -703,19 +658,11 @@ fun FloatingHudOverlay(
                                 .height(34.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
-                            Text(
-                                text = "STOP",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Text("STOP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
 
                         Button(
-                            onClick = {
-                                DesktopPaginationService.instance?.toggleSoftKeyboard()
-                            },
+                            onClick = { DesktopPaginationService.instance?.toggleSoftKeyboard() },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)
                             ),
@@ -725,13 +672,7 @@ fun FloatingHudOverlay(
                                 .height(34.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
-                            Text(
-                                text = if (isKeyboardSuppressed) "KB: HIDE" else "KB: AUTO",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace
-                            )
+                            Text(if (isKeyboardSuppressed) "KB: HIDE" else "KB: AUTO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
                     }
                 }
@@ -741,15 +682,8 @@ fun FloatingHudOverlay(
 }
 
 @Composable
-fun SegmentHudRow(segment: SegmentRecorderService.SegmentDetail) {
-    val statusColor = when (segment.status) {
-        SegmentRecorderService.SegmentStatus.RECORDING -> Color(0xFF58A6FF)
-        SegmentRecorderService.SegmentStatus.UPLOADING -> Color(0xFFD29922)
-        SegmentRecorderService.SegmentStatus.PROCESSING -> Color(0xFFA371F7)
-        SegmentRecorderService.SegmentStatus.EXTRACTING -> Color(0xFFE3B341)
-        SegmentRecorderService.SegmentStatus.EXTRACTED -> Color(0xFF00FF9D)
-        SegmentRecorderService.SegmentStatus.FAILED -> Color(0xFFFF7B72)
-    }
+fun FrameUploadRow(segment: SegmentRecorderService.SegmentDetail) {
+    val statusColor = if (segment.status == SegmentRecorderService.SegmentStatus.EXTRACTED) Color(0xFF00FF9D) else Color(0xFFFF7B72)
 
     Box(
         modifier = Modifier
@@ -764,7 +698,7 @@ fun SegmentHudRow(segment: SegmentRecorderService.SegmentDetail) {
         ) {
             Column {
                 Text(
-                    text = "Vid #${segment.segmentIndex}: Lines ${segment.startLine}-${segment.endLine}",
+                    text = "Page #${segment.segmentIndex}: Lines ${segment.startLine}-${segment.endLine}",
                     color = Color.White,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
