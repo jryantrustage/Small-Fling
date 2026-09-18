@@ -498,71 +498,146 @@ fun FloatingHudOverlay(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Single Button: CAPTURE
+                    // Action Buttons: CAPTURE + NEXT PG & ALIGN
                     var isCapturing by remember { mutableStateOf(false) }
-                    Button(
-                        onClick = {
-                            isCapturing = true
-                            coroutineScope.launch {
-                                DesktopPaginationService.updateStatus("Capturing screen...")
-                                val activeService = SegmentRecorderService.instance
-                                val cm = activeService?.getCaptureManager()
-                                val snapshot = DesktopPaginationService.instance?.captureScreenshot()
-                                    ?: cm?.captureSettledSnapshot()
-                                    ?: DesktopPaginationService.latestCapturedBitmap
+                    var isAligningNext by remember { mutableStateOf(false) }
 
-                                if (snapshot != null) {
-                                    DesktopPaginationService.latestCapturedBitmap = snapshot
-                                    DesktopPaginationService.updateStatus("Uploading to Studio (Ln $topLn-$botLn)...")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Button 1: CAPTURE
+                        Button(
+                            onClick = {
+                                isCapturing = true
+                                coroutineScope.launch {
+                                    DesktopPaginationService.updateStatus("Capturing screen...")
+                                    val activeService = SegmentRecorderService.instance
+                                    val cm = activeService?.getCaptureManager()
+                                    val snapshot = DesktopPaginationService.instance?.captureScreenshot()
+                                        ?: cm?.captureSettledSnapshot()
+                                        ?: DesktopPaginationService.latestCapturedBitmap
 
+                                    if (snapshot != null) {
+                                        DesktopPaginationService.latestCapturedBitmap = snapshot
+                                        DesktopPaginationService.updateStatus("Uploading to Studio (Ln $topLn-$botLn)...")
+
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        val res = uploadClient.uploadFrame(
+                                            bitmap = snapshot,
+                                            topLine = topLn,
+                                            bottomLine = botLn,
+                                            pageIndex = currentPage.coerceAtLeast(1),
+                                            sync = true
+                                        )
+
+                                        if (res.success) {
+                                            DesktopPaginationService.updateStatus("Page $currentPage Uploaded to Studio ✔ (Ln ${res.topLine}-${res.bottomLine})")
+                                        } else {
+                                            DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
+                                        }
+                                    } else {
+                                        DesktopPaginationService.updateStatus("Capture Failed: No active screen buffer")
+                                    }
+                                    delay(600)
+                                    isCapturing = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.RadioButtonChecked,
+                                    contentDescription = null,
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isCapturing) "CAPTURING..." else "CAPTURE",
+                                    color = Color.Black,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
+                        // Button 2: NEXT PG & ALIGN
+                        Button(
+                            onClick = {
+                                isAligningNext = true
+                                coroutineScope.launch {
+                                    DesktopPaginationService.updateStatus("Fetching next page target line...")
                                     val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
                                     val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
                                     val uploadClient = FrameUploadClient(serverHost)
-                                    val res = uploadClient.uploadFrame(
-                                        bitmap = snapshot,
-                                        topLine = topLn,
-                                        bottomLine = botLn,
-                                        pageIndex = currentPage.coerceAtLeast(1),
-                                        sync = true
-                                    )
+                                    val nextLineRes = uploadClient.getNextPageLine()
+                                    val targetTopLine = nextLineRes.getOrNull() ?: (if (botLn > 0) botLn + 1 else 1)
 
-                                    if (res.success) {
-                                        DesktopPaginationService.updateStatus("Page $currentPage Uploaded to Studio ✔ (Ln ${res.topLine}-${res.bottomLine})")
+                                    DesktopPaginationService.updateStatus("Orchestrating sensitive touch to line $targetTopLine...")
+                                    val pagination = DesktopPaginationService.instance
+                                    val targetDisplayId = pagination?.resolveTargetDisplayId() ?: 0
+                                    val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, targetDisplayId)
+
+                                    if (snapshot != null) {
+                                        DesktopPaginationService.latestCapturedBitmap = snapshot
+                                        val nextPage = (displayPage + 1).coerceAtLeast(1)
+                                        val botEstimated = targetTopLine + 44
+                                        DesktopPaginationService.updateStatus("Uploading Page $nextPage (Line $targetTopLine at top)...")
+                                        val res = uploadClient.uploadFrame(
+                                            bitmap = snapshot,
+                                            topLine = targetTopLine,
+                                            bottomLine = botEstimated,
+                                            pageIndex = nextPage,
+                                            sync = true
+                                        )
+                                        if (res.success) {
+                                            DesktopPaginationService.updateStatus("Page $nextPage (Top Ln $targetTopLine) Aligned & Uploaded ✔")
+                                        } else {
+                                            DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
+                                        }
                                     } else {
-                                        DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
+                                        DesktopPaginationService.updateStatus("Alignment capture failed: No buffer")
                                     }
-                                } else {
-                                    DesktopPaginationService.updateStatus("Capture Failed: No active screen buffer")
+                                    delay(600)
+                                    isAligningNext = false
                                 }
-                                delay(600)
-                                isCapturing = false
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .height(46.dp)
                         ) {
-                            Icon(
-                                Icons.Default.RadioButtonChecked,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = if (isCapturing) "CAPTURING..." else "CAPTURE",
-                                color = Color.Black,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                fontFamily = FontFamily.Monospace,
-                                letterSpacing = 1.sp
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.FastForward,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isAligningNext) "ALIGNING..." else "NEXT PG & ALIGN",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }

@@ -3,13 +3,14 @@ import json
 import glob
 import re
 import asyncio
+import io
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import Response, FileResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
 from PIL import Image
 
@@ -932,6 +933,89 @@ async def export_markdown():
     return PlainTextResponse(full_markdown, headers={
         "Content-Disposition": "attachment; filename=Matrix_main_transcribed.md"
     })
+
+
+@app.get("/api/spliced-document-image")
+async def get_spliced_document_image():
+    """
+    Stitches all stored frames in chronological/page order into a single continuous,
+    seamless vertical image, trimming overlap based on consecutive top_line and bottom_line.
+    """
+    sorted_frames = sorted(
+        captured_frames.values(),
+        key=lambda f: (f.get("page_index", 0) or 0, f.get("top_line", 0) or 0, f.get("created_at", ""))
+    )
+
+    valid_frames = []
+    for f in sorted_frames:
+        fn = f.get("filename", f"{f.get('frame_id')}.png")
+        p = FRAMES_DIR / fn
+        if not p.exists():
+            matches = list(FRAMES_DIR.glob(f"*{f.get('frame_id')}*.png"))
+            if matches:
+                p = matches[0]
+            else:
+                continue
+        valid_frames.append((f, p))
+
+    if not valid_frames:
+        placeholder = Image.new("RGB", (1920, 300), color=(13, 17, 23))
+        buf = io.BytesIO()
+        placeholder.save(buf, format="PNG")
+        return Response(content=buf.getvalue(), media_type="image/png")
+
+    slices = []
+    prev_bottom = 0
+    total_height = 0
+    max_width = 0
+
+    for idx, (frame_meta, img_path) in enumerate(valid_frames):
+        try:
+            img = Image.open(img_path).convert("RGB")
+            w, h = img.size
+            max_width = max(max_width, w)
+
+            top_line = frame_meta.get("top_line", 0) or 0
+            bottom_line = frame_meta.get("bottom_line", 0) or 0
+            line_count = bottom_line - top_line + 1 if bottom_line >= top_line and top_line > 0 else 0
+
+            crop_top = 0
+            if idx > 0 and prev_bottom > 0 and top_line > 0 and top_line <= prev_bottom:
+                overlap_lines = prev_bottom - top_line + 1
+                if line_count > 0:
+                    est_pitch = h / max(line_count, 1)
+                    crop_top = min(int(overlap_lines * est_pitch), h - 100)
+                else:
+                    crop_top = min(int(overlap_lines * 32.0), h - 100)
+
+            if crop_top > 0:
+                sliced = img.crop((0, crop_top, w, h))
+            else:
+                sliced = img
+
+            slices.append(sliced)
+            total_height += sliced.height
+            if bottom_line > 0:
+                prev_bottom = bottom_line
+        except Exception as e:
+            print(f"Error loading frame image {img_path}: {e}")
+
+    if not slices:
+        raise HTTPException(status_code=404, detail="No valid frame images found to splice")
+
+    spliced_canvas = Image.new("RGB", (max_width, total_height), color=(13, 17, 23))
+    curr_y = 0
+    for sl in slices:
+        spliced_canvas.paste(sl, (0, curr_y))
+        curr_y += sl.height
+
+    buf = io.BytesIO()
+    spliced_canvas.save(buf, format="PNG")
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Content-Disposition": "inline; filename=spliced_document.png"}
+    )
 
 
 class ResetStateRequest(BaseModel):

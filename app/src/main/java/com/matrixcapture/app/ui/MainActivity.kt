@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
                         onTestPacer = { viewModel.startPacingOnly() },
                         onSendCapturesToApi = { viewModel.sendCapturesToPythonApi() },
                         onGetNextPageLine = { viewModel.getNextPageLine() },
+                        onAlignAndCaptureNextPage = { viewModel.alignAndCaptureNextPage() },
                         onStartWorkflow = {
                             val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                             projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
@@ -117,6 +118,7 @@ fun MatrixCaptureDashboard(
     onTestPacer: () -> Unit,
     onSendCapturesToApi: () -> Unit = {},
     onGetNextPageLine: () -> Unit = {},
+    onAlignAndCaptureNextPage: () -> Unit = {},
     onStartWorkflow: () -> Unit,
     onStopWorkflow: () -> Unit,
     onOpenAccessibility: () -> Unit,
@@ -748,6 +750,47 @@ fun MatrixCaptureDashboard(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Button 3: Next Page & Align to Top (And Capture)
+            Button(
+                onClick = onAlignAndCaptureNextPage,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 56.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.FastForward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Text(
+                            text = "NEXT PAGE & ALIGN TO TOP",
+                            color = Color.White,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp
+                        )
+                        Text(
+                            text = "Coarse Jump + Sensitive Micro-Touch + Capture",
+                            color = Color(0xFFC9D1D9),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
                 }
             }
 

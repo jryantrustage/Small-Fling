@@ -569,6 +569,72 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    /**
+     * Orchestrates moving next page's target line to the very top of the viewport
+     * using coarse page advance and sensitive micro-touch control, then captures and uploads the frame.
+     */
+    fun alignAndCaptureNextPage() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(workflowStatus = "Fetching next page line from Python API...") }
+            val nextLineResult = uploadClient.getNextPageLine()
+            val targetTopLine = nextLineResult.getOrNull() ?: (
+                if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine + 1 else 1
+            )
+
+            _uiState.update {
+                it.copy(workflowStatus = "Positioning Target Line $targetTopLine at top of viewport...")
+            }
+
+            val paginationService = DesktopPaginationService.instance
+            if (paginationService == null) {
+                _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled") }
+                return@launch
+            }
+
+            val targetDisplayId = paginationService.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
+            val snapshot = paginationService.alignAndCaptureNextPage(targetTopLine, targetDisplayId)
+
+            if (snapshot == null) {
+                _uiState.update { it.copy(workflowStatus = "Capture failed after alignment") }
+                return@launch
+            }
+
+            val page = (_uiState.value.currentPage + 1).coerceAtLeast(1)
+            val botLine = targetTopLine + 44
+            _uiState.update {
+                it.copy(
+                    currentPage = page,
+                    currentTopLine = targetTopLine,
+                    currentBottomLine = botLine,
+                    workflowStatus = "Uploading Page $page (Line $targetTopLine at top) to Studio..."
+                )
+            }
+
+            val result = uploadClient.uploadFrame(
+                bitmap = snapshot,
+                topLine = targetTopLine,
+                bottomLine = botLine,
+                pageIndex = page,
+                sync = true
+            )
+
+            if (result.success) {
+                val newCount = _uiState.value.uploadedFramesCount + 1
+                _uiState.update {
+                    it.copy(
+                        uploadedFramesCount = newCount,
+                        workflowStatus = "Page $page (Top Line $targetTopLine) Aligned & Uploaded to Studio ✔"
+                    )
+                }
+                DesktopPaginationService.updateStatus("Page $page (Top Ln $targetTopLine) Aligned & Uploaded ✔")
+            } else {
+                _uiState.update {
+                    it.copy(workflowStatus = "Upload failed: ${result.message}")
+                }
+            }
+        }
+    }
+
     fun openAccessibilitySettings() {
         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK

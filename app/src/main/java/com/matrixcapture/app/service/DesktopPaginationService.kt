@@ -784,8 +784,189 @@ class DesktopPaginationService : AccessibilityService() {
 
         if (!dispatchedPhase1 && continuation.isActive) {
             Log.w(TAG, "Failed to dispatch gesture phase 1 on Display $displayId")
-            continuation.resume(false) {}
+            continuation.resume(false)
         }
+    }
+
+    /**
+     * Executes a sensitive, zero-momentum micro-touch drag of exact pixel offset (deltaY).
+     * Used for sub-line and single-line fine tuning to position the target line number
+     * precisely at the top gutter of the viewport.
+     * Positive deltaY = pull document down (scroll up).
+     * Negative deltaY = push document up (scroll down).
+     */
+    suspend fun dispatchMicroDrag(
+        deltaY: Float,
+        displayId: Int = 0
+    ): Boolean {
+        val bounds = getDisplayOrWindowBounds(displayId)
+        val centerX = bounds.centerX().toFloat()
+        val centerY = bounds.centerY().toFloat()
+
+        // Confine drag within middle 40% safe viewport zone
+        val clampedDeltaY = deltaY.coerceIn(-bounds.height() * 0.35f, bounds.height() * 0.35f)
+        val startY = centerY - (clampedDeltaY * 0.5f)
+        val endY = centerY + (clampedDeltaY * 0.5f)
+
+        Log.i(TAG, "Sensitive micro-drag on Display $displayId: deltaY=${deltaY}px ($startY -> $endY)")
+        return dispatchSwipe(
+            startX = centerX,
+            startY = startY,
+            endX = centerX,
+            endY = endY,
+            durationMs = 380L,
+            holdDurationMs = 280L,
+            displayId = displayId
+        )
+    }
+
+    /**
+     * Performs coarse Page Down on the target display window.
+     */
+    suspend fun performPageDown(displayId: Int = 0): Boolean {
+        val resolvedDisplay = resolveTargetDisplayId(displayId)
+        val window = findTargetWindow(resolvedDisplay)
+        val root = window?.root ?: rootInActiveWindow
+        val scrollable = root?.let { findFirstScrollableNode(it) }
+        if (scrollable != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val res = scrollable.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id)
+                if (res) return true
+            }
+            val res = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            if (res) return true
+        }
+        val bounds = getDisplayOrWindowBounds(resolvedDisplay)
+        val centerX = bounds.centerX().toFloat()
+        val startY = bounds.centerY() + bounds.height() * 0.25f
+        val endY = bounds.centerY() - bounds.height() * 0.25f
+        return dispatchSwipe(centerX, startY, centerX, endY, 350L, 200L, resolvedDisplay)
+    }
+
+    /**
+     * Performs coarse Page Up on the target display window.
+     */
+    suspend fun performPageUp(displayId: Int = 0): Boolean {
+        val resolvedDisplay = resolveTargetDisplayId(displayId)
+        val window = findTargetWindow(resolvedDisplay)
+        val root = window?.root ?: rootInActiveWindow
+        val scrollable = root?.let { findFirstScrollableNode(it) }
+        if (scrollable != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val res = scrollable.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id)
+                if (res) return true
+            }
+            val res = scrollable.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+            if (res) return true
+        }
+        val bounds = getDisplayOrWindowBounds(resolvedDisplay)
+        val centerX = bounds.centerX().toFloat()
+        val startY = bounds.centerY() - bounds.height() * 0.25f
+        val endY = bounds.centerY() + bounds.height() * 0.25f
+        return dispatchSwipe(centerX, startY, centerX, endY, 350L, 200L, resolvedDisplay)
+    }
+
+    /**
+     * Synchronized Orchestration to scroll down to targetTopLine so it becomes the very first line at the top.
+     * Combines coarse page up/down with closed-loop sensitive micro-touch adjustment.
+     */
+    suspend fun navigateToNextPageTargetLine(
+        targetTopLine: Int,
+        currentEstimatedTopLine: Int = 0,
+        targetDisplayId: Int = 0
+    ): Boolean {
+        val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
+        val bounds = getDisplayOrWindowBounds(resolvedDisplay)
+        val linePitch = _telemetry.value.linePitchPx.coerceIn(24f, 48f)
+
+        updateStatus("Orchestrating advance to Target Line $targetTopLine at top...")
+
+        // Step 1: Coarse page advance (Page Down / Page Up) if target is far
+        val linesToAdvance = if (currentEstimatedTopLine > 0) {
+            targetTopLine - currentEstimatedTopLine
+        } else {
+            28 // Default page jump
+        }
+
+        if (linesToAdvance >= 20) {
+            updateStatus("Coarse advance: Executing Page Down...")
+            performPageDown(resolvedDisplay)
+            delay(500)
+        } else if (linesToAdvance <= -20) {
+            updateStatus("Coarse advance: Executing Page Up...")
+            performPageUp(resolvedDisplay)
+            delay(500)
+        } else if (Math.abs(linesToAdvance) > 5) {
+            val coarseAdvancePx = (linesToAdvance * linePitch).coerceAtMost(bounds.height() * 0.65f)
+            val centerX = bounds.centerX().toFloat()
+            val startY = bounds.centerY() + (coarseAdvancePx * 0.45f).coerceAtMost(bounds.height() * 0.30f)
+            val endY = bounds.centerY() - (coarseAdvancePx * 0.45f).coerceAtMost(bounds.height() * 0.30f)
+
+            dispatchSwipe(
+                startX = centerX,
+                startY = startY,
+                endX = centerX,
+                endY = endY,
+                durationMs = 400L,
+                holdDurationMs = 250L,
+                displayId = resolvedDisplay
+            )
+            delay(450)
+        }
+
+        // Step 2: Sensitive touch micro-adjustment to position target line precisely at top
+        val gState = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+        val detectedTop = gState?.currentTopLine ?: 0
+        val effectiveLinePitch = if (gState != null && gState.linePitchPx > 10f) gState.linePitchPx else linePitch
+
+        if (detectedTop > 0) {
+            val lineDelta = targetTopLine - detectedTop
+            Log.i(TAG, "Alignment check: Target Line $targetTopLine, Detected Top $detectedTop (pitch=${effectiveLinePitch}px)")
+            if (lineDelta != 0 && Math.abs(lineDelta) <= 15) {
+                // Negative delta pushes document up so lower lines move to the top
+                val microDeltaY = -lineDelta * effectiveLinePitch
+                updateStatus("Sensitive micro-touch positioning (offset: ${microDeltaY.toInt()}px for ${lineDelta} lines)...")
+                dispatchMicroDrag(microDeltaY, resolvedDisplay)
+                delay(400)
+            }
+        }
+
+        updateStatus("Target Line $targetTopLine positioned at top of viewport ✔")
+        return true
+    }
+
+    /**
+     * Advances to the next page's target line, executes micro-touch alignment,
+     * settles with zero blur, and returns the high-res screenshot ready for upload.
+     */
+    suspend fun alignAndCaptureNextPage(
+        targetTopLine: Int? = null,
+        targetDisplayId: Int = 0
+    ): Bitmap? {
+        val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
+        val currentBottom = _telemetry.value.currentBottomLine
+        val nextTarget = targetTopLine ?: (if (currentBottom > 0) currentBottom + 1 else 1)
+
+        navigateToNextPageTargetLine(
+            targetTopLine = nextTarget,
+            currentEstimatedTopLine = _telemetry.value.currentTopLine,
+            targetDisplayId = resolvedDisplay
+        )
+        delay(DWELL_TIME_MS) // Enforce Zero-Blur dwell freeze
+
+        val snapshot = captureScreenshot(resolvedDisplay)
+        if (snapshot != null) {
+            latestCapturedBitmap = snapshot
+            val curPage = _telemetry.value.currentPage
+            val newPage = if (curPage > 0) curPage + 1 else 2
+            _telemetry.value = _telemetry.value.copy(
+                currentPage = newPage,
+                currentTopLine = nextTarget,
+                currentBottomLine = nextTarget + 44,
+                statusMessage = "Line $nextTarget at top of Page $newPage"
+            )
+        }
+        return snapshot
     }
 
     /**
