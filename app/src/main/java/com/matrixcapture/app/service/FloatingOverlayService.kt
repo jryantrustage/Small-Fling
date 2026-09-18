@@ -504,18 +504,35 @@ fun FloatingHudOverlay(
                         onClick = {
                             isCapturing = true
                             coroutineScope.launch {
+                                DesktopPaginationService.updateStatus("Capturing screen...")
                                 val activeService = SegmentRecorderService.instance
                                 val cm = activeService?.getCaptureManager()
-                                val snapshot = cm?.captureSettledSnapshot()
+                                val snapshot = DesktopPaginationService.instance?.captureScreenshot()
+                                    ?: cm?.captureSettledSnapshot()
+                                    ?: DesktopPaginationService.latestCapturedBitmap
+
                                 if (snapshot != null) {
                                     DesktopPaginationService.latestCapturedBitmap = snapshot
-                                    DesktopPaginationService.updateStatus("Desktop Screen Captured (Ln $topLn-$botLn)")
-                                } else {
-                                    DesktopPaginationService.updateStatus("Desktop Capture Requested")
-                                    val intent = Intent(context, com.matrixcapture.app.ui.MainActivity::class.java).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    DesktopPaginationService.updateStatus("Uploading to Studio (Ln $topLn-$botLn)...")
+
+                                    val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                    val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                    val uploadClient = FrameUploadClient(serverHost)
+                                    val res = uploadClient.uploadFrame(
+                                        bitmap = snapshot,
+                                        topLine = topLn,
+                                        bottomLine = botLn,
+                                        pageIndex = currentPage.coerceAtLeast(1),
+                                        sync = true
+                                    )
+
+                                    if (res.success) {
+                                        DesktopPaginationService.updateStatus("Page $currentPage Uploaded to Studio ✔ (Ln ${res.topLine}-${res.bottomLine})")
+                                    } else {
+                                        DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
                                     }
-                                    context.startActivity(intent)
+                                } else {
+                                    DesktopPaginationService.updateStatus("Capture Failed: No active screen buffer")
                                 }
                                 delay(600)
                                 isCapturing = false
