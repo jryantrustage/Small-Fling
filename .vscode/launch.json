@@ -15,7 +15,6 @@
             "type": "android",
             "request": "attach",
             "appSrcRoot": "${workspaceFolder}/app/src/main",
-            "packageName": "com.matrixcapture.app",
             "processId": "${command:PickAndroidProcess}",
             "targetDevice": "192.168.86.81:43677"
         },
