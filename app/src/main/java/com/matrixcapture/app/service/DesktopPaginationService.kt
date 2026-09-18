@@ -73,7 +73,34 @@ class DesktopPaginationService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         _isServiceActive.value = true
+        try {
+            softKeyboardController.addOnShowModeChangedListener { _, showMode ->
+                _isSoftKeyboardSuppressed.value = (showMode == SHOW_MODE_HIDDEN)
+                Log.d(TAG, "Soft keyboard show mode changed: $showMode")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register soft keyboard show mode listener", e)
+        }
         Log.i(TAG, "DesktopPaginationService connected and ready for external display automation.")
+    }
+
+    /**
+     * Controls on-screen soft keyboard suppression.
+     * Prevents virtual keyboard from popping up on external displays during capture sessions.
+     */
+    fun setSoftKeyboardHidden(hidden: Boolean) {
+        try {
+            val mode = if (hidden) SHOW_MODE_HIDDEN else SHOW_MODE_AUTO
+            softKeyboardController.showMode = mode
+            _isSoftKeyboardSuppressed.value = (mode == SHOW_MODE_HIDDEN)
+            Log.i(TAG, "Soft keyboard showMode set to: ${if (hidden) "HIDDEN" else "AUTO"}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to set soft keyboard showMode", e)
+        }
+    }
+
+    fun toggleSoftKeyboard() {
+        setSoftKeyboardHidden(!_isSoftKeyboardSuppressed.value)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -88,6 +115,7 @@ class DesktopPaginationService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         stopPagination()
+        setSoftKeyboardHidden(false)
         serviceScope.cancel()
         instance = null
         _isServiceActive.value = false
@@ -220,17 +248,25 @@ class DesktopPaginationService : AccessibilityService() {
 
         _calibrationState.value = "Calibrating: Resetting to line 1..."
 
-        // Rapid fling back to top (downward swipes)
-        repeat(15) {
+        // Safe, controlled scrolling back to top (downward swipes strictly within middle body zone).
+        // Keeps startY >= 42% of screen to NEVER trigger Teams pull-down-to-dismiss gesture.
+        val upStartY = bounds.centerY() - (bounds.height() * 0.05f) // ~45% of height
+        val upEndY = bounds.centerY() + (bounds.height() * 0.35f)   // ~85% of height
+        for (i in 0 until 12) {
+            val metricsNow = getGutterMetrics()
+            if (metricsNow != null && metricsNow.lowestLineNumber <= 46) {
+                Log.i(TAG, "Line 1 reached during upward scroll at iteration $i; stopping to avoid container dismiss.")
+                break
+            }
             dispatchSwipe(
                 startX = bounds.centerX().toFloat(),
-                startY = bounds.top * 0.25f,
+                startY = upStartY,
                 endX = bounds.centerX().toFloat(),
-                endY = bounds.bottom * 0.85f,
-                durationMs = 120,
+                endY = upEndY,
+                durationMs = 280,
                 displayId = resolvedDisplay
             )
-            delay(180)
+            delay(220)
         }
 
         // Settle at top of document
@@ -243,8 +279,8 @@ class DesktopPaginationService : AccessibilityService() {
     /**
      * Starts the automated pacing engine.
      * Enforces a strict freeze-per-page dwell time (default 1,500ms) for Gemini 1 FPS ingestion,
-     * tracks exact line ranges (38 lines/page advance with 8-line overlap), and signals
-     * segment rotations at ~1,200 line increments.
+     * tracks exact line ranges with guaranteed 10-14 line overlap so ZERO lines are ever missed,
+     * and auto-suppresses the soft keyboard during capture.
      */
     fun startPacingEngine(
         targetDisplayId: Int = 0,
@@ -267,16 +303,25 @@ class DesktopPaginationService : AccessibilityService() {
 
         automationJob = serviceScope.launch {
             try {
+                // Auto-suppress on-screen soft keyboard during capture session
+                setSoftKeyboardHidden(true)
+
                 _paginationState.value = PaginationState.Running
                 val targetWindow = findTargetWindow(resolvedDisplay)
                 val bounds = getDisplayOrWindowBounds(resolvedDisplay)
 
-                val startY = bounds.bottom * 0.82f
-                val endY = bounds.top + (bounds.height() * 0.12f)
+                // Calibrated, controlled swipe parameters:
+                // Advances ~26-28 lines per flip to guarantee a 12-16 line overlap with the ~42 visible lines.
+                // Stays within the middle 50% of the screen to eliminate inertial fling overshoot.
+                val centerY = bounds.centerY().toFloat()
+                val travelDistance = (bounds.height() * 0.44f).coerceAtLeast(350f)
+                val startY = centerY + (travelDistance / 2f)
+                val endY = centerY - (travelDistance / 2f)
                 val centerX = bounds.centerX().toFloat()
+                val durationMs = 380L
 
-                val linesPerPage = 38
-                val visibleLinesCount = 46
+                val linesPerPage = 28
+                val visibleLinesCount = 44
                 var pageIndex = 0
                 var currentTopLine = 1
                 var currentChunkIndex = 1
@@ -290,20 +335,27 @@ class DesktopPaginationService : AccessibilityService() {
 
                     val currentBottomLine: Int
                     if (pageIndex == 1) {
-                        currentTopLine = 1
-                        currentBottomLine = visibleLinesCount
-                        Log.i(TAG, "Page 1 initial frame settling (Lines 1-$visibleLinesCount)...")
+                        // Check if real OCR lines are available on initial frame
+                        val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+                        if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
+                            currentTopLine = ocr.currentTopLine
+                            currentBottomLine = ocr.currentBottomLine
+                        } else {
+                            currentTopLine = 1
+                            currentBottomLine = visibleLinesCount
+                        }
+                        Log.i(TAG, "Page 1 initial frame settling (Lines $currentTopLine-$currentBottomLine)...")
                         delay(400) // Initial settle
                         onFrameCaptureNeeded?.invoke(pageIndex, currentTopLine, currentBottomLine)
                     } else {
-                        // Advance page via swipe
+                        // Advance page via calibrated swipe with guaranteed overlap
                         Log.i(TAG, "Swiping to Page $pageIndex on Display $resolvedDisplay...")
                         val gestureSucceeded = dispatchSwipe(
                             startX = centerX,
                             startY = startY,
                             endX = centerX,
                             endY = endY,
-                            durationMs = 280,
+                            durationMs = durationMs,
                             displayId = resolvedDisplay
                         )
 
@@ -312,9 +364,17 @@ class DesktopPaginationService : AccessibilityService() {
                             performScrollFallback(targetWindow)
                         }
 
-                        delay(450) // Wait for inertial scroll to completely stop (Zero motion blur)
-                        currentTopLine += linesPerPage
-                        currentBottomLine = currentTopLine + visibleLinesCount - 1
+                        delay(450) // Wait for scroll to completely settle (Zero motion blur)
+
+                        // Ground-truth line numbers directly from Gutter OCR if detected
+                        val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+                        if (ocr != null && ocr.currentTopLine > currentTopLine && ocr.currentBottomLine >= ocr.currentTopLine) {
+                            currentTopLine = ocr.currentTopLine
+                            currentBottomLine = ocr.currentBottomLine
+                        } else {
+                            currentTopLine += linesPerPage
+                            currentBottomLine = currentTopLine + visibleLinesCount - 1
+                        }
 
                         // Trigger discrete settled snapshot grab
                         onFrameCaptureNeeded?.invoke(pageIndex, currentTopLine, currentBottomLine)
@@ -374,6 +434,7 @@ class DesktopPaginationService : AccessibilityService() {
                 Log.e(TAG, "Error during pagination loop", e)
             } finally {
                 isPaginating.set(false)
+                setSoftKeyboardHidden(false) // Restore soft keyboard when finished
                 releaseWakeLock()
                 _paginationState.value = PaginationState.Idle
                 _telemetry.value = _telemetry.value.copy(
@@ -389,6 +450,7 @@ class DesktopPaginationService : AccessibilityService() {
     fun stopPagination() {
         if (isPaginating.compareAndSet(true, false)) {
             automationJob?.cancel()
+            setSoftKeyboardHidden(false)
             releaseWakeLock()
             _paginationState.value = PaginationState.Idle
             Log.i(TAG, "Pagination automation stopped.")
@@ -398,6 +460,7 @@ class DesktopPaginationService : AccessibilityService() {
     /**
      * Injects scroll gestures to seek to a specific line number.
      * Brings a flagged or missing line requested from the web UI directly into view.
+     * Confines gestures to middle/lower viewport so Teams never interprets upward scrolling as dismiss.
      */
     suspend fun seekToLine(targetLine: Int, currentEstimatedLine: Int, targetDisplayId: Int = 0) {
         val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
@@ -405,30 +468,30 @@ class DesktopPaginationService : AccessibilityService() {
         val centerX = bounds.centerX().toFloat()
         val lineDiff = targetLine - currentEstimatedLine
 
-        val linesPerPage = 38
+        val linesPerPage = 28
         val pagesToMove = Math.abs(lineDiff) / linesPerPage
         val moves = pagesToMove.coerceIn(1, 12)
 
         Log.i(TAG, "Seeking to line $targetLine from $currentEstimatedLine ($moves gestures on Display $resolvedDisplay)...")
         repeat(moves) {
             if (lineDiff < 0) {
-                // Scroll UP (pull document down)
+                // Scroll UP (pull document down) - stay strictly between 45% and 80% to avoid Teams pull-down-to-dismiss
                 dispatchSwipe(
                     startX = centerX,
-                    startY = bounds.top + (bounds.height() * 0.20f),
+                    startY = bounds.centerY() - (bounds.height() * 0.05f),
                     endX = centerX,
-                    endY = bounds.bottom * 0.80f,
-                    durationMs = 250,
+                    endY = bounds.centerY() + (bounds.height() * 0.35f),
+                    durationMs = 280,
                     displayId = resolvedDisplay
                 )
             } else {
-                // Scroll DOWN (pull document up)
+                // Scroll DOWN (pull document up) - stay within middle 50%
                 dispatchSwipe(
                     startX = centerX,
-                    startY = bounds.bottom * 0.80f,
+                    startY = bounds.centerY() + (bounds.height() * 0.22f),
                     endX = centerX,
-                    endY = bounds.top + (bounds.height() * 0.20f),
-                    durationMs = 250,
+                    endY = bounds.centerY() - (bounds.height() * 0.22f),
+                    durationMs = 280,
                     displayId = resolvedDisplay
                 )
             }
@@ -557,5 +620,8 @@ class DesktopPaginationService : AccessibilityService() {
 
         private val _telemetry = MutableStateFlow(PacingTelemetry())
         val telemetry = _telemetry.asStateFlow()
+
+        private val _isSoftKeyboardSuppressed = MutableStateFlow(false)
+        val isSoftKeyboardSuppressed = _isSoftKeyboardSuppressed.asStateFlow()
     }
 }

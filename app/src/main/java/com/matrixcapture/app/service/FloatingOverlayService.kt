@@ -206,6 +206,7 @@ fun FloatingHudOverlay(
     val currentPage by DesktopPaginationService.currentPage.collectAsState()
     val calculatedTotalLines by DesktopPaginationService.calculatedTotalLines.collectAsState()
     val dwellRemainingMs by DesktopPaginationService.dwellCountdownMs.collectAsState()
+    val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
 
     val isPaused = paginationState == DesktopPaginationService.PaginationState.Idle && recorderState.isRecording
 
@@ -508,6 +509,28 @@ fun FloatingHudOverlay(
                             Text(
                                 text = "STOP",
                                 fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                DesktopPaginationService.instance?.toggleSoftKeyboard()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(34.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text(
+                                text = if (isKeyboardSuppressed) "KB: HIDE" else "KB: AUTO",
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 fontFamily = FontFamily.Monospace
