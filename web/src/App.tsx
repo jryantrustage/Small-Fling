@@ -3,8 +3,6 @@ import {
   Scan, 
   Download, 
   Settings, 
-  Smartphone, 
-  Edit3, 
   ZoomIn, 
   ZoomOut, 
   Search, 
@@ -145,6 +143,7 @@ export default function App() {
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const prevFramesCountRef = useRef(0);
 
   // Poll backend every 1.2s for document, telemetry, frames, and tokens
   useEffect(() => {
@@ -169,8 +168,11 @@ export default function App() {
         if (framesRes.ok) {
           const framesJson: FrameData[] = await framesRes.json();
           setFrames(framesJson);
-          if (framesJson.length > 0 && !selectedFrameId) {
-            setSelectedFrameId(framesJson[framesJson.length - 1].frame_id);
+          if (framesJson.length > 0) {
+            if (framesJson.length > prevFramesCountRef.current || !selectedFrameId || !framesJson.some(f => f.frame_id === selectedFrameId)) {
+              setSelectedFrameId(framesJson[framesJson.length - 1].frame_id);
+            }
+            prevFramesCountRef.current = framesJson.length;
           }
         }
 
@@ -278,19 +280,6 @@ export default function App() {
       console.error('Failed to reset session:', err);
     } finally {
       setIsResetting(false);
-    }
-  };
-
-  // Handle requesting recapture
-  const handleRequestRecapture = async (lineNum: number) => {
-    try {
-      await fetch(`${API_BASE}/api/lines/${lineNum}/request-recapture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ line_number: lineNum, reason: 'Flagged for recapture by user' })
-      });
-    } catch (err) {
-      console.error(err);
     }
   };
 
@@ -670,25 +659,45 @@ export default function App() {
               </div>
             )}
             {activeFrame ? (
-              <div 
-                className={`source-image-wrapper ${zoomMode}`}
-                style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}
-              >
-                <img 
-                  src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
-                  alt={activeFrame.frame_id} 
-                />
+              <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
+                {/* 1. START LINE NUMBER AT THE TOP */}
+                <div className="gutter-line-callout top">
+                  <span className="gutter-callout-icon">▲</span>
+                  <span className="gutter-callout-label">START LINE NUMBER (TOP GUTTER):</span>
+                  <span className="gutter-callout-value">
+                    {activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Awaiting / Detecting...'}
+                  </span>
+                </div>
+
+                <div 
+                  className={`source-image-wrapper ${zoomMode}`}
+                  style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}
+                >
+                  <img 
+                    src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
+                    alt={activeFrame.frame_id} 
+                  />
+                </div>
+
+                {/* 2. END LINE NUMBER AT THE BOTTOM */}
+                <div className="gutter-line-callout bottom">
+                  <span className="gutter-callout-icon">▼</span>
+                  <span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
+                  <span className="gutter-callout-value">
+                    {activeFrame.bottom_line > 0 ? `Line #${activeFrame.bottom_line}` : 'Awaiting / Detecting...'}
+                  </span>
+                </div>
               </div>
             ) : (
               <div className="empty-inspector-state">
                 <Scan size={36} color="#30363d" />
-                <p>Select a frame from the feed or drag a 1080p screenshot to inspect line alignment.</p>
+                <p>Select a frame from the feed or capture a screen on mobile to inspect line alignment.</p>
               </div>
             )}
           </div>
         </main>
 
-        {/* Column 3: Line-by-Line Code Inspector & Verification */}
+        {/* Column 3: Simple Table with Columns "Line #" and "text" */}
         <section className="line-inspector-panel">
           <div className="panel-header">
             <span>Verified Lines ({filteredLines.length})</span>
@@ -724,61 +733,40 @@ export default function App() {
               <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}>
                 <p>No lines transcribed yet.</p>
                 <p style={{ fontSize: '11px', marginTop: '6px', color: '#8b949e' }}>
-                  Upload a 1080p frame screenshot above or run the mobile pacer to transcribe lines with Gemini Vision OCR!
+                  Tap "CAPTURE SCREEN & ANALYZE" on the mobile HUD to capture and transcribe lines!
                 </p>
               </div>
             ) : (
-              filteredLines.map(line => (
-                <div 
-                  key={line.line_number}
-                  className={`line-row ${line.status} ${selectedLine?.line_number === line.line_number ? 'selected' : ''}`}
-                  onClick={() => {
-                    setSelectedLine(line);
-                    if (line.frame_id && line.frame_id !== 'manual') {
-                      setSelectedFrameId(line.frame_id);
-                    }
-                  }}
-                >
-                  <div className="gutter-cell">
-                    <span>{line.gutter_number || line.line_number}</span>
-                    {line.is_wrapped && (
-                      <span className="wrap-indicator" title={`Wrapped across ${line.wrapped_line_count || 2} visual rows`}>↵</span>
-                    )}
-                  </div>
-                  <div className="text-cell">
-                    {line.text || <span style={{ color: '#484f58', fontStyle: 'italic' }}>(blank line)</span>}
-                  </div>
-                  <div className="actions-cell">
-                    <span className={`status-badge ${line.status}`}>
-                      {line.status.replace('_', ' ')}
-                    </span>
-                    
-                    <button 
-                      className="btn btn-outline btn-sm"
-                      title="Edit Line"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingLine(line);
-                        setEditText(line.text);
+              <table className="clean-lines-table">
+                <thead>
+                  <tr>
+                    <th className="th-line-num">Line #</th>
+                    <th className="th-line-text">text</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLines.map(line => (
+                    <tr 
+                      key={line.line_number}
+                      className={`table-line-row ${line.status} ${selectedLine?.line_number === line.line_number ? 'selected' : ''}`}
+                      onClick={() => {
+                        setSelectedLine(line);
+                        if (line.frame_id && line.frame_id !== 'manual') {
+                          setSelectedFrameId(line.frame_id);
+                        }
                       }}
                     >
-                      <Edit3 size={11} />
-                    </button>
-
-                    <button 
-                      className="btn btn-outline btn-sm"
-                      title="Seek & Recapture on Mobile"
-                      style={{ color: '#bc8cff', borderColor: '#bc8cff33' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRequestRecapture(line.line_number);
-                      }}
-                    >
-                      <Smartphone size={11} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                      <td className="td-line-num">
+                        {line.gutter_number || line.line_number}
+                        {line.is_wrapped && <span className="wrap-tag" title="Wrapped line"> ↵</span>}
+                      </td>
+                      <td className="td-line-text">
+                        <pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </section>

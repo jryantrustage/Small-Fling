@@ -8,6 +8,7 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import android.view.*
 import androidx.compose.animation.AnimatedVisibility
@@ -19,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,11 +29,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.*
@@ -47,11 +55,10 @@ import kotlinx.coroutines.flow.asStateFlow
  * Floating Overlay Service for MatrixCapture.
  *
  * Displays a lightweight, non-jumping, draggable HUD providing real-time telemetry:
- * - Current Page, Top Line, Bottom Line
- * - Live Settled Screenshot upload status to FastAPI Studio
- * - Non-jumping fixed-height Dwell Freeze indicator
- * - Auto-tune calibration & line error
- * - Pacing Controls (Start / Pause / Reset / Soft Keyboard)
+ * 1. Accessibility controls (status & direct settings shortcut)
+ * 2. Start Settled capture button
+ * 3. Line# seeker input with "GO" button and quick steppers
+ * 4. Fixed-height dwell freeze indicator (zero jumping)
  */
 class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
@@ -103,6 +110,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
@@ -154,6 +162,19 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                     isBackendOnline.value = false
                 }
             }
+        }
+    }
+
+    fun setOverlayFocusable(focusable: Boolean) {
+        try {
+            if (focusable) {
+                layoutParams.flags = layoutParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            } else {
+                layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            }
+            composeView?.let { windowManager.updateViewLayout(it, layoutParams) }
+        } catch (e: Exception) {
+            Log.e("FloatingOverlayService", "Failed to update overlay focusable", e)
         }
     }
 
@@ -234,9 +255,13 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         }
         composeView = null
         _isOverlayRunning.value = false
+        instance = null
     }
 
     companion object {
+        var instance: FloatingOverlayService? = null
+            private set
+
         private val _isOverlayRunning = MutableStateFlow(false)
         val isOverlayRunning = _isOverlayRunning.asStateFlow()
 
@@ -254,6 +279,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FloatingHudOverlay(
     onDrag: (Float, Float) -> Unit,
@@ -269,8 +295,17 @@ fun FloatingHudOverlay(
     val calculatedTotalLines by DesktopPaginationService.calculatedTotalLines.collectAsState()
     val dwellRemainingMs by DesktopPaginationService.dwellCountdownMs.collectAsState()
     val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
+    val isAccessibilityActive by DesktopPaginationService.isServiceActive.collectAsState()
     val isBackendOnline by FloatingOverlayService.isBackendOnline.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Line Seeker state
+    var seekLineText by remember { mutableStateOf("") }
+    var isSeeking by remember { mutableStateOf(false) }
+    var isCapturingCurrentScreen by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -310,8 +345,8 @@ fun FloatingHudOverlay(
                         fontFamily = FontFamily.Monospace
                     )
                     Text(
-                        text = if (telemetry.currentTopLine > 0) "Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine}" else "Ln Scanning...",
-                        color = Color(0xFF00FF9D),
+                        text = if (telemetry.currentTopLine > 0) "Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine}" else "Ln: Awaiting Capture",
+                        color = if (telemetry.currentTopLine > 0) Color(0xFF00FF9D) else Color(0xFF8B949E),
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
@@ -375,6 +410,54 @@ fun FloatingHudOverlay(
 
                     Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
 
+                    // 1. Accessibility Control & Status Banner
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isAccessibilityActive) Color(0xFF00FF9D) else Color(0xFFFF7B72))
+                            )
+                            Text(
+                                text = if (isAccessibilityActive) "A11Y ACTIVE" else "A11Y DISABLED",
+                                color = if (isAccessibilityActive) Color(0xFF00FF9D) else Color(0xFFFF7B72),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Button(
+                            onClick = {
+                                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isAccessibilityActive) Color(0xFF21262D) else Color(0xFFFF7B72)
+                            ),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(26.dp)
+                        ) {
+                            Text(
+                                text = if (isAccessibilityActive) "SETTINGS" else "ENABLE A11Y",
+                                color = if (isAccessibilityActive) Color(0xFF8B949E) else Color.Black,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     // Status & API Connection
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -414,8 +497,11 @@ fun FloatingHudOverlay(
                     // Page and Line Bounds
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine})",
-                            color = Color.White,
+                            text = if (telemetry.currentTopLine > 0)
+                                "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine})"
+                            else
+                                "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln: Awaiting Capture)",
+                            color = if (telemetry.currentTopLine > 0) Color.White else Color(0xFF8B949E),
                             fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
                         )
@@ -476,107 +562,172 @@ fun FloatingHudOverlay(
 
                     Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
 
-                    // Live Settled Frame Upload Telemetry
+                    // 3. Line# Seeker Input Control & "GO" Button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text(
-                            text = "CAPTURED FRAMES",
-                            color = Color(0xFF8B949E),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
+                        OutlinedTextField(
+                            value = seekLineText,
+                            onValueChange = { seekLineText = it.filter { ch -> ch.isDigit() } },
+                            placeholder = { Text("Line #", fontSize = 11.sp, color = Color(0xFF6E7681)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Go
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onGo = {
+                                    val target = seekLineText.toIntOrNull()
+                                    if (target != null && target > 0) {
+                                        isSeeking = true
+                                        keyboardController?.hide()
+                                        focusManager.clearFocus()
+                                        FloatingOverlayService.instance?.setOverlayFocusable(false)
+                                        coroutineScope.launch {
+                                            val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
+                                            DesktopPaginationService.instance?.seekToLine(target, current)
+                                            isSeeking = false
+                                        }
+                                    }
+                                }
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .onFocusChanged { focusState ->
+                                    // Enable overlay focusability so soft keyboard can type into this field
+                                    FloatingOverlayService.instance?.setOverlayFocusable(focusState.isFocused)
+                                },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF00FF9D),
+                                unfocusedBorderColor = Color(0xFF30363D),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedContainerColor = Color(0xFF161B22),
+                                unfocusedContainerColor = Color(0xFF161B22)
+                            )
                         )
-                        Text(
-                            text = "Uploaded: ${recorderState.completedSegmentsCount}",
-                            color = Color(0xFF00FF9D),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                        // "GO" Button
+                        Button(
+                            onClick = {
+                                val target = seekLineText.toIntOrNull()
+                                if (target != null && target > 0) {
+                                    isSeeking = true
+                                    keyboardController?.hide()
+                                    focusManager.clearFocus()
+                                    FloatingOverlayService.instance?.setOverlayFocusable(false)
+                                    coroutineScope.launch {
+                                        val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
+                                        DesktopPaginationService.instance?.seekToLine(target, current)
+                                        isSeeking = false
+                                    }
+                                }
+                            },
+                            enabled = !isSeeking && seekLineText.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(46.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) {
+                            Text(
+                                text = if (isSeeking) "..." else "GO",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
 
-                    // Scrollable list of verified uploads
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 100.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (segments.isEmpty()) {
-                            item {
-                                Text(
-                                    text = if (recorderState.isRecording) "Awaiting Page 1 dwell capture..." else "Pacer standby. Tap START PACER below.",
-                                    color = Color(0xFF6E7681),
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        } else {
-                            items(segments) { seg ->
-                                FrameUploadRow(seg)
-                            }
+                        // Quick Steppers: -100 / +100
+                        Button(
+                            onClick = {
+                                val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
+                                val target = (current - 100).coerceAtLeast(1)
+                                seekLineText = target.toString()
+                                isSeeking = true
+                                coroutineScope.launch {
+                                    DesktopPaginationService.instance?.seekToLine(target, current)
+                                    isSeeking = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(46.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Text("-100", fontSize = 9.sp, color = Color(0xFF58A6FF), fontFamily = FontFamily.Monospace)
+                        }
+
+                        Button(
+                            onClick = {
+                                val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
+                                val target = current + 100
+                                seekLineText = target.toString()
+                                isSeeking = true
+                                coroutineScope.launch {
+                                    DesktopPaginationService.instance?.seekToLine(target, current)
+                                    isSeeking = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(46.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Text("+100", fontSize = 9.sp, color = Color(0xFF00FF9D), fontFamily = FontFamily.Monospace)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Row 1 Controls: Pause/Start & Calibrate
+                    // 2. Primary Control: CAPTURE SCREEN & ANALYZE (WAIT - NO FLIP)
+                    Button(
+                        onClick = {
+                            val activeService = SegmentRecorderService.instance
+                            if (activeService == null || !activeService.serviceState.value.isReady) {
+                                val intent = Intent(context, com.matrixcapture.app.ui.MainActivity::class.java).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } else {
+                                isCapturingCurrentScreen = true
+                                val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                DesktopPaginationService.instance?.captureAndAnalyzeCurrentScreen(host) { _, _, _, _ ->
+                                    isCapturingCurrentScreen = false
+                                }
+                            }
+                        },
+                        enabled = !isCapturingCurrentScreen,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isCapturingCurrentScreen) Color(0xFF1F6FEB) else Color(0xFF238636)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(40.dp)
+                    ) {
+                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isCapturingCurrentScreen) "CAPTURING & ANALYZING..." else "CAPTURE SCREEN & ANALYZE (WAIT)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Secondary Controls: CALIB, RESET, STOP, SOFT KB
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        if (paginationState == DesktopPaginationService.PaginationState.Running) {
-                            Button(
-                                onClick = { DesktopPaginationService.instance?.stopPagination() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD29922)),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .weight(1.2f)
-                                    .height(34.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text("PAUSE PACER", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
-                            }
-                        } else {
-                            Button(
-                                onClick = {
-                                    val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                    val total = prefs.getInt("target_total_lines", 0)
-                                    val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-                                    val client = FrameUploadClient(host)
-
-                                    DesktopPaginationService.instance?.startPacingEngine(
-                                        totalLines = total,
-                                        dwellTimeMs = 1500L,
-                                        phase = "SETTLED_CAPTURE_AND_UPLOAD",
-                                        onFrameCaptureNeeded = { pageIndex, topLine, bottomLine ->
-                                            val activeService = SegmentRecorderService.instance
-                                            val cm = activeService?.getCaptureManager()
-                                            val snapshot = cm?.captureSettledSnapshot()
-                                            if (snapshot != null) {
-                                                val ok = client.uploadFrame(snapshot, topLine, bottomLine, pageIndex)
-                                                activeService.reportFrameUploaded(pageIndex, topLine, bottomLine, ok)
-                                            } else {
-                                                Log.w("FloatingOverlayService", "Settled snapshot was null on Page $pageIndex")
-                                            }
-                                        }
-                                    )
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier
-                                    .weight(1.2f)
-                                    .height(34.dp),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Text("START PACER", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
-                            }
-                        }
-
                         Button(
                             onClick = {
                                 CoroutineScope(Dispatchers.Default).launch {
@@ -602,26 +753,17 @@ fun FloatingHudOverlay(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(34.dp),
+                                .height(32.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
                             Text("CALIB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
-                    }
 
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Row 2 Controls: Reset, Stop, Soft Keyboard Toggle
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
                         Button(
                             onClick = {
-                                // Completely clear target_total_lines from SharedPreferences
                                 val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
                                 prefs.edit().putInt("target_total_lines", 0).apply()
                                 val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
@@ -637,10 +779,10 @@ fun FloatingHudOverlay(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE36209)),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .weight(1.1f)
-                                .height(34.dp),
+                                .height(32.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
                             Text("RESET LN 1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
@@ -652,10 +794,10 @@ fun FloatingHudOverlay(
                                 SegmentRecorderService.instance?.stopWorkflow()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .weight(0.9f)
-                                .height(34.dp),
+                                .height(32.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
                             Text("STOP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
@@ -666,60 +808,16 @@ fun FloatingHudOverlay(
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)
                             ),
-                            shape = RoundedCornerShape(8.dp),
+                            shape = RoundedCornerShape(6.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(34.dp),
+                                .height(32.dp),
                             contentPadding = PaddingValues(0.dp)
                         ) {
                             Text(if (isKeyboardSuppressed) "KB: HIDE" else "KB: AUTO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-fun FrameUploadRow(segment: SegmentRecorderService.SegmentDetail) {
-    val statusColor = if (segment.status == SegmentRecorderService.SegmentStatus.EXTRACTED) Color(0xFF00FF9D) else Color(0xFFFF7B72)
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF161B22), RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Page #${segment.segmentIndex}: Lines ${segment.startLine}-${segment.endLine}",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = segment.statusMessage,
-                    color = statusColor,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-
-            if (segment.markdownLineCount > 0) {
-                Text(
-                    text = "${segment.markdownLineCount} ln",
-                    color = Color(0xFF00FF9D),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
     }

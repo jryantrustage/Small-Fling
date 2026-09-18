@@ -734,6 +734,76 @@ class DesktopPaginationService : AccessibilityService() {
         return null
     }
 
+    /**
+     * Captures current screen snapshot without flipping pages, sends to Python API,
+     * reads first and last gutter line numbers via Gemini AI OCR, updates telemetry, and WAITS.
+     */
+    fun captureAndAnalyzeCurrentScreen(
+        serverHost: String = "192.168.86.83:8000",
+        onComplete: ((topLine: Int, bottomLine: Int, success: Boolean, msg: String) -> Unit)? = null
+    ) {
+        val activeService = SegmentRecorderService.instance
+        if (activeService == null || !activeService.serviceState.value.isReady) {
+            _telemetry.value = _telemetry.value.copy(
+                statusMessage = "Capture not ready: open app to grant screen capture"
+            )
+            onComplete?.invoke(0, 0, false, "Screen capture not ready")
+            return
+        }
+
+        serviceScope.launch {
+            _telemetry.value = _telemetry.value.copy(
+                statusMessage = "Capturing screen snapshot...",
+                isPacing = false
+            )
+            delay(300) // Settle
+
+            val cm = activeService.getCaptureManager()
+            val snapshot = cm?.captureSettledSnapshot()
+            if (snapshot == null) {
+                _telemetry.value = _telemetry.value.copy(
+                    statusMessage = "Failed: VirtualDisplay snapshot was null"
+                )
+                onComplete?.invoke(0, 0, false, "Snapshot was null")
+                return@launch
+            }
+
+            _telemetry.value = _telemetry.value.copy(
+                statusMessage = "Sending frame to Python API for AI Gutter OCR..."
+            )
+
+            val client = com.matrixcapture.app.network.FrameUploadClient(serverHost)
+            val result = client.uploadFrame(
+                bitmap = snapshot,
+                topLine = 0,
+                bottomLine = 0,
+                pageIndex = _currentPage.value
+            )
+
+            if (result.success && result.topLine > 0) {
+                _telemetry.value = _telemetry.value.copy(
+                    currentTopLine = result.topLine,
+                    currentBottomLine = result.bottomLine,
+                    statusMessage = "Gutter Verified: Ln ${result.topLine} → ${result.bottomLine} (${result.extractedLineCount} lines). Waiting.",
+                    isPacing = false
+                )
+                onComplete?.invoke(result.topLine, result.bottomLine, true, result.message)
+            } else if (result.success) {
+                _telemetry.value = _telemetry.value.copy(
+                    statusMessage = "Server analyzed frame (${result.extractedLineCount} lines). Waiting.",
+                    isPacing = false
+                )
+                onComplete?.invoke(0, 0, true, "Analyzed")
+            } else {
+                _telemetry.value = _telemetry.value.copy(
+                    statusMessage = "Upload/OCR failed: ${result.message}",
+                    isPacing = false
+                )
+                onComplete?.invoke(0, 0, false, result.message)
+            }
+        }
+    }
+
     sealed class PaginationState {
         object Idle : PaginationState()
         object Running : PaginationState()
@@ -748,14 +818,15 @@ class DesktopPaginationService : AccessibilityService() {
 
     data class PacingTelemetry(
         val phase: String = "IDLE", // "IDLE", "PACING_TEST", "RECORDING_AND_PACING", "COMPLETED"
+        val isPacing: Boolean = false,
         val currentPage: Int = 1,
-        val currentTopLine: Int = 1,
-        val currentBottomLine: Int = 44,
+        val currentTopLine: Int = 0,
+        val currentBottomLine: Int = 0,
         val targetTotalLines: Int = 0,
         val currentSegmentIndex: Int = 1,
         val segmentProgressLines: Int = 0,
         val segmentTargetLines: Int = 1200,
-        val statusMessage: String = "Ready on Page 1 (Auto-Detect / Calibrate)",
+        val statusMessage: String = "Ready: Tap 'Capture Screen' to read gutter",
         val dwellRemainingMs: Long = 0L,
         val isDwellActive: Boolean = false,
         val autoTuneFactor: Float = 1.0f,
@@ -805,13 +876,13 @@ class DesktopPaginationService : AccessibilityService() {
             _telemetry.value = PacingTelemetry(
                 phase = "READY",
                 currentPage = 1,
-                currentTopLine = 1,
-                currentBottomLine = 44,
+                currentTopLine = 0,
+                currentBottomLine = 0,
                 targetTotalLines = targetLines,
                 currentSegmentIndex = 1,
                 segmentProgressLines = 0,
                 segmentTargetLines = 1200,
-                statusMessage = if (targetLines > 0) "Ready on Page 1 (Target: $targetLines lines)" else "Ready on Page 1 (Auto-detecting lines)",
+                statusMessage = "Ready: Tap 'Capture Screen' to read gutter",
                 dwellRemainingMs = 0L,
                 isDwellActive = false
             )

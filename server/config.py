@@ -49,7 +49,7 @@ if CONFIG_FILE.exists():
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "").strip() or _persisted_key
 GEMINI_PRIMARY_MODEL: str = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-3.6-flash").strip()
 
-_raw_fallbacks = os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite,gemini-3.1-flash-lite")
+_raw_fallbacks = os.environ.get("GEMINI_FALLBACK_MODELS", "gemini-3.7-flash,gemini-3.8-flash,gemini-flash-latest,gemini-pro-latest")
 GEMINI_FALLBACK_MODELS: List[str] = [m.strip() for m in _raw_fallbacks.split(",") if m.strip()]
 
 GEMINI_RETRY_ATTEMPTS: int = int(os.environ.get("GEMINI_RETRY_ATTEMPTS", "3"))
