@@ -93,6 +93,21 @@ interface TelemetryState {
   };
 }
 
+interface BoundingBoxItem {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  line_number?: number;
+  text_snippet?: string;
+}
+
+interface FrameBoundingBoxes {
+  first_line?: BoundingBoxItem;
+  last_line?: BoundingBoxItem;
+  wrapped_lines?: BoundingBoxItem[];
+}
+
 export default function App() {
   const [documentData, setDocumentData] = useState<{
     total_lines: number;
@@ -140,6 +155,11 @@ export default function App() {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+
+  const [isScanningOcr, setIsScanningOcr] = useState(false);
+  const [scanStatusMsg, setScanStatusMsg] = useState('');
+  const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
+  const [wsConnected, setWsConnected] = useState(false);
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -204,6 +224,111 @@ export default function App() {
     const interval = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [selectedFrameId]);
+
+  // Connect to FastAPI server via WebSocket for real-time frame streaming and OCR push
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const connectWs = () => {
+      try {
+        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws';
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          setWsConnected(true);
+          console.log('[WebSocket] Connected to MatrixCapture server.');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'new_frame' && msg.frame) {
+              const newF: FrameData = msg.frame;
+              setFrames(prev => {
+                const existingIdx = prev.findIndex(f => f.frame_id === newF.frame_id);
+                if (existingIdx >= 0) {
+                  const updated = [...prev];
+                  updated[existingIdx] = newF;
+                  return updated;
+                }
+                return [...prev, newF];
+              });
+              // Automatically select and push image into the web UI inspector
+              setSelectedFrameId(newF.frame_id);
+            } else if (msg.type === 'ocr_completed') {
+              if (msg.bounding_boxes) {
+                setFrameBoundingBoxes(prev => ({
+                  ...prev,
+                  [msg.frame_id]: msg.bounding_boxes
+                }));
+              }
+              // Immediately refresh document lines so right-hand panel populates
+              fetch(`${API_BASE}/api/document`)
+                .then(res => res.json())
+                .then(data => setDocumentData(data))
+                .catch(err => console.error(err));
+            }
+          } catch (e) {
+            console.error('[WebSocket] Message parse error:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          setWsConnected(false);
+          reconnectTimeout = setTimeout(connectWs, 3000);
+        };
+
+        ws.onerror = () => {
+          ws?.close();
+        };
+      } catch (err) {
+        console.error('[WebSocket] Connection failed:', err);
+        reconnectTimeout = setTimeout(connectWs, 3000);
+      }
+    };
+
+    connectWs();
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      ws?.close();
+    };
+  }, []);
+
+  // Send selected frame to local AI model (Ollama minicpm-v) for OCR Scan
+  const handleScanFrameOcr = async () => {
+    if (!activeFrame) return;
+    setIsScanningOcr(true);
+    setScanStatusMsg('Scanning with Ollama (minicpm-v)...');
+    try {
+      const res = await fetch(`${API_BASE}/api/frames/${activeFrame.frame_id}/scan`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.bounding_boxes) {
+          setFrameBoundingBoxes(prev => ({
+            ...prev,
+            [activeFrame.frame_id]: data.bounding_boxes
+          }));
+        }
+        // Refresh document lines to populate the right panel
+        const docRes = await fetch(`${API_BASE}/api/document`);
+        if (docRes.ok) {
+          const docJson = await docRes.json();
+          setDocumentData(docJson);
+        }
+        setScanStatusMsg(`Lines ${data.top_line} → ${data.bottom_line} transcribed`);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setScanStatusMsg(`Scan failed: ${errJson.detail || 'Server error'}`);
+      }
+    } catch (err: any) {
+      setScanStatusMsg(`Error: ${err.message || 'Network error'}`);
+    } finally {
+      setIsScanningOcr(false);
+    }
+  };
 
   // Handle direct file uploads (drag-and-drop or file picker)
   const handleUploadFiles = async (fileList: FileList | File[]) => {
@@ -386,6 +511,12 @@ export default function App() {
           <div className={`metric-pill ${documentData.issue_count > 0 ? 'issues' : ''}`}>
             <span className="label">ISSUES:</span>
             <span className="value">{documentData.issue_count}</span>
+          </div>
+          <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
+            <span className="label">SOCKET:</span>
+            <span className="value" style={{ color: wsConnected ? '#00ff9d' : '#ff7b72' }}>
+              {wsConnected ? 'LIVE' : 'OFFLINE'}
+            </span>
           </div>
           {recaptureQueue.length > 0 && (
             <div className="metric-pill" style={{ borderColor: '#bc8cff44' }}>
@@ -608,7 +739,21 @@ export default function App() {
                 ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` 
                 : '1080p Desktop Frame Inspector'}
             </span>
-            <div style={{ display: 'flex', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {activeFrame && (
+                <button 
+                  className="btn-scan-ocr"
+                  onClick={handleScanFrameOcr}
+                  disabled={isScanningOcr}
+                  title="Send image to local AI model (minicpm-v) for gutter scan & text OCR"
+                >
+                  <Scan size={13} className={isScanningOcr ? 'spinning' : ''} />
+                  <span>{isScanningOcr ? 'Scanning with Ollama...' : 'Send Image for OCR Scan'}</span>
+                </button>
+              )}
+              {scanStatusMsg && (
+                <span className="scan-status-pill">{scanStatusMsg}</span>
+              )}
               <button 
                 className={`btn btn-sm ${zoomMode === 'fit' ? 'btn-primary' : 'btn-outline'}`}
                 onClick={() => { setZoomMode('fit'); setImageZoom(1); }}
@@ -677,6 +822,46 @@ export default function App() {
                     src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} 
                     alt={activeFrame.frame_id} 
                   />
+                  {/* Bounding Box Overlays: Green on first line, Red on last line, Yellow on wrapped lines */}
+                  {activeFrame && frameBoundingBoxes[activeFrame.frame_id] && (
+                    <svg 
+                      className="bbox-svg-overlay"
+                      viewBox="0 0 1920 1080"
+                      preserveAspectRatio="none"
+                    >
+                      {/* Green bounding box on first line */}
+                      {frameBoundingBoxes[activeFrame.frame_id].first_line && (
+                        <rect
+                          x={frameBoundingBoxes[activeFrame.frame_id].first_line!.x}
+                          y={frameBoundingBoxes[activeFrame.frame_id].first_line!.y}
+                          width={frameBoundingBoxes[activeFrame.frame_id].first_line!.width}
+                          height={frameBoundingBoxes[activeFrame.frame_id].first_line!.height}
+                          className="bbox-rect-green"
+                        />
+                      )}
+                      {/* Red bounding box around space of last line */}
+                      {frameBoundingBoxes[activeFrame.frame_id].last_line && (
+                        <rect
+                          x={frameBoundingBoxes[activeFrame.frame_id].last_line!.x}
+                          y={frameBoundingBoxes[activeFrame.frame_id].last_line!.y}
+                          width={frameBoundingBoxes[activeFrame.frame_id].last_line!.width}
+                          height={frameBoundingBoxes[activeFrame.frame_id].last_line!.height}
+                          className="bbox-rect-red"
+                        />
+                      )}
+                      {/* Yellow bounding boxes on wrapped lines */}
+                      {frameBoundingBoxes[activeFrame.frame_id].wrapped_lines?.map((wb, idx) => (
+                        <rect
+                          key={idx}
+                          x={wb.x}
+                          y={wb.y}
+                          width={wb.width}
+                          height={wb.height}
+                          className="bbox-rect-yellow"
+                        />
+                      ))}
+                    </svg>
+                  )}
                 </div>
 
                 {/* 2. END LINE NUMBER AT THE BOTTOM */}

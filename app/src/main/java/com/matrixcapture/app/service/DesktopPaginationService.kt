@@ -843,6 +843,13 @@ class DesktopPaginationService : AccessibilityService() {
         var instance: DesktopPaginationService? = null
             private set
 
+        @Volatile
+        var latestCapturedBitmap: android.graphics.Bitmap? = null
+
+        fun updateStatus(message: String) {
+            _telemetry.value = _telemetry.value.copy(statusMessage = message)
+        }
+
         private val _isServiceActive = MutableStateFlow(false)
         val isServiceActive = _isServiceActive.asStateFlow()
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
@@ -20,6 +20,7 @@ except ImportError:
     genai = None
 
 import config
+from ocr_engine import LocalGutterOCREngine
 
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
 
@@ -31,6 +32,54 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+class WebSocketManager:
+    """Manages active browser WebSocket connections and broadcasts real-time frame/OCR events."""
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"[WebSocket] Client connected. Total active: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            print(f"[WebSocket] Client disconnected. Remaining: {len(self.active_connections)}")
+
+    async def broadcast(self, message: Dict[str, Any]):
+        payload = json.dumps(message)
+        disconnected = []
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(payload)
+            except Exception:
+                disconnected.append(connection)
+        for dead in disconnected:
+            self.disconnect(dead)
+
+ws_manager = WebSocketManager()
+ocr_engine = LocalGutterOCREngine()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Respond to client ping/heartbeat
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.now().isoformat()}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
 
 STORAGE_DIR = config.STORAGE_DIR
 FRAMES_DIR = config.FRAMES_DIR
@@ -525,12 +574,18 @@ async def upload_frame(
         "bottom_line": bottom_line or 0,
         "page_index": page_idx,
         "file_size": len(contents),
-        "status": "queued",
+        "status": "awaiting_review" if not sync else "queued",
         "created_at": datetime.now().isoformat(),
         "extracted_line_count": 0,
         "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
     }
     save_persisted_state()
+
+    # Push new frame event to all connected Web UI clients via WebSocket
+    await ws_manager.broadcast({
+        "type": "new_frame",
+        "frame": captured_frames[frame_id]
+    })
 
     if sync:
         # Await Gemini OCR directly so client receives actual gutter line numbers immediately
@@ -548,8 +603,7 @@ async def upload_frame(
             "message": f"Frame stored and verified via Gutter OCR: Lines {detected_top} → {detected_bottom}."
         }
     else:
-        # Launch Gemini OCR in background
-        background_tasks.add_task(process_frame_with_gemini, frame_id, target_path, top_line or 0, bottom_line or 0)
+        # Frame stored and pushed to web UI for review before user clicks "Send Image for OCR Scan"
         return {
             "status": "success",
             "frame_id": frame_id,
@@ -557,8 +611,117 @@ async def upload_frame(
             "top_line": top_line or 0,
             "bottom_line": bottom_line or 0,
             "extracted_line_count": 0,
-            "message": f"Frame stored. Analyzing lines in background."
+            "message": f"Frame {frame_id} received, pushed to Web UI via socket, awaiting OCR review."
         }
+
+
+@app.get("/api/next-page-line")
+async def get_next_page_line():
+    """
+    Returns the first line number of the next page based on the bottom line
+    of the most recently captured or analyzed frame, or document lines.
+    """
+    last_bottom = 0
+    sorted_frames = sorted(
+        captured_frames.values(),
+        key=lambda f: (f.get("page_index", 0) or 0, f.get("created_at", ""))
+    )
+    for f in reversed(sorted_frames):
+        if f.get("bottom_line", 0) > 0:
+            last_bottom = f["bottom_line"]
+            break
+
+    if last_bottom == 0 and document_lines:
+        last_bottom = max(document_lines.keys())
+
+    next_line = (last_bottom + 1) if last_bottom > 0 else 1
+    return {
+        "status": "success",
+        "next_page_first_line": next_line,
+        "last_bottom_line": last_bottom,
+        "total_frames": len(captured_frames)
+    }
+
+
+@app.post("/api/frames/{frame_id}/scan")
+async def scan_frame_ocr(frame_id: str):
+    """
+    Scans frame using local AI model (Ollama minicpm-v) + RapidOCR token alignment
+    to determine top and bottom gutter first & last line numbers,
+    wrapped lines, and bounding boxes (green for top, red for bottom, yellow for wrapped).
+    Populates document_lines and broadcasts results to the Web UI via WebSocket.
+    """
+    if frame_id not in captured_frames:
+        raise HTTPException(status_code=404, detail=f"Frame '{frame_id}' not found")
+
+    frame_info = captured_frames[frame_id]
+    image_filename = frame_info.get("filename", f"{frame_id}.png")
+    image_path = FRAMES_DIR / image_filename
+    if not image_path.exists():
+        matches = list(FRAMES_DIR.glob(f"*{frame_id}*.png"))
+        if matches:
+            image_path = matches[0]
+        else:
+            raise HTTPException(status_code=404, detail="Frame image file not found")
+
+    try:
+        scan_result = ocr_engine.scan_image(str(image_path))
+        top_ln = scan_result.get("top_line", 0)
+        bot_ln = scan_result.get("bottom_line", 0)
+        lines = scan_result.get("lines", [])
+
+        # Update frame info
+        frame_info["top_line"] = top_ln
+        frame_info["bottom_line"] = bot_ln
+        frame_info["extracted_line_count"] = len(lines)
+        frame_info["status"] = "processed"
+        frame_info["bounding_boxes"] = scan_result.get("bounding_boxes", {})
+
+        # Populate document_lines
+        for item in lines:
+            ln_num = item.get("line_number")
+            if ln_num:
+                document_lines[ln_num] = {
+                    "line_number": ln_num,
+                    "gutter_number": ln_num,
+                    "text": item.get("text", ""),
+                    "is_blank": item.get("is_blank", False),
+                    "is_wrapped": item.get("is_wrapped", False),
+                    "wrapped_line_count": item.get("wrapped_line_count", 1),
+                    "status": "verified",
+                    "frame_id": frame_id,
+                    "sources": [frame_id],
+                    "confidence": item.get("confidence", 0.98),
+                    "notes": "Ollama minicpm-v gutter OCR",
+                    "updated_at": datetime.now().isoformat()
+                }
+
+        save_persisted_state()
+
+        # Broadcast ocr_completed over WebSocket
+        await ws_manager.broadcast({
+            "type": "ocr_completed",
+            "frame_id": frame_id,
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
+            "extracted_line_count": len(lines),
+            "bounding_boxes": scan_result.get("bounding_boxes", {}),
+            "lines": lines
+        })
+
+        return {
+            "status": "success",
+            "frame_id": frame_id,
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
+            "extracted_line_count": len(lines),
+            "bounding_boxes": scan_result.get("bounding_boxes", {}),
+            "lines": lines
+        }
+    except Exception as e:
+        frame_info["status"] = f"error: {str(e)}"
+        save_persisted_state()
+        raise HTTPException(status_code=500, detail=f"OCR scan failed: {str(e)}")
 
 
 @app.get("/api/frames")

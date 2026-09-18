@@ -498,6 +498,72 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun sendCapturesToPythonApi() {
+        viewModelScope.launch {
+            val snapshot = DesktopPaginationService.latestCapturedBitmap
+                ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
+
+            if (snapshot == null) {
+                _uiState.update {
+                    it.copy(workflowStatus = "No capture in buffer. Tap CAPTURE on Floating HUD first.")
+                }
+                return@launch
+            }
+
+            val page = _uiState.value.currentPage.coerceAtLeast(1)
+            val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 225
+            val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 268
+
+            _uiState.update {
+                it.copy(workflowStatus = "Sending capture to Python API (Page $page, Lines $top-$bot)...")
+            }
+
+            val result = uploadClient.uploadFrame(
+                bitmap = snapshot,
+                topLine = top,
+                bottomLine = bot,
+                pageIndex = page,
+                sync = false
+            )
+
+            if (result.success) {
+                val newCount = _uiState.value.uploadedFramesCount + 1
+                _uiState.update {
+                    it.copy(
+                        uploadedFramesCount = newCount,
+                        workflowStatus = "Page $page (Lines $top-$bot) Settled & Uploaded to Studio"
+                    )
+                }
+                DesktopPaginationService.updateStatus("Page $page (Lines $top-$bot) Settled & Uploaded to Studio")
+            } else {
+                _uiState.update {
+                    it.copy(workflowStatus = "Failed sending capture: ${result.message}")
+                }
+            }
+        }
+    }
+
+    fun getNextPageLine() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(workflowStatus = "Querying Python API for next page line number...")
+            }
+            val res = uploadClient.getNextPageLine()
+            res.onSuccess { nextLine ->
+                _uiState.update {
+                    it.copy(
+                        workflowStatus = "Next page first line number: $nextLine (from python api)"
+                    )
+                }
+                DesktopPaginationService.updateStatus("Next page line: $nextLine (from python api)")
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(workflowStatus = "Error querying next page line: ${err.message}")
+                }
+            }
+        }
+    }
+
     fun openAccessibilitySettings() {
         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
