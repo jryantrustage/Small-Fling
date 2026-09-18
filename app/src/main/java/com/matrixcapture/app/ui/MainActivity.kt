@@ -75,6 +75,8 @@ class MainActivity : ComponentActivity() {
                         onResetSession = { viewModel.resetSession() },
                         onCalibrate = { viewModel.calibrateDocument() },
                         onTestPacer = { viewModel.startPacingOnly() },
+                        onSendCapturesToApi = { viewModel.sendCapturesToPythonApi() },
+                        onGetNextPageLine = { viewModel.getNextPageLine() },
                         onStartWorkflow = {
                             val mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
                             projectionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
@@ -113,6 +115,8 @@ fun MatrixCaptureDashboard(
     onResetSession: () -> Unit,
     onCalibrate: () -> Unit,
     onTestPacer: () -> Unit,
+    onSendCapturesToApi: () -> Unit = {},
+    onGetNextPageLine: () -> Unit = {},
     onStartWorkflow: () -> Unit,
     onStopWorkflow: () -> Unit,
     onOpenAccessibility: () -> Unit,
@@ -649,79 +653,15 @@ fun MatrixCaptureDashboard(
             }
         }
 
-        // Action Buttons
+        // Action Buttons (Mock 2 Layout)
         Spacer(modifier = Modifier.height(4.dp))
         if (!uiState.isWorkflowRunning) {
-            Button(
-                onClick = onResetSession,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = 44.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE36209))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "RESET SESSION (PAGE 1, LINE 1)",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Button(
-                onClick = onCalibrate,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .defaultMinSize(minHeight = 44.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.Default.Straighten,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "AUTO-CALIBRATE (FLING TO BOTTOM & DETECT LINES)",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
             Button(
                 onClick = onTestPacer,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .defaultMinSize(minHeight = 52.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                    .defaultMinSize(minHeight = 48.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
             ) {
@@ -734,9 +674,9 @@ fun MatrixCaptureDashboard(
                         Icons.Default.Speed,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Column(
                         horizontalAlignment = Alignment.Start
                     ) {
@@ -745,7 +685,7 @@ fun MatrixCaptureDashboard(
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                         Text(
                             text = "Test page scroll gestures without recording",
@@ -754,6 +694,60 @@ fun MatrixCaptureDashboard(
                             fontFamily = FontFamily.Monospace
                         )
                     }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Button 1: Send Captures to Python API
+            Button(
+                onClick = onSendCapturesToApi,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 52.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
+            ) {
+                Text(
+                    text = "Send Captures to Python API",
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Button 2: Get line number of next page (from python api)
+            Button(
+                onClick = onGetNextPageLine,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 52.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = "Get line number of next page",
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "(from python api)",
+                        color = Color(0xFFE6EDF3),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
                 }
             }
 

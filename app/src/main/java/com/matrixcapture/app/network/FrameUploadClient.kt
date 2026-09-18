@@ -47,7 +47,8 @@ class FrameUploadClient(
         bitmap: Bitmap,
         topLine: Int = 0,
         bottomLine: Int = 0,
-        pageIndex: Int = 1
+        pageIndex: Int = 1,
+        sync: Boolean = true
     ): UploadResult = withContext(Dispatchers.IO) {
         val stream = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
@@ -58,7 +59,7 @@ class FrameUploadClient(
             .addFormDataPart("top_line", topLine.toString())
             .addFormDataPart("bottom_line", bottomLine.toString())
             .addFormDataPart("page_index", pageIndex.toString())
-            .addFormDataPart("sync", "true")
+            .addFormDataPart("sync", sync.toString())
             .addFormDataPart(
                 "file",
                 "frame_p${pageIndex}_${System.currentTimeMillis()}.png",
@@ -97,6 +98,29 @@ class FrameUploadClient(
         } catch (e: Exception) {
             Log.e(TAG, "Network error uploading frame to $url", e)
             UploadResult(success = false, message = e.message ?: "Network error")
+        }
+    }
+
+    /**
+     * Queries the FastAPI backend for the first line number of the next page.
+     */
+    suspend fun getNextPageLine(): Result<Int> = withContext(Dispatchers.IO) {
+        val url = "http://$serverHost/api/next-page-line"
+        val request = Request.Builder().url(url).get().build()
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: "{}"
+                    val json = JSONObject(bodyStr)
+                    val nextLine = json.optInt("next_page_first_line", 1)
+                    Result.success(nextLine)
+                } else {
+                    Result.failure(IOException("HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching next page line from $url", e)
+            Result.failure(e)
         }
     }
 

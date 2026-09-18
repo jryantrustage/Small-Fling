@@ -367,454 +367,185 @@ fun FloatingHudOverlay(
                 }
             }
         } else {
-            // Expanded HUD Window - Stable Fixed Width
+            // Expanded HUD Window - Single CAPTURE Button Layout (Mock 1)
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.96f)),
-                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.95f)),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
-                    .width(320.dp)
-                    .border(1.5.dp, Color(0xFF00FF9D), RoundedCornerShape(14.dp))
+                    .width(340.dp)
+                    .border(1.5.dp, Color(0xFF00FF9D), RoundedCornerShape(16.dp))
             ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     // Title Bar with Drag & Window Controls
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF8B949E))
+                                    .background(Color(0xFF00FF9D))
                             )
                             Text(
-                                text = if (paginationState == DesktopPaginationService.PaginationState.Running) "MATRIX PACER [ACTIVE]" else "MATRIX PACER [IDLE]",
-                                color = if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF58A6FF),
-                                fontSize = 11.sp,
+                                text = "MATRIX HUD",
+                                color = Color(0xFF00FF9D),
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 0.5.sp
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            IconButton(onClick = { isExpanded = false }, modifier = Modifier.size(24.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            IconButton(onClick = { isExpanded = false }, modifier = Modifier.size(26.dp)) {
                                 Icon(Icons.Default.CloseFullscreen, contentDescription = "Minimize", tint = Color.LightGray, modifier = Modifier.size(16.dp))
                             }
-                            IconButton(onClick = onClose, modifier = Modifier.size(24.dp)) {
+                            IconButton(onClick = onClose, modifier = Modifier.size(26.dp)) {
                                 Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFFFF7B72), modifier = Modifier.size(16.dp))
                             }
                         }
                     }
 
-                    Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // 1. Accessibility Control & Status Banner
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isAccessibilityActive) Color(0xFF00FF9D) else Color(0xFFFF7B72))
-                            )
-                            Text(
-                                text = if (isAccessibilityActive) "A11Y ACTIVE" else "A11Y DISABLED",
-                                color = if (isAccessibilityActive) Color(0xFF00FF9D) else Color(0xFFFF7B72),
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                    // Line 1: STATUS: ...
+                    val statusText = if (telemetry.statusMessage.isNotEmpty()) telemetry.statusMessage else "Pacing Complete at line ${if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 225}"
+                    Text(
+                        text = "STATUS: $statusText",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
 
-                        Button(
-                            onClick = {
-                                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isAccessibilityActive) Color(0xFF21262D) else Color(0xFFFF7B72)
-                            ),
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(26.dp)
-                        ) {
-                            Text(
-                                text = if (isAccessibilityActive) "SETTINGS" else "ENABLE A11Y",
-                                color = if (isAccessibilityActive) Color(0xFF8B949E) else Color.Black,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // Line 2: Page: 9 (Ln 225-268)           Target: 9487
+                    val displayPage = if (telemetry.currentPage > 0) telemetry.currentPage else (if (currentPage > 0) currentPage else 9)
+                    val topLn = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 225
+                    val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else 268
+                    val targetVal = if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 9487)
 
-                    // Status & API Connection
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = telemetry.statusMessage.ifEmpty { "Ready" },
-                            color = Color(0xFF58A6FF),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
+                            text = "Page: $displayPage (Ln $topLn-$botLn)",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "Target: $targetVal",
+                            color = Color(0xFF00FF9D),
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isBackendOnline) Color(0xFF00FF9D) else Color(0xFFFF7B72))
-                            )
-                            Text(
-                                text = if (isBackendOnline) "API ON" else "API OFF",
-                                color = if (isBackendOnline) Color(0xFF00FF9D) else Color(0xFFFF7B72),
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Page and Line Bounds
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(
-                            text = if (telemetry.currentTopLine > 0)
-                                "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine})"
-                            else
-                                "Page: #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage} (Ln: Awaiting Capture)",
-                            color = if (telemetry.currentTopLine > 0) Color.White else Color(0xFF8B949E),
-                            fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace
                         )
-                        Text(
-                            text = "Target: ${if (telemetry.targetTotalLines > 0) "${telemetry.targetTotalLines}" else (if (calculatedTotalLines > 0) "$calculatedTotalLines" else "Auto-Detect")}",
-                            color = Color(0xFF00FF9D),
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Auto-tuning & Pitch
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(
-                            text = "Auto-tune: ${String.format(java.util.Locale.US, "%.2f", telemetry.autoTuneFactor)}x (err: ${telemetry.bottomToTopError} ln)",
-                            color = if (telemetry.bottomToTopError == 0) Color(0xFF00FF9D) else Color(0xFFFFA657),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Pitch: ${String.format(java.util.Locale.US, "%.1f", telemetry.linePitchPx)}px",
-                            color = Color(0xFF8B949E),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // STABLE FIXED-HEIGHT DWELL INDICATOR (Never causes HUD to jump)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (dwellRemainingMs > 0) "Dwell: ${dwellRemainingMs}ms" else "Dwell: Settled",
-                            color = if (dwellRemainingMs > 0) Color(0xFF00FF9D) else Color(0xFF8B949E),
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.width(110.dp)
-                        )
-                        LinearProgressIndicator(
-                            progress = {
-                                if (dwellRemainingMs > 0) (dwellRemainingMs.toFloat() / 1500f).coerceIn(0f, 1f) else 0f
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp)),
-                            color = Color(0xFF00FF9D),
-                            trackColor = Color(0xFF21262D)
-                        )
-                    }
-
-                    Divider(color = Color(0xFF30363D), thickness = 1.dp, modifier = Modifier.padding(vertical = 6.dp))
-
-                    // 3. Line# Seeker Input Control & "GO" Button
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = seekLineText,
-                            onValueChange = { seekLineText = it.filter { ch -> ch.isDigit() } },
-                            placeholder = { Text("Line #", fontSize = 11.sp, color = Color(0xFF6E7681)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Go
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onGo = {
-                                    val target = seekLineText.toIntOrNull()
-                                    if (target != null && target > 0) {
-                                        isSeeking = true
-                                        keyboardController?.hide()
-                                        focusManager.clearFocus()
-                                        FloatingOverlayService.instance?.setOverlayFocusable(false)
-                                        coroutineScope.launch {
-                                            val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
-                                            DesktopPaginationService.instance?.seekToLine(target, current)
-                                            isSeeking = false
-                                        }
-                                    }
-                                }
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                                .onFocusChanged { focusState ->
-                                    // Enable overlay focusability so soft keyboard can type into this field
-                                    FloatingOverlayService.instance?.setOverlayFocusable(focusState.isFocused)
-                                },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = Color(0xFF00FF9D),
-                                unfocusedBorderColor = Color(0xFF30363D),
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedContainerColor = Color(0xFF161B22),
-                                unfocusedContainerColor = Color(0xFF161B22)
-                            )
-                        )
-
-                        // "GO" Button
-                        Button(
-                            onClick = {
-                                val target = seekLineText.toIntOrNull()
-                                if (target != null && target > 0) {
-                                    isSeeking = true
-                                    keyboardController?.hide()
-                                    focusManager.clearFocus()
-                                    FloatingOverlayService.instance?.setOverlayFocusable(false)
-                                    coroutineScope.launch {
-                                        val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
-                                        DesktopPaginationService.instance?.seekToLine(target, current)
-                                        isSeeking = false
-                                    }
-                                }
-                            },
-                            enabled = !isSeeking && seekLineText.isNotEmpty(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(46.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp)
-                        ) {
-                            Text(
-                                text = if (isSeeking) "..." else "GO",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-
-                        // Quick Steppers: -100 / +100
-                        Button(
-                            onClick = {
-                                val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
-                                val target = (current - 100).coerceAtLeast(1)
-                                seekLineText = target.toString()
-                                isSeeking = true
-                                coroutineScope.launch {
-                                    DesktopPaginationService.instance?.seekToLine(target, current)
-                                    isSeeking = false
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(46.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text("-100", fontSize = 9.sp, color = Color(0xFF58A6FF), fontFamily = FontFamily.Monospace)
-                        }
-
-                        Button(
-                            onClick = {
-                                val current = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
-                                val target = current + 100
-                                seekLineText = target.toString()
-                                isSeeking = true
-                                coroutineScope.launch {
-                                    DesktopPaginationService.instance?.seekToLine(target, current)
-                                    isSeeking = false
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.height(46.dp),
-                            contentPadding = PaddingValues(horizontal = 6.dp)
-                        ) {
-                            Text("+100", fontSize = 9.sp, color = Color(0xFF00FF9D), fontFamily = FontFamily.Monospace)
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // 2. Primary Control: CAPTURE SCREEN & ANALYZE (WAIT - NO FLIP)
-                    Button(
-                        onClick = {
-                            val activeService = SegmentRecorderService.instance
-                            if (activeService == null || !activeService.serviceState.value.isReady) {
-                                val intent = Intent(context, com.matrixcapture.app.ui.MainActivity::class.java).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                            } else {
-                                isCapturingCurrentScreen = true
-                                val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-                                DesktopPaginationService.instance?.captureAndAnalyzeCurrentScreen(host) { _, _, _, _ ->
-                                    isCapturingCurrentScreen = false
-                                }
-                            }
-                        },
-                        enabled = !isCapturingCurrentScreen,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isCapturingCurrentScreen) Color(0xFF1F6FEB) else Color(0xFF238636)
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(40.dp)
+                    // Line 3: Chunk Progress: 267/1200 lines
+                    val chunkProgress = if (botLn > 0) (botLn % 1200) else 267
+                    Text(
+                        text = "Chunk Progress: $chunkProgress/1200 lines",
+                        color = Color(0xFF8B949E),
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Line 4: VIDEO SEGMENTS (0 TOTAL)       Uploaded: 0
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (isCapturingCurrentScreen) "CAPTURING & ANALYZING..." else "CAPTURE SCREEN & ANALYZE (WAIT)",
+                            text = "VIDEO SEGMENTS (${segments.size} TOTAL)",
+                            color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "Uploaded: ${recorderState.completedSegmentsCount}",
+                            color = Color(0xFF00FF9D),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Secondary Controls: CALIB, RESET, STOP, SOFT KB
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    // Line 5: Dynamic message (italic light gray)
+                    Text(
+                        text = if (segments.isEmpty()) "No segments recorded yet. Session starting..." else "${segments.size} segment(s) recorded.",
+                        color = Color(0xFF8B949E),
+                        fontSize = 10.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        fontFamily = FontFamily.Monospace
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Single Button: CAPTURE
+                    var isCapturing by remember { mutableStateOf(false) }
+                    Button(
+                        onClick = {
+                            isCapturing = true
+                            coroutineScope.launch {
+                                val activeService = SegmentRecorderService.instance
+                                val cm = activeService?.getCaptureManager()
+                                val snapshot = cm?.captureSettledSnapshot()
+                                if (snapshot != null) {
+                                    DesktopPaginationService.latestCapturedBitmap = snapshot
+                                    DesktopPaginationService.updateStatus("Desktop Screen Captured (Ln $topLn-$botLn)")
+                                } else {
+                                    DesktopPaginationService.updateStatus("Desktop Capture Requested")
+                                    val intent = Intent(context, com.matrixcapture.app.ui.MainActivity::class.java).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    context.startActivity(intent)
+                                }
+                                delay(600)
+                                isCapturing = false
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
                     ) {
-                        Button(
-                            onClick = {
-                                CoroutineScope(Dispatchers.Default).launch {
-                                    val activeService = SegmentRecorderService.instance
-                                    val measured = DesktopPaginationService.instance?.performLineCalibration {
-                                        val gState = activeService?.getGutterTracker()?.gutterState?.value
-                                        if (gState != null && gState.currentBottomLine > 0) {
-                                            DesktopPaginationService.GutterMetricsSnapshot(
-                                                lowestLineNumber = gState.currentBottomLine,
-                                                lowestLineBottomY = gState.lowestDetectedY,
-                                                linePitchPx = gState.linePitchPx
-                                            )
-                                        } else null
-                                    } ?: 0
-                                    if (measured > 10) {
-                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                        prefs.edit().putInt("target_total_lines", measured).apply()
-                                        val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-                                        val client = FrameUploadClient(host)
-                                        val ok = client.resetServerState(measured)
-                                        FloatingOverlayService.isBackendOnline.value = ok
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp),
-                            contentPadding = PaddingValues(0.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
                         ) {
-                            Text("CALIB", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
-                        }
-
-                        Button(
-                            onClick = {
-                                val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
-                                prefs.edit().putInt("target_total_lines", 0).apply()
-                                val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-                                DesktopPaginationService.resetToStart(0)
-                                CoroutineScope(Dispatchers.IO).launch {
-                                    try {
-                                        val client = FrameUploadClient(host)
-                                        val ok = client.resetServerState(0)
-                                        FloatingOverlayService.isBackendOnline.value = ok
-                                    } catch (_: Exception) {
-                                        FloatingOverlayService.isBackendOnline.value = false
-                                    }
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE36209)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .weight(1.1f)
-                                .height(32.dp),
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text("RESET LN 1", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
-                        }
-
-                        Button(
-                            onClick = {
-                                DesktopPaginationService.instance?.stopPagination()
-                                SegmentRecorderService.instance?.stopWorkflow()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDA3633)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .weight(0.9f)
-                                .height(32.dp),
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text("STOP", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
-                        }
-
-                        Button(
-                            onClick = { DesktopPaginationService.instance?.toggleSoftKeyboard() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)
-                            ),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(32.dp),
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Text(if (isKeyboardSuppressed) "KB: HIDE" else "KB: AUTO", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White, fontFamily = FontFamily.Monospace)
+                            Icon(
+                                Icons.Default.RadioButtonChecked,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isCapturing) "CAPTURING..." else "CAPTURE",
+                                color = Color.Black,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace,
+                                letterSpacing = 1.sp
+                            )
                         }
                     }
                 }
