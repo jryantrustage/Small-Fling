@@ -4,7 +4,7 @@ import {
   UploadCloud, Cpu, Coins, FileCode, Layers, RotateCw, RotateCcw,
   AlertCircle, FolderKanban, Plus, Trash2, Ban, ChevronLeft,
   ChevronRight, MoveVertical, Menu, Play, Pause, Square, Camera,
-  Clock, Repeat, Flag, ChevronsRight, Sparkles
+  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap
 } from 'lucide-react';
 
 const env = import.meta.env;
@@ -127,6 +127,8 @@ export default function App() {
   const [backendConnected, setBackendConnected] = useState(true);
   const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
+  const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
+  const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -136,10 +138,15 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, telemetryRes, orchRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, telemetryRes, orchRes, modeRes] = await Promise.all([
         api('/api/projects'), api('/api/document'), api('/api/frames'),
-        api('/api/recapture-queue'), api('/api/config'), api('/api/telemetry'), api('/api/orchestrate')
+        api('/api/recapture-queue'), api('/api/config'), api('/api/telemetry'), api('/api/orchestrate'),
+        api('/api/pipeline/mode')
       ]);
+      if (modeRes && modeRes.ok) {
+        const m = await modeRes.json();
+        if (m.pipeline_mode) setPipelineMode(m.pipeline_mode);
+      }
       if (projRes.ok) {
         const pList: ProjectData[] = await projRes.json();
         setProjects(pList);
@@ -285,6 +292,10 @@ export default function App() {
             setFrames(prev => prev.map(f => f.frame_id === msg.data.frame_id ? { ...f, status: `error: ${msg.data.error}` } : f));
           } else if (msg.type === 'frame_bounding_boxes') {
             setFrameBoundingBoxes(prev => ({ ...prev, [msg.data.frame_id]: msg.data.boxes }));
+          } else if (msg.type === 'pipeline_mode_changed') {
+            if (msg.data && msg.data.pipeline_mode) {
+              setPipelineMode(msg.data.pipeline_mode);
+            }
           }
         } catch {}
       };
@@ -292,6 +303,25 @@ export default function App() {
     connectWs();
     return () => { if (ws) ws.close(); clearTimeout(timer); };
   }, []);
+
+  const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
+    setIsSwitchingPipeline(true);
+    try {
+      const res = await api('/api/pipeline/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setPipelineMode(d.pipeline_mode);
+      }
+    } catch (e) {
+      console.error('Failed to toggle pipeline mode:', e);
+    } finally {
+      setIsSwitchingPipeline(false);
+    }
+  };
 
   const handleScanFrameOcr = async () => {
     if (!activeFrame) return;
@@ -409,7 +439,7 @@ export default function App() {
   const DAG_STAGES = [
     { num: '01', icon: Flag, title: 'Start Position', sub: 'Gutter Line 1 Initialized', pill: 'Ln 1 Set & Ready', step: 'START_READY', conn: 'SCREEN_CAPTURE' },
     { num: '02', icon: Camera, title: 'Display 1 Capture', sub: 'Desktop Mode (HDMI TO USB)', pill: '1920x1080 Frame', step: 'SCREEN_CAPTURE', conn: 'OCR_BOUNDS' },
-    { num: '03', icon: Scan, title: 'OCR Bounds', sub: 'Detect First & Last Line', pill: `Ln ${telemetry.current_top_line || 1} → ${telemetry.current_bottom_line || 49}`, step: 'OCR_BOUNDS', conn: 'PRECISION_SCROLL' },
+    { num: '03', icon: Scan, title: 'OCR Bounds', sub: pipelineMode === 'cloud' ? 'Gemini 2.5 Flash Vision' : 'Pixel 10 ML Kit + Ollama', pill: `Ln ${telemetry.current_top_line || 1} → ${telemetry.current_bottom_line || 49}`, step: 'OCR_BOUNDS', conn: 'PRECISION_SCROLL' },
     { num: '04', icon: MoveVertical, title: 'Precision Scroll', sub: 'Align Prior Bottom + 1', pill: `Target Top: Ln ${(telemetry.current_bottom_line && telemetry.current_bottom_line > 0) ? telemetry.current_bottom_line + 1 : 50}`, step: 'PRECISION_SCROLL', conn: 'DWELL_FREEZE' },
     { num: '05', icon: Clock, title: '1.5s Dwell Freeze', sub: 'Anti-Blur Frame Settling', pill: telemetry.dwell_countdown_ms > 0 ? `${telemetry.dwell_countdown_ms}ms` : '1,500ms Freeze', step: 'DWELL_FREEZE', conn: 'LOOP_EVAL' },
     { num: '06', icon: Repeat, title: 'EOF or Loop', sub: 'Page Top Changed?', pill: orch.status === 'COMPLETED' ? 'Document Complete' : 'Cycle to Next Page', step: 'LOOP_EVAL' }
@@ -435,6 +465,40 @@ export default function App() {
 
         {/* Realtime Metrics */}
         <div className="header-metrics">
+          {/* Runtime Capture Pipeline Toggle */}
+          <div className="pipeline-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
+            <button
+              onClick={() => handleTogglePipelineMode('cloud')}
+              disabled={isSwitchingPipeline}
+              title="Cloud Mode: Gemini 2.5 Flash Vision Multimodal"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
+                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                background: pipelineMode === 'cloud' ? 'linear-gradient(135deg, #1f6feb, #388bfd)' : 'transparent',
+                color: pipelineMode === 'cloud' ? '#ffffff' : '#8b949e',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Cloud size={13} />
+              <span>CLOUD</span>
+            </button>
+            <button
+              onClick={() => handleTogglePipelineMode('local')}
+              disabled={isSwitchingPipeline}
+              title="Local Mode: Pixel 10 ML Kit Gutter OCR + Laptop Ollama Vision"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
+                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                background: pipelineMode === 'local' ? 'linear-gradient(135deg, #238636, #2ea043)' : 'transparent',
+                color: pipelineMode === 'local' ? '#ffffff' : '#8b949e',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Zap size={13} color={pipelineMode === 'local' ? '#ffdf5d' : '#8b949e'} />
+              <span>LOCAL</span>
+            </button>
+          </div>
+
           <div className="metric-pill"><span className="label">FRAMES:</span><span className="value">{frames.length}</span></div>
           <div className="metric-pill"><span className="label">TOTAL LINES:</span><span className="value">{documentData.total_lines}</span></div>
           <div className={`metric-pill ${documentData.issue_count > 0 ? 'issues' : ''}`}>
