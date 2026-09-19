@@ -134,7 +134,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevFramesCountRef = useRef(0);
 
-  const sortedFrames = [...frames].sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
+  const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
 
   const fetchData = async () => {
     try {
@@ -160,11 +160,12 @@ export default function App() {
       }
       if (framesRes.ok) {
         const framesJson: FrameData[] = await framesRes.json();
-        setFrames(framesJson);
-        if (framesJson.length > 0 && (framesJson.length > prevFramesCountRef.current || !selectedFrameId || !framesJson.some(f => f.frame_id === selectedFrameId))) {
-          setSelectedFrameId(framesJson[framesJson.length - 1].frame_id);
+        const validFrames = Array.isArray(framesJson) ? framesJson.filter(f => f && f.frame_id) : [];
+        setFrames(validFrames);
+        if (validFrames.length > 0 && (validFrames.length > prevFramesCountRef.current || !selectedFrameId || !validFrames.some(f => f.frame_id === selectedFrameId))) {
+          setSelectedFrameId(validFrames[validFrames.length - 1].frame_id);
         }
-        prevFramesCountRef.current = framesJson.length;
+        prevFramesCountRef.current = validFrames.length;
       }
       if (queueRes.ok) setRecaptureQueue(await queueRes.json());
       if (cfgRes.ok) {
@@ -244,6 +245,32 @@ export default function App() {
     if (res.ok) await fetchData();
   };
 
+  const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
+
+  const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) e.stopPropagation();
+    if (!id || deletingFrameId) return;
+    setDeletingFrameId(id);
+    try {
+      const res = await api(`/api/frames/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setFrames(prev => {
+          const remaining = prev.filter(f => f.frame_id !== id);
+          if (selectedFrameId === id) {
+            setSelectedFrameId(remaining.length > 0 ? remaining[remaining.length - 1].frame_id : null);
+          }
+          return remaining;
+        });
+        prevFramesCountRef.current = Math.max(0, prevFramesCountRef.current - 1);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to delete frame:', err);
+    } finally {
+      setDeletingFrameId(null);
+    }
+  };
+
   const handleUpdateFramePosition = async (id: string, delta: number) => {
     const target = frames.find(f => f.frame_id === id);
     if (!target) return;
@@ -270,13 +297,24 @@ export default function App() {
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'new_frame') {
+          if (msg.type === 'new_frame' && msg.data?.frame_id) {
             const nf: FrameData = msg.data;
             setFrames(prev => {
-              const i = prev.findIndex(f => f.frame_id === nf.frame_id);
-              return i >= 0 ? prev.map((f, idx) => idx === i ? nf : f) : [...prev, nf];
+              const clean = prev.filter(f => f && f.frame_id);
+              const i = clean.findIndex(f => f.frame_id === nf.frame_id);
+              return i >= 0 ? clean.map((f, idx) => idx === i ? nf : f) : [...clean, nf];
             });
             setSelectedFrameId(nf.frame_id);
+            apiJson<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[]; token_stats?: TokenStats }>('/api/document')
+              .then(doc => { setDocumentData(doc); if (doc.token_stats) setTokenStats(doc.token_stats); });
+          } else if (msg.type === 'frame_deleted') {
+            setFrames(prev => {
+              const remaining = prev.filter(f => f && f.frame_id && f.frame_id !== msg.frame_id);
+              if (selectedFrameId === msg.frame_id) {
+                setSelectedFrameId(remaining.length > 0 ? remaining[remaining.length - 1].frame_id : null);
+              }
+              return remaining;
+            });
             apiJson<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[]; token_stats?: TokenStats }>('/api/document')
               .then(doc => { setDocumentData(doc); if (doc.token_stats) setTokenStats(doc.token_stats); });
           } else if (msg.type === 'document_updated') {
@@ -286,11 +324,11 @@ export default function App() {
             setTelemetry(prev => ({ ...prev, ...msg.data }));
           } else if (msg.type === 'orchestration_updated') {
             setOrch(msg.data);
-          } else if (msg.type === 'frame_processed') {
-            setFrames(prev => prev.map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
-          } else if (msg.type === 'frame_error') {
-            setFrames(prev => prev.map(f => f.frame_id === msg.data.frame_id ? { ...f, status: `error: ${msg.data.error}` } : f));
-          } else if (msg.type === 'frame_bounding_boxes') {
+          } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
+            setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
+          } else if (msg.type === 'frame_error' && msg.data?.frame_id) {
+            setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, status: `error: ${msg.data.error}` } : f));
+          } else if (msg.type === 'frame_bounding_boxes' && msg.data?.frame_id) {
             setFrameBoundingBoxes(prev => ({ ...prev, [msg.data.frame_id]: msg.data.boxes }));
           } else if (msg.type === 'pipeline_mode_changed') {
             if (msg.data && msg.data.pipeline_mode) {
@@ -740,6 +778,15 @@ export default function App() {
                         <img src={`${API_BASE}/api/frames/${f.frame_id}/image`} alt={f.frame_id} />
                         <span className="frame-badge">Pg {f.page_index}</span>
                         {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
+                        <button
+                          className="frame-card-delete-overlay"
+                          onClick={(e) => handleDeleteFrame(f.frame_id, e)}
+                          disabled={deletingFrameId === f.frame_id}
+                          title="Delete frame image"
+                          aria-label="Delete frame image"
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                       <div className="frame-card-info">
                         <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
@@ -780,9 +827,20 @@ export default function App() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {inspectorMode === 'single' && activeFrame && (
-                <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}>
-                  <Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'Send Image for OCR'}</span>
-                </button>
+                <>
+                  <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}>
+                    <Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'Send Image for OCR'}</span>
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline btn-frame-header-delete"
+                    onClick={(e) => handleDeleteFrame(activeFrame.frame_id, e)}
+                    disabled={deletingFrameId === activeFrame.frame_id}
+                    title="Delete selected frame"
+                  >
+                    <Trash2 size={13} />
+                    <span>{deletingFrameId === activeFrame.frame_id ? 'Deleting...' : 'Delete'}</span>
+                  </button>
+                </>
               )}
               {scanStatusMsg && <span className="scan-status-pill">{scanStatusMsg}</span>}
               <button className={`btn btn-sm ${zoomMode === 'fit' ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setZoomMode('fit'); setImageZoom(1); }}>Fit</button>
@@ -835,6 +893,19 @@ export default function App() {
                           ))}
                         </svg>
                       )}
+                      {/* Image Delete Overlay Control */}
+                      <div className="frame-image-overlay-controls">
+                        <button
+                          className="frame-delete-overlay-btn"
+                          onClick={(e) => handleDeleteFrame(activeFrame.frame_id, e)}
+                          disabled={deletingFrameId === activeFrame.frame_id}
+                          title="Delete selected image (click or tap trash can)"
+                          aria-label="Delete selected image"
+                        >
+                          <Trash2 size={16} />
+                          <span className="overlay-btn-text">{deletingFrameId === activeFrame.frame_id ? 'Deleting...' : 'Delete Frame'}</span>
+                        </button>
+                      </div>
                     </div>
                     <div className="gutter-line-callout bottom">
                       <span className="gutter-callout-icon">▼</span><span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
