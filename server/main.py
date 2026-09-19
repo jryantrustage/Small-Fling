@@ -22,6 +22,9 @@ except ImportError:
 
 import config
 from ocr_engine import LocalGutterOCREngine
+import db
+
+db.init_db()
 
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
 
@@ -129,18 +132,29 @@ latest_telemetry: Dict[str, Any] = {
 }
 
 
+def get_current_project_id() -> str:
+    proj = db.get_active_project()
+    return proj["id"]
+
+
 def load_persisted_state():
     global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
-    if DOCUMENT_FILE.exists():
-        try:
-            with open(DOCUMENT_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-                document_lines = {int(k): v for k, v in saved.get("lines", {}).items()}
-                captured_frames = saved.get("frames", {})
-                token_stats.update(saved.get("token_stats", {}))
-                latest_telemetry.update(saved.get("latest_telemetry", {}))
-        except Exception as e:
-            print(f"Error loading document state: {e}")
+    try:
+        proj = db.get_active_project()
+        proj_id = proj["id"]
+        document_lines = db.get_document_lines(proj_id)
+        frames_list = db.get_frames(proj_id)
+        captured_frames = {f["frame_id"]: f for f in frames_list}
+        tel_data = db.get_project_telemetry(proj_id)
+        if tel_data.get("telemetry"):
+            latest_telemetry.update(tel_data["telemetry"])
+        if tel_data.get("token_stats"):
+            token_stats.update(tel_data["token_stats"])
+        if proj.get("target_total_lines"):
+            latest_telemetry["target_total_lines"] = proj["target_total_lines"]
+    except Exception as e:
+        print(f"Error loading state from SQLite: {e}")
+
     if RECAPTURE_QUEUE_FILE.exists():
         try:
             with open(RECAPTURE_QUEUE_FILE, "r", encoding="utf-8") as f:
@@ -151,6 +165,28 @@ def load_persisted_state():
 
 def save_persisted_state():
     try:
+        proj_id = get_current_project_id()
+        for fid, f in captured_frames.items():
+            db.save_frame(
+                project_id=proj_id,
+                frame_id=fid,
+                filename=f.get("filename", f"{fid}.png"),
+                top_line=f.get("top_line", 0),
+                bottom_line=f.get("bottom_line", 0),
+                page_index=f.get("page_index", 1),
+                file_size=f.get("file_size", 0),
+                status=f.get("status", "processed"),
+                extracted_line_count=f.get("extracted_line_count", 0),
+                custom_offset_y=f.get("custom_offset_y", 0.0),
+                token_usage=f.get("token_usage", {}),
+                bounding_boxes=f.get("bounding_boxes", {}),
+                model_used=f.get("model_used", ""),
+                created_at=f.get("created_at")
+            )
+        db.save_document_lines(proj_id, document_lines)
+        db.save_project_telemetry(proj_id, latest_telemetry, token_stats)
+
+        # Also write JSON backup for compatibility
         with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:
             json.dump({
                 "lines": {str(k): v for k, v in sorted(document_lines.items())},
@@ -162,10 +198,20 @@ def save_persisted_state():
         with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f:
             json.dump(recapture_queue, f, indent=2)
     except Exception as e:
-        print(f"Error saving state: {e}")
+        print(f"Error saving state to SQLite: {e}")
 
 
 load_persisted_state()
+
+
+class ProjectCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    target_total_lines: Optional[int] = 0
+
+
+class FramePositionRequest(BaseModel):
+    custom_offset_y: float
 
 
 class ConfigRequest(BaseModel):
@@ -199,6 +245,20 @@ class TelemetryUpdateRequest(BaseModel):
     status_message: Optional[str] = ""
     mobile_tokens: Optional[Dict[str, int]] = None
     pacer_calibration: Optional[Dict[str, Any]] = None
+
+
+class OrchestrationRequest(BaseModel):
+    command: str  # "BEGIN", "PAUSE", "RESUME", "END", "RESTART"
+    source: Optional[str] = "web"
+    target_total_lines: Optional[int] = None
+
+
+orchestration_state: Dict[str, Any] = {
+    "status": "IDLE",  # "IDLE", "RUNNING", "PAUSED", "COMPLETED", "ABORTED"
+    "last_command": "NONE",
+    "source": "system",
+    "updated_at": datetime.now().isoformat()
+}
 
 
 async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
@@ -537,7 +597,94 @@ async def update_telemetry(payload: TelemetryUpdateRequest):
     if payload.mobile_tokens:
         token_stats["mobile_tokens"] = payload.mobile_tokens
 
+    # Synchronize orchestration state from mobile pacer reports
+    if payload.is_pacing:
+        orchestration_state["status"] = "RUNNING"
+    elif payload.phase == "COMPLETED":
+        orchestration_state["status"] = "COMPLETED"
+    elif payload.phase == "PAUSED":
+        orchestration_state["status"] = "PAUSED"
+    elif payload.phase in ["STANDBY", "IDLE"] and orchestration_state["status"] == "RUNNING":
+        orchestration_state["status"] = "IDLE"
+
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/orchestrate")
+async def get_orchestration_state():
+    """
+    Returns the synchronized orchestration state and fresh telemetry.
+    """
+    return {
+        "orchestration": orchestration_state,
+        "telemetry": get_fresh_telemetry()
+    }
+
+
+@app.post("/api/orchestrate")
+async def handle_orchestration_command(payload: OrchestrationRequest):
+    """
+    Dispatches orchestration commands (BEGIN, PAUSE, RESUME, END, RESTART).
+    Synchronizes status across Web UI, Mobile App, and Floating HUD via WebSockets.
+    """
+    global latest_telemetry, document_lines, captured_frames, orchestration_state
+    cmd = payload.command.upper()
+    now_iso = datetime.now().isoformat()
+
+    orchestration_state["last_command"] = cmd
+    orchestration_state["source"] = payload.source or "web"
+    orchestration_state["updated_at"] = now_iso
+
+    if cmd == "BEGIN":
+        orchestration_state["status"] = "RUNNING"
+        latest_telemetry["is_pacing"] = True
+        latest_telemetry["phase"] = "PACING"
+        latest_telemetry["status_message"] = "Orchestration Begun"
+    elif cmd == "PAUSE":
+        orchestration_state["status"] = "PAUSED"
+        latest_telemetry["is_pacing"] = False
+        latest_telemetry["phase"] = "PAUSED"
+        latest_telemetry["status_message"] = "Orchestration Paused"
+    elif cmd == "RESUME":
+        orchestration_state["status"] = "RUNNING"
+        latest_telemetry["is_pacing"] = True
+        latest_telemetry["phase"] = "PACING"
+        latest_telemetry["status_message"] = "Orchestration Resumed"
+    elif cmd == "END":
+        orchestration_state["status"] = "COMPLETED"
+        latest_telemetry["is_pacing"] = False
+        latest_telemetry["phase"] = "COMPLETED"
+        latest_telemetry["status_message"] = "Orchestration Ended"
+    elif cmd == "RESTART":
+        orchestration_state["status"] = "RUNNING"
+        latest_telemetry["current_page"] = 1
+        latest_telemetry["current_top_line"] = 1
+        latest_telemetry["current_bottom_line"] = 0
+        latest_telemetry["is_pacing"] = True
+        latest_telemetry["phase"] = "PACING"
+        latest_telemetry["status_message"] = "Restarted from Beginning (Page 1)"
+
+    # Broadcast immediately to Web, Mobile, and HUD WebSocket subscribers
+    broadcast_msg = json.dumps({
+        "type": "orchestration_event",
+        "orchestration": orchestration_state,
+        "telemetry": latest_telemetry
+    })
+    await ws_manager.broadcast(broadcast_msg)
+
+    # Save to SQLite telemetry
+    try:
+        proj_id = get_current_project_id()
+        db.save_project_telemetry(proj_id, latest_telemetry, token_stats)
+    except Exception as e:
+        print(f"Error saving orchestration state to DB: {e}")
+
+    return {
+        "status": "success",
+        "command": cmd,
+        "orchestration": orchestration_state,
+        "telemetry": latest_telemetry
+    }
 
 
 @app.post("/api/upload-frame")
@@ -725,9 +872,113 @@ async def scan_frame_ocr(frame_id: str):
         raise HTTPException(status_code=500, detail=f"OCR scan failed: {str(e)}")
 
 
+# --- Project Management Endpoints ---
+
+@app.get("/api/projects")
+async def list_projects():
+    return db.get_projects()
+
+
+@app.get("/api/projects/active")
+async def get_active_project():
+    return db.get_active_project()
+
+
+@app.post("/api/projects")
+async def create_project(req: ProjectCreateRequest):
+    new_proj = db.create_project(
+        name=req.name,
+        description=req.description or "",
+        target_total_lines=req.target_total_lines or 0
+    )
+    load_persisted_state()
+    await ws_manager.broadcast({
+        "type": "project_switched",
+        "project": new_proj
+    })
+    return new_proj
+
+
+@app.post("/api/projects/{project_id}/activate")
+async def activate_project(project_id: str):
+    success = db.activate_project(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    load_persisted_state()
+    proj = db.get_project(project_id)
+    await ws_manager.broadcast({
+        "type": "project_switched",
+        "project": proj
+    })
+    return {"status": "success", "project": proj}
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(project_id: str):
+    success = db.delete_project(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    load_persisted_state()
+    active_proj = db.get_active_project()
+    await ws_manager.broadcast({
+        "type": "project_switched",
+        "project": active_proj
+    })
+    return {"status": "success", "active_project": active_proj}
+
+
+@app.post("/api/projects/{project_id}/abort")
+async def abort_project(project_id: str):
+    success = db.abort_project(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    load_persisted_state()
+    active_proj = db.get_active_project()
+    await ws_manager.broadcast({
+        "type": "project_aborted",
+        "project_id": project_id,
+        "active_project": active_proj
+    })
+    return {"status": "success", "message": f"Project '{project_id}' aborted and data cleared."}
+
+
+@app.post("/api/projects/{project_id}/clear")
+async def clear_project_data(project_id: str):
+    success = db.clear_project_data(project_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Project not found")
+    load_persisted_state()
+    active_proj = db.get_active_project()
+    await ws_manager.broadcast({
+        "type": "project_cleared",
+        "project_id": project_id,
+        "active_project": active_proj
+    })
+    return {"status": "success", "message": f"Project '{project_id}' data cleared."}
+
+
+@app.patch("/api/frames/{frame_id}/position")
+async def update_frame_position(frame_id: str, req: FramePositionRequest):
+    success = db.update_frame_position(frame_id, req.custom_offset_y)
+    if not success:
+        raise HTTPException(status_code=404, detail="Frame not found")
+    if frame_id in captured_frames:
+        captured_frames[frame_id]["custom_offset_y"] = req.custom_offset_y
+    await ws_manager.broadcast({
+        "type": "frame_position_updated",
+        "frame_id": frame_id,
+        "custom_offset_y": req.custom_offset_y
+    })
+    return {"status": "success", "frame_id": frame_id, "custom_offset_y": req.custom_offset_y}
+
+
 @app.get("/api/frames")
 async def get_frames():
-    return list(captured_frames.values())
+    """
+    Returns frames for the active project strictly sorted by top_line ASC, page_index ASC.
+    """
+    proj_id = get_current_project_id()
+    return db.get_frames(proj_id)
 
 
 @app.get("/api/frames/{frame_id}/image")
@@ -941,10 +1192,8 @@ async def get_spliced_document_image():
     Stitches all stored frames in chronological/page order into a single continuous,
     seamless vertical image, trimming overlap based on consecutive top_line and bottom_line.
     """
-    sorted_frames = sorted(
-        captured_frames.values(),
-        key=lambda f: (f.get("page_index", 0) or 0, f.get("top_line", 0) or 0, f.get("created_at", ""))
-    )
+    proj_id = get_current_project_id()
+    sorted_frames = db.get_frames(proj_id)
 
     valid_frames = []
     for f in sorted_frames:
@@ -987,6 +1236,10 @@ async def get_spliced_document_image():
                     crop_top = min(int(overlap_lines * est_pitch), h - 100)
                 else:
                     crop_top = min(int(overlap_lines * 32.0), h - 100)
+
+            # Apply custom image position / offset if specified by user
+            custom_offset = int(frame_meta.get("custom_offset_y", 0.0) or 0)
+            crop_top = max(0, min(crop_top + custom_offset, h - 50))
 
             if crop_top > 0:
                 sliced = img.crop((0, crop_top, w, h))
@@ -1081,5 +1334,15 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
 
 if __name__ == "__main__":
     import uvicorn
+    import sys
     print(f"Starting MatrixCapture FastAPI backend on {config.SERVER_HOST}:{config.SERVER_PORT}...")
-    uvicorn.run(app, host=config.SERVER_HOST, port=config.SERVER_PORT)
+    try:
+        uvicorn.run(app, host=config.SERVER_HOST, port=config.SERVER_PORT)
+    except OSError as e:
+        if getattr(e, 'winerror', None) == 10048 or getattr(e, 'errno', None) == 10048:
+            print(f"\n[ERROR] Port {config.SERVER_PORT} is already in use by another running server instance.")
+            print(f"To free port {config.SERVER_PORT}, run in PowerShell:")
+            print(f"  Stop-Process -Id (Get-NetTCPConnection -LocalPort {config.SERVER_PORT} -State Listen).OwningProcess -Force\n")
+            sys.exit(1)
+        else:
+            raise

@@ -131,6 +131,34 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                         )
                     )
                     _uiState.update { it.copy(isBackendConnected = ok) }
+
+                    // Sync remote orchestration state from backend
+                    val remoteOrchRes = uploadClient.fetchOrchestrationState()
+                    if (remoteOrchRes.isSuccess) {
+                        val remoteOrch = remoteOrchRes.getOrNull()
+                        if (remoteOrch != null && remoteOrch.status != _uiState.value.orchestrationStatus) {
+                            _uiState.update { it.copy(orchestrationStatus = remoteOrch.status) }
+                            when (remoteOrch.status) {
+                                "RUNNING" -> {
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) {
+                                        DesktopPaginationService.instance?.resumePagination()
+                                    } else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) {
+                                        startPacingOnly()
+                                    }
+                                }
+                                "PAUSED" -> {
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                        DesktopPaginationService.instance?.pausePagination()
+                                    }
+                                }
+                                "COMPLETED" -> {
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                        stopWorkflow()
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } catch (e: Exception) {
                     _uiState.update { it.copy(isBackendConnected = false) }
                 }
@@ -667,8 +695,56 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val targetDisplay: com.matrixcapture.app.capture.DisplayCaptureManager.ExternalDisplayInfo? = null,
         val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
         val assemblyResult: MarkdownAssembler.AssemblyResult? = null,
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val orchestrationStatus: String = "IDLE" // "IDLE", "RUNNING", "PAUSED", "COMPLETED"
     )
+
+    fun beginOrchestration() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(orchestrationStatus = "RUNNING", isWorkflowRunning = true) }
+            uploadClient.sendOrchestrationCommand("BEGIN", "mobile")
+            startPacingOnly()
+        }
+    }
+
+    fun pauseOrchestration() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(orchestrationStatus = "PAUSED") }
+            uploadClient.sendOrchestrationCommand("PAUSE", "mobile")
+            DesktopPaginationService.instance?.pausePagination()
+        }
+    }
+
+    fun resumeOrchestration() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(orchestrationStatus = "RUNNING") }
+            uploadClient.sendOrchestrationCommand("RESUME", "mobile")
+            DesktopPaginationService.instance?.resumePagination()
+        }
+    }
+
+    fun endOrchestration() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(orchestrationStatus = "COMPLETED", isWorkflowRunning = false) }
+            uploadClient.sendOrchestrationCommand("END", "mobile")
+            stopWorkflow()
+        }
+    }
+
+    fun restartOrchestration() {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    orchestrationStatus = "RUNNING",
+                    currentPage = 1,
+                    currentTopLine = 1,
+                    currentBottomLine = 0
+                )
+            }
+            uploadClient.sendOrchestrationCommand("RESTART", "mobile")
+            DesktopPaginationService.instance?.restartFromBeginning()
+        }
+    }
 
     companion object {
         private const val TAG = "CaptureViewModel"

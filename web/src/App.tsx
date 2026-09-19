@@ -15,7 +15,18 @@ import {
   Layers,
   RotateCw,
   RotateCcw,
-  AlertCircle
+  AlertCircle,
+  FolderKanban,
+  Plus,
+  Trash2,
+  Ban,
+  ChevronLeft,
+  ChevronRight,
+  MoveVertical,
+  Menu,
+  Play,
+  Pause,
+  Square
 } from 'lucide-react';
 
 const getApiBase = () => {
@@ -31,6 +42,21 @@ const getApiBase = () => {
 const API_BASE = getApiBase();
 const POLL_INTERVAL_MS = Number(import.meta.env.VITE_POLL_INTERVAL_MS) || 1200;
 const DEFAULT_TARGET_LINES = Number(import.meta.env.VITE_DEFAULT_TARGET_LINES) || 0;
+
+interface ProjectData {
+  id: string;
+  name: string;
+  description: string;
+  target_total_lines: number;
+  status: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+  frame_count?: number;
+  line_count?: number;
+  min_line?: number | null;
+  max_line?: number | null;
+}
 
 interface LineData {
   line_number: number;
@@ -57,6 +83,7 @@ interface FrameData {
   status: string;
   created_at: string;
   extracted_line_count: number;
+  custom_offset_y?: number;
   model_used?: string;
   token_usage?: {
     prompt_tokens: number;
@@ -119,6 +146,16 @@ interface FrameBoundingBoxes {
 }
 
 export default function App() {
+  const [projects, setProjects] = useState<ProjectData[]>([]);
+  const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showAbortModal, setShowAbortModal] = useState(false);
+  const [projectToAbort, setProjectToAbort] = useState<ProjectData | null>(null);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [newProjectTargetLines, setNewProjectTargetLines] = useState(0);
+
   const [documentData, setDocumentData] = useState<{
     total_lines: number;
     issue_count: number;
@@ -150,6 +187,18 @@ export default function App() {
     last_heartbeat: null
   });
 
+  const [orchestrationState, setOrchestrationState] = useState<{
+    status: string;
+    last_command: string;
+    timestamp: number;
+    source?: string;
+  }>({
+    status: 'IDLE',
+    last_command: '',
+    timestamp: 0,
+    source: 'system'
+  });
+
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<LineData | null>(null);
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
@@ -177,66 +226,192 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const prevFramesCountRef = useRef(0);
 
-  // Poll backend every 1.2s for document, telemetry, frames, and tokens
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [docRes, framesRes, queueRes, cfgRes, telemetryRes] = await Promise.all([
-          fetch(`${API_BASE}/api/document`),
-          fetch(`${API_BASE}/api/frames`),
-          fetch(`${API_BASE}/api/recapture-queue`),
-          fetch(`${API_BASE}/api/config`),
-          fetch(`${API_BASE}/api/telemetry`)
-        ]);
+  // Strictly sorted frames in ascending order by line number (Ln 1 -> 10 on top, etc.)
+  const sortedFrames = [...frames].sort((a, b) => {
+    if (a.top_line !== b.top_line) {
+      return a.top_line - b.top_line;
+    }
+    return a.page_index - b.page_index;
+  });
 
-        if (docRes.ok) {
-          setBackendConnected(true);
-          const docJson = await docRes.json();
-          setDocumentData(docJson);
-          if (docJson.token_stats) {
-            setTokenStats(docJson.token_stats);
-          }
-        }
+  // Fetch all projects, document data, telemetry, frames, tokens, and orchestration
+  const fetchData = async () => {
+    try {
+      const [projRes, docRes, framesRes, queueRes, cfgRes, telemetryRes, orchRes] = await Promise.all([
+        fetch(`${API_BASE}/api/projects`),
+        fetch(`${API_BASE}/api/document`),
+        fetch(`${API_BASE}/api/frames`),
+        fetch(`${API_BASE}/api/recapture-queue`),
+        fetch(`${API_BASE}/api/config`),
+        fetch(`${API_BASE}/api/telemetry`),
+        fetch(`${API_BASE}/api/orchestrate`)
+      ]);
 
-        if (framesRes.ok) {
-          const framesJson: FrameData[] = await framesRes.json();
-          setFrames(framesJson);
-          if (framesJson.length > 0) {
-            if (framesJson.length > prevFramesCountRef.current || !selectedFrameId || !framesJson.some(f => f.frame_id === selectedFrameId)) {
-              setSelectedFrameId(framesJson[framesJson.length - 1].frame_id);
-            }
-            prevFramesCountRef.current = framesJson.length;
-          }
-        }
-
-        if (queueRes.ok) {
-          const qJson = await queueRes.json();
-          setRecaptureQueue(qJson);
-        }
-
-        if (cfgRes.ok) {
-          const cfgJson = await cfgRes.json();
-          setApiKeyConfigured(cfgJson.api_key_configured);
-        }
-
-        if (telemetryRes.ok) {
-          const tJson = await telemetryRes.json();
-          if (tJson.telemetry) {
-            setTelemetry(tJson.telemetry);
-          }
-          if (tJson.token_stats) {
-            setTokenStats(tJson.token_stats);
-          }
-        }
-      } catch {
-        setBackendConnected(false);
+      if (projRes.ok) {
+        const pList: ProjectData[] = await projRes.json();
+        setProjects(pList);
+        const active = pList.find(p => p.is_active === 1) || pList[0] || null;
+        setActiveProject(active);
       }
-    };
 
+      if (docRes.ok) {
+        setBackendConnected(true);
+        const docJson = await docRes.json();
+        setDocumentData(docJson);
+        if (docJson.token_stats) {
+          setTokenStats(docJson.token_stats);
+        }
+      }
+
+      if (framesRes.ok) {
+        const framesJson: FrameData[] = await framesRes.json();
+        setFrames(framesJson);
+        if (framesJson.length > 0) {
+          if (framesJson.length > prevFramesCountRef.current || !selectedFrameId || !framesJson.some(f => f.frame_id === selectedFrameId)) {
+            // Default to earliest or latest frame
+            setSelectedFrameId(framesJson[0].frame_id);
+          }
+          prevFramesCountRef.current = framesJson.length;
+        }
+      }
+
+      if (queueRes.ok) {
+        const qJson = await queueRes.json();
+        setRecaptureQueue(qJson);
+      }
+
+      if (cfgRes.ok) {
+        const cfgJson = await cfgRes.json();
+        setApiKeyConfigured(cfgJson.api_key_configured);
+      }
+
+      if (telemetryRes.ok) {
+        const tJson = await telemetryRes.json();
+        if (tJson.telemetry) {
+          setTelemetry(tJson.telemetry);
+        }
+        if (tJson.token_stats) {
+          setTokenStats(tJson.token_stats);
+        }
+      }
+
+      if (orchRes.ok) {
+        const oJson = await orchRes.json();
+        setOrchestrationState(oJson);
+      }
+    } catch {
+      setBackendConnected(false);
+    }
+  };
+
+  useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [selectedFrameId]);
+
+  const handleSwitchProject = async (projectId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/activate`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        // Automatically collapse sidebar after selection
+        setIsSidebarOpen(false);
+        setSelectedFrameId(null);
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to switch project', e);
+    }
+  };
+
+  const handleCreateProject = async () => {
+    if (!newProjectName.trim()) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newProjectName.trim(),
+          description: newProjectDesc.trim(),
+          target_total_lines: newProjectTargetLines
+        })
+      });
+      if (res.ok) {
+        setNewProjectName('');
+        setNewProjectDesc('');
+        setNewProjectTargetLines(0);
+        setShowNewProjectModal(false);
+        setIsSidebarOpen(false);
+        setSelectedFrameId(null);
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to create project', e);
+    }
+  };
+
+  const handleAbortProject = async (projectId: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/abort`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        setShowAbortModal(false);
+        setProjectToAbort(null);
+        setSelectedFrameId(null);
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to abort project', e);
+    }
+  };
+
+  const handleClearProjectData = async (projectId: string) => {
+    if (!window.confirm('Are you sure you want to clear all frames and OCR lines for this project?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}/clear`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        setSelectedFrameId(null);
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to clear project data', e);
+    }
+  };
+
+  const handleDeleteProject = async (projectId: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this project and its images?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${projectId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to delete project', e);
+    }
+  };
+
+  const handleUpdateFramePosition = async (frameId: string, delta: number) => {
+    const targetFrame = frames.find(f => f.frame_id === frameId);
+    if (!targetFrame) return;
+    const newOffset = (targetFrame.custom_offset_y || 0) + delta;
+    try {
+      await fetch(`${API_BASE}/api/frames/${frameId}/position`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ custom_offset_y: newOffset })
+      });
+      setFrames(prev => prev.map(f => f.frame_id === frameId ? { ...f, custom_offset_y: newOffset } : f));
+    } catch (e) {
+      console.error('Failed to update frame offset', e);
+    }
+  };
 
   // Connect to FastAPI server via WebSocket for real-time frame streaming and OCR push
   useEffect(() => {
@@ -284,6 +459,21 @@ export default function App() {
                 .then(res => res.json())
                 .then(data => setDocumentData(data))
                 .catch(err => console.error(err));
+            } else if (msg.type === 'orchestration_event') {
+              setOrchestrationState({
+                status: msg.status,
+                last_command: msg.command,
+                timestamp: msg.timestamp || Date.now(),
+                source: msg.source || 'system'
+              });
+              if (msg.telemetry) {
+                setTelemetry(prev => ({
+                  ...prev,
+                  current_page: msg.telemetry.page ?? prev.current_page,
+                  current_top_line: msg.telemetry.top_line ?? prev.current_top_line,
+                  current_bottom_line: msg.telemetry.bottom_line ?? prev.current_bottom_line,
+                }));
+              }
             }
           } catch (e) {
             console.error('[WebSocket] Message parse error:', e);
@@ -424,6 +614,23 @@ export default function App() {
     }
   };
 
+  // Send synchronized orchestration command (BEGIN, PAUSE, RESUME, END, RESTART)
+  const handleOrchestrationCommand = async (command: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/orchestrate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command, source: 'web' })
+      });
+      if (res.ok) {
+        const state = await res.json();
+        setOrchestrationState(state);
+      }
+    } catch (err) {
+      console.error('Failed to send orchestration command:', err);
+    }
+  };
+
   // Handle manual line edit save
   const handleSaveLineEdit = async () => {
     if (!editingLine) return;
@@ -506,12 +713,29 @@ export default function App() {
       {/* Top Header */}
       <header className="app-header">
         <div className="brand-section">
+          <button 
+            className="sidebar-toggle-btn"
+            onClick={() => setIsSidebarOpen(prev => !prev)}
+            title={isSidebarOpen ? "Collapse Projects Sidebar" : "Open Projects Sidebar"}
+          >
+            <Menu size={15} />
+          </button>
           <div className="brand-logo">
             <Scan size={18} />
           </div>
           <span className="brand-title">
             MATRIX CAPTURE <span className="brand-badge">STUDIO 2.5</span>
           </span>
+          {activeProject && (
+            <div 
+              className="active-project-pill" 
+              onClick={() => setIsSidebarOpen(true)}
+              title="Current active project (click to switch)"
+            >
+              <FolderKanban size={13} color="#00ff9d" />
+              <span className="project-name">{activeProject.name}</span>
+            </div>
+          )}
         </div>
 
         {/* Realtime Metrics & Token Utilization Pill */}
@@ -590,6 +814,21 @@ export default function App() {
             <span>Export VFS/Monaco JSON</span>
           </a>
 
+          {activeProject && (
+            <button 
+              className="btn btn-outline"
+              onClick={() => {
+                setProjectToAbort(activeProject);
+                setShowAbortModal(true);
+              }}
+              title="Abort current project and clear active state"
+              style={{ borderColor: 'rgba(255, 123, 114, 0.4)', color: '#ff7b72' }}
+            >
+              <Ban size={14} />
+              <span>Abort Project</span>
+            </button>
+          )}
+
           <button 
             className="btn btn-outline"
             onClick={handleResetSession}
@@ -626,6 +865,112 @@ export default function App() {
           </a>
         </div>
       </header>
+
+      {/* 3-Way Unified Orchestration Bar (Web UI, Mobile, HUD Sync) */}
+      <div className="orchestration-bar">
+        <div className="orchestration-status-cluster">
+          <div className="orchestration-label-group">
+            <span className="orch-subtitle">SYNCHRONIZED ORCHESTRATION</span>
+            <div className="orch-status-row">
+              <span className={`orch-status-pill status-${(orchestrationState.status || 'idle').toLowerCase()}`}>
+                <span className="orch-status-dot" />
+                {orchestrationState.status || 'IDLE'}
+              </span>
+              <span className="orch-source-tag">Source: {orchestrationState.source || 'system'}</span>
+            </div>
+          </div>
+
+          <div className="orch-telemetry-badge">
+            <Layers size={14} color="#58a6ff" />
+            <span className="orch-telemetry-page">PAGE {telemetry.current_page || 1}</span>
+            <span className="orch-telemetry-lines">
+              Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || 30}
+            </span>
+            {telemetry.dwell_countdown_ms > 0 && (
+              <span className="orch-dwell-tag">{telemetry.dwell_countdown_ms}ms dwell</span>
+            )}
+          </div>
+        </div>
+
+        <div className="orchestration-actions">
+          {orchestrationState.status === 'RUNNING' ? (
+            <>
+              <button
+                className="btn btn-orch btn-pause"
+                onClick={() => handleOrchestrationCommand('PAUSE')}
+                title="Pause orchestration across Web, Mobile and HUD"
+              >
+                <Pause size={15} />
+                <span>PAUSE</span>
+              </button>
+              <button
+                className="btn btn-orch btn-end"
+                onClick={() => handleOrchestrationCommand('END')}
+                title="End orchestration session"
+              >
+                <Square size={15} />
+                <span>END</span>
+              </button>
+              <button
+                className="btn btn-orch btn-restart"
+                onClick={() => handleOrchestrationCommand('RESTART')}
+                title="Restart pagination and capture from beginning (Line 1)"
+              >
+                <RotateCcw size={14} />
+                <span>Restart from Beginning</span>
+              </button>
+            </>
+          ) : orchestrationState.status === 'PAUSED' ? (
+            <>
+              <button
+                className="btn btn-orch btn-resume"
+                onClick={() => handleOrchestrationCommand('RESUME')}
+                title="Resume orchestration across Web, Mobile and HUD"
+              >
+                <Play size={15} />
+                <span>RESUME</span>
+              </button>
+              <button
+                className="btn btn-orch btn-end"
+                onClick={() => handleOrchestrationCommand('END')}
+                title="End orchestration session"
+              >
+                <Square size={15} />
+                <span>END</span>
+              </button>
+              <button
+                className="btn btn-orch btn-restart"
+                onClick={() => handleOrchestrationCommand('RESTART')}
+                title="Restart pagination and capture from beginning (Line 1)"
+              >
+                <RotateCcw size={14} />
+                <span>Restart from Beginning</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className="btn btn-orch btn-begin"
+                onClick={() => handleOrchestrationCommand('BEGIN')}
+                title="Begin synchronized capture orchestration across Web UI, Mobile and HUD"
+              >
+                <Play size={16} />
+                <span>BEGIN</span>
+              </button>
+              {(telemetry.current_top_line > 1 || frames.length > 0) && (
+                <button
+                  className="btn btn-orch btn-restart"
+                  onClick={() => handleOrchestrationCommand('RESTART')}
+                  title="Restart pagination from beginning (Line 1)"
+                >
+                  <RotateCcw size={14} />
+                  <span>Restart from Beginning</span>
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
       {!backendConnected && (
         <div style={{
@@ -702,7 +1047,128 @@ export default function App() {
         onDragLeave={() => setIsDraggingOver(false)}
         onDrop={handleDrop}
       >
-        {/* Column 1: Captured Frame Feed with drag-and-drop */}
+        {/* Leftmost Collapsible Projects Sidebar */}
+        <aside className={`projects-sidebar ${isSidebarOpen ? 'open' : 'collapsed'}`}>
+          {isSidebarOpen ? (
+            <div className="projects-sidebar-content">
+              <div className="sidebar-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FolderKanban size={16} color="#00ff9d" />
+                  <span style={{ fontWeight: 600, fontSize: '13px', color: '#e6edf3' }}>Projects</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <button 
+                    className="btn btn-sm btn-outline"
+                    onClick={() => setShowNewProjectModal(true)}
+                    title="Create New Project"
+                    style={{ padding: '3px 8px', fontSize: '11px' }}
+                  >
+                    <Plus size={12} /> New
+                  </button>
+                  <button 
+                    className="sidebar-toggle-btn"
+                    onClick={() => setIsSidebarOpen(false)}
+                    title="Collapse Sidebar"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="projects-list">
+                {projects.map(p => (
+                  <div 
+                    key={p.id}
+                    className={`project-card ${p.id === activeProject?.id ? 'active' : ''} ${p.status === 'aborted' ? 'aborted' : ''}`}
+                    onClick={() => handleSwitchProject(p.id)}
+                    title={`Switch to ${p.name}`}
+                  >
+                    <div className="project-card-top">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span className={`project-status-dot ${p.id === activeProject?.id ? 'active' : ''}`} />
+                        <span className="project-title">{p.name}</span>
+                      </div>
+                      {p.id === activeProject?.id ? (
+                        <span className="active-badge">ACTIVE</span>
+                      ) : p.status === 'aborted' ? (
+                        <span style={{ fontSize: '9px', color: '#ff7b72', border: '1px solid rgba(255,123,114,0.3)', padding: '1px 4px', borderRadius: '3px' }}>ABORTED</span>
+                      ) : null}
+                    </div>
+
+                    {p.description && (
+                      <p className="project-desc">{p.description}</p>
+                    )}
+
+                    <div className="project-stats">
+                      <span>Status: {p.status}</span>
+                      {p.target_total_lines > 0 && <span>• Target: {p.target_total_lines} ln</span>}
+                    </div>
+
+                    <div className="project-actions" onClick={e => e.stopPropagation()}>
+                      <button 
+                        className="btn-text-muted"
+                        onClick={() => handleClearProjectData(p.id)}
+                        title="Clear captured frames & OCR lines for this project"
+                      >
+                        Clear Data
+                      </button>
+                      {p.status !== 'aborted' && (
+                        <button 
+                          className="btn-text-danger"
+                          onClick={() => {
+                            setProjectToAbort(p);
+                            setShowAbortModal(true);
+                          }}
+                          title="Abort this project"
+                        >
+                          <Ban size={11} /> Abort
+                        </button>
+                      )}
+                      {projects.length > 1 && (
+                        <button 
+                          className="btn-text-danger"
+                          onClick={() => handleDeleteProject(p.id)}
+                          title="Delete this project permanently"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="sidebar-footer">
+                <div className="db-indicator">
+                  <span className="db-dot" />
+                  <span>SQLite3: matrix_capture.db</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div 
+              className="projects-sidebar-rail" 
+              onClick={() => setIsSidebarOpen(true)}
+              title="Expand Projects Sidebar"
+            >
+              <button 
+                className="rail-add-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowNewProjectModal(true);
+                }}
+                title="Create New Project"
+              >
+                <Plus size={14} />
+              </button>
+              <FolderKanban size={16} color="#00ff9d" />
+              <span className="rail-project-label">{activeProject ? activeProject.name : 'Projects'}</span>
+              <ChevronRight size={14} color="#8b949e" style={{ marginTop: 'auto' }} />
+            </div>
+          )}
+        </aside>
+
+        {/* Column 1: Captured Frame Feed with drag-and-drop - Sequentially Sorted */}
         <aside className="frames-feed-panel">
           <div className="panel-header">
             <span>Captured Frames ({frames.length})</span>
@@ -728,7 +1194,7 @@ export default function App() {
           </div>
 
           <div className="frames-list">
-            {frames.length === 0 ? (
+            {sortedFrames.length === 0 ? (
               <div className="drop-zone-placeholder" onClick={() => fileInputRef.current?.click()}>
                 <UploadCloud size={28} color="#00ff9d" />
                 <span style={{ fontWeight: 600, color: '#e6edf3' }}>Drop 1080p Screenshots Here</span>
@@ -736,44 +1202,72 @@ export default function App() {
                 <span style={{ fontSize: '10px', color: '#58a6ff', marginTop: '6px' }}>Settled Pixel 10 frames stream here automatically</span>
               </div>
             ) : (
-              frames.map(f => (
-                <div
-                  key={f.frame_id}
-                  className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
-                  onClick={() => setSelectedFrameId(f.frame_id)}
-                >
-                  <div className="frame-card-preview">
-                    <img src={`${API_BASE}/api/frames/${f.frame_id}/image`} alt={f.frame_id} />
-                    <span className="frame-badge">Pg {f.page_index}</span>
-                    {f.token_usage && f.token_usage.total_tokens > 0 && (
-                      <span className="frame-token-badge">
-                        <Coins size={9} /> {f.token_usage.total_tokens}
-                      </span>
+              sortedFrames.map((f, idx) => {
+                const prevFrame = idx > 0 ? sortedFrames[idx - 1] : null;
+                const hasGap = prevFrame && prevFrame.bottom_line > 0 && f.top_line > prevFrame.bottom_line + 1;
+
+                return (
+                  <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {hasGap && (
+                      <div className="gap-alert-tag">
+                        <AlertCircle size={11} />
+                        <span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span>
+                      </div>
                     )}
-                  </div>
-                  <div className="frame-card-info">
-                    <span className="frame-lines-badge">
-                      Ln {f.top_line} → {f.bottom_line}
-                    </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
-                      <span className="frame-status-text" title={f.status}>
-                        {f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}
-                      </span>
-                      {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
-                        <button
-                          className="frame-retry-btn"
-                          onClick={(e) => handleReprocessFrame(f.frame_id, e)}
-                          title="Retry Gemini OCR"
-                          disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}
-                        >
-                          <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
-                        </button>
-                      )}
+                    <div
+                      className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
+                      onClick={() => setSelectedFrameId(f.frame_id)}
+                    >
+                      <div className="frame-card-preview">
+                        <img src={`${API_BASE}/api/frames/${f.frame_id}/image`} alt={f.frame_id} />
+                        <span className="frame-badge">Pg {f.page_index}</span>
+                        {f.token_usage && f.token_usage.total_tokens > 0 && (
+                          <span className="frame-token-badge">
+                            <Coins size={9} /> {f.token_usage.total_tokens}
+                          </span>
+                        )}
+                      </div>
+                      <div className="frame-card-info">
+                        <span className="frame-lines-badge">
+                          Ln {f.top_line} → {f.bottom_line}
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
+                          <span className="frame-status-text" title={f.status}>
+                            {f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}
+                          </span>
+                          {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
+                            <button
+                              className="frame-retry-btn"
+                              onClick={(e) => handleReprocessFrame(f.frame_id, e)}
+                              title="Retry Gemini OCR"
+                              disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}
+                            >
+                              <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Custom Offset Micro-nudge for Concatenation */}
+                        <div className="frame-position-controls" onClick={e => e.stopPropagation()} title="Micro-nudge vertical alignment offset (px)">
+                          <MoveVertical size={10} color="#8b949e" />
+                          <button 
+                            className="nudge-btn" 
+                            onClick={() => handleUpdateFramePosition(f.frame_id, -1)}
+                            title="Nudge Up (-1px)"
+                          >▲</button>
+                          <span className="nudge-val">{f.custom_offset_y || 0}px</span>
+                          <button 
+                            className="nudge-btn" 
+                            onClick={() => handleUpdateFramePosition(f.frame_id, 1)}
+                            title="Nudge Down (+1px)"
+                          >▼</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </aside>
@@ -1123,6 +1617,109 @@ export default function App() {
             <div className="modal-footer">
               <button className="btn btn-outline" onClick={() => setShowConfigModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSaveApiKey}>Save Key</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Project Modal */}
+      {showNewProjectModal && (
+        <div className="modal-overlay" onClick={() => setShowNewProjectModal(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <FolderKanban size={16} color="#00ff9d" />
+                <span>Create New Project</span>
+              </div>
+              <button 
+                onClick={() => setShowNewProjectModal(false)} 
+                style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="modal-form-group">
+                <label>PROJECT NAME *</label>
+                <input 
+                  type="text"
+                  placeholder="e.g. Small-Fling Core Service"
+                  className="modal-input"
+                  value={newProjectName}
+                  onChange={e => setNewProjectName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="modal-form-group">
+                <label>DESCRIPTION (OPTIONAL)</label>
+                <input 
+                  type="text"
+                  placeholder="e.g. Desktop screen capture scan of parser module"
+                  className="modal-input"
+                  value={newProjectDesc}
+                  onChange={e => setNewProjectDesc(e.target.value)}
+                />
+              </div>
+
+              <div className="modal-form-group">
+                <label>TARGET TOTAL LINES</label>
+                <input 
+                  type="number"
+                  placeholder="0 (unspecified)"
+                  className="modal-input"
+                  value={newProjectTargetLines || ''}
+                  onChange={e => setNewProjectTargetLines(Number(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setShowNewProjectModal(false)}>Cancel</button>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleCreateProject}
+                disabled={!newProjectName.trim()}
+              >
+                <Plus size={14} /> Create & Activate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Abort Project Confirmation Modal */}
+      {showAbortModal && projectToAbort && (
+        <div className="modal-overlay" onClick={() => setShowAbortModal(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()} style={{ borderColor: 'rgba(255, 123, 114, 0.5)' }}>
+            <div className="modal-header" style={{ borderBottomColor: 'rgba(255, 123, 114, 0.2)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ff7b72' }}>
+                <Ban size={16} />
+                <span>Abort Project & Clear Data</span>
+              </div>
+              <button 
+                onClick={() => setShowAbortModal(false)} 
+                style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: '13px', color: '#e6edf3', lineHeight: 1.5, marginBottom: '10px' }}>
+                Are you sure you want to abort project <strong style={{ color: '#ff7b72' }}>{projectToAbort.name}</strong>?
+              </p>
+              <p style={{ fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>
+                This will mark the project status as <strong style={{ color: '#ff7b72' }}>ABORTED</strong>, reset active pacing orchestration, and delete all captured screenshot frames and OCR transcribed lines for this project from SQLite.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-outline" onClick={() => setShowAbortModal(false)}>Cancel</button>
+              <button 
+                className="btn btn-outline" 
+                style={{ borderColor: '#ff7b72', color: '#ff7b72', background: 'rgba(255, 123, 114, 0.15)' }}
+                onClick={() => handleAbortProject(projectToAbort.id)}
+              >
+                <Ban size={14} /> Confirm Abort & Wipe Data
+              </button>
             </div>
           </div>
         </div>

@@ -40,6 +40,7 @@ class DesktopPaginationService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var automationJob: Job? = null
     private val isPaginating = AtomicBoolean(false)
+    private val isPaused = AtomicBoolean(false)
     private var wakeLock: PowerManager.WakeLock? = null
 
     private fun acquireWakeLock() {
@@ -474,6 +475,10 @@ class DesktopPaginationService : AccessibilityService() {
                 }
 
                 while (isActive && isPaginating.get()) {
+                    while (isPaused.get() && isPaginating.get() && isActive) {
+                        delay(250)
+                    }
+                    if (!isActive || !isPaginating.get()) break
                     pageIndex++
                     _currentPage.value = pageIndex
 
@@ -659,12 +664,66 @@ class DesktopPaginationService : AccessibilityService() {
 
     fun stopPagination() {
         if (isPaginating.compareAndSet(true, false)) {
+            isPaused.set(false)
             automationJob?.cancel()
             setSoftKeyboardHidden(false)
             releaseWakeLock()
             _paginationState.value = PaginationState.Idle
             Log.i(TAG, "Pagination automation stopped.")
         }
+    }
+
+    fun pausePagination() {
+        if (isPaginating.get()) {
+            isPaused.set(true)
+            _paginationState.value = PaginationState.Paused
+            _telemetry.value = _telemetry.value.copy(
+                phase = "PAUSED",
+                isPacing = false,
+                statusMessage = "Orchestration Paused at Page ${_currentPage.value}"
+            )
+            Log.i(TAG, "Pagination automation paused.")
+        }
+    }
+
+    fun resumePagination() {
+        if (isPaginating.get() && isPaused.get()) {
+            isPaused.set(false)
+            _paginationState.value = PaginationState.Running
+            _telemetry.value = _telemetry.value.copy(
+                phase = "PACING",
+                isPacing = true,
+                statusMessage = "Orchestration Resumed at Page ${_currentPage.value}"
+            )
+            Log.i(TAG, "Pagination automation resumed.")
+        }
+    }
+
+    suspend fun restartFromBeginning(targetDisplayId: Int = 0) {
+        stopPagination()
+        isPaused.set(false)
+        resetToStart(_calculatedTotalLines.value)
+        val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
+        val bounds = getDisplayOrWindowBounds(resolvedDisplay)
+        repeat(12) {
+            dispatchSwipe(
+                startX = bounds.centerX().toFloat(),
+                startY = bounds.top * 0.25f,
+                endX = bounds.centerX().toFloat(),
+                endY = bounds.bottom * 0.75f,
+                durationMs = 250,
+                displayId = resolvedDisplay
+            )
+            delay(250)
+        }
+        _telemetry.value = _telemetry.value.copy(
+            phase = "READY",
+            statusMessage = "Restarted from Beginning (Page 1)",
+            currentPage = 1,
+            currentTopLine = 1,
+            currentBottomLine = 0
+        )
+        Log.i(TAG, "Restarted pagination from beginning.")
     }
 
     /**
@@ -1061,6 +1120,7 @@ class DesktopPaginationService : AccessibilityService() {
     sealed class PaginationState {
         object Idle : PaginationState()
         object Running : PaginationState()
+        object Paused : PaginationState()
         data class Error(val message: String) : PaginationState()
     }
 

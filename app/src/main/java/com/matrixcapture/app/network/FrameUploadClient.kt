@@ -252,6 +252,82 @@ class FrameUploadClient(
         }
     }
 
+    data class OrchestrationState(
+        val status: String = "IDLE", // IDLE, RUNNING, PAUSED, COMPLETED, ABORTED
+        val command: String = "NONE", // BEGIN, PAUSE, RESUME, END, RESTART
+        val currentPage: Int = 1,
+        val currentTopLine: Int = 0,
+        val currentBottomLine: Int = 0,
+        val targetTotalLines: Int = 0,
+        val statusMessage: String = ""
+    )
+
+    suspend fun sendOrchestrationCommand(command: String, source: String = "mobile"): Result<OrchestrationState> = withContext(Dispatchers.IO) {
+        val url = "http://$serverHost/api/orchestrate"
+        val json = JSONObject().apply {
+            put("command", command.uppercase())
+            put("source", source)
+        }
+        val requestBody = json.toString().toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder().url(url).post(requestBody).build()
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: "{}"
+                    val root = JSONObject(bodyStr)
+                    val orch = root.optJSONObject("orchestration") ?: JSONObject()
+                    val telem = root.optJSONObject("telemetry") ?: JSONObject()
+                    Result.success(
+                        OrchestrationState(
+                            status = orch.optString("status", "IDLE"),
+                            command = orch.optString("last_command", command),
+                            currentPage = telem.optInt("current_page", 1),
+                            currentTopLine = telem.optInt("current_top_line", 0),
+                            currentBottomLine = telem.optInt("current_bottom_line", 0),
+                            targetTotalLines = telem.optInt("target_total_lines", 0),
+                            statusMessage = telem.optString("status_message", "")
+                        )
+                    )
+                } else {
+                    Result.failure(IOException("HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "sendOrchestrationCommand failed for $url", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchOrchestrationState(): Result<OrchestrationState> = withContext(Dispatchers.IO) {
+        val url = "http://$serverHost/api/orchestrate"
+        val request = Request.Builder().url(url).get().build()
+        try {
+            client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string() ?: "{}"
+                    val root = JSONObject(bodyStr)
+                    val orch = root.optJSONObject("orchestration") ?: JSONObject()
+                    val telem = root.optJSONObject("telemetry") ?: JSONObject()
+                    Result.success(
+                        OrchestrationState(
+                            status = orch.optString("status", "IDLE"),
+                            command = orch.optString("last_command", "NONE"),
+                            currentPage = telem.optInt("current_page", 1),
+                            currentTopLine = telem.optInt("current_top_line", 0),
+                            currentBottomLine = telem.optInt("current_bottom_line", 0),
+                            targetTotalLines = telem.optInt("target_total_lines", 0),
+                            statusMessage = telem.optString("status_message", "")
+                        )
+                    )
+                } else {
+                    Result.failure(IOException("HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     companion object {
         private const val TAG = "FrameUploadClient"
     }
