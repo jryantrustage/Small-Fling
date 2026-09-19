@@ -14,296 +14,99 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
-/**
- * Module D: Gemini Cloud Extraction Client for Video File API and Multimodal OCR.
- *
- * Implements:
- * 1. Resumable Upload to Gemini File API (https://generativelanguage.googleapis.com/upload/v1beta/files).
- * 2. Polling loop awaiting ACTIVE file state.
- * 3. Exact system prompt inference with gemini-2.5-flash / gemini-1.5-pro.
- * 4. Automatic cleanup/deletion of remote video files.
- */
-class GeminiApiService(
-    private val apiKeyProvider: () -> String
-) {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        isLenient = true
-        encodeDefaults = true
-    }
+class GeminiApiService(private val apiKeyProvider: () -> String) {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true; encodeDefaults = true }
+    private val httpClient = OkHttpClient.Builder().connectTimeout(60, TimeUnit.SECONDS).readTimeout(180, TimeUnit.SECONDS).writeTimeout(180, TimeUnit.SECONDS).build()
 
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(180, TimeUnit.SECONDS)
-        .writeTimeout(180, TimeUnit.SECONDS)
-        .build()
+    val mobilePromptTokens = AtomicInteger(0)
+    val mobileCandidatesTokens = AtomicInteger(0)
+    val mobileTotalTokens = AtomicInteger(0)
 
-    /**
-     * Uploads an MP4 video segment to the Gemini File API via the 2-step resumable protocol.
-     */
     suspend fun uploadVideo(file: File, displayName: String = file.name): GeminiFile = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider().trim()
-        if (apiKey.isEmpty()) {
-            throw IllegalStateException("Gemini API Key is not set. Please provide a valid Gemini API Key.")
-        }
+        if (apiKey.isEmpty()) throw IllegalStateException("Gemini API Key is not set.")
 
         val fileSize = file.length()
-        Log.i(TAG, "Uploading ${file.name} (${fileSize / 1024} KB) to Gemini File API...")
-
-        // Step 1: Initialize Resumable Upload Session
-        val initUrl = "https://generativelanguage.googleapis.com/upload/v1beta/files?key=$apiKey"
-        val metadataJson = """{"file": {"display_name": "$displayName"}}"""
-
-        val initRequest = Request.Builder()
-            .url(initUrl)
-            .addHeader("X-Goog-Upload-Protocol", "resumable")
-            .addHeader("X-Goog-Upload-Command", "start")
-            .addHeader("X-Goog-Upload-Header-Content-Length", fileSize.toString())
-            .addHeader("X-Goog-Upload-Header-Content-Type", "video/mp4")
-            .post(metadataJson.toRequestBody("application/json".toMediaType()))
+        val initReq = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$apiKey")
+            .addHeader("X-Goog-Upload-Protocol", "resumable").addHeader("X-Goog-Upload-Command", "start")
+            .addHeader("X-Goog-Upload-Header-Content-Length", fileSize.toString()).addHeader("X-Goog-Upload-Header-Content-Type", "video/mp4")
+            .post("""{"file": {"display_name": "$displayName"}}""".toRequestBody("application/json".toMediaType()))
             .build()
 
-        val uploadUrl = httpClient.newCall(initRequest).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Failed to initiate Gemini upload: HTTP ${response.code} - ${response.body?.string()}")
-            }
-            response.header("X-Goog-Upload-URL")
-                ?: throw IOException("Missing X-Goog-Upload-URL header in Gemini upload response")
+        val uploadUrl = httpClient.newCall(initReq).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("Failed upload init: HTTP ${resp.code} - ${resp.body?.string()}")
+            resp.header("X-Goog-Upload-URL") ?: throw IOException("Missing X-Goog-Upload-URL")
         }
 
-        // Step 2: Upload Raw MP4 Video Bytes
-        val uploadRequestBody = file.asRequestBody("video/mp4".toMediaType())
-        val uploadRequest = Request.Builder()
-            .url(uploadUrl)
-            .addHeader("Content-Length", fileSize.toString())
-            .addHeader("X-Goog-Upload-Offset", "0")
-            .addHeader("X-Goog-Upload-Command", "upload, finalize")
-            .post(uploadRequestBody)
-            .build()
-
-        val geminiFile = httpClient.newCall(uploadRequest).execute().use { response ->
-            val respBody = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                throw IOException("Failed to upload video bytes to Gemini: HTTP ${response.code} - $respBody")
-            }
-            val uploadResponse = json.decodeFromString<FileUploadResponse>(respBody)
-            uploadResponse.file
+        val uploadReq = Request.Builder().url(uploadUrl).addHeader("Content-Length", fileSize.toString()).addHeader("X-Goog-Upload-Offset", "0").addHeader("X-Goog-Upload-Command", "upload, finalize").post(file.asRequestBody("video/mp4".toMediaType())).build()
+        httpClient.newCall(uploadReq).execute().use { resp ->
+            val body = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) throw IOException("Failed upload: HTTP ${resp.code} - $body")
+            json.decodeFromString<FileUploadResponse>(body).file
         }
-
-        Log.i(TAG, "Uploaded video successfully. Remote Name: ${geminiFile.name}, State: ${geminiFile.state}")
-        geminiFile
     }
 
-    /**
-     * Polls the Gemini File API until the video transitions from PROCESSING to ACTIVE.
-     */
-    suspend fun pollUntilActive(
-        fileName: String,
-        timeoutMs: Long = 180_000L,
-        pollIntervalMs: Long = 3000L
-    ): GeminiFile = withContext(Dispatchers.IO) {
+    suspend fun pollUntilActive(fileName: String, timeoutMs: Long = 180_000L, pollIntervalMs: Long = 3000L): GeminiFile = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider().trim()
-        val startTime = System.currentTimeMillis()
-        val getUrl = "https://generativelanguage.googleapis.com/v1beta/$fileName?key=$apiKey"
-
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
-            val request = Request.Builder().url(getUrl).get().build()
-            val file = httpClient.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: ""
-                if (!response.isSuccessful) {
-                    throw IOException("Failed to check file status: HTTP ${response.code} - $body")
-                }
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            val file = httpClient.newCall(Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/$fileName?key=$apiKey").get().build()).execute().use { resp ->
+                val body = resp.body?.string() ?: ""
+                if (!resp.isSuccessful) throw IOException("File status failed: HTTP ${resp.code} - $body")
                 json.decodeFromString<GeminiFile>(body)
             }
-
-            Log.d(TAG, "File $fileName state: ${file.state}")
             when (file.state) {
                 "ACTIVE" -> return@withContext file
-                "FAILED" -> throw IllegalStateException("Gemini video processing failed for $fileName")
-                else -> {
-                    delay(pollIntervalMs)
-                }
+                "FAILED" -> throw IllegalStateException("Video processing failed: $fileName")
+                else -> delay(pollIntervalMs)
             }
         }
-
-        throw IllegalStateException("Timed out waiting for file $fileName to become ACTIVE")
+        throw IllegalStateException("Timed out waiting for $fileName")
     }
 
-    /**
-     * Dispatches the segment to Gemini with the EXACT system instructions from Section 3.
-     */
-    suspend fun extractCodeFromSegment(
-        fileUri: String,
-        segmentIndex: Int,
-        startLine: Int,
-        endLine: Int,
-        modelName: String = "gemini-3.6-flash"
-    ): String = withContext(Dispatchers.IO) {
+    suspend fun extractCodeFromSegment(fileUri: String, segmentIndex: Int, startLine: Int, endLine: Int, modelName: String = "gemini-3.6-flash"): String = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider().trim()
-        val generateUrl = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
-
-        val requestPayload = GenerateContentRequest(
-            systemInstruction = ContentBlock(
-                parts = listOf(Part(text = GEMINI_SYSTEM_PROMPT))
-            ),
-            contents = listOf(
-                ContentBlock(
-                    parts = listOf(
-                        Part(
-                            fileData = FileData(
-                                mimeType = "video/mp4",
-                                fileUri = fileUri
-                            )
-                        ),
-                        Part(
-                            text = "Extract the complete document content displayed in this video segment " +
-                                    "(Lines approximately $startLine through $endLine). " +
-                                    "Follow all instructions precisely."
-                        )
-                    )
-                )
-            ),
-            generationConfig = GenerationConfig(
-                temperature = 0.0,
-                maxOutputTokens = 8192
-            )
+        val payload = GenerateContentRequest(
+            systemInstruction = ContentBlock(parts = listOf(Part(text = GEMINI_SYSTEM_PROMPT))),
+            contents = listOf(ContentBlock(parts = listOf(Part(fileData = FileData("video/mp4", fileUri)), Part(text = "Extract the complete document content displayed in this video segment (Lines approximately $startLine through $endLine). Follow all instructions precisely.")))),
+            generationConfig = GenerationConfig(temperature = 0.0, maxOutputTokens = 8192)
         )
+        val bodyStr = json.encodeToString(GenerateContentRequest.serializer(), payload)
+        val req = Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey").post(bodyStr.toRequestBody("application/json".toMediaType())).build()
 
-        val jsonBody = json.encodeToString(GenerateContentRequest.serializer(), requestPayload)
-        val request = Request.Builder()
-            .url(generateUrl)
-            .post(jsonBody.toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val extractedText = httpClient.newCall(request).execute().use { response ->
-            val body = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                throw IOException("Gemini generateContent error: HTTP ${response.code} - $body")
+        httpClient.newCall(req).execute().use { resp ->
+            val b = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) throw IOException("Gemini error: HTTP ${resp.code} - $b")
+            val res = json.decodeFromString<GenerateContentResponse>(b)
+            res.usageMetadata?.let {
+                mobilePromptTokens.addAndGet(it.promptTokenCount); mobileCandidatesTokens.addAndGet(it.candidatesTokenCount); mobileTotalTokens.addAndGet(it.totalTokenCount)
             }
-            val result = json.decodeFromString<GenerateContentResponse>(body)
-            result.usageMetadata?.let { meta ->
-                mobilePromptTokens.addAndGet(meta.promptTokenCount)
-                mobileCandidatesTokens.addAndGet(meta.candidatesTokenCount)
-                mobileTotalTokens.addAndGet(meta.totalTokenCount)
-                Log.i(TAG, "Segment $segmentIndex Gemini tokens: ${meta.totalTokenCount} (Prompt: ${meta.promptTokenCount}, Output: ${meta.candidatesTokenCount})")
-            }
-            result.candidates?.firstOrNull()?.content?.parts?.joinToString("\n") { it.text ?: "" } ?: ""
+            res.candidates?.firstOrNull()?.content?.parts?.joinToString("\n") { it.text ?: "" } ?: ""
         }
-
-        Log.i(TAG, "Successfully extracted ${extractedText.lines().size} lines from segment $segmentIndex.")
-        extractedText
     }
 
-    /**
-     * Deletes the uploaded video file from the Gemini File API.
-     */
     suspend fun deleteRemoteFile(fileName: String): Boolean = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider().trim()
-        val deleteUrl = "https://generativelanguage.googleapis.com/v1beta/$fileName?key=$apiKey"
-        val request = Request.Builder().url(deleteUrl).delete().build()
-
-        try {
-            httpClient.newCall(request).execute().use { response ->
-                val success = response.isSuccessful
-                Log.i(TAG, "Deleted remote Gemini file $fileName (Success: $success)")
-                success
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not delete remote Gemini file $fileName", e)
-            false
-        }
+        try { httpClient.newCall(Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/$fileName?key=$apiKey").delete().build()).execute().use { it.isSuccessful } }
+        catch (_: Exception) { false }
     }
 
-    // --- Data Models for Gemini REST API ---
-
-    @Serializable
-    data class FileUploadResponse(
-        val file: GeminiFile
-    )
-
-    @Serializable
-    data class GeminiFile(
-        val name: String,
-        @SerialName("display_name") val displayName: String? = null,
-        val mimeType: String? = null,
-        val sizeBytes: String? = null,
-        val state: String? = null,
-        val uri: String? = null
-    )
-
-    @Serializable
-    data class GenerateContentRequest(
-        @SerialName("system_instruction") val systemInstruction: ContentBlock? = null,
-        val contents: List<ContentBlock>,
-        val generationConfig: GenerationConfig? = null
-    )
-
-    @Serializable
-    data class ContentBlock(
-        val role: String? = null,
-        val parts: List<Part>
-    )
-
-    @Serializable
-    data class Part(
-        val text: String? = null,
-        @SerialName("file_data") val fileData: FileData? = null
-    )
-
-    @Serializable
-    data class FileData(
-        @SerialName("mime_type") val mimeType: String,
-        @SerialName("file_uri") val fileUri: String
-    )
-
-    @Serializable
-    data class GenerationConfig(
-        val temperature: Double = 0.0,
-        val maxOutputTokens: Int = 8192
-    )
-
-    val mobilePromptTokens = java.util.concurrent.atomic.AtomicInteger(0)
-    val mobileCandidatesTokens = java.util.concurrent.atomic.AtomicInteger(0)
-    val mobileTotalTokens = java.util.concurrent.atomic.AtomicInteger(0)
-
-    @Serializable
-    data class GenerateContentResponse(
-        val candidates: List<Candidate>? = null,
-        val usageMetadata: UsageMetadata? = null
-    )
-
-    @Serializable
-    data class UsageMetadata(
-        val promptTokenCount: Int = 0,
-        val candidatesTokenCount: Int = 0,
-        val totalTokenCount: Int = 0
-    )
-
-    @Serializable
-    data class Candidate(
-        val content: ContentBlock? = null
-    )
+    @Serializable data class FileUploadResponse(val file: GeminiFile)
+    @Serializable data class GeminiFile(val name: String, @SerialName("display_name") val displayName: String? = null, val mimeType: String? = null, val sizeBytes: String? = null, val state: String? = null, val uri: String? = null)
+    @Serializable data class GenerateContentRequest(@SerialName("system_instruction") val systemInstruction: ContentBlock? = null, val contents: List<ContentBlock>, val generationConfig: GenerationConfig? = null)
+    @Serializable data class ContentBlock(val role: String? = null, val parts: List<Part>)
+    @Serializable data class Part(val text: String? = null, @SerialName("file_data") val fileData: FileData? = null)
+    @Serializable data class FileData(@SerialName("mime_type") val mimeType: String, @SerialName("file_uri") val fileUri: String)
+    @Serializable data class GenerationConfig(val temperature: Double = 0.0, val maxOutputTokens: Int = 8192)
+    @Serializable data class GenerateContentResponse(val candidates: List<Candidate>? = null, val usageMetadata: UsageMetadata? = null)
+    @Serializable data class UsageMetadata(val promptTokenCount: Int = 0, val candidatesTokenCount: Int = 0, val totalTokenCount: Int = 0)
+    @Serializable data class Candidate(val content: ContentBlock? = null)
 
     companion object {
         private const val TAG = "GeminiApiService"
-
-        /**
-         * The exact system instructions mandated in Section 3 of the Technical Specifications.
-         */
-        val GEMINI_SYSTEM_PROMPT = """
-You are an uncompromising, bit-level OCR code extraction engine.
-You are given a 30fps screen-recorded MP4 video showing a document being paginated line by line.
-
-CRITICAL INSTRUCTIONS:
-1. Extract ALL text and code visible in the editor exactly as typed.
-2. Maintain all triple backticks (```) for code blocks and their exact language identifiers (json, tsx, typescript, css, html, etc.).
-3. Preserve all parser comments verbatim, including:
-   <!-- CODESCAN_FILE_START path="..." type="..." size="..." lines="..." chars="..." -->
-   <!-- CODESCAN_FILE_END -->
-4. Never abbreviate, truncate, summarize, or insert placeholders (e.g., no "// ... rest of code").
-5. Do not replace spaces with  . Use standard ASCII spaces for indentation.
-6. Only output the raw document contents. Do not include introductory or conversational filler.
-""".trimIndent()
+        val GEMINI_SYSTEM_PROMPT = """You are an uncompromising, bit-level OCR code extraction engine. You are given a 30fps screen-recorded MP4 video showing a document being paginated line by line. Extract ALL text and code visible in the editor exactly as typed. Maintain all triple backticks (```) and language identifiers. Preserve all parser comments. Never abbreviate, truncate or summarize. Use standard ASCII spaces. Only output raw document contents.""".trimIndent()
     }
 }
