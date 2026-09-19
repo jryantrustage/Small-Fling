@@ -37,14 +37,17 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
         )
     }
 
-    suspend fun uploadFrame(bitmap: Bitmap, topLine: Int = 0, bottomLine: Int = 0, pageIndex: Int = 1, sync: Boolean = true): UploadResult = withContext(Dispatchers.IO) {
+    suspend fun uploadFrame(bitmap: Bitmap, topLine: Int = 0, bottomLine: Int = 0, pageIndex: Int = 1, sync: Boolean = true, engine: String? = null, modelTarget: String? = null, pipelineMode: String? = null): UploadResult = withContext(Dispatchers.IO) {
         val stream = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
         val bytes = stream.toByteArray()
-        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("top_line", topLine.toString()).addFormDataPart("bottom_line", bottomLine.toString())
             .addFormDataPart("page_index", pageIndex.toString()).addFormDataPart("sync", sync.toString())
             .addFormDataPart("file", "frame_p${pageIndex}_${System.currentTimeMillis()}.png", bytes.toRequestBody("image/png".toMediaTypeOrNull(), 0, bytes.size))
-            .build()
+        engine?.let { builder.addFormDataPart("engine", it) }
+        modelTarget?.let { builder.addFormDataPart("model_target", it) }
+        pipelineMode?.let { builder.addFormDataPart("pipeline_mode", it) }
+        val body = builder.build()
         try {
             client.newCall(Request.Builder().url("http://$serverHost/api/upload-frame").post(body).build()).execute().use { resp ->
                 if (resp.isSuccessful) {
@@ -53,6 +56,15 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
                 } else UploadResult(false, message = "HTTP ${resp.code}")
             }
         } catch (e: Exception) { UploadResult(false, message = e.message ?: "Error") }
+    }
+
+    suspend fun setServerPipelineMode(mode: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val json = JSONObject().apply { put("mode", mode.lowercase()) }
+        try {
+            client.newCall(Request.Builder().url("http://$serverHost/api/pipeline/mode").post(json.toString().toRequestBody("application/json".toMediaTypeOrNull())).build()).execute().use { resp ->
+                if (resp.isSuccessful) Result.success(Unit) else Result.failure(IOException("HTTP ${resp.code}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
     suspend fun getNextPageLine(): Result<Int> = withContext(Dispatchers.IO) {

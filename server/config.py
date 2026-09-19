@@ -44,6 +44,11 @@ CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in
 TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "0"))
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
+OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip()
+OLLAMA_VISION_MODEL: str = os.environ.get("OLLAMA_VISION_MODEL", "llama3.2-vision").strip()
+OLLAMA_CODER_MODEL: str = os.environ.get("OLLAMA_CODER_MODEL", "qwen2.5-coder").strip()
+OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", OLLAMA_VISION_MODEL).strip()
+OLLAMA_TIMEOUT: int = int(os.environ.get("OLLAMA_TIMEOUT", "45"))
 
 def set_api_key(new_key: str) -> None:
     global GEMINI_API_KEY

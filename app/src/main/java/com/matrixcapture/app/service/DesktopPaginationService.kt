@@ -60,8 +60,11 @@ class DesktopPaginationService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         stopPagination()
+        releaseWakeLock()
         setSoftKeyboardHidden(false)
         serviceScope.cancel()
+        latestCapturedBitmap?.recycle()
+        latestCapturedBitmap = null
         instance = null
         _isServiceActive.value = false
     }
@@ -220,7 +223,8 @@ class DesktopPaginationService : AccessibilityService() {
                         onFrameCaptureNeeded?.invoke(pageIndex, curTop, curBot)
                     } else {
                         val targetTop = curBot + 1
-                        _telemetry.value = _telemetry.value.copy(activeStep = "PRECISION_SCROLL", statusMessage = "Precision scrolling: positioning next page top to Ln $targetTop...")
+                        val pitch = _telemetry.value.linePitchPx.coerceIn(24f, 48f)
+                        _telemetry.value = _telemetry.value.copy(activeStep = "PRECISION_SCROLL", statusMessage = "Precision scrolling: positioning next page top to Ln $targetTop (pitch ${pitch.toInt()}px)...")
                         val ocrBefore = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                         val prevBottomY = if (ocrBefore != null && ocrBefore.lowestDetectedY > 0) ocrBefore.lowestDetectedY.toFloat() else bounds.height() * 0.86f
                         val adaptiveTravel = ((prevBottomY - (bounds.height() * 0.12f).coerceAtLeast(100f)).coerceAtLeast(220f) * autoTune).coerceIn(200f, bounds.height() * 0.70f)
@@ -239,7 +243,12 @@ class DesktopPaginationService : AccessibilityService() {
                             } else { botStatic = 0; prevBot = curBot; prevTop = curTop }
                             alignErr = curTop - targetTop
                             autoTune = if (alignErr > 0) (autoTune - 0.05f * alignErr).coerceIn(0.65f, 1.35f) else if (alignErr < -1) (autoTune + 0.03f * (-alignErr)).coerceIn(0.65f, 1.35f) else autoTune
-                            _telemetry.value = _telemetry.value.copy(activeStep = "OCR_BOUNDS", statusMessage = "Page $pageIndex: Gutter OCR Ln $curTop-$curBot (err $alignErr)")
+                            if (Math.abs(alignErr) in 1..10) {
+                                val correctionPx = -alignErr * ocr.linePitchPx
+                                dispatchMicroDrag(correctionPx, resolvedDisplay)
+                                delay(300)
+                            }
+                            _telemetry.value = _telemetry.value.copy(activeStep = "OCR_BOUNDS", statusMessage = "Page $pageIndex: Gutter OCR Ln $curTop-$curBot (err $alignErr, pitch ${ocr.linePitchPx.toInt()}px)")
                         } else alignErr = 0
                         onFrameCaptureNeeded?.invoke(pageIndex, curTop, curBot)
                     }
@@ -481,6 +490,16 @@ class DesktopPaginationService : AccessibilityService() {
         @Volatile var latestCapturedBitmap: Bitmap? = null
 
         fun updateStatus(message: String) { _telemetry.value = _telemetry.value.copy(statusMessage = message) }
+        fun updateGutterMetrics(topLine: Int, bottomLine: Int, linePitchPx: Float, wrappedLinesCount: Int = 0) {
+            val old = _telemetry.value
+            val pitch = if (linePitchPx > 0f) linePitchPx else old.linePitchPx
+            _telemetry.value = old.copy(
+                currentTopLine = if (topLine > 0) topLine else old.currentTopLine,
+                currentBottomLine = if (bottomLine > 0) bottomLine else old.currentBottomLine,
+                linePitchPx = pitch,
+                wrappedLinesDetected = wrappedLinesCount
+            )
+        }
         private val _isServiceActive = MutableStateFlow(false); val isServiceActive = _isServiceActive.asStateFlow()
         private val _paginationState = MutableStateFlow<PaginationState>(PaginationState.Idle); val paginationState = _paginationState.asStateFlow()
         private val _currentPage = MutableStateFlow(1); val currentPage = _currentPage.asStateFlow()

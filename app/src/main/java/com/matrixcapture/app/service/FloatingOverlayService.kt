@@ -13,6 +13,7 @@ import android.view.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -33,7 +34,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.*
 import androidx.savedstate.*
+import com.matrixcapture.app.data.EngineMode
+import com.matrixcapture.app.data.PipelineMode
+import com.matrixcapture.app.data.SettingsRepository
 import com.matrixcapture.app.network.FrameUploadClient
+import com.matrixcapture.app.ocr.OcrEngineType
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -54,15 +59,31 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     override val savedStateRegistry: SavedStateRegistry get() = savedStateRegistryController.savedStateRegistry
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun acquireWakeLock() = runCatching {
-        if (wakeLock == null) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:OverlayWakeLock")
+    private fun acquireWakeLock() {
+        try {
+            if (wakeLock == null) {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:OverlayWakeLock")
+            }
+            if (wakeLock?.isHeld == false) {
+                wakeLock?.acquire(120 * 60 * 1000L)
+                Log.i(TAG, "Screen WakeLock acquired in FloatingOverlayService.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to acquire wake lock in FloatingOverlayService", e)
         }
-        if (wakeLock?.isHeld == false) wakeLock?.acquire(120 * 60 * 1000L)
     }
 
-    private fun releaseWakeLock() = runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.i(TAG, "Screen WakeLock released in FloatingOverlayService.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to release wake lock in FloatingOverlayService", e)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -73,6 +94,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         initOverlayView()
         _isOverlayRunning.value = true
+        Log.i(TAG, "FloatingOverlayService created and HUD initialized.")
 
         telemetryJob = serviceScope.launch {
             val uploadClient = getUploadClient(this@FloatingOverlayService)
@@ -82,7 +104,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                     val pState = DesktopPaginationService.telemetry.value
                     val isRunning = DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running
                     val geminiApi = SegmentRecorderService.instance?.getGeminiApiService()
-                    isBackendOnline.value = uploadClient.sendTelemetry(
+                    val isOnline = uploadClient.sendTelemetry(
                         FrameUploadClient.TelemetryData(
                             deviceId = "Pixel 10 Desktop (HUD Active)", isPacing = isRunning,
                             currentPage = pState.currentPage, currentTopLine = pState.currentTopLine,
@@ -96,16 +118,26 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                             bottomToTopError = pState.bottomToTopError, wrappedLinesDetected = pState.wrappedLinesDetected
                         )
                     )
+                    isBackendOnline.value = isOnline
                     uploadClient.fetchOrchestrationState().getOrNull()?.let { remoteOrchestration.value = it }
-                } catch (_: Exception) { isBackendOnline.value = false }
+                    Log.d(TAG, "HUD telemetry sent: Pg=${pState.currentPage}, Ln=${pState.currentTopLine}-${pState.currentBottomLine}, Pacing=$isRunning, Online=$isOnline")
+                } catch (e: Exception) {
+                    isBackendOnline.value = false
+                    Log.w(TAG, "Failed to send telemetry update: ${e.message}")
+                }
             }
         }
     }
 
-    fun setOverlayFocusable(focusable: Boolean) = runCatching {
-        val flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        layoutParams.flags = if (focusable) layoutParams.flags and flag.inv() else layoutParams.flags or flag
-        composeView?.let { windowManager.updateViewLayout(it, layoutParams) }
+    fun setOverlayFocusable(focusable: Boolean) {
+        try {
+            val flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            layoutParams.flags = if (focusable) layoutParams.flags and flag.inv() else layoutParams.flags or flag
+            composeView?.let { windowManager.updateViewLayout(it, layoutParams) }
+            Log.i(TAG, "Overlay focusable set to $focusable")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update overlay focusable", e)
+        }
     }
 
     @SuppressLint("RtlHardcoded")
@@ -139,6 +171,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         super.onDestroy()
         releaseWakeLock()
         telemetryJob?.cancel()
+        Log.i(TAG, "FloatingOverlayService onDestroy. Releasing resources and sending standby telemetry...")
         CoroutineScope(Dispatchers.IO).launch {
             runCatching {
                 getUploadClient(this@FloatingOverlayService).sendTelemetry(
@@ -152,9 +185,11 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         composeView = null
         _isOverlayRunning.value = false
         instance = null
+        Log.i(TAG, "FloatingOverlayService destroyed successfully.")
     }
 
     companion object {
+        private const val TAG = "FloatingOverlayService"
         var instance: FloatingOverlayService? = null; private set
         private val _isOverlayRunning = MutableStateFlow(false)
         val isOverlayRunning = _isOverlayRunning.asStateFlow()
@@ -182,6 +217,11 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
     val remoteOrch by FloatingOverlayService.remoteOrchestration.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val settingsRepo = remember { SettingsRepository.getInstance(context) }
+    val pipelineMode by settingsRepo.pipelineMode.collectAsState()
+    val engineMode by settingsRepo.engineMode.collectAsState()
+    val isCloud = pipelineMode == PipelineMode.CLOUD_GEMINI
+    val pipeCol = if (isCloud) Color(0xFF79C0FF) else Color(0xFF00FF9D)
 
     Box(modifier = Modifier.pointerInput(Unit) { detectDragGestures { change, dragAmount -> change.consume(); onDrag(dragAmount.x, dragAmount.y) } }) {
         if (!isExpanded) {
@@ -195,7 +235,21 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                     Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(if (paginationState == DesktopPaginationService.PaginationState.Running) Color(0xFF00FF9D) else Color(0xFF8B949E)))
                     Text("Pg #${if (telemetry.currentPage > 0) telemetry.currentPage else currentPage}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     Text(if (telemetry.currentTopLine > 0) "Ln ${telemetry.currentTopLine}-${telemetry.currentBottomLine}" else "Ln: Awaiting Capture", color = if (telemetry.currentTopLine > 0) Color(0xFF00FF9D) else Color(0xFF8B949E), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    remoteOrch?.invokedBy?.takeIf { it.isNotEmpty() }?.let { Text(it, color = Color(0xFF79C0FF), fontSize = 10.sp, fontFamily = FontFamily.Monospace) }
+                    Box(
+                        modifier = Modifier
+                            .border(1.dp, pipeCol.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                            .background(pipeCol.copy(alpha = 0.15f))
+                            .clickable {
+                                val next = settingsRepo.togglePipelineMode()
+                                Log.i("FloatingOverlayService", "HUD pill toggled pipeline mode: ${next.label}")
+                                coroutineScope.launch {
+                                    FloatingOverlayService.getUploadClient(context).setServerPipelineMode(if (next == PipelineMode.CLOUD_GEMINI) "cloud" else "local")
+                                }
+                            }
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    ) {
+                        Text(if (isCloud) "☁️ CLOUD" else "⚡ LOCAL", color = pipeCol, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
                     if (dwellRemainingMs > 0) Text("${dwellRemainingMs}ms", color = Color(0xFF58A6FF), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                     Icon(Icons.Default.OpenInFull, "Expand", tint = Color.LightGray, modifier = Modifier.size(14.dp))
                 }
@@ -212,6 +266,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
             val isPaused = paginationState is DesktopPaginationService.PaginationState.Paused
 
             fun sendCmd(cmd: String, action: () -> Unit) = coroutineScope.launch {
+                Log.i("FloatingOverlayService", "HUD sending orchestration command: $cmd")
                 FloatingOverlayService.getUploadClient(context).sendOrchestrationCommand(cmd, "hud")
                 action()
             }
@@ -230,10 +285,20 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                             Box(modifier = Modifier.border(1.dp, badgeCol.copy(alpha = 0.4f), RoundedCornerShape(4.dp)).background(badgeCol.copy(alpha = 0.1f)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                                 Text(badgeTxt, color = badgeCol, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                             }
-                            remoteOrch?.invokedBy?.takeIf { it.isNotEmpty() }?.let {
-                                Box(modifier = Modifier.border(1.dp, Color(0xFF30363D), RoundedCornerShape(4.dp)).background(Color(0xFF21262D)).padding(horizontal = 5.dp, vertical = 2.dp)) {
-                                    Text(it, color = Color(0xFF79C0FF), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
-                                }
+                            Box(
+                                modifier = Modifier
+                                    .border(1.dp, pipeCol.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                    .background(pipeCol.copy(alpha = 0.15f))
+                                    .clickable {
+                                        val next = settingsRepo.togglePipelineMode()
+                                        Log.i("FloatingOverlayService", "HUD header toggled pipeline mode: ${next.label}")
+                                        coroutineScope.launch {
+                                            FloatingOverlayService.getUploadClient(context).setServerPipelineMode(if (next == PipelineMode.CLOUD_GEMINI) "cloud" else "local")
+                                        }
+                                    }
+                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                            ) {
+                                Text(if (isCloud) "☁️ CLOUD" else "⚡ LOCAL", color = pipeCol, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -326,14 +391,17 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                         Button(
                             onClick = {
                                 isCapturing = true
+                                Log.i("FloatingOverlayService", "Manual CAPT button clicked in HUD")
                                 coroutineScope.launch {
                                     DesktopPaginationService.updateStatus("Capturing screen...")
                                     val cm = SegmentRecorderService.instance?.getCaptureManager()
                                     val snapshot = DesktopPaginationService.instance?.captureScreenshot() ?: cm?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
                                     if (snapshot != null) {
                                         DesktopPaginationService.latestCapturedBitmap = snapshot
-                                        val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, true)
+                                        val pMode = if (pipelineMode == PipelineMode.CLOUD_GEMINI) "cloud" else "local"
+                                        val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, sync = true, pipelineMode = pMode, modelTarget = if (pMode == "cloud") "gemini" else "ollama")
                                         DesktopPaginationService.updateStatus(if (res.success) "Page $displayPage Uploaded ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
+                                        Log.i("FloatingOverlayService", "Manual CAPT frame uploaded: success=${res.success}, lines=${res.topLine}-${res.bottomLine}")
                                     }
                                     delay(500)
                                     isCapturing = false
@@ -360,14 +428,34 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                     }
 
                     AnimatedVisibility(visible = showSettings) {
+                        val activeEngine = SegmentRecorderService.instance?.getGutterTracker()?.ocrEngine?.engineType ?: OcrEngineType.MLKIT
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(top = 10.dp).background(Color(0xFF161B22), RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF30363D), RoundedCornerShape(8.dp)).padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("ADVANCED HUD CONTROLS", color = Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("ADVANCED HUD CONTROLS", color = Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF21262D))
+                                        .border(1.dp, pipeCol.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                        .clickable {
+                                            val next = settingsRepo.togglePipelineMode()
+                                            Log.i("FloatingOverlayService", "HUD settings drawer toggled pipeline mode: ${next.label}")
+                                            coroutineScope.launch {
+                                                FloatingOverlayService.getUploadClient(context).setServerPipelineMode(if (next == PipelineMode.CLOUD_GEMINI) "cloud" else "local")
+                                            }
+                                        }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("PIPELINE: ${pipelineMode.badge}", color = pipeCol, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                }
+                            }
                             Button(
                                 onClick = {
                                     isAligningNext = true
+                                    Log.i("FloatingOverlayService", "Align & Next Page triggered from HUD")
                                     coroutineScope.launch {
                                         DesktopPaginationService.updateStatus("Fetching next line...")
                                         val client = FloatingOverlayService.getUploadClient(context)
@@ -379,6 +467,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                             val nextPage = displayPage + 1
                                             client.uploadFrame(snapshot, targetTopLine, targetTopLine + 44, nextPage, true)
                                             DesktopPaginationService.updateStatus("Page $nextPage Aligned & Uploaded ✔")
+                                            Log.i("FloatingOverlayService", "Page $nextPage aligned and uploaded to server.")
                                         }
                                         delay(400)
                                         isAligningNext = false

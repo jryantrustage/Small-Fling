@@ -19,6 +19,7 @@ import androidx.core.app.NotificationCompat
 import com.matrixcapture.app.MatrixCaptureApp
 import com.matrixcapture.app.capture.DisplayCaptureManager
 import com.matrixcapture.app.capture.GutterOcrTracker
+import com.matrixcapture.app.capture.LocalGutterOcrTracker
 import com.matrixcapture.app.gemini.GeminiApiService
 import com.matrixcapture.app.ui.MainActivity
 import kotlinx.coroutines.*
@@ -88,7 +89,8 @@ class SegmentRecorderService : Service() {
                 }
                 captureManager = DisplayCaptureManager(applicationContext, mediaProjection!!)
                 val dInfo = captureManager!!.detectExternalDisplay()
-                gutterTracker = GutterOcrTracker(serviceScope); captureManager!!.gutterTracker = gutterTracker
+                val tracker = LocalGutterOcrTracker(serviceScope, applicationContext)
+                gutterTracker = tracker; captureManager!!.connectLocalGutterTracker(tracker)
                 captureManager!!.setupOcrVirtualDisplay(dInfo?.width ?: 1920, dInfo?.height ?: 1080, dInfo?.densityDpi ?: 320)
                 _serviceState.value = _serviceState.value.copy(isReady = true, isRecording = true, targetDisplayInfo = dInfo, processingStatus = "Ready for settled capture")
             } catch (e: Exception) { _serviceState.value = _serviceState.value.copy(errorMessage = e.message) }
@@ -103,7 +105,9 @@ class SegmentRecorderService : Service() {
     }
 
     fun stopWorkflow() {
-        releaseWakeLock(); DesktopPaginationService.instance?.stopPagination(); captureManager?.release(); mediaProjection?.stop()
+        releaseWakeLock(); DesktopPaginationService.instance?.stopPagination()
+        gutterTracker?.close(); captureManager?.release(); mediaProjection?.stop()
+        mediaProjection = null; captureManager = null; gutterTracker = null
         stopForeground(STOP_FOREGROUND_REMOVE); stopSelf()
     }
 
@@ -112,7 +116,9 @@ class SegmentRecorderService : Service() {
     fun getGeminiApiService(): GeminiApiService? = geminiApiService
 
     override fun onDestroy() {
-        super.onDestroy(); releaseWakeLock(); serviceScope.cancel(); captureManager?.release(); mediaProjection?.stop(); instance = null
+        super.onDestroy(); releaseWakeLock(); serviceScope.cancel()
+        gutterTracker?.close(); captureManager?.release(); mediaProjection?.stop()
+        mediaProjection = null; captureManager = null; gutterTracker = null; instance = null
     }
 
     enum class SegmentStatus { RECORDING, UPLOADING, PROCESSING, EXTRACTING, EXTRACTED, FAILED }

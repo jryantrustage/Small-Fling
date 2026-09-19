@@ -1,9 +1,9 @@
-import os, json, glob, re, asyncio, io
+import os, json, glob, re, asyncio, io, base64, urllib.request
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
-from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, File, UploadFile, Form, Query, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, FileResponse, PlainTextResponse, JSONResponse
 from pydantic import BaseModel
@@ -33,7 +33,48 @@ class WebSocketManager:
             try: await ws.send_text(payload)
             except Exception: self.disconnect(ws)
 
-ws_manager, ocr_engine = WebSocketManager(), LocalGutterOCREngine()
+ws_manager = WebSocketManager()
+ocr_engine = LocalGutterOCREngine(
+    ollama_url=config.OLLAMA_URL,
+    ollama_vision_model=config.OLLAMA_VISION_MODEL,
+    ollama_coder_model=config.OLLAMA_CODER_MODEL,
+    ollama_timeout=config.OLLAMA_TIMEOUT
+)
+active_ocr_engine: str = "auto"
+active_model_target: str = "gemini"
+active_pipeline_mode: str = "cloud"
+
+connection_stats: Dict[str, Any] = {
+    "total_http_requests": 0, "http_errors_count": 0, "last_connection_error": None,
+    "last_error_timestamp": None, "ollama_available": False, "ollama_latency_ms": None,
+    "gemini_available": bool(config.GEMINI_API_KEY)
+}
+
+def check_ollama_status() -> Dict[str, Any]:
+    url = f"{config.OLLAMA_URL.rstrip('/')}/api/tags"
+    try:
+        req = urllib.request.Request(url)
+        t0 = datetime.now()
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            lat = int((datetime.now() - t0).total_seconds() * 1000)
+            models = [m.get("name") for m in data.get("models", [])]
+            connection_stats["ollama_available"] = True
+            connection_stats["ollama_latency_ms"] = lat
+            return {"available": True, "models": models, "latency_ms": lat, "error": None}
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception) as e:
+        connection_stats["ollama_available"] = False
+        connection_stats["http_errors_count"] += 1
+        connection_stats["last_connection_error"] = str(e)
+        connection_stats["last_error_timestamp"] = datetime.now().isoformat()
+        return {"available": False, "models": [], "latency_ms": None, "error": str(e)}
+
+def normalize_model_target(target: Optional[str]) -> str:
+    if not target: return active_model_target
+    t = target.strip().lower()
+    if t not in {"gemini", "ollama"}:
+        raise HTTPException(status_code=400, detail=f"Invalid model_target '{target}'. Must be 'gemini' or 'ollama'.")
+    return t
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -48,7 +89,54 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception: ws_manager.disconnect(websocket)
 
 FRAMES_DIR, DOCUMENT_FILE, RECAPTURE_QUEUE_FILE = config.FRAMES_DIR, config.DOCUMENT_FILE, config.RECAPTURE_QUEUE_FILE
-document_lines: Dict[int, Dict[str, Any]] = {}
+
+class MasterLine(str):
+    def __new__(cls, text: str = "", **meta):
+        s = super().__new__(cls, str(text) if text is not None else "")
+        s.meta = dict(meta)
+        return s
+    def get(self, key, default=None):
+        if key == "text": return str(self)
+        if key == "line_number": return self.meta.get("line_number", 0)
+        return self.meta.get(key, default)
+    def __getitem__(self, item):
+        if isinstance(item, str):
+            if item == "text": return str(self)
+            return self.meta.get(item)
+        return super().__getitem__(item)
+    def update(self, d: dict):
+        self.meta.update(d)
+    def to_dict(self) -> dict:
+        d = dict(self.meta)
+        d["text"] = str(self)
+        d.setdefault("line_number", 0)
+        d.setdefault("status", "ok")
+        return d
+
+class MasterDocumentLines(dict):
+    """
+    Master document lines dictionary keyed by integer line number for automatic deduplication
+    across overlapping page swipes. Maintains document_lines: Dict[int, str] while supporting rich metadata.
+    """
+    def __setitem__(self, key: int, value: Any):
+        k = int(key)
+        if isinstance(value, MasterLine):
+            super().__setitem__(k, value)
+        elif isinstance(value, str):
+            existing_meta = self[k].meta if (k in self and hasattr(self[k], "meta")) else {
+                "line_number": k, "status": "ok", "updated_at": datetime.now().isoformat()
+            }
+            super().__setitem__(k, MasterLine(value, **existing_meta))
+        elif isinstance(value, dict):
+            text = value.get("text", "")
+            meta = dict(value)
+            meta.pop("text", None)
+            meta["line_number"] = k
+            super().__setitem__(k, MasterLine(text, **meta))
+        else:
+            super().__setitem__(k, MasterLine(str(value), line_number=k))
+
+document_lines: Dict[int, str] = MasterDocumentLines()
 captured_frames: Dict[str, Dict[str, Any]] = {}
 recapture_queue: List[Dict[str, Any]] = []
 
@@ -64,11 +152,21 @@ latest_telemetry: Dict[str, Any] = {
 
 def get_current_project_id() -> str: return db.get_active_project()["id"]
 
+def get_serialized_lines() -> List[Dict[str, Any]]:
+    return [
+        document_lines[k].to_dict() if hasattr(document_lines[k], "to_dict")
+        else (document_lines[k] if isinstance(document_lines[k], dict)
+              else {"line_number": k, "gutter_number": k, "text": str(document_lines[k]), "status": "ok", "is_blank": not bool(str(document_lines[k]).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": datetime.now().isoformat()})
+        for k in sorted(document_lines.keys())
+    ]
+
 def load_persisted_state():
     global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
     try:
         p = db.get_active_project(); pid = p["id"]
-        document_lines = db.get_document_lines(pid)
+        lines_db = db.get_document_lines(pid)
+        document_lines.clear()
+        for k, v in lines_db.items(): document_lines[k] = v
         captured_frames = {f["frame_id"]: f for f in db.get_frames(pid)}
         tel = db.get_project_telemetry(pid)
         if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
@@ -86,7 +184,7 @@ def save_persisted_state():
         for fid, f in captured_frames.items():
             db.save_frame(pid, fid, f.get("filename", f"{fid}.png"), f.get("top_line", 0), f.get("bottom_line", 0), f.get("page_index", 1), f.get("file_size", 0), f.get("status", "processed"), f.get("extracted_line_count", 0), f.get("custom_offset_y", 0.0), f.get("token_usage", {}), f.get("bounding_boxes", {}), f.get("model_used", ""), f.get("created_at"))
         db.save_document_lines(pid, document_lines); db.save_project_telemetry(pid, latest_telemetry, token_stats)
-        with open(DOCUMENT_FILE, "w", encoding="utf-8") as f: json.dump({"lines": {str(k): v for k, v in sorted(document_lines.items())}, "frames": captured_frames, "token_stats": token_stats, "latest_telemetry": latest_telemetry, "updated_at": datetime.now().isoformat()}, f, indent=2)
+        with open(DOCUMENT_FILE, "w", encoding="utf-8") as f: json.dump({"lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())}, "frames": captured_frames, "token_stats": token_stats, "latest_telemetry": latest_telemetry, "updated_at": datetime.now().isoformat()}, f, indent=2)
         with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f: json.dump(recapture_queue, f, indent=2)
     except Exception as e: print(f"Error saving state to SQLite: {e}")
 
@@ -106,6 +204,15 @@ class TelemetryUpdateRequest(BaseModel):
     pacer_calibration: Optional[Dict[str, Any]] = None
 class OrchestrationRequest(BaseModel):
     command: str; source: Optional[str] = "web"; active_step: Optional[str] = None; target_total_lines: Optional[int] = None
+class OcrSelectionRequest(BaseModel):
+    engine: Optional[str] = None
+    model_target: Optional[str] = None
+
+class PipelineModeRequest(BaseModel):
+    mode: str
+
+class ReprocessRequest(BaseModel):
+    model_target: Optional[str] = None
 
 def format_device_name(source: Optional[str]) -> str:
     s = (source or "").lower()
@@ -115,6 +222,22 @@ orchestration_state: Dict[str, Any] = {
     "status": "IDLE", "last_command": "NONE", "source": "system", "invoked_by": "System ⚙️", "active_step": "START_READY",
     "step_label": "Line 1 Start Position Set (Ready to Begin)", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1, "updated_at": datetime.now().isoformat()
 }
+
+def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, model_desc: str) -> int:
+    global document_lines, captured_frames, latest_telemetry
+    added = ocr_engine.stitcher.stitch_frame_lines(document_lines, plines, frame_id, model_desc)
+    min_d = min((int(l["line_number"]) for l in plines if l.get("line_number") is not None), default=999999)
+    max_d = max((int(l["line_number"]) for l in plines if l.get("line_number") is not None), default=0)
+    if top_g and int(top_g) > 0: min_d = min(min_d, int(top_g))
+    if bot_g and int(bot_g) > 0: max_d = max(max_d, int(bot_g))
+    if min_d <= max_d and min_d < 999999:
+        captured_frames[frame_id]["top_line"], captured_frames[frame_id]["bottom_line"] = min_d, max_d
+        latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = min_d, max_d
+    elif top_g and bot_g:
+        captured_frames[frame_id]["top_line"], captured_frames[frame_id]["bottom_line"] = int(top_g), int(bot_g)
+        latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = int(top_g), int(bot_g)
+    captured_frames[frame_id]["status"], captured_frames[frame_id]["extracted_line_count"] = "processed", added
+    return added
 
 async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
     global document_lines, captured_frames, token_stats, latest_telemetry
@@ -153,41 +276,156 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
         top_g = parsed.get("top_gutter_line") if isinstance(parsed, dict) else None
         bot_g = parsed.get("bottom_gutter_line") if isinstance(parsed, dict) else None
         plines = parsed.get("lines", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
-
-        min_d, max_d, added = (int(top_g) if top_g and int(top_g) > 0 else 999999), (int(bot_g) if bot_g and int(bot_g) > 0 else 0), 0
-        for item in plines:
-            ln = item.get("line_number")
-            if ln is None: continue
-            ln = int(ln)
-            text, is_blank, is_wrapped, wcount, flagged, gutter_num = item.get("text", ""), item.get("is_blank", not bool(item.get("text", "").strip())), item.get("is_wrapped", False), item.get("wrapped_line_count", 1), item.get("flagged", False), item.get("gutter_number", ln)
-            min_d, max_d = min(min_d, ln), max(max_d, ln)
-            st, ex, srcs = ("flagged" if flagged else "ok"), document_lines.get(ln), [frame_id]
-            if ex:
-                srcs = list(set(ex.get("sources", [ex.get("frame_id", frame_id)]) + [frame_id]))
-                st = "verified_overlap" if ex.get("text") == text else "overlap_conflict"
-            document_lines[ln] = {"line_number": ln, "gutter_number": gutter_num, "text": text, "is_blank": is_blank, "is_wrapped": is_wrapped, "wrapped_line_count": wcount, "status": st, "frame_id": frame_id, "sources": srcs, "confidence": 1.0 if st != "flagged" else 0.75, "notes": "Verified by Gemini Vision OCR" if st != "overlap_conflict" else f"Differs between frames {srcs}", "updated_at": datetime.now().isoformat()}
-            added += 1
-
-        if min_d <= max_d and min_d < 999999:
-            captured_frames[frame_id]["top_line"], captured_frames[frame_id]["bottom_line"] = min_d, max_d
-            latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = min_d, max_d
-        elif top_g and bot_g:
-            captured_frames[frame_id]["top_line"], captured_frames[frame_id]["bottom_line"] = int(top_g), int(bot_g)
-            latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = int(top_g), int(bot_g)
-        captured_frames[frame_id]["status"], captured_frames[frame_id]["extracted_line_count"] = "processed", added
-
-        if document_lines:
-            for chk in range(min(document_lines.keys()), max(document_lines.keys()) + 1):
-                if chk not in document_lines:
-                    document_lines[chk] = {"line_number": chk, "gutter_number": chk, "text": "", "is_blank": False, "is_wrapped": False, "wrapped_line_count": 1, "status": "missing", "frame_id": frame_id, "sources": [], "confidence": 0.0, "notes": "Gap detected between frames", "updated_at": datetime.now().isoformat()}
+        _apply_extracted_lines(frame_id, plines, top_g, bot_g, f"Gemini Vision OCR ({model_used})")
     except Exception as e:
         print(f"Error processing frame {frame_id} with Gemini: {e}")
         captured_frames[frame_id]["status"] = f"error: {str(e)}"
     finally: save_persisted_state()
 
+async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
+    global captured_frames
+    def _call_ollama_sync():
+        with Image.open(image_path) as img:
+            w, h = img.size
+            scale = min(1.0, 720.0 / h) if h > 720 else 1.0
+            if scale < 1.0: img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        prompt = (
+            "Extract code lines verbatim with gutter line numbers from the image.\n"
+            "Output each line in the strict structured format:\n"
+            "LINE_NUM: code_content\n\n"
+            "Rules:\n"
+            "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
+            "- LINE_NUM must be the integer line number visible in the left gutter.\n"
+            "- code_content must be the verbatim code with exact indentation.\n"
+            "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
+            "- Do not include markdown code fences, headers, or explanations."
+        )
+        models = [config.OLLAMA_VISION_MODEL, "minicpm-v"]
+        last_ex = None
+        for m in models:
+            try:
+                connection_stats["total_http_requests"] += 1
+                req_data = json.dumps({
+                    "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
+                    "options": {"num_predict": 768, "temperature": 0.05}
+                }).encode("utf-8")
+                req = urllib.request.Request(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", data=req_data, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    connection_stats["ollama_available"] = True
+                    return data.get("response", ""), m
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception) as e:
+                connection_stats["http_errors_count"] += 1
+                connection_stats["last_connection_error"] = f"[Ollama {m}] {str(e)}"
+                connection_stats["last_error_timestamp"] = datetime.now().isoformat()
+                last_ex = e
+        raise last_ex or RuntimeError("Ollama vision models failed")
+
+    try:
+        raw_resp, model_used = await asyncio.to_thread(_call_ollama_sync)
+        raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
+        plines = []
+        for line in raw_text.splitlines():
+            line_clean = line.rstrip()
+            if not line_clean.strip(): continue
+            if match := re.match(r"^\s*(\d+)\s*[:|]\s?(.*)$", line_clean):
+                ln = int(match.group(1))
+                code = match.group(2)
+                plines.append({
+                    "line_number": ln, "gutter_number": ln, "text": code,
+                    "is_blank": not bool(code.strip()), "is_wrapped": False,
+                    "wrapped_line_count": 1, "confidence": 0.98
+                })
+
+        top_g, bot_g = None, None
+        if plines:
+            top_g = min(p["line_number"] for p in plines)
+            bot_g = max(p["line_number"] for p in plines)
+        else:
+            parsed = {}
+            if m := re.search(r'\{.*\}', raw_text, re.DOTALL):
+                try: parsed = json.loads(m.group(0))
+                except Exception: pass
+            elif m := re.search(r'\[.*\]', raw_text, re.DOTALL):
+                try: parsed = {"lines": json.loads(m.group(0))}
+                except Exception: pass
+            top_g = parsed.get("top_gutter_line") if isinstance(parsed, dict) else None
+            bot_g = parsed.get("bottom_gutter_line") if isinstance(parsed, dict) else None
+            plines = parsed.get("lines", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+
+        _apply_extracted_lines(frame_id, plines, top_g, bot_g, f"Ollama Vision ({model_used})")
+        captured_frames[frame_id]["model_used"] = f"ollama:{model_used}"
+    except Exception as e:
+        print(f"[Ollama] Frame {frame_id} failed or timed out: {e}")
+        connection_stats["last_connection_error"] = str(e)
+        connection_stats["last_error_timestamp"] = datetime.now().isoformat()
+        if config.GEMINI_API_KEY:
+            print(f"[Ollama] Falling back to Gemini Cloud API for frame {frame_id}")
+            await process_frame_with_gemini(frame_id, image_path, top_line, bottom_line)
+        else:
+            print(f"[Ollama] Gemini not configured, falling back to local OCR for frame {frame_id}")
+            await process_frame_with_local_ocr(frame_id, image_path)
+    finally: save_persisted_state()
+
+async def process_frame_with_target(frame_id: str, image_path: Path, top_line: int, bottom_line: int, model_target: Optional[str] = None):
+    target = normalize_model_target(model_target)
+    if target == "ollama":
+        await process_frame_with_ollama(frame_id, image_path, top_line, bottom_line)
+    else:
+        await process_frame_with_gemini(frame_id, image_path, top_line, bottom_line)
+
 @app.get("/api/health")
 async def health():
     return {"status": "healthy", "has_api_key": bool(config.GEMINI_API_KEY), "total_lines": len(document_lines), "total_frames": len(captured_frames), "pending_recaptures": len(recapture_queue), "token_stats": token_stats, "is_pacing": latest_telemetry.get("is_pacing", False)}
+
+@app.get("/api/status")
+async def get_system_status():
+    ollama_status = await asyncio.to_thread(check_ollama_status)
+    p = db.get_active_project()
+    sl = get_serialized_lines()
+    return {
+        "status": "online",
+        "timestamp": datetime.now().isoformat(),
+        "active_project": p,
+        "pipeline_mode": active_pipeline_mode,
+        "model_target": active_model_target,
+        "ocr_engine": active_ocr_engine,
+        "models": {
+            "ollama_vision_model": config.OLLAMA_VISION_MODEL,
+            "ollama_coder_model": config.OLLAMA_CODER_MODEL,
+            "gemini_primary_model": config.GEMINI_PRIMARY_MODEL
+        },
+        "ollama": {
+            "available": ollama_status["available"],
+            "url": config.OLLAMA_URL,
+            "vision_model": config.OLLAMA_VISION_MODEL,
+            "coder_model": config.OLLAMA_CODER_MODEL,
+            "latency_ms": ollama_status["latency_ms"],
+            "models": ollama_status["models"],
+            "error": ollama_status["error"]
+        },
+        "gemini": {
+            "configured": bool(config.GEMINI_API_KEY),
+            "api_key_preview": f"{config.GEMINI_API_KEY[:6]}...{config.GEMINI_API_KEY[-4:]}" if len(config.GEMINI_API_KEY) > 10 else ("Set" if config.GEMINI_API_KEY else "Missing")
+        },
+        "metrics": {
+            "document_lines": len(document_lines),
+            "min_line": min(document_lines.keys()) if document_lines else 0,
+            "max_line": max(document_lines.keys()) if document_lines else 0,
+            "captured_frames": len(captured_frames),
+            "pending_recaptures": len(recapture_queue),
+            "verified_overlaps": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
+            "issues_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
+        },
+        "telemetry": get_fresh_telemetry(),
+        "token_stats": token_stats,
+        "connection_stats": connection_stats,
+        "stitching_stats": ocr_engine.stitcher.stitch_stats if hasattr(ocr_engine, "stitcher") else {}
+    }
 
 @app.get("/api/config")
 async def get_config():
@@ -210,7 +448,7 @@ def get_fresh_telemetry() -> Dict[str, Any]:
 
 @app.get("/api/telemetry")
 async def get_telemetry():
-    sl = [document_lines[k] for k in sorted(document_lines.keys())]
+    sl = get_serialized_lines()
     return {"telemetry": get_fresh_telemetry(), "token_stats": token_stats, "document_summary": {"total_lines": len(document_lines), "min_line": min(document_lines.keys()) if document_lines else 0, "max_line": max(document_lines.keys()) if document_lines else 0, "total_frames": len(captured_frames), "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"), "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])}}
 
 @app.post("/api/telemetry")
@@ -271,24 +509,222 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     except Exception: pass
     return {"status": "success", "command": cmd, "orchestration": orchestration_state, "telemetry": latest_telemetry}
 
-@app.post("/api/upload-frame")
-async def upload_frame(background_tasks: BackgroundTasks, file: UploadFile = File(...), top_line: Optional[int] = Form(0), bottom_line: Optional[int] = Form(0), page_index: Optional[int] = Form(0), sync: Optional[bool] = Form(True)):
+async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
+    res = ocr_engine.scan_image(str(image_path))
+    top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
+    captured_frames[frame_id].update({"top_line": top_ln, "bottom_line": bot_ln, "extracted_line_count": len(lines), "status": "processed", "bounding_boxes": res.get("bounding_boxes", {})})
+    if top_ln > 0 and bot_ln > 0:
+        latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = top_ln, bot_ln
+    for item in lines:
+        if item.get("line_number"):
+            ln = int(item["line_number"])
+            document_lines[ln] = {"line_number": ln, "gutter_number": ln, "text": item.get("text", ""), "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False), "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified", "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98), "notes": "Local Gutter OCR", "updated_at": datetime.now().isoformat()}
+    save_persisted_state()
+    return res
+
+async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bottom_line: int = 0, engine: Optional[str] = None, model_target: Optional[str] = None, pipeline_mode: Optional[str] = None) -> Dict[str, Any]:
+    pm = (pipeline_mode or active_pipeline_mode).lower()
+    effective_engine = engine or ("local" if pm == "local" else active_ocr_engine)
+    effective_target = model_target or ("ollama" if pm == "local" else active_model_target)
+    mode = effective_engine.lower()
+    target = normalize_model_target(effective_target)
+    if mode == "local" or (mode in {"auto", "gemini"} and target == "gemini" and not config.GEMINI_API_KEY):
+        return await process_frame_with_local_ocr(frame_id, image_path)
+    elif mode in {"gemini", "cloud"}:
+        await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
+        return {"top_line": captured_frames[frame_id].get("top_line", 0), "bottom_line": captured_frames[frame_id].get("bottom_line", 0), "lines": []}
+    elif mode == "hybrid":
+        local_res = await process_frame_with_local_ocr(frame_id, image_path)
+        try: await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
+        except Exception: pass
+        return local_res
+    else:
+        try:
+            await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
+            return {"top_line": captured_frames[frame_id].get("top_line", 0), "bottom_line": captured_frames[frame_id].get("bottom_line", 0), "lines": []}
+        except Exception:
+            return await process_frame_with_local_ocr(frame_id, image_path)
+
+@app.get("/api/pipeline/mode")
+async def get_pipeline_mode():
+    return {
+        "status": "success",
+        "pipeline_mode": active_pipeline_mode,
+        "mode": active_pipeline_mode,
+        "model_target": active_model_target,
+        "ocr_engine": active_ocr_engine,
+        "engine": active_ocr_engine,
+        "gemini_available": bool(config.GEMINI_API_KEY),
+        "ollama_url": config.OLLAMA_URL,
+        "ollama_vision_model": config.OLLAMA_VISION_MODEL,
+        "ollama_coder_model": config.OLLAMA_CODER_MODEL,
+        "ollama_model": config.OLLAMA_MODEL
+    }
+
+@app.post("/api/pipeline/mode")
+async def set_pipeline_mode(req: PipelineModeRequest):
+    global active_pipeline_mode, active_model_target, active_ocr_engine
+    m = req.mode.strip().lower()
+    if m not in {"cloud", "local"}:
+        raise HTTPException(status_code=400, detail="Invalid pipeline mode. Must be 'cloud' or 'local'.")
+    active_pipeline_mode = m
+    if m == "local":
+        active_model_target = "ollama"
+        active_ocr_engine = "local"
+    else:
+        active_model_target = "gemini"
+        active_ocr_engine = "auto"
+    payload = {
+        "type": "pipeline_mode_changed",
+        "pipeline_mode": active_pipeline_mode,
+        "mode": active_pipeline_mode,
+        "model_target": active_model_target,
+        "ocr_engine": active_ocr_engine,
+        "engine": active_ocr_engine
+    }
+    await ws_manager.broadcast(payload)
+    return {"status": "success", **payload}
+
+@app.get("/api/ocr/engines")
+async def get_ocr_engines():
+    has_gemini = bool(config.GEMINI_API_KEY)
+    return {
+        "engines": [
+            {"id": "auto", "name": "Auto (Gemini with Local Fallback)", "available": True, "type": "auto"},
+            {"id": "local", "name": "Local RapidOCR / OpenCV Engine", "available": True, "type": "local"},
+            {"id": "gemini", "name": "Gemini 2.5 Cloud Vision", "available": has_gemini, "type": "cloud"},
+            {"id": "hybrid", "name": "Hybrid (Gemini Text + Local Bounding Boxes)", "available": has_gemini, "type": "hybrid"}
+        ],
+        "active_engine": active_ocr_engine,
+        "model_targets": ["gemini", "ollama"],
+        "active_model_target": active_model_target,
+        "pipeline_mode": active_pipeline_mode
+    }
+
+@app.post("/api/ocr/select-engine")
+async def select_ocr_engine(req: OcrSelectionRequest):
+    global active_ocr_engine, active_model_target
+    if req.model_target:
+        active_model_target = normalize_model_target(req.model_target)
+    if req.engine:
+        valid = {"auto", "local", "gemini", "hybrid"}
+        if req.engine.lower() not in valid:
+            raise HTTPException(status_code=400, detail=f"Invalid engine '{req.engine}'. Must be one of {valid}")
+        active_ocr_engine = req.engine.lower()
+    await ws_manager.broadcast({"type": "ocr_engine_changed", "active_engine": active_ocr_engine, "active_model_target": active_model_target})
+    return {"status": "success", "active_engine": active_ocr_engine, "active_model_target": active_model_target}
+
+@app.post("/api/ocr/scan-direct")
+async def scan_direct(request: Request, file: UploadFile = File(...), engine: Optional[str] = Form("auto"), model_target: Optional[str] = Form(None), pipeline_mode: Optional[str] = Form(None)):
     contents = await file.read()
+    temp_path = FRAMES_DIR / f"temp_scan_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
+    pm = pipeline_mode or request.query_params.get("pipeline_mode") or active_pipeline_mode
+    effective_target = model_target or ("ollama" if pm == "local" else active_model_target)
+    mt = normalize_model_target(effective_target or request.query_params.get("model_target"))
+    try:
+        with open(temp_path, "wb") as f: f.write(contents)
+        res = ocr_engine.scan_image(str(temp_path))
+        return {"status": "success", "engine": engine or active_ocr_engine, "model_target": mt, "pipeline_mode": pm, **res}
+    finally:
+        if temp_path.exists(): temp_path.unlink()
+
+@app.post("/api/upload-frame")
+async def upload_frame(request: Request, background_tasks: BackgroundTasks):
+    ct = request.headers.get("content-type", "")
+    contents = None
+    top_line = 0
+    bottom_line = 0
+    page_index = 0
+    sync = True
+    engine = None
+    model_type = None
+    model_target = None
+    pipeline_mode = None
+
+    if "application/json" in ct:
+        body = await request.json()
+        b64_str = body.get("image_base64") or body.get("image") or ""
+        if b64_str:
+            b64_clean = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
+            try: contents = base64.b64decode(b64_clean)
+            except Exception as e: raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}")
+        top_line = body.get("top_line", 0)
+        bottom_line = body.get("bottom_line", 0)
+        page_index = body.get("page_index", 0)
+        sync = body.get("sync", True)
+        engine = body.get("engine")
+        model_type = body.get("model_type")
+        model_target = body.get("model_target")
+        pipeline_mode = body.get("pipeline_mode")
+    else:
+        form = await request.form()
+        file_obj = form.get("file")
+        if file_obj and hasattr(file_obj, "read"):
+            contents = await file_obj.read()
+        elif b64_form := form.get("image_base64") or form.get("image"):
+            b64_clean = re.sub(r"^data:image/[^;]+;base64,", "", str(b64_form).strip())
+            try: contents = base64.b64decode(b64_clean)
+            except Exception as e: raise HTTPException(status_code=400, detail=f"Invalid base64 image: {e}")
+        top_line = form.get("top_line", 0)
+        bottom_line = form.get("bottom_line", 0)
+        page_index = form.get("page_index", 0)
+        sync = form.get("sync", True)
+        if isinstance(sync, str): sync = sync.lower() not in ("false", "0", "no")
+        engine = form.get("engine")
+        model_type = form.get("model_type")
+        model_target = form.get("model_target")
+        pipeline_mode = form.get("pipeline_mode")
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="Missing frame image: provide 'image_base64' or multipart 'file'")
+
+    try: top_line = int(top_line) if top_line is not None else 0
+    except (ValueError, TypeError): top_line = 0
+    try: bottom_line = int(bottom_line) if bottom_line is not None else 0
+    except (ValueError, TypeError): bottom_line = 0
+    try: pidx = int(page_index) if page_index and int(page_index) > 0 else len(captured_frames) + 1
+    except (ValueError, TypeError): pidx = len(captured_frames) + 1
+
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
-    pidx = page_index if page_index and page_index > 0 else len(captured_frames) + 1
-    fid = f"frame_{top_line:05d}_{bottom_line:05d}" if top_line and top_line > 0 and bottom_line and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"
+    fid = f"frame_{top_line:05d}_{bottom_line:05d}" if top_line > 0 and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"
     fn = f"{fid}.png"; tpath = FRAMES_DIR / fn
     with open(tpath, "wb") as f: f.write(contents)
 
-    captured_frames[fid] = {"frame_id": fid, "filename": fn, "top_line": top_line or 0, "bottom_line": bottom_line or 0, "page_index": pidx, "file_size": len(contents), "status": "awaiting_review" if not sync else "queued", "created_at": datetime.now().isoformat(), "extracted_line_count": 0, "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}}
+    pm = pipeline_mode or request.query_params.get("pipeline_mode") or active_pipeline_mode
+    effective_target = model_target or ("ollama" if pm == "local" else active_model_target)
+    if model_type:
+        mt_lower = str(model_type).strip().lower()
+        if "gemini" in mt_lower: effective_target = "gemini"
+        elif any(k in mt_lower for k in ["ollama", "llama", "qwen", "minicpm"]): effective_target = "ollama"
+        else: effective_target = mt_lower
+    mt = normalize_model_target(effective_target or request.query_params.get("model_target"))
+
+    captured_frames[fid] = {
+        "frame_id": fid, "filename": fn, "top_line": top_line, "bottom_line": bottom_line,
+        "page_index": pidx, "file_size": len(contents), "status": "awaiting_review" if not sync else "queued",
+        "created_at": datetime.now().isoformat(), "extracted_line_count": 0,
+        "model_type": model_type or mt,
+        "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
+    }
     save_persisted_state()
     await ws_manager.broadcast({"type": "new_frame", "frame": captured_frames[fid]})
 
     if sync:
-        await process_frame_with_gemini(fid, tpath, top_line or 0, bottom_line or 0)
+        await route_frame_ocr(fid, tpath, top_line, bottom_line, engine, mt, pm)
         cf = captured_frames[fid]
-        return {"status": "success", "frame_id": fid, "page_index": pidx, "top_line": cf.get("top_line", 0), "bottom_line": cf.get("bottom_line", 0), "extracted_line_count": cf.get("extracted_line_count", 0), "message": f"Frame stored and verified: Lines {cf.get('top_line', 0)} → {cf.get('bottom_line', 0)}."}
-    return {"status": "success", "frame_id": fid, "page_index": pidx, "top_line": top_line or 0, "bottom_line": bottom_line or 0, "extracted_line_count": 0, "message": f"Frame {fid} received and awaiting review."}
+        return {
+            "status": "success", "frame_id": fid, "page_index": pidx,
+            "top_line": cf.get("top_line", top_line), "bottom_line": cf.get("bottom_line", bottom_line),
+            "extracted_line_count": cf.get("extracted_line_count", 0),
+            "model_type": model_type or mt, "model_target": mt, "pipeline_mode": pm,
+            "message": f"Frame stored and verified: Lines {cf.get('top_line', top_line)} → {cf.get('bottom_line', bottom_line)}."
+        }
+    return {
+        "status": "success", "frame_id": fid, "page_index": pidx,
+        "top_line": top_line, "bottom_line": bottom_line, "extracted_line_count": 0,
+        "model_type": model_type or mt, "model_target": mt, "pipeline_mode": pm,
+        "message": f"Frame {fid} received and awaiting review."
+    }
 
 @app.get("/api/next-page-line")
 async def get_next_page_line():
@@ -299,7 +735,7 @@ async def get_next_page_line():
     return {"status": "success", "next_page_first_line": (last_bottom + 1) if last_bottom > 0 else 1, "last_bottom_line": last_bottom, "total_frames": len(captured_frames)}
 
 @app.post("/api/frames/{frame_id}/scan")
-async def scan_frame_ocr(frame_id: str):
+async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), model_target: Optional[str] = Query(None), payload: Optional[ReprocessRequest] = None):
     if frame_id not in captured_frames: raise HTTPException(status_code=404, detail=f"Frame '{frame_id}' not found")
     finfo = captured_frames[frame_id]
     ipath = FRAMES_DIR / finfo.get("filename", f"{frame_id}.png")
@@ -307,6 +743,7 @@ async def scan_frame_ocr(frame_id: str):
         matches = list(FRAMES_DIR.glob(f"*{frame_id}*.png"))
         if matches: ipath = matches[0]
         else: raise HTTPException(status_code=404, detail="Frame image file not found")
+    mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     try:
         res = ocr_engine.scan_image(str(ipath))
         top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
@@ -314,9 +751,9 @@ async def scan_frame_ocr(frame_id: str):
         for item in lines:
             if item.get("line_number"):
                 ln = int(item["line_number"])
-                document_lines[ln] = {"line_number": ln, "gutter_number": ln, "text": item.get("text", ""), "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False), "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified", "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98), "notes": "Ollama minicpm-v gutter OCR", "updated_at": datetime.now().isoformat()}
+                document_lines[ln] = {"line_number": ln, "gutter_number": ln, "text": item.get("text", ""), "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False), "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified", "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98), "notes": f"Gutter OCR ({mt})", "updated_at": datetime.now().isoformat()}
         save_persisted_state()
-        data = {"status": "success", "frame_id": frame_id, "top_line": top_ln, "bottom_line": bot_ln, "extracted_line_count": len(lines), "bounding_boxes": res.get("bounding_boxes", {}), "lines": lines}
+        data = {"status": "success", "frame_id": frame_id, "top_line": top_ln, "bottom_line": bot_ln, "extracted_line_count": len(lines), "bounding_boxes": res.get("bounding_boxes", {}), "lines": lines, "model_target": mt}
         await ws_manager.broadcast({"type": "ocr_completed", **data})
         return data
     except Exception as e:
@@ -383,19 +820,21 @@ async def get_frame_image(frame_id: str):
     return FileResponse(path, media_type="image/png")
 
 @app.post("/api/frames/{frame_id}/reprocess")
-async def reprocess_frame(frame_id: str, background_tasks: BackgroundTasks):
+async def reprocess_frame(frame_id: str, background_tasks: BackgroundTasks, model_target: Optional[str] = Query(None), payload: Optional[ReprocessRequest] = None):
     if frame_id not in captured_frames: raise HTTPException(status_code=404, detail=f"Frame '{frame_id}' not found")
     finfo = captured_frames[frame_id]; ipath = FRAMES_DIR / finfo.get("filename", f"{frame_id}.png")
     if not ipath.exists():
         matches = list(FRAMES_DIR.glob(f"*{frame_id}*.png"))
         if matches: ipath = matches[0]
         else: raise HTTPException(status_code=404, detail="Frame image file not found")
+    mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     captured_frames[frame_id]["status"] = "queued"; save_persisted_state()
-    background_tasks.add_task(process_frame_with_gemini, frame_id, ipath, finfo.get("top_line", 0), finfo.get("bottom_line", 0))
-    return {"status": "success", "message": f"Reprocessing scheduled for frame {frame_id}"}
+    background_tasks.add_task(process_frame_with_target, frame_id, ipath, finfo.get("top_line", 0), finfo.get("bottom_line", 0), mt)
+    return {"status": "success", "message": f"Reprocessing scheduled for frame {frame_id} with {mt}", "model_target": mt}
 
 @app.post("/api/reprocess-failed")
-async def reprocess_failed(background_tasks: BackgroundTasks):
+async def reprocess_failed(background_tasks: BackgroundTasks, model_target: Optional[str] = Query(None), payload: Optional[ReprocessRequest] = None):
+    mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     reprocessed = []
     for f_id, f_info in captured_frames.items():
         if f_info.get("status", "").startswith("error") or f_info.get("extracted_line_count", 0) == 0:
@@ -405,14 +844,14 @@ async def reprocess_failed(background_tasks: BackgroundTasks):
                 if m: ipath = m[0]
             if ipath.exists():
                 f_info["status"] = "queued"
-                background_tasks.add_task(process_frame_with_gemini, f_id, ipath, f_info.get("top_line", 0), f_info.get("bottom_line", 0))
+                background_tasks.add_task(process_frame_with_target, f_id, ipath, f_info.get("top_line", 0), f_info.get("bottom_line", 0), mt)
                 reprocessed.append(f_id)
     save_persisted_state()
-    return {"status": "success", "reprocessed_frames": reprocessed, "count": len(reprocessed)}
+    return {"status": "success", "reprocessed_frames": reprocessed, "count": len(reprocessed), "model_target": mt}
 
 @app.get("/api/document")
 async def get_document():
-    sl = [document_lines[k] for k in sorted(document_lines.keys())]
+    sl = get_serialized_lines()
     issues = [item for item in sl if item.get("status") in ["flagged", "missing", "overlap_conflict"]]
     return {"total_lines": len(document_lines), "min_line": min(document_lines.keys()) if document_lines else 0, "max_line": max(document_lines.keys()) if document_lines else 0, "total_frames": len(captured_frames), "issue_count": len(issues), "token_stats": token_stats, "latest_telemetry": get_fresh_telemetry(), "issues": issues, "lines": sl}
 
@@ -426,13 +865,16 @@ async def edit_line(line_number: int, req: LineEditRequest):
         if req.notes: document_lines[line_number]["notes"] = req.notes
         document_lines[line_number]["updated_at"] = datetime.now().isoformat()
     save_persisted_state()
-    return {"status": "success", "line": document_lines[line_number]}
+    lv = document_lines[line_number]
+    return {"status": "success", "line": lv.to_dict() if hasattr(lv, "to_dict") else lv}
 
 @app.post("/api/lines/{line_number}/flag")
 async def flag_line(line_number: int, req: FlagRequest):
     if line_number not in document_lines: raise HTTPException(status_code=404, detail="Line not found")
     document_lines[line_number].update({"status": "flagged", "notes": req.notes, "updated_at": datetime.now().isoformat()})
-    save_persisted_state(); return {"status": "success", "line": document_lines[line_number]}
+    save_persisted_state()
+    lv = document_lines[line_number]
+    return {"status": "success", "line": lv.to_dict() if hasattr(lv, "to_dict") else lv}
 
 @app.post("/api/lines/{line_number}/request-recapture")
 async def request_recapture(line_number: int, req: RecaptureRequest):
@@ -452,14 +894,25 @@ async def recapture_completed(req: RecaptureRequest):
 
 @app.get("/api/export-json")
 async def export_json():
-    sl = [document_lines[k] for k in sorted(document_lines.keys())]
+    sl = get_serialized_lines()
     payload = {"schema_version": "2.5.0", "exported_at": datetime.now().isoformat(), "document_metadata": {"total_lines": len(document_lines), "min_line": min(document_lines.keys()) if document_lines else 0, "max_line": max(document_lines.keys()) if document_lines else 0, "total_frames": len(captured_frames), "token_stats": token_stats, "issues_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])}, "frames": captured_frames, "lines": sl}
     return JSONResponse(content=payload, headers={"Content-Disposition": "attachment; filename=matrix_document_vfs_monaco.json"})
 
 @app.get("/api/export-markdown")
 async def export_markdown():
     if not document_lines: return PlainTextResponse("# Matrix Document\n\n(No lines transcribed yet)")
-    return PlainTextResponse("\n".join(document_lines[k].get("text", "") for k in sorted(document_lines.keys())), headers={"Content-Disposition": "attachment; filename=Matrix_main_transcribed.md"})
+    min_ln, max_ln = min(document_lines.keys()), max(document_lines.keys())
+    assembled = []
+    for ln in range(min_ln, max_ln + 1):
+        if ln in document_lines:
+            line_val = document_lines[ln]
+            if hasattr(line_val, "get") and line_val.get("status") == "missing" and not str(line_val).strip():
+                assembled.append(f"// [MISSING LINE {ln}]")
+            else:
+                assembled.append(str(line_val))
+        else:
+            assembled.append(f"// [MISSING LINE {ln}]")
+    return PlainTextResponse("\n".join(assembled), headers={"Content-Disposition": "attachment; filename=Matrix_main_transcribed.md"})
 
 @app.get("/api/spliced-document-image")
 async def get_spliced_document_image():

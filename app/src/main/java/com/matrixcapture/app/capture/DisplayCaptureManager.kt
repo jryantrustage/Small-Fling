@@ -13,10 +13,15 @@ import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicBoolean
 
 class DisplayCaptureManager(
     private val context: Context,
@@ -30,7 +35,21 @@ class DisplayCaptureManager(
 
     @Volatile private var latestSettledBitmap: Bitmap? = null
     private val bitmapLock = Any()
+    private val isProcessingFrame = AtomicBoolean(false)
+    private val _frameEmissionStream = MutableSharedFlow<Bitmap>(replay = 0, extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val frameEmissionStream: SharedFlow<Bitmap> = _frameEmissionStream.asSharedFlow()
+    val frameStream: SharedFlow<Bitmap> = frameEmissionStream
+
     var gutterTracker: GutterOcrTracker? = null
+        set(value) {
+            field = value
+            if (value is LocalGutterOcrTracker) value.connectFrameStream(frameEmissionStream)
+        }
+
+    fun connectLocalGutterTracker(tracker: LocalGutterOcrTracker) {
+        this.gutterTracker = tracker
+        tracker.connectFrameStream(frameEmissionStream)
+    }
 
     private val _displayInfoState = MutableStateFlow<ExternalDisplayInfo?>(null)
     val displayInfoState = _displayInfoState.asStateFlow()
@@ -60,13 +79,19 @@ class DisplayCaptureManager(
         imageReader = ImageReader.newInstance(tw, th, PixelFormat.RGBA_8888, 3).apply {
             setOnImageAvailableListener({ reader ->
                 val image = try { reader.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+                if (!isProcessingFrame.compareAndSet(false, true)) {
+                    image.close(); return@setOnImageAvailableListener
+                }
                 try {
                     convertImageToBitmap(image)?.let { bmp ->
                         synchronized(bitmapLock) { latestSettledBitmap?.recycle(); latestSettledBitmap = bmp }
-                        gutterTracker?.onFrameCaptured(bmp)
+                        _frameEmissionStream.tryEmit(bmp)
+                        if (_frameEmissionStream.subscriptionCount.value == 0) {
+                            gutterTracker?.onFrameCaptured(bmp)
+                        }
                     }
                 } catch (e: Exception) { Log.e(TAG, "Error in ImageReader", e) }
-                finally { image.close() }
+                finally { image.close(); isProcessingFrame.set(false) }
             }, frameHandler)
         }
         virtualDisplay?.release()
@@ -94,10 +119,15 @@ class DisplayCaptureManager(
 
     fun release() {
         try {
-            virtualDisplay?.release(); imageReader?.close()
+            isProcessingFrame.set(false)
+            (gutterTracker as? LocalGutterOcrTracker)?.disconnectFrameStream()
+            gutterTracker?.close()
+            virtualDisplay?.surface = null
+            virtualDisplay?.release()
+            imageReader?.close()
             synchronized(bitmapLock) { latestSettledBitmap?.recycle(); latestSettledBitmap = null }
         } catch (e: Exception) { Log.e(TAG, "Error releasing resources", e) }
-        finally { virtualDisplay = null; imageReader = null; _isRecording.value = false }
+        finally { virtualDisplay = null; imageReader = null; gutterTracker = null; _isRecording.value = false }
     }
 
     data class ExternalDisplayInfo(val displayId: Int, val name: String, val width: Int, val height: Int, val densityDpi: Int, val refreshRate: Float, val isExternal: Boolean)
