@@ -243,6 +243,8 @@ class TelemetryUpdateRequest(BaseModel):
     dwell_countdown_ms: Optional[int] = 0
     phase: Optional[str] = "IDLE"
     status_message: Optional[str] = ""
+    active_step: Optional[str] = None
+    source: Optional[str] = "mobile"
     mobile_tokens: Optional[Dict[str, int]] = None
     pacer_calibration: Optional[Dict[str, Any]] = None
 
@@ -250,13 +252,36 @@ class TelemetryUpdateRequest(BaseModel):
 class OrchestrationRequest(BaseModel):
     command: str  # "BEGIN", "PAUSE", "RESUME", "END", "RESTART"
     source: Optional[str] = "web"
+    active_step: Optional[str] = None
     target_total_lines: Optional[int] = None
+
+
+def format_device_name(source: Optional[str]) -> str:
+    s = (source or "").lower()
+    if "web" in s:
+        return "Web Studio 💻"
+    elif "mobile" in s:
+        return "Mobile App 📱"
+    elif "hud" in s:
+        return "Floating HUD 🪟"
+    elif "pacer" in s:
+        return "Auto-Pacer ⚡"
+    elif "api" in s:
+        return "Backend API ⚙️"
+    return "System ⚙️"
 
 
 orchestration_state: Dict[str, Any] = {
     "status": "IDLE",  # "IDLE", "RUNNING", "PAUSED", "COMPLETED", "ABORTED"
     "last_command": "NONE",
     "source": "system",
+    "invoked_by": "System ⚙️",
+    "active_step": "START_READY",  # "START_READY", "SCREEN_CAPTURE", "OCR_BOUNDS", "PRECISION_SCROLL", "DWELL_FREEZE", "LOOP_EVAL"
+    "step_label": "Line 1 Start Position Set (Ready to Begin)",
+    "top_line": 1,
+    "bottom_line": 49,
+    "next_target_top": 50,
+    "page": 1,
     "updated_at": datetime.now().isoformat()
 }
 
@@ -577,9 +602,9 @@ async def get_telemetry():
 @app.post("/api/telemetry")
 async def update_telemetry(payload: TelemetryUpdateRequest):
     """
-    Published by the Android mobile app to update live pacer state, line numbers, dwell timer, and calibration.
+    Published by the Android mobile app / pacer to update live state, line numbers, dwell timer, and calibration.
     """
-    global latest_telemetry, token_stats
+    global latest_telemetry, token_stats, orchestration_state
     latest_telemetry["device_id"] = payload.device_id
     latest_telemetry["is_pacing"] = payload.is_pacing
     latest_telemetry["current_page"] = payload.current_page
@@ -597,15 +622,56 @@ async def update_telemetry(payload: TelemetryUpdateRequest):
     if payload.mobile_tokens:
         token_stats["mobile_tokens"] = payload.mobile_tokens
 
-    # Synchronize orchestration state from mobile pacer reports
+    # Synchronize orchestration state & invoker
+    if payload.source:
+        orchestration_state["source"] = payload.source
+        orchestration_state["invoked_by"] = format_device_name(payload.source)
+
+    if payload.current_top_line and payload.current_top_line > 0:
+        orchestration_state["top_line"] = payload.current_top_line
+    if payload.current_bottom_line and payload.current_bottom_line > 0:
+        orchestration_state["bottom_line"] = payload.current_bottom_line
+        orchestration_state["next_target_top"] = payload.current_bottom_line + 1
+    if payload.current_page and payload.current_page > 0:
+        orchestration_state["page"] = payload.current_page
+
+    # Update active DAG step if passed or derive from phase
+    if payload.active_step:
+        orchestration_state["active_step"] = payload.active_step
+    elif payload.phase:
+        p_upper = payload.phase.upper()
+        if "CAPTURING" in p_upper or "SCREEN" in p_upper:
+            orchestration_state["active_step"] = "SCREEN_CAPTURE"
+        elif "OCR" in p_upper or "BOUNDS" in p_upper:
+            orchestration_state["active_step"] = "OCR_BOUNDS"
+        elif "SCROLL" in p_upper or "PACING" in p_upper or "ALIGN" in p_upper:
+            orchestration_state["active_step"] = "PRECISION_SCROLL"
+        elif "DWELL" in p_upper or "FREEZE" in p_upper:
+            orchestration_state["active_step"] = "DWELL_FREEZE"
+        elif "READY" in p_upper or "STANDBY" in p_upper:
+            orchestration_state["active_step"] = "START_READY"
+
+    if payload.status_message:
+        orchestration_state["step_label"] = payload.status_message
+
     if payload.is_pacing:
         orchestration_state["status"] = "RUNNING"
     elif payload.phase == "COMPLETED":
         orchestration_state["status"] = "COMPLETED"
+        orchestration_state["active_step"] = "LOOP_EVAL"
     elif payload.phase == "PAUSED":
         orchestration_state["status"] = "PAUSED"
     elif payload.phase in ["STANDBY", "IDLE"] and orchestration_state["status"] == "RUNNING":
         orchestration_state["status"] = "IDLE"
+
+    orchestration_state["updated_at"] = datetime.now().isoformat()
+
+    # Broadcast updated orchestration state & telemetry to WebSocket subscribers
+    await ws_manager.broadcast({
+        "type": "orchestration_event",
+        "orchestration": orchestration_state,
+        "telemetry": latest_telemetry
+    })
 
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
@@ -625,44 +691,59 @@ async def get_orchestration_state():
 async def handle_orchestration_command(payload: OrchestrationRequest):
     """
     Dispatches orchestration commands (BEGIN, PAUSE, RESUME, END, RESTART).
-    Synchronizes status across Web UI, Mobile App, and Floating HUD via WebSockets.
+    Synchronizes status across Web UI, Mobile App, and Floating HUD via WebSockets with device attribution.
     """
     global latest_telemetry, document_lines, captured_frames, orchestration_state
     cmd = payload.command.upper()
     now_iso = datetime.now().isoformat()
 
+    invoker = format_device_name(payload.source)
     orchestration_state["last_command"] = cmd
     orchestration_state["source"] = payload.source or "web"
+    orchestration_state["invoked_by"] = invoker
     orchestration_state["updated_at"] = now_iso
 
     if cmd == "BEGIN":
         orchestration_state["status"] = "RUNNING"
+        orchestration_state["active_step"] = "SCREEN_CAPTURE"
+        orchestration_state["step_label"] = f"Orchestration Started by {invoker}"
         latest_telemetry["is_pacing"] = True
         latest_telemetry["phase"] = "PACING"
-        latest_telemetry["status_message"] = "Orchestration Begun"
+        latest_telemetry["status_message"] = f"Running • Invoked by {invoker}"
     elif cmd == "PAUSE":
         orchestration_state["status"] = "PAUSED"
+        orchestration_state["step_label"] = f"Paused by {invoker}"
         latest_telemetry["is_pacing"] = False
         latest_telemetry["phase"] = "PAUSED"
-        latest_telemetry["status_message"] = "Orchestration Paused"
+        latest_telemetry["status_message"] = f"Paused • Invoked by {invoker}"
     elif cmd == "RESUME":
         orchestration_state["status"] = "RUNNING"
+        orchestration_state["active_step"] = "PRECISION_SCROLL"
+        orchestration_state["step_label"] = f"Resumed by {invoker}"
         latest_telemetry["is_pacing"] = True
         latest_telemetry["phase"] = "PACING"
-        latest_telemetry["status_message"] = "Orchestration Resumed"
+        latest_telemetry["status_message"] = f"Running • Invoked by {invoker}"
     elif cmd == "END":
         orchestration_state["status"] = "COMPLETED"
+        orchestration_state["active_step"] = "LOOP_EVAL"
+        orchestration_state["step_label"] = f"Ended by {invoker}"
         latest_telemetry["is_pacing"] = False
         latest_telemetry["phase"] = "COMPLETED"
-        latest_telemetry["status_message"] = "Orchestration Ended"
+        latest_telemetry["status_message"] = f"Completed • Invoked by {invoker}"
     elif cmd == "RESTART":
         orchestration_state["status"] = "RUNNING"
+        orchestration_state["active_step"] = "START_READY"
+        orchestration_state["step_label"] = f"Restarted at Line 1 by {invoker}"
+        orchestration_state["top_line"] = 1
+        orchestration_state["bottom_line"] = 49
+        orchestration_state["next_target_top"] = 50
+        orchestration_state["page"] = 1
         latest_telemetry["current_page"] = 1
         latest_telemetry["current_top_line"] = 1
         latest_telemetry["current_bottom_line"] = 0
         latest_telemetry["is_pacing"] = True
         latest_telemetry["phase"] = "PACING"
-        latest_telemetry["status_message"] = "Restarted from Beginning (Page 1)"
+        latest_telemetry["status_message"] = f"Restarted • Invoked by {invoker}"
 
     # Broadcast immediately to Web, Mobile, and HUD WebSocket subscribers
     broadcast_msg = json.dumps({

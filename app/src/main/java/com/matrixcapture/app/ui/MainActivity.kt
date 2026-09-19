@@ -240,25 +240,47 @@ fun MatrixCaptureDashboard(
                 modifier = Modifier.padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Status Header Pill
+                // Status Header Pill & Invoker Attribution
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                            .border(1.dp, statusColor, RoundedCornerShape(16.dp))
-                            .padding(horizontal = 12.dp, vertical = 5.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(
-                            text = "STATUS: $statusText",
-                            color = statusColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        Box(
+                            modifier = Modifier
+                                .background(statusColor.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                .border(1.dp, statusColor, RoundedCornerShape(16.dp))
+                                .padding(horizontal = 12.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "STATUS: $statusText",
+                                color = statusColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        if (uiState.orchestrationInvokedBy.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF21262D), RoundedCornerShape(12.dp))
+                                    .border(1.dp, Color(0xFF30363D), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "by ${uiState.orchestrationInvokedBy}",
+                                    color = Color(0xFF79C0FF),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
                     }
 
                     Row(
@@ -308,6 +330,25 @@ fun MatrixCaptureDashboard(
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
+                    if (uiState.orchestrationStepLabel.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "DAG: ${uiState.orchestrationStepLabel}",
+                            color = Color(0xFFFFA657),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                    if (uiState.orchestrationNextTargetTop != null && uiState.orchestrationNextTargetTop > 0) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Target Next Top: Ln ${uiState.orchestrationNextTargetTop}",
+                            color = Color(0xFF79C0FF),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                     if (uiState.calculatedTotalLines > 0) {
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(

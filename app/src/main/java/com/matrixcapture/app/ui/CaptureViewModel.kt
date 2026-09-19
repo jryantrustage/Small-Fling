@@ -120,6 +120,8 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                             targetTotalLines = pState.targetTotalLines,
                             dwellCountdownMs = pState.dwellRemainingMs.toInt(),
                             phase = pState.phase,
+                            activeStep = pState.activeStep,
+                            source = "mobile",
                             statusMessage = pState.statusMessage,
                             mobilePromptTokens = pTokens,
                             mobileCandidatesTokens = cTokens,
@@ -136,24 +138,35 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                     val remoteOrchRes = uploadClient.fetchOrchestrationState()
                     if (remoteOrchRes.isSuccess) {
                         val remoteOrch = remoteOrchRes.getOrNull()
-                        if (remoteOrch != null && remoteOrch.status != _uiState.value.orchestrationStatus) {
-                            _uiState.update { it.copy(orchestrationStatus = remoteOrch.status) }
-                            when (remoteOrch.status) {
-                                "RUNNING" -> {
-                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) {
-                                        DesktopPaginationService.instance?.resumePagination()
-                                    } else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) {
-                                        startPacingOnly()
+                        if (remoteOrch != null) {
+                            val previousStatus = _uiState.value.orchestrationStatus
+                            _uiState.update {
+                                it.copy(
+                                    orchestrationStatus = remoteOrch.status,
+                                    orchestrationInvokedBy = remoteOrch.invokedBy,
+                                    orchestrationActiveStep = remoteOrch.activeStep,
+                                    orchestrationStepLabel = remoteOrch.stepLabel,
+                                    orchestrationNextTargetTop = remoteOrch.nextTargetTop
+                                )
+                            }
+                            if (remoteOrch.status != previousStatus) {
+                                when (remoteOrch.status) {
+                                    "RUNNING" -> {
+                                        if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) {
+                                            DesktopPaginationService.instance?.resumePagination()
+                                        } else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) {
+                                            startPacingOnly()
+                                        }
                                     }
-                                }
-                                "PAUSED" -> {
-                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
-                                        DesktopPaginationService.instance?.pausePagination()
+                                    "PAUSED" -> {
+                                        if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                            DesktopPaginationService.instance?.pausePagination()
+                                        }
                                     }
-                                }
-                                "COMPLETED" -> {
-                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
-                                        stopWorkflow()
+                                    "COMPLETED" -> {
+                                        if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                            stopWorkflow()
+                                        }
                                     }
                                 }
                             }
@@ -696,12 +709,22 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
         val assemblyResult: MarkdownAssembler.AssemblyResult? = null,
         val errorMessage: String? = null,
-        val orchestrationStatus: String = "IDLE" // "IDLE", "RUNNING", "PAUSED", "COMPLETED"
+        val orchestrationStatus: String = "IDLE", // "IDLE", "RUNNING", "PAUSED", "COMPLETED"
+        val orchestrationInvokedBy: String = "Web Studio 💻",
+        val orchestrationActiveStep: String = "START_READY",
+        val orchestrationStepLabel: String = "Ready at Ln 1",
+        val orchestrationNextTargetTop: Int? = null
     )
 
     fun beginOrchestration() {
         viewModelScope.launch {
-            _uiState.update { it.copy(orchestrationStatus = "RUNNING", isWorkflowRunning = true) }
+            _uiState.update {
+                it.copy(
+                    orchestrationStatus = "RUNNING",
+                    orchestrationInvokedBy = "Mobile App 📱",
+                    isWorkflowRunning = true
+                )
+            }
             uploadClient.sendOrchestrationCommand("BEGIN", "mobile")
             startPacingOnly()
         }
@@ -709,7 +732,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun pauseOrchestration() {
         viewModelScope.launch {
-            _uiState.update { it.copy(orchestrationStatus = "PAUSED") }
+            _uiState.update {
+                it.copy(
+                    orchestrationStatus = "PAUSED",
+                    orchestrationInvokedBy = "Mobile App 📱"
+                )
+            }
             uploadClient.sendOrchestrationCommand("PAUSE", "mobile")
             DesktopPaginationService.instance?.pausePagination()
         }
@@ -717,7 +745,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun resumeOrchestration() {
         viewModelScope.launch {
-            _uiState.update { it.copy(orchestrationStatus = "RUNNING") }
+            _uiState.update {
+                it.copy(
+                    orchestrationStatus = "RUNNING",
+                    orchestrationInvokedBy = "Mobile App 📱"
+                )
+            }
             uploadClient.sendOrchestrationCommand("RESUME", "mobile")
             DesktopPaginationService.instance?.resumePagination()
         }
@@ -725,7 +758,13 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun endOrchestration() {
         viewModelScope.launch {
-            _uiState.update { it.copy(orchestrationStatus = "COMPLETED", isWorkflowRunning = false) }
+            _uiState.update {
+                it.copy(
+                    orchestrationStatus = "COMPLETED",
+                    orchestrationInvokedBy = "Mobile App 📱",
+                    isWorkflowRunning = false
+                )
+            }
             uploadClient.sendOrchestrationCommand("END", "mobile")
             stopWorkflow()
         }
@@ -736,6 +775,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update {
                 it.copy(
                     orchestrationStatus = "RUNNING",
+                    orchestrationInvokedBy = "Mobile App 📱",
                     currentPage = 1,
                     currentTopLine = 1,
                     currentBottomLine = 0

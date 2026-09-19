@@ -1657,3 +1657,251 @@ body {
   color: #fff;
 }
 
+/* Orchestration Pipeline DAG */
+.orch-dag-panel {
+  background: rgba(13, 17, 23, 0.95);
+  border-bottom: 1px solid rgba(56, 139, 253, 0.2);
+  padding: 12px 20px 14px;
+  position: relative;
+  overflow: hidden;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+
+.orch-dag-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.orch-dag-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dag-title-text {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+  text-transform: uppercase;
+}
+
+.dag-status-pill {
+  font-size: 11px;
+  color: #c9d1d9;
+  background: rgba(56, 139, 253, 0.12);
+  border: 1px solid rgba(56, 139, 253, 0.25);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.dag-status-pill strong {
+  color: #58a6ff;
+}
+
+.dag-device-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #00ff9d;
+  background: rgba(0, 255, 157, 0.08);
+  border: 1px solid rgba(0, 255, 157, 0.25);
+  padding: 3px 10px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.orch-dag-flow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  position: relative;
+  overflow-x: auto;
+  padding: 4px 0 10px;
+}
+
+.dag-node {
+  flex: 1;
+  min-width: 140px;
+  background: rgba(22, 27, 34, 0.85);
+  border: 1px solid rgba(48, 54, 61, 0.8);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: all 0.25s ease;
+  position: relative;
+}
+
+.dag-node.completed {
+  border-color: rgba(35, 134, 54, 0.5);
+  background: rgba(35, 134, 54, 0.08);
+}
+
+.dag-node.completed .dag-node-num {
+  color: #2ea043;
+}
+
+.dag-node.active {
+  border-color: #00ff9d;
+  background: rgba(0, 255, 157, 0.07);
+  box-shadow: 0 0 18px rgba(0, 255, 157, 0.25);
+}
+
+.dag-node.active.pulse {
+  animation: dagPulse 2s infinite;
+}
+
+@keyframes dagPulse {
+  0% { box-shadow: 0 0 10px rgba(0, 255, 157, 0.2); }
+  50% { box-shadow: 0 0 24px rgba(0, 255, 157, 0.45); border-color: #39ffb4; }
+  100% { box-shadow: 0 0 10px rgba(0, 255, 157, 0.2); }
+}
+
+.dag-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2px;
+}
+
+.dag-node-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b949e;
+}
+
+.dag-node.active .dag-node-num {
+  color: #00ff9d;
+}
+
+.dag-icon {
+  color: #8b949e;
+}
+
+.dag-node.active .dag-icon {
+  color: #00ff9d;
+}
+
+.dag-node-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #e6edf3;
+  white-space: nowrap;
+}
+
+.dag-node-sub {
+  font-size: 10px;
+  color: #8b949e;
+  white-space: nowrap;
+}
+
+.dag-node-pill {
+  margin-top: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: #58a6ff;
+  background: rgba(56, 139, 253, 0.1);
+  border: 1px solid rgba(56, 139, 253, 0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  text-align: center;
+  font-weight: 600;
+}
+
+.dag-node-pill.highlight {
+  color: #00ff9d;
+  background: rgba(0, 255, 157, 0.12);
+  border-color: rgba(0, 255, 157, 0.3);
+}
+
+.dag-connector {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  color: #484f58;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.dag-connector.streaming {
+  color: #00ff9d;
+}
+
+.dag-beam {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+}
+
+.dag-connector.streaming .dag-beam {
+  background: linear-gradient(90deg, transparent, #00ff9d, transparent);
+  animation: beamStream 1s infinite linear;
+}
+
+@keyframes beamStream {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.dag-loopback-rail {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(48, 54, 61, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.loopback-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #8b949e;
+  font-family: var(--font-mono, monospace);
+}
+
+.loopback-track {
+  height: 2px;
+  background: rgba(48, 54, 61, 0.4);
+  border-radius: 2px;
+  position: relative;
+  overflow: hidden;
+}
+
+.loopback-track.track-animated::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, #00ff9d, transparent);
+  animation: loopStream 2s infinite linear;
+}
+
+@keyframes loopStream {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.spin-reverse {
+  animation: spinRev 2s infinite linear;
+}
+
+@keyframes spinRev {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+
