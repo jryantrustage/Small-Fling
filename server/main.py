@@ -807,6 +807,50 @@ async def update_frame_position(frame_id: str, req: FramePositionRequest):
     await ws_manager.broadcast({"type": "frame_position_updated", "frame_id": frame_id, "custom_offset_y": req.custom_offset_y})
     return {"status": "success", "frame_id": frame_id, "custom_offset_y": req.custom_offset_y}
 
+@app.delete("/api/frames/{frame_id}")
+async def delete_frame(frame_id: str):
+    if not db.delete_frame(frame_id):
+        raise HTTPException(status_code=404, detail="Frame not found")
+    load_persisted_state()
+    try:
+        pid = get_current_project_id()
+        with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())},
+                "frames": captured_frames,
+                "token_stats": token_stats,
+                "latest_telemetry": latest_telemetry,
+                "updated_at": datetime.now().isoformat()
+            }, f, indent=2)
+    except Exception as e:
+        print(f"Error saving JSON after frame deletion: {e}")
+    await ws_manager.broadcast({
+        "type": "frame_deleted",
+        "frame_id": frame_id,
+        "frames": db.get_frames(get_current_project_id())
+    })
+    sl = get_serialized_lines()
+    issues = [item for item in sl if item.get("status") in ["flagged", "missing", "overlap_conflict"]]
+    await ws_manager.broadcast({
+        "type": "document_updated",
+        "data": {
+            "total_lines": len(document_lines),
+            "min_line": min(document_lines.keys()) if document_lines else 0,
+            "max_line": max(document_lines.keys()) if document_lines else 0,
+            "total_frames": len(captured_frames),
+            "issue_count": len(issues),
+            "token_stats": token_stats,
+            "latest_telemetry": get_fresh_telemetry(),
+            "issues": issues,
+            "lines": sl
+        }
+    })
+    return {"status": "success", "frame_id": frame_id}
+
+@app.post("/api/frames/{frame_id}/delete")
+async def delete_frame_post(frame_id: str):
+    return await delete_frame(frame_id)
+
 @app.get("/api/frames")
 async def get_frames(): return db.get_frames(get_current_project_id())
 
@@ -969,7 +1013,7 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
 
 if __name__ == "__main__":
     import uvicorn, sys
-    try: uvicorn.run(app, host=config.SERVER_HOST, port=config.SERVER_PORT)
+    try: uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True)
     except OSError as e:
         if getattr(e, 'winerror', None) == 10048 or getattr(e, 'errno', None) == 10048:
             print(f"[ERROR] Port {config.SERVER_PORT} is in use."); sys.exit(1)
