@@ -182,6 +182,8 @@ class FrameUploadClient(
         val dwellCountdownMs: Int = 0,
         val phase: String = "IDLE",
         val statusMessage: String = "",
+        val activeStep: String? = null,
+        val source: String = "mobile",
         val mobilePromptTokens: Int = 0,
         val mobileCandidatesTokens: Int = 0,
         val mobileTotalTokens: Int = 0,
@@ -203,6 +205,8 @@ class FrameUploadClient(
             put("dwell_countdown_ms", data.dwellCountdownMs)
             put("phase", data.phase)
             put("status_message", data.statusMessage)
+            data.activeStep?.let { put("active_step", it) }
+            put("source", data.source)
             put("mobile_tokens", JSONObject().apply {
                 put("prompt_tokens", data.mobilePromptTokens)
                 put("candidates_tokens", data.mobileCandidatesTokens)
@@ -255,9 +259,14 @@ class FrameUploadClient(
     data class OrchestrationState(
         val status: String = "IDLE", // IDLE, RUNNING, PAUSED, COMPLETED, ABORTED
         val command: String = "NONE", // BEGIN, PAUSE, RESUME, END, RESTART
+        val source: String = "system",
+        val invokedBy: String = "System ⚙️",
+        val activeStep: String = "START_READY",
+        val stepLabel: String = "",
         val currentPage: Int = 1,
         val currentTopLine: Int = 0,
         val currentBottomLine: Int = 0,
+        val nextTargetTop: Int = 0,
         val targetTotalLines: Int = 0,
         val statusMessage: String = ""
     )
@@ -281,9 +290,14 @@ class FrameUploadClient(
                         OrchestrationState(
                             status = orch.optString("status", "IDLE"),
                             command = orch.optString("last_command", command),
-                            currentPage = telem.optInt("current_page", 1),
-                            currentTopLine = telem.optInt("current_top_line", 0),
-                            currentBottomLine = telem.optInt("current_bottom_line", 0),
+                            source = orch.optString("source", source),
+                            invokedBy = orch.optString("invoked_by", "System ⚙️"),
+                            activeStep = orch.optString("active_step", "START_READY"),
+                            stepLabel = orch.optString("step_label", ""),
+                            currentPage = telem.optInt("current_page", orch.optInt("page", 1)),
+                            currentTopLine = telem.optInt("current_top_line", orch.optInt("top_line", 0)),
+                            currentBottomLine = telem.optInt("current_bottom_line", orch.optInt("bottom_line", 0)),
+                            nextTargetTop = orch.optInt("next_target_top", 0),
                             targetTotalLines = telem.optInt("target_total_lines", 0),
                             statusMessage = telem.optString("status_message", "")
                         )
@@ -312,9 +326,14 @@ class FrameUploadClient(
                         OrchestrationState(
                             status = orch.optString("status", "IDLE"),
                             command = orch.optString("last_command", "NONE"),
-                            currentPage = telem.optInt("current_page", 1),
-                            currentTopLine = telem.optInt("current_top_line", 0),
-                            currentBottomLine = telem.optInt("current_bottom_line", 0),
+                            source = orch.optString("source", "system"),
+                            invokedBy = orch.optString("invoked_by", "System ⚙️"),
+                            activeStep = orch.optString("active_step", "START_READY"),
+                            stepLabel = orch.optString("step_label", ""),
+                            currentPage = telem.optInt("current_page", orch.optInt("page", 1)),
+                            currentTopLine = telem.optInt("current_top_line", orch.optInt("top_line", 0)),
+                            currentBottomLine = telem.optInt("current_bottom_line", orch.optInt("bottom_line", 0)),
+                            nextTargetTop = orch.optInt("next_target_top", 0),
                             targetTotalLines = telem.optInt("target_total_lines", 0),
                             statusMessage = telem.optString("status_message", "")
                         )

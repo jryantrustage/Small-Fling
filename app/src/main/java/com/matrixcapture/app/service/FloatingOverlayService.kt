@@ -147,6 +147,8 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                             targetTotalLines = pState.targetTotalLines,
                             dwellCountdownMs = pState.dwellRemainingMs.toInt(),
                             phase = pState.phase,
+                            activeStep = pState.activeStep,
+                            source = "hud",
                             statusMessage = pState.statusMessage,
                             mobilePromptTokens = pTokens,
                             mobileCandidatesTokens = cTokens,
@@ -158,6 +160,11 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                         )
                     )
                     isBackendOnline.value = ok
+
+                    val remoteRes = uploadClient.fetchOrchestrationState()
+                    if (remoteRes.isSuccess) {
+                        remoteRes.getOrNull()?.let { remoteOrchestration.value = it }
+                    }
                 } catch (e: Exception) {
                     isBackendOnline.value = false
                 }
@@ -266,6 +273,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
         val isOverlayRunning = _isOverlayRunning.asStateFlow()
 
         val isBackendOnline = MutableStateFlow(false)
+        val remoteOrchestration = MutableStateFlow<FrameUploadClient.OrchestrationState?>(null)
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingOverlayService::class.java)
@@ -306,6 +314,8 @@ fun FloatingHudOverlay(
     var seekLineText by remember { mutableStateOf("") }
     var isSeeking by remember { mutableStateOf(false) }
     var isCapturingCurrentScreen by remember { mutableStateOf(false) }
+
+    val remoteOrch by FloatingOverlayService.remoteOrchestration.collectAsState()
 
     Box(
         modifier = Modifier
@@ -350,6 +360,14 @@ fun FloatingHudOverlay(
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                     )
+                    if (remoteOrch != null && !remoteOrch?.invokedBy.isNullOrEmpty()) {
+                        Text(
+                            text = "${remoteOrch?.invokedBy}",
+                            color = Color(0xFF79C0FF),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                     if (dwellRemainingMs > 0) {
                         Text(
                             text = "${dwellRemainingMs}ms",
@@ -391,7 +409,7 @@ fun FloatingHudOverlay(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
@@ -436,6 +454,22 @@ fun FloatingHudOverlay(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+                            if (remoteOrch != null && !remoteOrch?.invokedBy.isNullOrEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .border(1.dp, Color(0xFF30363D), RoundedCornerShape(4.dp))
+                                        .background(Color(0xFF21262D))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "${remoteOrch?.invokedBy}",
+                                        color = Color(0xFF79C0FF),
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                             }
                         }
 
@@ -488,8 +522,19 @@ fun FloatingHudOverlay(
                             )
                         }
 
+                        if (remoteOrch != null && !remoteOrch?.stepLabel.isNullOrEmpty()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "DAG: ${remoteOrch?.stepLabel}",
+                                color = Color(0xFFFFA657),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
                         if (telemetry.statusMessage.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(4.dp))
+                            Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = telemetry.statusMessage,
                                 color = Color(0xFF8B949E),

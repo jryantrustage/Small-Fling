@@ -26,7 +26,13 @@ import {
   Menu,
   Play,
   Pause,
-  Square
+  Square,
+  Camera,
+  Clock,
+  Repeat,
+  Flag,
+  ChevronsRight,
+  Sparkles
 } from 'lucide-react';
 
 const getApiBase = () => {
@@ -192,12 +198,36 @@ export default function App() {
     last_command: string;
     timestamp: number;
     source?: string;
+    invoked_by?: string;
+    active_step?: string;
+    step_label?: string;
+    top_line?: number;
+    bottom_line?: number;
+    next_target_top?: number;
+    page?: number;
   }>({
     status: 'IDLE',
     last_command: '',
     timestamp: 0,
-    source: 'system'
+    source: 'system',
+    invoked_by: 'System ⚙️',
+    active_step: 'START_READY',
+    step_label: 'Line 1 Start Position Set (Ready to Begin)',
+    top_line: 1,
+    bottom_line: 49,
+    next_target_top: 50,
+    page: 1
   });
+
+  const formatDeviceName = (source?: string) => {
+    const s = (source || '').toLowerCase();
+    if (s.includes('web')) return 'Web Studio 💻';
+    if (s.includes('mobile')) return 'Mobile App 📱';
+    if (s.includes('hud')) return 'Floating HUD 🪟';
+    if (s.includes('pacer')) return 'Auto-Pacer ⚡';
+    if (s.includes('api')) return 'Backend API ⚙️';
+    return 'System ⚙️';
+  };
 
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<LineData | null>(null);
@@ -297,7 +327,14 @@ export default function App() {
 
       if (orchRes.ok) {
         const oJson = await orchRes.json();
-        setOrchestrationState(oJson);
+        if (oJson.orchestration) {
+          setOrchestrationState(oJson.orchestration);
+        } else {
+          setOrchestrationState(oJson);
+        }
+        if (oJson.telemetry) {
+          setTelemetry(oJson.telemetry);
+        }
       }
     } catch {
       setBackendConnected(false);
@@ -460,18 +497,28 @@ export default function App() {
                 .then(data => setDocumentData(data))
                 .catch(err => console.error(err));
             } else if (msg.type === 'orchestration_event') {
-              setOrchestrationState({
-                status: msg.status,
-                last_command: msg.command,
-                timestamp: msg.timestamp || Date.now(),
-                source: msg.source || 'system'
-              });
+              if (msg.orchestration) {
+                setOrchestrationState(msg.orchestration);
+              } else if (msg.status) {
+                setOrchestrationState({
+                  status: msg.status,
+                  last_command: msg.command || '',
+                  timestamp: msg.timestamp || Date.now(),
+                  source: msg.source || 'system',
+                  invoked_by: formatDeviceName(msg.source),
+                  active_step: msg.active_step,
+                  step_label: msg.step_label
+                });
+              }
               if (msg.telemetry) {
                 setTelemetry(prev => ({
                   ...prev,
-                  current_page: msg.telemetry.page ?? prev.current_page,
-                  current_top_line: msg.telemetry.top_line ?? prev.current_top_line,
-                  current_bottom_line: msg.telemetry.bottom_line ?? prev.current_bottom_line,
+                  current_page: msg.telemetry.current_page ?? msg.telemetry.page ?? prev.current_page,
+                  current_top_line: msg.telemetry.current_top_line ?? msg.telemetry.top_line ?? prev.current_top_line,
+                  current_bottom_line: msg.telemetry.current_bottom_line ?? msg.telemetry.bottom_line ?? prev.current_bottom_line,
+                  dwell_countdown_ms: msg.telemetry.dwell_countdown_ms ?? prev.dwell_countdown_ms,
+                  phase: msg.telemetry.phase ?? prev.phase,
+                  status_message: msg.telemetry.status_message ?? prev.status_message
                 }));
               }
             }
@@ -623,8 +670,15 @@ export default function App() {
         body: JSON.stringify({ command, source: 'web' })
       });
       if (res.ok) {
-        const state = await res.json();
-        setOrchestrationState(state);
+        const data = await res.json();
+        if (data.orchestration) {
+          setOrchestrationState(data.orchestration);
+        } else {
+          setOrchestrationState(data);
+        }
+        if (data.telemetry) {
+          setTelemetry(data.telemetry);
+        }
       }
     } catch (err) {
       console.error('Failed to send orchestration command:', err);
@@ -876,7 +930,9 @@ export default function App() {
                 <span className="orch-status-dot" />
                 {orchestrationState.status || 'IDLE'}
               </span>
-              <span className="orch-source-tag">Source: {orchestrationState.source || 'system'}</span>
+              <span className="orch-source-tag">
+                {orchestrationState.invoked_by ? `Invoked by: ${orchestrationState.invoked_by}` : `Invoked by: ${formatDeviceName(orchestrationState.source)}`}
+              </span>
             </div>
           </div>
 
@@ -884,7 +940,7 @@ export default function App() {
             <Layers size={14} color="#58a6ff" />
             <span className="orch-telemetry-page">PAGE {telemetry.current_page || 1}</span>
             <span className="orch-telemetry-lines">
-              Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || 30}
+              Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || 49}
             </span>
             {telemetry.dwell_countdown_ms > 0 && (
               <span className="orch-dwell-tag">{telemetry.dwell_countdown_ms}ms dwell</span>
@@ -969,6 +1025,134 @@ export default function App() {
               )}
             </>
           )}
+        </div>
+      </div>
+
+      {/* Interactive Animated Orchestration Pipeline DAG */}
+      <div className="orch-dag-panel">
+        <div className="orch-dag-header">
+          <div className="orch-dag-title">
+            <Sparkles size={14} color="#00ff9d" />
+            <span className="dag-title-text">ORCHESTRATION PIPELINE DAG</span>
+            <span className="dag-status-pill">
+              Active: <strong>{orchestrationState.step_label || 'Line 1 Ready to Begin'}</strong>
+            </span>
+          </div>
+          <div className="orch-dag-attribution">
+            <span className="dag-device-tag">
+              {orchestrationState.invoked_by ? `Invoked by: ${orchestrationState.invoked_by}` : `Invoked by: ${formatDeviceName(orchestrationState.source)}`}
+            </span>
+          </div>
+        </div>
+
+        <div className="orch-dag-flow">
+          {/* Stage 1: Line 1 Start Position */}
+          <div className={`dag-node ${(!orchestrationState.active_step || orchestrationState.active_step === 'START_READY') ? 'active pulse' : 'completed'}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">01</span>
+              <Flag size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">Start Position</div>
+            <div className="dag-node-sub">Gutter Line 1 Initialized</div>
+            <div className="dag-node-pill">Ln 1 Set & Ready</div>
+          </div>
+
+          <div className={`dag-connector ${orchestrationState.status === 'RUNNING' && orchestrationState.active_step === 'SCREEN_CAPTURE' ? 'streaming' : ''}`}>
+            <div className="dag-beam" />
+            <ChevronsRight size={14} />
+          </div>
+
+          {/* Stage 2: Display 1 Capture */}
+          <div className={`dag-node ${orchestrationState.active_step === 'SCREEN_CAPTURE' ? 'active pulse' : (['OCR_BOUNDS', 'PRECISION_SCROLL', 'DWELL_FREEZE', 'LOOP_EVAL'].includes(orchestrationState.active_step || '') ? 'completed' : '')}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">02</span>
+              <Camera size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">Display 1 Capture</div>
+            <div className="dag-node-sub">Desktop Mode (HDMI TO USB)</div>
+            <div className="dag-node-pill">1920x1080 Frame</div>
+          </div>
+
+          <div className={`dag-connector ${orchestrationState.status === 'RUNNING' && orchestrationState.active_step === 'OCR_BOUNDS' ? 'streaming' : ''}`}>
+            <div className="dag-beam" />
+            <ChevronsRight size={14} />
+          </div>
+
+          {/* Stage 3: OCR Bounds */}
+          <div className={`dag-node ${orchestrationState.active_step === 'OCR_BOUNDS' ? 'active pulse' : (['PRECISION_SCROLL', 'DWELL_FREEZE', 'LOOP_EVAL'].includes(orchestrationState.active_step || '') ? 'completed' : '')}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">03</span>
+              <Scan size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">OCR Bounds</div>
+            <div className="dag-node-sub">Detect First & Last Line</div>
+            <div className="dag-node-pill">
+              Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || 49}
+            </div>
+          </div>
+
+          <div className={`dag-connector ${orchestrationState.status === 'RUNNING' && orchestrationState.active_step === 'PRECISION_SCROLL' ? 'streaming' : ''}`}>
+            <div className="dag-beam" />
+            <ChevronsRight size={14} />
+          </div>
+
+          {/* Stage 4: Precision Scroll */}
+          <div className={`dag-node ${orchestrationState.active_step === 'PRECISION_SCROLL' ? 'active pulse' : (['DWELL_FREEZE', 'LOOP_EVAL'].includes(orchestrationState.active_step || '') ? 'completed' : '')}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">04</span>
+              <MoveVertical size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">Precision Scroll</div>
+            <div className="dag-node-sub">Align Prior Bottom + 1</div>
+            <div className="dag-node-pill highlight">
+              Target Top: Ln {(telemetry.current_bottom_line && telemetry.current_bottom_line > 0) ? telemetry.current_bottom_line + 1 : 50}
+            </div>
+          </div>
+
+          <div className={`dag-connector ${orchestrationState.status === 'RUNNING' && orchestrationState.active_step === 'DWELL_FREEZE' ? 'streaming' : ''}`}>
+            <div className="dag-beam" />
+            <ChevronsRight size={14} />
+          </div>
+
+          {/* Stage 5: Dwell Freeze */}
+          <div className={`dag-node ${orchestrationState.active_step === 'DWELL_FREEZE' ? 'active pulse' : (orchestrationState.active_step === 'LOOP_EVAL' ? 'completed' : '')}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">05</span>
+              <Clock size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">1.5s Dwell Freeze</div>
+            <div className="dag-node-sub">Anti-Blur Frame Settling</div>
+            <div className="dag-node-pill">
+              {telemetry.dwell_countdown_ms > 0 ? `${telemetry.dwell_countdown_ms}ms` : '1,500ms Freeze'}
+            </div>
+          </div>
+
+          <div className={`dag-connector ${orchestrationState.status === 'RUNNING' && orchestrationState.active_step === 'LOOP_EVAL' ? 'streaming' : ''}`}>
+            <div className="dag-beam" />
+            <ChevronsRight size={14} />
+          </div>
+
+          {/* Stage 6: Loop or EOF */}
+          <div className={`dag-node ${orchestrationState.active_step === 'LOOP_EVAL' || orchestrationState.status === 'COMPLETED' ? 'active pulse' : ''}`}>
+            <div className="dag-node-header">
+              <span className="dag-node-num">06</span>
+              <Repeat size={14} className="dag-icon" />
+            </div>
+            <div className="dag-node-title">EOF or Loop</div>
+            <div className="dag-node-sub">Page Top Changed?</div>
+            <div className="dag-node-pill">
+              {orchestrationState.status === 'COMPLETED' ? 'Document Complete' : 'Cycle to Next Page'}
+            </div>
+          </div>
+        </div>
+
+        {/* Animated Loopback Rail */}
+        <div className="dag-loopback-rail">
+          <div className="loopback-badge">
+            <Repeat size={12} className={orchestrationState.status === 'RUNNING' ? 'spinning' : ''} />
+            <span>Automated Pacing Cycle: Loops back to Display 1 Capture until page top stops advancing (EOF)</span>
+          </div>
+          <div className={`loopback-track ${orchestrationState.status === 'RUNNING' ? 'track-animated' : ''}`} />
         </div>
       </div>
 

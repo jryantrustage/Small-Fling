@@ -458,17 +458,20 @@ class DesktopPaginationService : AccessibilityService() {
 
                 var bottomStaticCount = 0
                 var prevBottomRead = -1
+                var prevTopRead = -1
 
                 // Adaptive Closed-Loop Auto-Tune State
                 var autoTuneFactor = 1.0f
                 var lastAlignmentError = 0
                 var targetPreviousBottomLine = 1
+                var targetNextTopLine = 1
 
                 Log.i(TAG, "Starting pacing engine on Display $resolvedDisplay: Initial=$initialTarget lines, Dwell=${dwellTimeMs}ms, Phase=$phase")
 
                 // 3-second focus countdown so user can ensure Teams is focused
                 for (sec in 3 downTo 1) {
                     _telemetry.value = _telemetry.value.copy(
+                        activeStep = "START_READY",
                         statusMessage = "Focus Teams window! Starting capture in $sec..."
                     )
                     delay(1000)
@@ -483,21 +486,36 @@ class DesktopPaginationService : AccessibilityService() {
                     _currentPage.value = pageIndex
 
                     if (pageIndex == 1) {
+                        _telemetry.value = _telemetry.value.copy(
+                            activeStep = "SCREEN_CAPTURE",
+                            statusMessage = "Page 1: Capturing initial frame (Ln 1)..."
+                        )
                         // Check if real OCR lines are available on initial frame
                         val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                         if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
                             currentTopLine = ocr.currentTopLine
                             currentBottomLine = ocr.currentBottomLine
                             prevBottomRead = currentBottomLine
+                            prevTopRead = currentTopLine
                         } else {
                             currentTopLine = 1
                             currentBottomLine = visibleLinesCount
                         }
                         Log.i(TAG, "Page 1 initial frame settling (Lines $currentTopLine-$currentBottomLine)...")
                         delay(500) // Initial settle
+                        _telemetry.value = _telemetry.value.copy(
+                            activeStep = "OCR_BOUNDS",
+                            statusMessage = "Page 1: OCR bounds verified (Ln $currentTopLine-$currentBottomLine)"
+                        )
                         onFrameCaptureNeeded?.invoke(pageIndex, currentTopLine, currentBottomLine)
                     } else {
                         targetPreviousBottomLine = currentBottomLine
+                        targetNextTopLine = targetPreviousBottomLine + 1
+                        _telemetry.value = _telemetry.value.copy(
+                            activeStep = "PRECISION_SCROLL",
+                            statusMessage = "Precision scrolling: positioning next page top to Ln $targetNextTopLine..."
+                        )
+
                         val ocrBefore = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                         val prevBottomY = if (ocrBefore != null && ocrBefore.lowestDetectedY > 0) {
                             ocrBefore.lowestDetectedY.toFloat()
@@ -511,7 +529,7 @@ class DesktopPaginationService : AccessibilityService() {
                         val startY = centerY + (adaptiveTravel / 2f)
                         val endY = centerY - (adaptiveTravel / 2f)
 
-                        Log.i(TAG, "Auto-tune flip to Page $pageIndex: targetBottomLine=$targetPreviousBottomLine, travel=${adaptiveTravel}px (factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)})...")
+                        Log.i(TAG, "Auto-tune flip to Page $pageIndex: targetTopLine=$targetNextTopLine (prior bottom $targetPreviousBottomLine), travel=${adaptiveTravel}px (factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)})...")
 
                         val gestureSucceeded = dispatchSwipe(
                             startX = centerX,
@@ -529,6 +547,11 @@ class DesktopPaginationService : AccessibilityService() {
 
                         delay(700) // Wait for scroll to completely settle (Zero motion blur with anti-fling deceleration)
 
+                        _telemetry.value = _telemetry.value.copy(
+                            activeStep = "SCREEN_CAPTURE",
+                            statusMessage = "Page $pageIndex: Settled, capturing frame..."
+                        )
+
                         // Ground-truth line numbers directly from Gutter OCR if detected
                         val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                         val hasRealOcr = ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine
@@ -543,11 +566,11 @@ class DesktopPaginationService : AccessibilityService() {
                                 _calculatedTotalLines.value = dynamicTotalLines
                             }
 
-                            // Dynamic end-of-document detection: if bottom line stops advancing after swipe
-                            if (pageIndex > 1 && currentBottomLine == prevBottomRead) {
+                            // Dynamic end-of-document detection: if top line or bottom line stops advancing after swipe
+                            if (pageIndex > 1 && (currentBottomLine == prevBottomRead || currentTopLine == prevTopRead)) {
                                 bottomStaticCount++
                                 if (bottomStaticCount >= 2) {
-                                    Log.i(TAG, "End of document reached dynamically at line $currentBottomLine (pacing complete).")
+                                    Log.i(TAG, "End of document reached dynamically (line unchanged: top=$currentTopLine, bottom=$currentBottomLine).")
                                     dynamicTotalLines = currentBottomLine
                                     _calculatedTotalLines.value = dynamicTotalLines
                                     break
@@ -555,10 +578,11 @@ class DesktopPaginationService : AccessibilityService() {
                             } else {
                                 bottomStaticCount = 0
                                 prevBottomRead = currentBottomLine
+                                prevTopRead = currentTopLine
                             }
 
-                            // Auto-tune alignment error calculation:
-                            val error = currentTopLine - targetPreviousBottomLine
+                            // Auto-tune alignment error calculation: target top is prior bottom + 1
+                            val error = currentTopLine - targetNextTopLine
                             lastAlignmentError = error
 
                             // If error > 0: overshot! We scrolled too far and skipped lines.
@@ -568,7 +592,11 @@ class DesktopPaginationService : AccessibilityService() {
                             } else if (error < -1) {
                                 autoTuneFactor = (autoTuneFactor + 0.03f * (-error)).coerceIn(0.65f, 1.35f)
                             }
-                            Log.i(TAG, "Auto-tune evaluated: prevBottom=$targetPreviousBottomLine, newTop=$currentTopLine, error=$error lines -> next factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)}")
+                            Log.i(TAG, "Auto-tune evaluated: targetTop=$targetNextTopLine, actualTop=$currentTopLine, error=$error lines -> next factor=${String.format(java.util.Locale.US, "%.3f", autoTuneFactor)}")
+                            _telemetry.value = _telemetry.value.copy(
+                                activeStep = "OCR_BOUNDS",
+                                statusMessage = "Page $pageIndex: Gutter OCR Ln $currentTopLine-$currentBottomLine (target top $targetNextTopLine, err $error)"
+                            )
                         } else {
                             // When OCR is not active, DO NOT fabricate arbitrary line numbers!
                             Log.w(TAG, "OCR did not detect line numbers on Page $pageIndex. Swiping based on viewport.")
@@ -591,6 +619,7 @@ class DesktopPaginationService : AccessibilityService() {
                     val currentGutter = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                     _telemetry.value = PacingTelemetry(
                         phase = phase,
+                        activeStep = "DWELL_FREEZE",
                         currentPage = pageIndex,
                         currentTopLine = currentTopLine,
                         currentBottomLine = currentBottomLine,
@@ -618,7 +647,12 @@ class DesktopPaginationService : AccessibilityService() {
                         _telemetry.value = _telemetry.value.copy(dwellRemainingMs = remaining)
                     }
                     _dwellCountdownMs.value = 0L
-                    _telemetry.value = _telemetry.value.copy(dwellRemainingMs = 0L, isDwellActive = false)
+                    _telemetry.value = _telemetry.value.copy(
+                        dwellRemainingMs = 0L,
+                        isDwellActive = false,
+                        activeStep = "LOOP_EVAL",
+                        statusMessage = "Page $pageIndex complete. Evaluating loop continuation..."
+                    )
 
                     onPageAdvanced?.invoke(pageIndex, currentTopLine, currentBottomLine)
 
@@ -1132,6 +1166,7 @@ class DesktopPaginationService : AccessibilityService() {
 
     data class PacingTelemetry(
         val phase: String = "IDLE", // "IDLE", "PACING_TEST", "RECORDING_AND_PACING", "COMPLETED"
+        val activeStep: String = "START_READY", // "START_READY", "SCREEN_CAPTURE", "OCR_BOUNDS", "PRECISION_SCROLL", "DWELL_FREEZE", "LOOP_EVAL"
         val isPacing: Boolean = false,
         val currentPage: Int = 1,
         val currentTopLine: Int = 0,
