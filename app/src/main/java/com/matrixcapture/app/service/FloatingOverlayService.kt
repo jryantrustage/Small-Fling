@@ -367,15 +367,24 @@ fun FloatingHudOverlay(
                 }
             }
         } else {
-            // Expanded HUD Window - Single CAPTURE Button Layout (Mock 1)
+            // Expanded HUD Window - Minimalist "Less is More" Design with Unified Orchestration
+            var showSettings by remember { mutableStateOf(false) }
+            var isCapturing by remember { mutableStateOf(false) }
+            var isAligningNext by remember { mutableStateOf(false) }
+
+            val displayPage = if (telemetry.currentPage > 0) telemetry.currentPage else (if (currentPage > 0) currentPage else 1)
+            val topLn = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
+            val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else 44
+            val targetVal = if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 0)
+
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.95f)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.96f)),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
-                    .width(340.dp)
+                    .width(320.dp)
                     .border(1.5.dp, Color(0xFF00FF9D), RoundedCornerShape(16.dp))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     // Title Bar with Drag & Window Controls
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -385,128 +394,270 @@ fun FloatingHudOverlay(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
+                                    .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF00FF9D))
+                                    .background(
+                                        when (paginationState) {
+                                            is DesktopPaginationService.PaginationState.Running -> Color(0xFF00FF9D)
+                                            is DesktopPaginationService.PaginationState.Paused -> Color(0xFFE3B341)
+                                            else -> Color(0xFF8B949E)
+                                        }
+                                    )
                             )
                             Text(
                                 text = "MATRIX HUD",
                                 color = Color(0xFF00FF9D),
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
-                                letterSpacing = 0.5.sp
+                                letterSpacing = 1.sp
+                            )
+                            // Clean Status Badge
+                            val statusBadgeText = when (paginationState) {
+                                is DesktopPaginationService.PaginationState.Running -> "RUNNING"
+                                is DesktopPaginationService.PaginationState.Paused -> "PAUSED"
+                                else -> "IDLE"
+                            }
+                            val statusBadgeColor = when (paginationState) {
+                                is DesktopPaginationService.PaginationState.Running -> Color(0xFF00FF9D)
+                                is DesktopPaginationService.PaginationState.Paused -> Color(0xFFE3B341)
+                                else -> Color(0xFF8B949E)
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .border(1.dp, statusBadgeColor.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                                    .background(statusBadgeColor.copy(alpha = 0.1f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = statusBadgeText,
+                                    color = statusBadgeColor,
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            IconButton(onClick = { showSettings = !showSettings }, modifier = Modifier.size(26.dp)) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = "Settings",
+                                    tint = if (showSettings) Color(0xFF00FF9D) else Color.LightGray,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                            IconButton(onClick = { isExpanded = false }, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.CloseFullscreen, contentDescription = "Minimize", tint = Color.LightGray, modifier = Modifier.size(15.dp))
+                            }
+                            IconButton(onClick = onClose, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFFFF7B72), modifier = Modifier.size(15.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Hero Telemetry: Page # • Ln X → Y
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF161B22), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFF30363D), RoundedCornerShape(10.dp))
+                            .padding(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Page $displayPage",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Ln $topLn → $botLn",
+                                color = Color(0xFF00FF9D),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
                             )
                         }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            IconButton(onClick = { isExpanded = false }, modifier = Modifier.size(26.dp)) {
-                                Icon(Icons.Default.CloseFullscreen, contentDescription = "Minimize", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                        if (telemetry.statusMessage.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = telemetry.statusMessage,
+                                color = Color(0xFF8B949E),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
+                            )
+                        }
+
+                        // Dwell Freeze Countdown Bar
+                        if (dwellRemainingMs > 0) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "DWELL FREEZE",
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "${dwellRemainingMs}ms",
+                                    color = Color(0xFF58A6FF),
+                                    fontSize = 9.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
-                            IconButton(onClick = onClose, modifier = Modifier.size(26.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color(0xFFFF7B72), modifier = Modifier.size(16.dp))
-                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            LinearProgressIndicator(
+                                progress = { (dwellRemainingMs.toFloat() / DesktopPaginationService.DWELL_TIME_MS).coerceIn(0f, 1f) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = Color(0xFF58A6FF),
+                                trackColor = Color(0xFF21262D)
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Line 1: STATUS: ...
-                    val statusText = if (telemetry.statusMessage.isNotEmpty()) telemetry.statusMessage else "Pacing Complete at line ${if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 225}"
-                    Text(
-                        text = "STATUS: $statusText",
-                        color = Color(0xFF38BDF8),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Line 2: Page: 9 (Ln 225-268)           Target: 9487
-                    val displayPage = if (telemetry.currentPage > 0) telemetry.currentPage else (if (currentPage > 0) currentPage else 9)
-                    val topLn = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 225
-                    val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else 268
-                    val targetVal = if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 9487)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Page: $displayPage (Ln $topLn-$botLn)",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Target: $targetVal",
-                            color = Color(0xFF00FF9D),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Line 3: Chunk Progress: 267/1200 lines
-                    val chunkProgress = if (botLn > 0) (botLn % 1200) else 267
-                    Text(
-                        text = "Chunk Progress: $chunkProgress/1200 lines",
-                        color = Color(0xFF8B949E),
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Line 4: VIDEO SEGMENTS (0 TOTAL)       Uploaded: 0
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "VIDEO SEGMENTS (${segments.size} TOTAL)",
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            text = "Uploaded: ${recorderState.completedSegmentsCount}",
-                            color = Color(0xFF00FF9D),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Line 5: Dynamic message (italic light gray)
-                    Text(
-                        text = if (segments.isEmpty()) "No segments recorded yet. Session starting..." else "${segments.size} segment(s) recorded.",
-                        color = Color(0xFF8B949E),
-                        fontSize = 10.sp,
-                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                        fontFamily = FontFamily.Monospace
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Action Buttons: CAPTURE + NEXT PG & ALIGN
-                    var isCapturing by remember { mutableStateOf(false) }
-                    var isAligningNext by remember { mutableStateOf(false) }
+                    // Synchronized Orchestration Controls: [Begin] / [Pause] / [Resume] / [End]
+                    val isRunning = paginationState is DesktopPaginationService.PaginationState.Running
+                    val isPaused = paginationState is DesktopPaginationService.PaginationState.Paused
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Button 1: CAPTURE
+                        if (!isRunning && !isPaused) {
+                            // [Begin] Button
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        uploadClient.sendOrchestrationCommand("BEGIN", "hud")
+                                        val pService = DesktopPaginationService.instance
+                                        pService?.startPacingEngine(totalLines = targetVal)
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1.4f)
+                                    .height(42.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("BEGIN", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                            }
+                        } else if (isRunning) {
+                            // [Pause] Button
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        uploadClient.sendOrchestrationCommand("PAUSE", "hud")
+                                        DesktopPaginationService.instance?.pausePagination()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3B341)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                            ) {
+                                Icon(Icons.Default.Pause, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("PAUSE", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+
+                            // [End] Button
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        uploadClient.sendOrchestrationCommand("END", "hud")
+                                        DesktopPaginationService.instance?.stopPagination()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7B72)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("END", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                        } else {
+                            // [Resume] Button
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        uploadClient.sendOrchestrationCommand("RESUME", "hud")
+                                        DesktopPaginationService.instance?.resumePagination()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("RESUME", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+
+                            // [End] Button
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch {
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        uploadClient.sendOrchestrationCommand("END", "hud")
+                                        DesktopPaginationService.instance?.stopPagination()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF7B72)),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                            ) {
+                                Icon(Icons.Default.Stop, contentDescription = null, tint = Color.Black, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("END", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            }
+                        }
+
+                        // [Capt] Single manual snapshot button
                         Button(
                             onClick = {
                                 isCapturing = true
@@ -520,8 +671,6 @@ fun FloatingHudOverlay(
 
                                     if (snapshot != null) {
                                         DesktopPaginationService.latestCapturedBitmap = snapshot
-                                        DesktopPaginationService.updateStatus("Uploading to Studio (Ln $topLn-$botLn)...")
-
                                         val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
                                         val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
                                         val uploadClient = FrameUploadClient(serverHost)
@@ -529,114 +678,103 @@ fun FloatingHudOverlay(
                                             bitmap = snapshot,
                                             topLine = topLn,
                                             bottomLine = botLn,
-                                            pageIndex = currentPage.coerceAtLeast(1),
+                                            pageIndex = displayPage,
                                             sync = true
                                         )
-
                                         if (res.success) {
-                                            DesktopPaginationService.updateStatus("Page $currentPage Uploaded to Studio ✔ (Ln ${res.topLine}-${res.bottomLine})")
+                                            DesktopPaginationService.updateStatus("Page $displayPage Uploaded ✔ (Ln ${res.topLine}-${res.bottomLine})")
                                         } else {
                                             DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
                                         }
-                                    } else {
-                                        DesktopPaginationService.updateStatus("Capture Failed: No active screen buffer")
                                     }
-                                    delay(600)
+                                    delay(500)
                                     isCapturing = false
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
-                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
+                                .weight(0.9f)
+                                .height(42.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.RadioButtonChecked,
-                                    contentDescription = null,
-                                    tint = Color.Black,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isCapturing) "CAPTURING..." else "CAPTURE",
-                                    color = Color.Black,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
+                            Text(if (isCapturing) "..." else "CAPT", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                         }
+                    }
 
-                        // Button 2: NEXT PG & ALIGN
-                        Button(
+                    // Restart button (when paused or idle)
+                    if (isPaused || (!isRunning && displayPage > 1)) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedButton(
                             onClick = {
-                                isAligningNext = true
                                 coroutineScope.launch {
-                                    DesktopPaginationService.updateStatus("Fetching next page target line...")
                                     val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
                                     val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
                                     val uploadClient = FrameUploadClient(serverHost)
-                                    val nextLineRes = uploadClient.getNextPageLine()
-                                    val targetTopLine = nextLineRes.getOrNull() ?: (if (botLn > 0) botLn + 1 else 1)
-
-                                    DesktopPaginationService.updateStatus("Orchestrating sensitive touch to line $targetTopLine...")
-                                    val pagination = DesktopPaginationService.instance
-                                    val targetDisplayId = pagination?.resolveTargetDisplayId() ?: 0
-                                    val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, targetDisplayId)
-
-                                    if (snapshot != null) {
-                                        DesktopPaginationService.latestCapturedBitmap = snapshot
-                                        val nextPage = (displayPage + 1).coerceAtLeast(1)
-                                        val botEstimated = targetTopLine + 44
-                                        DesktopPaginationService.updateStatus("Uploading Page $nextPage (Line $targetTopLine at top)...")
-                                        val res = uploadClient.uploadFrame(
-                                            bitmap = snapshot,
-                                            topLine = targetTopLine,
-                                            bottomLine = botEstimated,
-                                            pageIndex = nextPage,
-                                            sync = true
-                                        )
-                                        if (res.success) {
-                                            DesktopPaginationService.updateStatus("Page $nextPage (Top Ln $targetTopLine) Aligned & Uploaded ✔")
-                                        } else {
-                                            DesktopPaginationService.updateStatus("Upload Failed: ${res.message}")
-                                        }
-                                    } else {
-                                        DesktopPaginationService.updateStatus("Alignment capture failed: No buffer")
-                                    }
-                                    delay(600)
-                                    isAligningNext = false
+                                    uploadClient.sendOrchestrationCommand("RESTART", "hud")
+                                    DesktopPaginationService.instance?.restartFromBeginning()
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF58A6FF).copy(alpha = 0.5f)),
                             modifier = Modifier
-                                .weight(1.3f)
-                                .height(46.dp)
+                                .fillMaxWidth()
+                                .height(34.dp),
+                            contentPadding = PaddingValues(0.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xFF58A6FF), modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restart from Beginning", color = Color(0xFF58A6FF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        }
+                    }
+
+                    // Settings Drawer (Only revealed when ⚙️ gear icon is clicked)
+                    AnimatedVisibility(visible = showSettings) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 10.dp)
+                                .background(Color(0xFF161B22), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF30363D), RoundedCornerShape(8.dp))
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("ADVANCED HUD CONTROLS", color = Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+
+                            // Align & Next Page Button
+                            Button(
+                                onClick = {
+                                    isAligningNext = true
+                                    coroutineScope.launch {
+                                        DesktopPaginationService.updateStatus("Fetching next line...")
+                                        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+                                        val serverHost = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+                                        val uploadClient = FrameUploadClient(serverHost)
+                                        val nextLineRes = uploadClient.getNextPageLine()
+                                        val targetTopLine = nextLineRes.getOrNull() ?: (if (botLn > 0) botLn + 1 else 1)
+
+                                        val pagination = DesktopPaginationService.instance
+                                        val targetDisplayId = pagination?.resolveTargetDisplayId() ?: 0
+                                        val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, targetDisplayId)
+                                        if (snapshot != null) {
+                                            DesktopPaginationService.latestCapturedBitmap = snapshot
+                                            val nextPage = displayPage + 1
+                                            uploadClient.uploadFrame(snapshot, targetTopLine, targetTopLine + 44, nextPage, true)
+                                            DesktopPaginationService.updateStatus("Page $nextPage Aligned & Uploaded ✔")
+                                        }
+                                        delay(400)
+                                        isAligningNext = false
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth().height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
                             ) {
-                                Icon(
-                                    Icons.Default.FastForward,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (isAligningNext) "ALIGNING..." else "NEXT PG & ALIGN",
-                                    color = Color.White,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontFamily = FontFamily.Monospace
-                                )
+                                Text(if (isAligningNext) "Aligning..." else "Next Pg & Align to Top", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            }
+
+                            if (targetVal > 0) {
+                                Text("Target Document Length: $targetVal lines", color = Color(0xFF00FF9D), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                             }
                         }
                     }
