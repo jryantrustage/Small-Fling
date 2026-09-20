@@ -488,9 +488,22 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     cmd, invoker = payload.command.upper(), format_device_name(payload.source)
     orchestration_state.update({"last_command": cmd, "source": payload.source or "web", "invoked_by": invoker, "updated_at": datetime.now().isoformat()})
 
-    if cmd == "BEGIN":
-        orchestration_state.update({"status": "RUNNING", "active_step": "SCREEN_CAPTURE", "step_label": f"Orchestration Started by {invoker}"})
-        latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Running • Invoked by {invoker}"})
+    if cmd in ("BEGIN", "BEGIN_AUTO_FLIPPING"):
+        orchestration_state.update({"status": "RUNNING", "active_step": "SCREEN_CAPTURE", "step_label": f"Auto Flipping Started by {invoker}"})
+        latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Auto Flipping • Invoked by {invoker}"})
+    elif cmd == "CAPTURE_DESKTOP":
+        orchestration_state.update({"active_step": "SCREEN_CAPTURE", "step_label": f"Capture Desktop Invoked by {invoker}"})
+        latest_telemetry.update({"status_message": f"Capture Desktop Mode • Invoked by {invoker}"})
+    elif cmd == "GET_NEXT_LINE":
+        next_ln = 1
+        for f in reversed(sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
+            if f.get("bottom_line", 0) > 0:
+                next_ln = f["bottom_line"] + 1
+                break
+        if next_ln == 1 and document_lines:
+            next_ln = max(document_lines.keys()) + 1
+        orchestration_state.update({"next_target_top": next_ln, "step_label": f"Next Target Line: {next_ln} (Queried by {invoker})"})
+        latest_telemetry.update({"status_message": f"Next Page First Line: {next_ln} • Invoked by {invoker}"})
     elif cmd == "PAUSE":
         orchestration_state.update({"status": "PAUSED", "step_label": f"Paused by {invoker}"})
         latest_telemetry.update({"is_pacing": False, "phase": "PAUSED", "status_message": f"Paused • Invoked by {invoker}"})
@@ -686,7 +699,7 @@ async def upload_frame(request: Request, background_tasks: BackgroundTasks):
     except (ValueError, TypeError): pidx = len(captured_frames) + 1
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
-    fid = f"frame_{top_line:05d}_{bottom_line:05d}" if top_line > 0 and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"
+    fid = f"frame_{top_line:05d}_{bottom_line:05d}_{now_str}" if top_line > 0 and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"
     fn = f"{fid}.png"; tpath = FRAMES_DIR / fn
     with open(tpath, "wb") as f: f.write(contents)
 
