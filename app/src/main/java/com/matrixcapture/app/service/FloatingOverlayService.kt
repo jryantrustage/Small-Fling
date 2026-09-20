@@ -457,20 +457,21 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                     isAligningNext = true
                                     Log.i("FloatingOverlayService", "Align & Next Page triggered from HUD")
                                     coroutineScope.launch {
-                                        DesktopPaginationService.updateStatus("Fetching next line from API...")
+                                        DesktopPaginationService.updateStatus("Fetching next line...")
                                         val client = FloatingOverlayService.getUploadClient(context)
                                         val targetTopLine = client.getNextPageLine().getOrNull() ?: (if (botLn > 0) botLn + 1 else 1)
                                         val pagination = DesktopPaginationService.instance
-                                        val targetDisplay = pagination?.resolveTargetDisplayId() ?: 0
-                                        val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, targetDisplay)
+                                        val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, pagination.resolveTargetDisplayId())
                                         if (snapshot != null) {
                                             DesktopPaginationService.latestCapturedBitmap = snapshot
                                             val nextPage = displayPage + 1
-                                            val confirmedTop = DesktopPaginationService.telemetry.value.currentTopLine.takeIf { it > 0 } ?: targetTopLine
-                                            val confirmedBot = DesktopPaginationService.telemetry.value.currentBottomLine.takeIf { it > confirmedTop } ?: (confirmedTop + 20)
-                                            client.uploadFrame(snapshot, confirmedTop, confirmedBot, nextPage, true)
-                                            DesktopPaginationService.updateStatus("Page $nextPage (Ln $confirmedTop → $confirmedBot) Aligned & Uploaded ✔")
-                                            Log.i("FloatingOverlayService", "Page $nextPage (Ln $confirmedTop → $confirmedBot) aligned and uploaded to server.")
+                                            val curTop = DesktopPaginationService.telemetry.value.currentTopLine
+                                            val curBot = DesktopPaginationService.telemetry.value.currentBottomLine
+                                            val actualTop = if (curTop > 0) curTop else targetTopLine
+                                            val actualBot = if (curBot > actualTop) curBot else (actualTop + 44)
+                                            client.uploadFrame(snapshot, actualTop, actualBot, nextPage, true)
+                                            DesktopPaginationService.updateStatus("Page $nextPage (Ln $actualTop-$actualBot) Aligned & Uploaded ✔")
+                                            Log.i("FloatingOverlayService", "Page $nextPage (Ln $actualTop-$actualBot) aligned and uploaded to server.")
                                         }
                                         delay(400)
                                         isAligningNext = false

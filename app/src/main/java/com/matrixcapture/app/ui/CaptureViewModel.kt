@@ -215,13 +215,15 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
         val snap = ps.alignAndCaptureNextPage(targetTop, dId) ?: return@launch run { _uiState.update { it.copy(workflowStatus = "Capture failed") } }
         val page = (_uiState.value.currentPage + 1).coerceAtLeast(1)
-        val confirmedTop = DesktopPaginationService.telemetry.value.currentTopLine.takeIf { it > 0 } ?: targetTop
-        val confirmedBot = DesktopPaginationService.telemetry.value.currentBottomLine.takeIf { it > confirmedTop } ?: (confirmedTop + 20)
-        _uiState.update { it.copy(currentPage = page, currentTopLine = confirmedTop, currentBottomLine = confirmedBot, workflowStatus = "Uploading Page $page (Ln $confirmedTop → $confirmedBot)...") }
-        val res = uploadClient.uploadFrame(snap, confirmedTop, confirmedBot, page, sync = true)
+        val curTop = DesktopPaginationService.telemetry.value.currentTopLine
+        val curBot = DesktopPaginationService.telemetry.value.currentBottomLine
+        val actualTop = if (curTop > 0) curTop else targetTop
+        val actualBot = if (curBot > actualTop) curBot else (actualTop + 44)
+        _uiState.update { it.copy(currentPage = page, currentTopLine = actualTop, currentBottomLine = actualBot, workflowStatus = "Uploading Page $page...") }
+        val res = uploadClient.uploadFrame(snap, actualTop, actualBot, page, sync = true)
         if (res.success) {
-            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $page (Ln $confirmedTop → $confirmedBot) Aligned & Uploaded ✔") }
-            DesktopPaginationService.updateStatus("Page $page (Ln $confirmedTop → $confirmedBot) Aligned & Uploaded ✔")
+            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $page (Ln $actualTop-$actualBot) Aligned & Uploaded ✔") }
+            DesktopPaginationService.updateStatus("Page $page (Ln $actualTop-$actualBot) Aligned & Uploaded ✔")
         } else _uiState.update { it.copy(workflowStatus = "Upload failed: ${res.message}") }
     }
 
