@@ -64,12 +64,21 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                                 "COMPLETED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) stopWorkflow()
                             }
                         }
+                        if (ro.command == "CAPTURE_DESKTOP" && lastHandledRemoteCommand != "CAPTURE_DESKTOP_${ro.stepLabel}") {
+                            lastHandledRemoteCommand = "CAPTURE_DESKTOP_${ro.stepLabel}"
+                            captureDesktopMode()
+                        } else if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != "GET_NEXT_LINE_${ro.stepLabel}") {
+                            lastHandledRemoteCommand = "GET_NEXT_LINE_${ro.stepLabel}"
+                            getNextPageLine()
+                        }
                     }
                 } catch (_: Exception) { _uiState.update { it.copy(isBackendConnected = false) } }
             }
         }
         initDisplayDetection()
     }
+
+    private var lastHandledRemoteCommand: String? = null
 
     private fun initDisplayDetection() {
         val dm = context.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager
@@ -184,20 +193,32 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Stopped by user.") }
     }
 
-    fun sendCapturesToPythonApi() = viewModelScope.launch {
+    fun captureDesktopMode() = viewModelScope.launch {
         _uiState.update { it.copy(workflowStatus = "Capturing desktop screen...") }
-        val snap = DesktopPaginationService.latestCapturedBitmap ?: DesktopPaginationService.instance?.captureScreenshot() ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
-        if (snap == null) { _uiState.update { it.copy(workflowStatus = "Capture failed: No screen image.") }; return@launch }
+        val ps = DesktopPaginationService.instance
+        val dId = ps?.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId) ?: 0
+        // ALWAYS capture fresh screenshot first to prevent showing stale cached images
+        val snap = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
+        if (snap == null) {
+            _uiState.update { it.copy(workflowStatus = "Capture failed: No screen image.") }
+            return@launch
+        }
         DesktopPaginationService.latestCapturedBitmap = snap
         val page = _uiState.value.currentPage.coerceAtLeast(1)
         val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 1
-        val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 46
-        _uiState.update { it.copy(workflowStatus = "Sending capture (Page $page, Lines $top-$bot)...") }
+        val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 49
+        _uiState.update { it.copy(workflowStatus = "Uploading desktop mode capture (Lines $top-$bot)...") }
         val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
         if (res.success) {
-            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $page (Lines $top-$bot) Settled & Uploaded") }
-            DesktopPaginationService.updateStatus("Page $page (Lines $top-$bot) Settled & Uploaded")
-        } else _uiState.update { it.copy(workflowStatus = "Failed: ${res.message}") }
+            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Desktop Capture (Lines ${res.topLine}-${res.bottomLine}) Uploaded ✔") }
+            DesktopPaginationService.updateStatus("Desktop Capture (Lines ${res.topLine}-${res.bottomLine}) Uploaded ✔")
+        } else {
+            _uiState.update { it.copy(workflowStatus = "Capture failed: ${res.message}") }
+        }
+    }
+
+    fun sendCapturesToPythonApi() = viewModelScope.launch {
+        captureDesktopMode()
     }
 
     fun getNextPageLine() = viewModelScope.launch {
@@ -234,7 +255,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         uploadClient.sendOrchestrationCommand(cmd, "mobile")
     }
 
-    fun beginOrchestration() { updateOrch("BEGIN", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true) }; startPacingOnly() }
+    fun beginOrchestration() { updateOrch("BEGIN_AUTO_FLIPPING", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true) }; startPacingOnly() }
     fun pauseOrchestration() { updateOrch("PAUSE", "PAUSED"); DesktopPaginationService.instance?.pausePagination() }
     fun resumeOrchestration() { updateOrch("RESUME", "RUNNING"); DesktopPaginationService.instance?.resumePagination() }
     fun endOrchestration() { updateOrch("END", "COMPLETED"); _uiState.update { it.copy(isWorkflowRunning = false) }; stopWorkflow() }

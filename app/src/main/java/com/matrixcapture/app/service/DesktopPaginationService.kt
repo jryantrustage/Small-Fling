@@ -451,15 +451,15 @@ class DesktopPaginationService : AccessibilityService() {
             else -> 1
         }
         val targetTopY = preState?.highestDetectedY?.toFloat() ?: (editorTopMargin + 20f)
-        val pitch = (preState?.linePitchPx ?: _telemetry.value.linePitchPx).coerceIn(24f, 48f)
+        val pitch = (preState?.linePitchPx ?: _telemetry.value.linePitchPx).coerceIn(16f, 48f)
 
         val lineDelta = targetTopLine - curTop
         Log.i(TAG, "navigateToNextPageTargetLine: targetTopLine=$targetTopLine, curTop=$curTop, lineDelta=$lineDelta, pitch=$pitch")
 
         if (lineDelta != 0) {
             // Step 2: Calculate travel distance.
-            // When lineDelta > 0 (advancing, e.g. Ln 1 -> Ln 22), content must move UP.
-            // For content to move UP, finger swipes UP: startY = centerY + chunk/2, endY = centerY - chunk/2 (startY > endY).
+            // When lineDelta > 0 (advancing, e.g. Ln 1 -> Ln 50), content must move UP.
+            // For content to move UP, finger swipes UP: startY = centerY + chunk/2, endY = centerY - chunk/2.
             val totalTravelPx = lineDelta * pitch
             var remainingTravel = totalTravelPx
 
@@ -478,30 +478,46 @@ class DesktopPaginationService : AccessibilityService() {
             delay(500)
         }
 
-        // Step 3: Closed-loop verification and micro-alignment
-        val checkSnap = captureScreenshot(resolved)
-        val checkState = checkSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-        if (checkState != null && checkState.currentTopLine > 0) {
+        // Step 3: Multi-iteration closed-loop verification and micro-alignment
+        var currentPitch = pitch
+        for (iter in 1..4) {
+            val checkSnap = captureScreenshot(resolved)
+            val checkState = checkSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+            if (checkState == null || checkState.currentTopLine <= 0) {
+                delay(300)
+                continue
+            }
+            if (checkState.linePitchPx in 14f..50f) {
+                currentPitch = checkState.linePitchPx
+            }
             val detectedTop = checkState.currentTopLine
             val error = targetTopLine - detectedTop
-            Log.i(TAG, "navigateToNextPageTargetLine: post-scroll detectedTop=$detectedTop, error=$error")
+            Log.i(TAG, "navigateToNextPageTargetLine [iter $iter]: detectedTop=$detectedTop, targetTopLine=$targetTopLine, error=$error, pitch=$currentPitch")
             
-            if (error != 0 && Math.abs(error) <= 10) {
-                val effectivePitch = if (checkState.linePitchPx > 10f) checkState.linePitchPx else pitch
-                val corrTravel = error * effectivePitch
-                val corrStartY = (editorCenterY + corrTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                val corrEndY = (editorCenterY - corrTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                dispatchSwipe(editorCenterX, corrStartY, editorCenterX, corrEndY, 280L, 250L, resolved)
-                delay(400)
-            } else if (error == 0 && targetTopY > 0 && checkState.highestDetectedY > 0) {
+            if (error == 0) {
                 // Sub-line precision: align top Y position to initial top Y position
-                val yDiff = checkState.highestDetectedY.toFloat() - targetTopY
-                if (Math.abs(yDiff) in 6f..55f) {
-                    val subStartY = (editorCenterY + yDiff * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                    val subEndY = (editorCenterY - yDiff * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                    dispatchSwipe(editorCenterX, subStartY, editorCenterX, subEndY, 220L, 200L, resolved)
-                    delay(300)
+                if (targetTopY > 0 && checkState.highestDetectedY > 0) {
+                    val yDiff = checkState.highestDetectedY.toFloat() - targetTopY
+                    if (Math.abs(yDiff) in 4f..60f) {
+                        val subTravel = yDiff.coerceIn(-maxStroke * 0.4f, maxStroke * 0.4f)
+                        val subStartY = (editorCenterY + subTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                        val subEndY = (editorCenterY - subTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                        dispatchSwipe(editorCenterX, subStartY, editorCenterX, subEndY, 240L, 220L, resolved)
+                        delay(350)
+                    }
                 }
+                break
+            } else {
+                // Iterative micro-touch correction:
+                // When error > 0 (content needs to advance further), finger swipes UP: startY > endY.
+                val corrLines = error.coerceIn(-35, 35)
+                val corrTravel = corrLines * currentPitch
+                val corrChunk = corrTravel.coerceIn(-maxStroke, maxStroke)
+                val corrStartY = (editorCenterY + corrChunk * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                val corrEndY = (editorCenterY - corrChunk * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                val corrDuration = (220L + (Math.abs(corrChunk) / maxStroke * 140L).toLong()).coerceIn(220L, 380L)
+                dispatchSwipe(editorCenterX, corrStartY, editorCenterX, corrEndY, corrDuration, 240L, resolved)
+                delay(450)
             }
         }
 

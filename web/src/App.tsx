@@ -4,7 +4,7 @@ import {
   UploadCloud, Cpu, Coins, FileCode, Layers, RotateCw, RotateCcw,
   AlertCircle, FolderKanban, Plus, Trash2, Ban, ChevronLeft,
   ChevronRight, MoveVertical, Menu, Play, Pause, Square, Camera,
-  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap
+  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash
 } from 'lucide-react';
 
 const env = import.meta.env;
@@ -423,6 +423,31 @@ export default function App() {
     if (res.ok) setOrch(await res.json());
   };
 
+  const handleGetNextPageLine = async () => {
+    try {
+      const res = await api('/api/next-page-line');
+      if (res.ok) {
+        const data = await res.json();
+        const nextLn = data.next_page_first_line || 1;
+        setScanStatusMsg(`Next Page Line: #${nextLn} (Prior bottom: #${data.last_bottom_line || 0})`);
+        setOrch(prev => ({
+          ...prev,
+          next_target_top: nextLn,
+          step_label: `Next Target Line: #${nextLn} (Queried by Web Studio)`
+        }));
+        await api('/api/orchestrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: 'GET_NEXT_LINE', source: 'web_studio' })
+        });
+        setTimeout(() => setScanStatusMsg(''), 7000);
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to get next page line:', err);
+    }
+  };
+
   const handleSaveLineEdit = async () => {
     if (!editingLine) return;
     const res = await api(`/api/lines/${editingLine.line_number}/edit`, {
@@ -601,17 +626,23 @@ export default function App() {
             <>
               <button className="btn btn-orch btn-pause" onClick={() => handleOrchCommand('PAUSE')}><Pause size={15} /><span>PAUSE</span></button>
               <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
+              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
+              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
               <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
             </>
           ) : orch.status === 'PAUSED' ? (
             <>
               <button className="btn btn-orch btn-resume" onClick={() => handleOrchCommand('RESUME')}><Play size={15} /><span>RESUME</span></button>
               <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
+              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
+              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
               <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
             </>
           ) : (
             <>
-              <button className="btn btn-orch btn-begin" onClick={() => handleOrchCommand('BEGIN')}><Play size={16} /><span>BEGIN</span></button>
+              <button className="btn btn-orch btn-begin" onClick={() => handleOrchCommand('BEGIN')}><Play size={16} /><span>begin Auto Flipping</span></button>
+              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
+              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
               {(telemetry.current_top_line > 1 || frames.length > 0) && (
                 <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
               )}
@@ -775,7 +806,7 @@ export default function App() {
                     )}
                     <div className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`} onClick={() => setSelectedFrameId(f.frame_id)}>
                       <div className="frame-card-preview">
-                        <img src={`${API_BASE}/api/frames/${f.frame_id}/image`} alt={f.frame_id} />
+                        <img src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
                         <span className="frame-badge">Pg {f.page_index}</span>
                         {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
                         <button
@@ -879,7 +910,7 @@ export default function App() {
                       <span className="gutter-callout-value">{activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Detecting...'}</span>
                     </div>
                     <div className={`source-image-wrapper ${zoomMode}`} style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}>
-                      <img src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image`} alt={activeFrame.frame_id} />
+                      <img src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image?t=${encodeURIComponent(activeFrame.created_at || '')}`} alt={activeFrame.frame_id} />
                       {frameBoundingBoxes[activeFrame.frame_id] && (
                         <svg className="bbox-svg-overlay" viewBox="0 0 1920 1080" preserveAspectRatio="none">
                           {frameBoundingBoxes[activeFrame.frame_id].first_line && (

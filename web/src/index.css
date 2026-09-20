@@ -215,6 +215,10 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .btn-end:hover { background: #f85149; }
 .btn-restart { background: rgba(48, 54, 61, 0.6); color: #c9d1d9; border: 1px solid rgba(255, 255, 255, 0.15); }
 .btn-restart:hover { background: rgba(56, 139, 253, 0.15); border-color: #58a6ff; color: #fff; }
+.btn-capture-desktop { background: #1f6feb; color: #fff; box-shadow: 0 0 12px rgba(31, 111, 235, 0.35); }
+.btn-capture-desktop:hover { background: #388bfd; box-shadow: 0 0 18px rgba(31, 111, 235, 0.6); }
+.btn-next-line { background: rgba(56, 139, 253, 0.15); color: #58a6ff; border: 1px solid rgba(88, 166, 255, 0.4); }
+.btn-next-line:hover { background: rgba(56, 139, 253, 0.28); border-color: #58a6ff; color: #fff; }
 .orch-dag-panel { background: rgba(13, 17, 23, 0.95); border-bottom: 1px solid rgba(56, 139, 253, 0.2); padding: 12px 20px 14px; position: relative; overflow: hidden; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .orch-dag-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .orch-dag-title { display: flex; align-items: center; gap: 8px; }

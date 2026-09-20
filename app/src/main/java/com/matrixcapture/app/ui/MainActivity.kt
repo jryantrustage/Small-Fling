@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
                         onTargetLinesChange = { viewModel.setTargetTotalLines(it) }, onResetSession = { viewModel.resetSession() },
                         onCalibrate = { viewModel.calibrateDocument() }, onTestPacer = { viewModel.startPacingOnly() },
                         onSendCapturesToApi = { viewModel.sendCapturesToPythonApi() }, onGetNextPageLine = { viewModel.getNextPageLine() },
+                        onCaptureDesktopMode = { viewModel.captureDesktopMode() },
                         onAlignAndCaptureNextPage = { viewModel.alignAndCaptureNextPage() },
                         onStartWorkflow = {
                             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -84,7 +85,7 @@ fun MatrixCaptureDashboard(
     uiState: CaptureViewModel.UiState, isOverlayActive: Boolean,
     onApiKeyChange: (String) -> Unit, onServerHostChange: (String) -> Unit, onTargetLinesChange: (Int) -> Unit,
     onResetSession: () -> Unit, onCalibrate: () -> Unit, onTestPacer: () -> Unit,
-    onSendCapturesToApi: () -> Unit = {}, onGetNextPageLine: () -> Unit = {}, onAlignAndCaptureNextPage: () -> Unit = {},
+    onSendCapturesToApi: () -> Unit = {}, onGetNextPageLine: () -> Unit = {}, onCaptureDesktopMode: () -> Unit = {}, onAlignAndCaptureNextPage: () -> Unit = {},
     onStartWorkflow: () -> Unit, onStopWorkflow: () -> Unit, onOpenAccessibility: () -> Unit,
     onBeginOrchestration: () -> Unit = {}, onPauseOrchestration: () -> Unit = {}, onResumeOrchestration: () -> Unit = {},
     onEndOrchestration: () -> Unit = {}, onRestartOrchestration: () -> Unit = {}, onToggleOverlay: () -> Unit
@@ -192,10 +193,16 @@ fun MatrixCaptureDashboard(
                     RestartBtn(onRestartOrchestration)
                 }
                 else -> {
-                    Button(onClick = onBeginOrchestration, modifier = Modifier.fillMaxWidth().height(60.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF9D))) {
+                    Button(onClick = onBeginOrchestration, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF9D))) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(26.dp))
-                            Text("BEGIN", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, fontSize = 18.sp, letterSpacing = 1.sp)
+                            Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(24.dp))
+                            Text("begin Auto Flipping", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, fontSize = 16.sp, letterSpacing = 0.5.sp)
+                        }
+                    }
+                    Button(onClick = onCaptureDesktopMode, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Default.CameraAlt, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Text("capture desktop mode", color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                         }
                     }
                     if (uiState.currentTopLine > 1 || uiState.uploadedFramesCount > 0) RestartBtn(onRestartOrchestration)
@@ -329,8 +336,8 @@ fun MatrixCaptureDashboard(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     DiagBtn("Test Pacer (1.5s Dwell)", onTestPacer)
-                    DiagBtn("Send Captures to Python API", onSendCapturesToApi)
-                    DiagBtn("Get line number of next page", onGetNextPageLine)
+                    DiagBtn("capture desktop mode", onCaptureDesktopMode)
+                    DiagBtn("Get line number of next", onGetNextPageLine)
                     Button(onClick = onAlignAndCaptureNextPage, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
                         Text("Next Page & Align To Top (Micro-Touch)", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
                     }
