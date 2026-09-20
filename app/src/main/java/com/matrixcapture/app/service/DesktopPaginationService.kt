@@ -15,6 +15,8 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.matrixcapture.app.capture.GutterOcrTracker
+import com.matrixcapture.app.ocr.MlKitOcrEngine
 import kotlin.coroutines.resume
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,44 +71,10 @@ class DesktopPaginationService : AccessibilityService() {
         _isServiceActive.value = false
     }
 
-    fun findTeamsWindow(): AccessibilityWindowInfo? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val allDisplays = windowsOnAllDisplays
-            for (i in 0 until allDisplays.size()) {
-                val list = allDisplays.valueAt(i)
-                val teams = list.firstOrNull { isLikelyTeamsWindow(it) }
-                if (teams != null) return teams
-            }
-        }
-        val all = windows
-        return all.firstOrNull { isLikelyTeamsWindow(it) }
-    }
-
-    private fun isLikelyTeamsWindow(win: AccessibilityWindowInfo): Boolean {
-        val pkg = runCatching { win.root?.packageName?.toString() }.getOrNull() ?: ""
-        if (pkg.contains("teams", true)) return true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val title = win.title?.toString() ?: ""
-            if (title.contains("teams", true) || title.contains("Matrix", true)) return true
-        }
-        return false
-    }
-
     fun resolveTargetDisplayId(preferredId: Int? = null): Int {
-        val teamsWin = findTeamsWindow()
-        if (teamsWin != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            return teamsWin.displayId
-        }
         if (preferredId != null && preferredId != Display.DEFAULT_DISPLAY) return preferredId
         val dm = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-        val extDisplays = dm?.displays?.filter { d ->
-            d.displayId != Display.DEFAULT_DISPLAY &&
-            !d.name.contains("Virtual", true) &&
-            !d.name.contains("Matrix", true) &&
-            !d.name.contains("Record", true) &&
-            (d.flags and Display.FLAG_PRIVATE == 0)
-        }
-        return extDisplays?.firstOrNull()?.displayId ?: Display.DEFAULT_DISPLAY
+        return dm?.displays?.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }?.displayId ?: 0
     }
 
     suspend fun captureScreenshot(targetDisplayId: Int? = null): Bitmap? = suspendCancellableCoroutine { cont ->
@@ -138,38 +106,53 @@ class DesktopPaginationService : AccessibilityService() {
     }
 
     fun findTargetWindow(displayId: Int): AccessibilityWindowInfo? {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val list = windowsOnAllDisplays.get(displayId)
-            if (list != null) {
-                val teams = list.firstOrNull { isLikelyTeamsWindow(it) }
-                if (teams != null) return teams
-                val appFocused = list.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
-                if (appFocused != null) return appFocused
-                val appWin = list.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-                if (appWin != null) return appWin
-                return list.firstOrNull()
-            }
+        val myPkg = packageName ?: "com.matrixcapture.app"
+        val allWindows: List<AccessibilityWindowInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            windowsOnAllDisplays.get(displayId) ?: windows.filter { it.displayId == displayId }
+        } else {
+            windows
         }
-        val all = windows
-        val teams = all.firstOrNull { isLikelyTeamsWindow(it) && (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || it.displayId == displayId) }
-        if (teams != null) return teams
-        val appFocused = all.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused && (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || it.displayId == displayId) }
-        if (appFocused != null) return appFocused
-        return all.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: all.firstOrNull()
+        if (allWindows.isEmpty()) return null
+
+        // 1. Explicit Teams window match (by package name or window title)
+        val teamsWindow = allWindows.firstOrNull { win ->
+            val pkg = win.root?.packageName?.toString() ?: ""
+            val title = win.title?.toString() ?: ""
+            pkg.contains("teams", ignoreCase = true) ||
+            title.contains("teams", ignoreCase = true) ||
+            title.contains("matrix_", ignoreCase = true)
+        }
+        if (teamsWindow != null) return teamsWindow
+
+        // 2. Application window that is NOT our Matrix Capture app
+        val otherAppWindow = allWindows.firstOrNull { win ->
+            val pkg = win.root?.packageName?.toString() ?: ""
+            win.type == AccessibilityWindowInfo.TYPE_APPLICATION && pkg != myPkg
+        }
+        if (otherAppWindow != null) return otherAppWindow
+
+        // 3. Focused window that is NOT our app
+        val otherFocused = allWindows.firstOrNull { win ->
+            val pkg = win.root?.packageName?.toString() ?: ""
+            win.isFocused && pkg != myPkg
+        }
+        if (otherFocused != null) return otherFocused
+
+        // 4. Any application window fallback
+        return allWindows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION } ?: allWindows.firstOrNull()
     }
 
     fun getDisplayOrWindowBounds(displayId: Int): Rect {
         val bounds = Rect()
-        val win = findTeamsWindow() ?: findTargetWindow(displayId)
-        win?.getBoundsInScreen(bounds)
-        if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) {
+        findTargetWindow(displayId)?.getBoundsInScreen(bounds)
+        if (bounds.isEmpty || bounds.width() < 200 || bounds.height() < 200) {
             val dm = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-            val display = dm?.getDisplay(displayId) ?: dm?.getDisplay(Display.DEFAULT_DISPLAY)
+            val display = dm?.getDisplay(displayId)
             if (display != null) {
                 val metrics = DisplayMetrics()
                 @Suppress("DEPRECATION") display.getRealMetrics(metrics)
                 bounds.set(0, 0, metrics.widthPixels, metrics.heightPixels)
-            } else bounds.set(0, 0, 1080, 2400)
+            } else bounds.set(0, 0, 1920, 1080)
         }
         return bounds
     }
@@ -398,33 +381,44 @@ class DesktopPaginationService : AccessibilityService() {
             }
             override fun onCancelled(g: GestureDescription?) { if (cont.isActive) cont.resume(false) }
         }, null)
-        if (!d1) {
-            if (displayId != Display.DEFAULT_DISPLAY) {
-                // Fallback to DEFAULT_DISPLAY if custom displayId was rejected
-                val bFallback = GestureDescription.Builder().addStroke(s1).build()
-                val dFallback = dispatchGesture(bFallback, object : GestureResultCallback() {
-                    override fun onCompleted(g: GestureDescription?) { if (cont.isActive) cont.resume(true) }
-                    override fun onCancelled(g: GestureDescription?) { if (cont.isActive) cont.resume(false) }
-                }, null)
-                if (!dFallback && cont.isActive) cont.resume(false)
-            } else if (cont.isActive) cont.resume(false)
-        }
+        if (!d1 && cont.isActive) cont.resume(false)
     }
 
     suspend fun dispatchMicroDrag(deltaY: Float, displayId: Int = 0): Boolean {
         val bounds = getDisplayOrWindowBounds(displayId)
         val clamped = deltaY.coerceIn(-bounds.height() * 0.35f, bounds.height() * 0.35f)
-        val swipeX = bounds.left + bounds.width() * 0.55f
-        return dispatchSwipe(swipeX, bounds.centerY() - clamped * 0.5f, swipeX, bounds.centerY() + clamped * 0.5f, 380L, 280L, displayId)
+        return dispatchSwipe(bounds.centerX().toFloat(), bounds.centerY() - clamped * 0.5f, bounds.centerX().toFloat(), bounds.centerY() + clamped * 0.5f, 380L, 280L, displayId)
+    }
+
+    suspend fun detectGutterState(bitmap: Bitmap): GutterOcrTracker.GutterState? {
+        if (bitmap.isRecycled) return null
+        val activeTracker = SegmentRecorderService.instance?.getGutterTracker()
+        if (activeTracker != null) {
+            val res = activeTracker.analyzeFrameSync(bitmap)
+            if (res != null && res.currentTopLine > 0) return res
+        }
+        return runCatching {
+            val localEngine = MlKitOcrEngine()
+            val tracker = GutterOcrTracker(serviceScope, this, localEngine)
+            val res = tracker.analyzeFrameSync(bitmap)
+            tracker.close()
+            res
+        }.getOrNull()
     }
 
     private suspend fun performPageScroll(forward: Boolean, displayId: Int): Boolean {
         val resolved = resolveTargetDisplayId(displayId)
         val bounds = getDisplayOrWindowBounds(resolved)
-        val swipeX = bounds.left + bounds.width() * 0.55f
-        val offset = bounds.height() * 0.25f
-        val (startY, endY) = if (forward) (bounds.centerY() + offset) to (bounds.centerY() - offset) else (bounds.centerY() - offset) to (bounds.centerY() + offset)
-        return dispatchSwipe(swipeX, startY, swipeX, endY, 350L, 200L, resolved)
+        val winWidth = bounds.width().toFloat().coerceAtLeast(300f)
+        val winHeight = bounds.height().toFloat().coerceAtLeast(400f)
+        val editorCenterX = bounds.left + winWidth * 0.50f
+        val editorTopMargin = bounds.top + winHeight * 0.20f
+        val editorBottomMargin = bounds.bottom - winHeight * 0.18f
+        val editorCenterY = (editorTopMargin + editorBottomMargin) * 0.5f
+        val stroke = ((editorBottomMargin - editorTopMargin) * 0.70f).coerceIn(180f, 550f)
+        val (startY, endY) = if (forward) (editorCenterY + stroke * 0.5f) to (editorCenterY - stroke * 0.5f)
+        else (editorCenterY - stroke * 0.5f) to (editorCenterY + stroke * 0.5f)
+        return dispatchSwipe(editorCenterX, startY, editorCenterX, endY, 350L, 220L, resolved)
     }
 
     suspend fun performPageDown(displayId: Int = 0) = performPageScroll(true, displayId)
@@ -433,95 +427,80 @@ class DesktopPaginationService : AccessibilityService() {
     suspend fun navigateToNextPageTargetLine(targetTopLine: Int, currentEstimatedTopLine: Int = 0, targetDisplayId: Int = 0): Boolean {
         val resolved = resolveTargetDisplayId(targetDisplayId)
         val bounds = getDisplayOrWindowBounds(resolved)
-        val tracker = SegmentRecorderService.instance?.getGutterTracker()
+        
+        val winWidth = bounds.width().toFloat().coerceAtLeast(300f)
+        val winHeight = bounds.height().toFloat().coerceAtLeast(400f)
+        
+        // Editor touch bounds: keep swipes squarely inside the editor, avoiding toolbar (~20%) and bottom bar (~18%)
+        val editorCenterX = bounds.left + winWidth * 0.50f
+        val editorTopMargin = bounds.top + winHeight * 0.20f
+        val editorBottomMargin = bounds.bottom - winHeight * 0.18f
+        val editorCenterY = (editorTopMargin + editorBottomMargin) * 0.5f
+        val usableEditorHeight = (editorBottomMargin - editorTopMargin).coerceAtLeast(200f)
+        val maxStroke = (usableEditorHeight * 0.85f).coerceIn(160f, 650f)
 
-        updateStatus("Targeting Line $targetTopLine at top: inspecting current viewport...")
+        updateStatus("Orchestrating advance to Target Line $targetTopLine at top...")
 
-        // Define gutter crop area within the Teams window
-        val gw = (bounds.width() * 0.16f).toInt().coerceIn(60, bounds.width() / 3)
-        val gy = bounds.top + (bounds.height() * 0.14f).toInt()
-        val gh = (bounds.height() * 0.76f).toInt()
-        val gutterCropRect = Rect(bounds.left, gy, bounds.left + gw, gy + gh)
+        // Step 1: Detect actual currently visible top line on screen
+        val preSnap = captureScreenshot(resolved)
+        val preState = preSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+        val curTop = when {
+            preState != null && preState.currentTopLine > 0 -> preState.currentTopLine
+            currentEstimatedTopLine > 0 -> currentEstimatedTopLine
+            _telemetry.value.currentTopLine > 0 -> _telemetry.value.currentTopLine
+            else -> 1
+        }
+        val targetTopY = preState?.highestDetectedY?.toFloat() ?: (editorTopMargin + 20f)
+        val pitch = (preState?.linePitchPx ?: _telemetry.value.linePitchPx).coerceIn(24f, 48f)
 
-        var gState = tracker?.gutterState?.value
-        if (gState == null || gState.currentTopLine <= 0) {
-            val preBmp = captureScreenshot(resolved) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
-            if (preBmp != null && tracker != null) {
-                gState = tracker.analyzeSnapshot(preBmp, gutterCropRect)
+        val lineDelta = targetTopLine - curTop
+        Log.i(TAG, "navigateToNextPageTargetLine: targetTopLine=$targetTopLine, curTop=$curTop, lineDelta=$lineDelta, pitch=$pitch")
+
+        if (lineDelta != 0) {
+            // Step 2: Calculate travel distance.
+            // When lineDelta > 0 (advancing, e.g. Ln 1 -> Ln 22), content must move UP.
+            // For content to move UP, finger swipes UP: startY = centerY + chunk/2, endY = centerY - chunk/2 (startY > endY).
+            val totalTravelPx = lineDelta * pitch
+            var remainingTravel = totalTravelPx
+
+            while (Math.abs(remainingTravel) > 5f) {
+                val chunk = remainingTravel.coerceIn(-maxStroke, maxStroke)
+                val startY = editorCenterY + chunk * 0.5f
+                val endY = editorCenterY - chunk * 0.5f
+                val durationMs = (240L + (Math.abs(chunk) / maxStroke * 160L).toLong()).coerceIn(240L, 420L)
+                
+                dispatchSwipe(editorCenterX, startY, editorCenterX, endY, durationMs, holdDurationMs = 220L, displayId = resolved)
+                remainingTravel -= chunk
+                if (Math.abs(remainingTravel) > 5f) {
+                    delay(250)
+                }
             }
+            delay(500)
         }
 
-        val curTop = if (gState != null && gState.currentTopLine > 0) gState.currentTopLine else (if (currentEstimatedTopLine > 0) currentEstimatedTopLine else 1)
-        val curBot = if (gState != null && gState.currentBottomLine > 0) gState.currentBottomLine else curTop + 20
-        val linePitch = (if (gState != null && gState.linePitchPx > 10f) gState.linePitchPx else _telemetry.value.linePitchPx).coerceIn(20f, 60f)
-
-        Log.i(TAG, "navigateToNextPageTargetLine: targetTopLine=$targetTopLine, curTop=$curTop, curBot=$curBot, pitch=$linePitch, bounds=$bounds")
-
-        val lineAdvance = targetTopLine - curTop
-        if (lineAdvance == 0) {
-            updateStatus("Target Line $targetTopLine is already positioned at top ✔")
-            return true
-        }
-
-        // Calculate exact vertical swipe travel
-        val contentTop = bounds.top + bounds.height() * 0.16f
-        val contentBottom = bounds.bottom - bounds.height() * 0.12f
-        val contentCenterY = (contentTop + contentBottom) / 2f
-        val maxStepTravel = ((contentBottom - contentTop) * 0.72f).coerceAtLeast(150f)
-        val swipeX = bounds.left + bounds.width() * 0.55f // inside markdown content, clear of gutter
-
-        val totalTravelPx: Float = if (lineAdvance > 0) {
-            if (gState != null && gState.lowestDetectedY > 0 && gState.highestDetectedY > 0 && targetTopLine == curBot + 1) {
-                // To move (curBot + 1) to where curTop was at highestDetectedY:
-                (gState.lowestDetectedY - gState.highestDetectedY + linePitch).coerceAtLeast(lineAdvance * linePitch * 0.75f)
-            } else {
-                lineAdvance * linePitch
-            }
-        } else {
-            lineAdvance * linePitch
-        }
-
-        updateStatus("Scrolling Teams markdown: advancing $lineAdvance lines (${totalTravelPx.toInt()}px) to Line $targetTopLine...")
-
-        if (lineAdvance > 0) {
-            var remaining = totalTravelPx
-            while (remaining > 15f) {
-                val step = remaining.coerceAtMost(maxStepTravel)
-                val startY = contentCenterY + step / 2f
-                val endY = contentCenterY - step / 2f
-                dispatchSwipe(swipeX, startY, swipeX, endY, durationMs = 380L, holdDurationMs = 220L, displayId = resolved)
+        // Step 3: Closed-loop verification and micro-alignment
+        val checkSnap = captureScreenshot(resolved)
+        val checkState = checkSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+        if (checkState != null && checkState.currentTopLine > 0) {
+            val detectedTop = checkState.currentTopLine
+            val error = targetTopLine - detectedTop
+            Log.i(TAG, "navigateToNextPageTargetLine: post-scroll detectedTop=$detectedTop, error=$error")
+            
+            if (error != 0 && Math.abs(error) <= 10) {
+                val effectivePitch = if (checkState.linePitchPx > 10f) checkState.linePitchPx else pitch
+                val corrTravel = error * effectivePitch
+                val corrStartY = (editorCenterY + corrTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                val corrEndY = (editorCenterY - corrTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                dispatchSwipe(editorCenterX, corrStartY, editorCenterX, corrEndY, 280L, 250L, resolved)
                 delay(400)
-                remaining -= step
-            }
-        } else {
-            var remaining = Math.abs(totalTravelPx)
-            while (remaining > 15f) {
-                val step = remaining.coerceAtMost(maxStepTravel)
-                val startY = contentCenterY - step / 2f
-                val endY = contentCenterY + step / 2f
-                dispatchSwipe(swipeX, startY, swipeX, endY, durationMs = 380L, holdDurationMs = 220L, displayId = resolved)
-                delay(400)
-                remaining -= step
-            }
-        }
-
-        // Wait for viewport to settle
-        delay(550)
-
-        // Closed-loop verification and micro-adjustment
-        val postBmp = captureScreenshot(resolved) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
-        if (postBmp != null && tracker != null) {
-            val verifiedState = tracker.analyzeSnapshot(postBmp, gutterCropRect)
-            val detectedTop = verifiedState?.currentTopLine ?: 0
-            if (detectedTop > 0) {
-                val alignErr = targetTopLine - detectedTop
-                Log.i(TAG, "Post-scroll OCR verified top line: $detectedTop (target: $targetTopLine, err: $alignErr)")
-                if (alignErr != 0 && Math.abs(alignErr) in 1..8) {
-                    val correctionPx = alignErr * (verifiedState?.linePitchPx ?: linePitch)
-                    val cStartY = contentCenterY + correctionPx * 0.5f
-                    val cEndY = contentCenterY - correctionPx * 0.5f
-                    dispatchSwipe(swipeX, cStartY, swipeX, cEndY, durationMs = 300L, holdDurationMs = 200L, displayId = resolved)
-                    delay(450)
+            } else if (error == 0 && targetTopY > 0 && checkState.highestDetectedY > 0) {
+                // Sub-line precision: align top Y position to initial top Y position
+                val yDiff = checkState.highestDetectedY.toFloat() - targetTopY
+                if (Math.abs(yDiff) in 6f..55f) {
+                    val subStartY = (editorCenterY + yDiff * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                    val subEndY = (editorCenterY - yDiff * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
+                    dispatchSwipe(editorCenterX, subStartY, editorCenterX, subEndY, 220L, 200L, resolved)
+                    delay(300)
                 }
             }
         }
@@ -532,28 +511,46 @@ class DesktopPaginationService : AccessibilityService() {
 
     suspend fun alignAndCaptureNextPage(targetTopLine: Int? = null, targetDisplayId: Int = 0): Bitmap? {
         val resolved = resolveTargetDisplayId(targetDisplayId)
-        val curBot = _telemetry.value.currentBottomLine
-        val nextTarget = targetTopLine ?: (if (curBot > 0) curBot + 1 else 1)
-        navigateToNextPageTargetLine(nextTarget, _telemetry.value.currentTopLine, resolved)
+        
+        // 1. Read current on-screen position
+        val preSnap = captureScreenshot(resolved)
+        val preState = preSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+        val curTop = when {
+            preState != null && preState.currentTopLine > 0 -> preState.currentTopLine
+            _telemetry.value.currentTopLine > 0 -> _telemetry.value.currentTopLine
+            else -> 1
+        }
+        val curBot = when {
+            preState != null && preState.currentBottomLine > 0 -> preState.currentBottomLine
+            _telemetry.value.currentBottomLine > 0 -> _telemetry.value.currentBottomLine
+            else -> curTop + 20
+        }
+
+        val nextTarget = targetTopLine ?: (curBot + 1)
+        Log.i(TAG, "alignAndCaptureNextPage starting: nextTarget=$nextTarget, curTop=$curTop, curBot=$curBot on display $resolved")
+        
+        // 2. Perform navigation to position nextTarget at top
+        navigateToNextPageTargetLine(nextTarget, curTop, resolved)
         delay(DWELL_TIME_MS)
-        val snapshot = captureScreenshot(resolved) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
+        
+        // 3. Capture settled frame
+        val snapshot = captureScreenshot(resolved)
         if (snapshot != null) {
             latestCapturedBitmap = snapshot
+            val finalState = detectGutterState(snapshot) ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
+            val finalTop = if (finalState != null && finalState.currentTopLine > 0) finalState.currentTopLine else nextTarget
+            val finalBot = if (finalState != null && finalState.currentBottomLine > 0) finalState.currentBottomLine else (finalTop + 44)
             val newPage = if (_telemetry.value.currentPage > 0) _telemetry.value.currentPage + 1 else 2
-            val bounds = getDisplayOrWindowBounds(resolved)
-            val gw = (bounds.width() * 0.16f).toInt().coerceIn(60, bounds.width() / 3)
-            val gy = bounds.top + (bounds.height() * 0.14f).toInt()
-            val gh = (bounds.height() * 0.76f).toInt()
-            val tracker = SegmentRecorderService.instance?.getGutterTracker()
-            val ocr = tracker?.analyzeSnapshot(snapshot, Rect(bounds.left, gy, bounds.left + gw, gy + gh))
-            val finalTop = if (ocr != null && ocr.currentTopLine > 0) ocr.currentTopLine else nextTarget
-            val finalBot = if (ocr != null && ocr.currentBottomLine > finalTop) ocr.currentBottomLine else (finalTop + 20)
+            
+            _currentPage.value = newPage
             _telemetry.value = _telemetry.value.copy(
                 currentPage = newPage,
                 currentTopLine = finalTop,
                 currentBottomLine = finalBot,
-                statusMessage = "Page $newPage: Line $finalTop at top (Ln $finalTop → $finalBot)"
+                linePitchPx = finalState?.linePitchPx ?: _telemetry.value.linePitchPx,
+                statusMessage = "Line $finalTop at top of Page $newPage ✔"
             )
+            Log.i(TAG, "alignAndCaptureNextPage captured: Page $newPage Top=$finalTop Bot=$finalBot")
         }
         return snapshot
     }

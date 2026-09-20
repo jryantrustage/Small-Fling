@@ -65,59 +65,54 @@ open class GutterOcrTracker(
         }
     }
 
-    suspend fun analyzeSnapshot(fullFrame: Bitmap, customGutterRect: Rect? = null): GutterState? = withContext(Dispatchers.Default) {
-        if (fullFrame.isRecycled) return@withContext null
-        try {
-            processGutterBitmap(fullFrame, customGutterRect)
-            _gutterState.value
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in analyzeSnapshot", e)
-            null
-        }
-    }
-
-    private suspend fun processGutterBitmap(fullFrame: Bitmap, customGutterRect: Rect? = null) {
+    private suspend fun processGutterBitmap(fullFrame: Bitmap) {
         val w = fullFrame.width; val h = fullFrame.height
-        val (gx, gy, gw, gh) = if (customGutterRect != null && !customGutterRect.isEmpty) {
-            val cx = customGutterRect.left.coerceIn(0, (w - 30).coerceAtLeast(0))
-            val cy = customGutterRect.top.coerceIn(0, (h - 30).coerceAtLeast(0))
-            val cw = customGutterRect.width().coerceIn(30, w - cx)
-            val ch = customGutterRect.height().coerceIn(30, h - cy)
-            listOf(cx, cy, cw, ch)
-        } else {
-            val cw = (w * GUTTER_WIDTH_RATIO).toInt().coerceIn(80, w / 2)
-            listOf(0, 0, cw, h)
-        }
-
+        val gw = (w * GUTTER_WIDTH_RATIO).toInt().coerceIn(80, w / 2)
         val targetBitmap = synchronized(bufferLock) {
             if (isPaused) return
             var buf = gutterBitmapBuffer
-            if (buf == null || buf.isRecycled || buf.width != gw || buf.height != gh) {
+            if (buf == null || buf.isRecycled || buf.width != gw || buf.height != h) {
                 buf?.recycle()
-                buf = Bitmap.createBitmap(gw, gh, Bitmap.Config.ARGB_8888)
+                buf = Bitmap.createBitmap(gw, h, Bitmap.Config.ARGB_8888)
                 gutterBitmapBuffer = buf
                 gutterCanvas = Canvas(buf)
             }
-            srcRect.set(gx, gy, gx + gw, gy + gh)
-            dstRect.set(0, 0, gw, gh)
+            srcRect.set(0, 0, gw, h)
+            dstRect.set(0, 0, gw, h)
             gutterCanvas?.drawBitmap(fullFrame, srcRect, dstRect, null)
             buf
         } ?: return
         val result = ocrEngine.recognizeText(targetBitmap)
-        parseGutterLines(result, gh, gy)
+        parseGutterLines(result, h)
     }
 
-    private fun parseGutterLines(result: OcrResult, viewportHeight: Int, offsetY: Int = 0) {
+    suspend fun analyzeFrameSync(fullFrame: Bitmap): GutterState? = withContext(Dispatchers.Default) {
+        if (fullFrame.isRecycled) return@withContext null
+        val w = fullFrame.width; val h = fullFrame.height
+        val gw = (w * GUTTER_WIDTH_RATIO).toInt().coerceIn(80, w / 2)
+        val gutterBmp = runCatching { Bitmap.createBitmap(fullFrame, 0, 0, gw, h) }.getOrNull() ?: return@withContext null
+        try {
+            val result = ocrEngine.recognizeText(gutterBmp)
+            parseGutterLines(result, h)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in analyzeFrameSync", e)
+            null
+        } finally {
+            gutterBmp.recycle()
+        }
+    }
+
+    fun parseGutterLines(result: OcrResult, viewportHeight: Int): GutterState? {
         val detected = mutableListOf<DetectedGutterLine>()
-        val topThresh = (viewportHeight * 0.02f).toInt(); val botThresh = (viewportHeight * 0.98f).toInt()
+        val topThresh = (viewportHeight * 0.05f).toInt(); val botThresh = (viewportHeight * 0.95f).toInt()
         for (line in result.lines) {
             val num = line.lineNumber
             val box = line.box
             if (num != null && num > 0 && box.top >= topThresh && box.bottom <= botThresh) {
-                detected.add(DetectedGutterLine(num, box.centerY + offsetY, box.top + offsetY, box.bottom + offsetY))
+                detected.add(DetectedGutterLine(num, box.centerY, box.top, box.bottom))
             }
         }
-        if (detected.isEmpty()) return
+        if (detected.isEmpty()) return null
         detected.sortBy { it.topY }
 
         val validLines = mutableListOf<DetectedGutterLine>()
@@ -126,7 +121,7 @@ open class GutterOcrTracker(
                 validLines.add(d)
             }
         }
-        if (validLines.isEmpty()) return
+        if (validLines.isEmpty()) return null
 
         // Compute line pitch (dY / dL) dynamically across consecutive gutter numbers
         var totalPitch = 0f; var pitchSamples = 0
@@ -173,6 +168,7 @@ open class GutterOcrTracker(
             linePitchPx = gState.linePitchPx,
             wrappedLinesCount = gState.wrappedLinesCount
         )
+        return gState
     }
 
     fun getCalibrationSnapshot(): DesktopPaginationService.GutterMetricsSnapshot? {
