@@ -258,6 +258,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
             var showSettings by remember { mutableStateOf(false) }
             var isCapturing by remember { mutableStateOf(false) }
             var isAligningNext by remember { mutableStateOf(false) }
+            var isGettingNextLine by remember { mutableStateOf(false) }
             val displayPage = if (telemetry.currentPage > 0) telemetry.currentPage else (if (currentPage > 0) currentPage else 1)
             val topLn = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
             val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else 44
@@ -271,7 +272,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                 action()
             }
 
-            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.96f)), shape = RoundedCornerShape(16.dp), modifier = Modifier.width(320.dp).border(1.5.dp, Color(0xFF00FF9D), RoundedCornerShape(16.dp))) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1117).copy(alpha = 0.96f)), shape = RoundedCornerShape(16.dp), modifier = Modifier.width(330.dp).border(1.5.dp, Color(0xFF00FF9D), RoundedCornerShape(16.dp))) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -342,12 +343,12 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                         when {
                             !isRunning && !isPaused -> {
                                 Button(
-                                    onClick = { sendCmd("BEGIN") { DesktopPaginationService.instance?.startPacingEngine(totalLines = targetVal) } },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1.4f).height(42.dp)
+                                    onClick = { sendCmd("BEGIN_AUTO_FLIPPING") { DesktopPaginationService.instance?.startPacingEngine(totalLines = targetVal) } },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(42.dp)
                                 ) {
                                     Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("BEGIN", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    Text("begin Auto Flipping", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                                 }
                             }
                             isRunning -> {
@@ -387,29 +388,59 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                 }
                             }
                         }
+                    }
 
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(
                             onClick = {
                                 isCapturing = true
-                                Log.i("FloatingOverlayService", "Manual CAPT button clicked in HUD")
+                                Log.i("FloatingOverlayService", "capture desktop mode clicked in HUD")
                                 coroutineScope.launch {
-                                    DesktopPaginationService.updateStatus("Capturing screen...")
-                                    val cm = SegmentRecorderService.instance?.getCaptureManager()
-                                    val snapshot = DesktopPaginationService.instance?.captureScreenshot() ?: cm?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
+                                    DesktopPaginationService.updateStatus("Capturing desktop screen...")
+                                    val ps = DesktopPaginationService.instance
+                                    val dId = ps?.resolveTargetDisplayId() ?: 0
+                                    val snapshot = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
                                     if (snapshot != null) {
                                         DesktopPaginationService.latestCapturedBitmap = snapshot
                                         val pMode = if (pipelineMode == PipelineMode.CLOUD_GEMINI) "cloud" else "local"
                                         val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, sync = true, pipelineMode = pMode, modelTarget = if (pMode == "cloud") "gemini" else "ollama")
-                                        DesktopPaginationService.updateStatus(if (res.success) "Page $displayPage Uploaded ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
-                                        Log.i("FloatingOverlayService", "Manual CAPT frame uploaded: success=${res.success}, lines=${res.topLine}-${res.bottomLine}")
+                                        DesktopPaginationService.updateStatus(if (res.success) "Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
+                                        Log.i("FloatingOverlayService", "Desktop capture uploaded: success=${res.success}, lines=${res.topLine}-${res.bottomLine}")
                                     }
                                     delay(500)
                                     isCapturing = false
                                 }
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(0.9f).height(42.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1.1f).height(38.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                         ) {
-                            Text(if (isCapturing) "..." else "CAPT", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            Text(if (isCapturing) "..." else "capture desktop mode", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
+                        }
+
+                        Button(
+                            onClick = {
+                                isGettingNextLine = true
+                                Log.i("FloatingOverlayService", "Get line number of next clicked in HUD")
+                                coroutineScope.launch {
+                                    DesktopPaginationService.updateStatus("Fetching next line...")
+                                    val client = FloatingOverlayService.getUploadClient(context)
+                                    val res = client.getNextPageLine()
+                                    res.onSuccess { nextLn ->
+                                        DesktopPaginationService.updateStatus("Next Line: Ln $nextLn")
+                                    }.onFailure { err ->
+                                        DesktopPaginationService.updateStatus("Next Ln Err: ${err.message}")
+                                    }
+                                    delay(400)
+                                    isGettingNextLine = false
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388BFD).copy(alpha = 0.25f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF58A6FF)),
+                            shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f).height(38.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text(if (isGettingNextLine) "..." else "Get line number of next", color = Color(0xFF79C0FF), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
                         }
                     }
 

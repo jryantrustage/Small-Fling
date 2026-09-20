@@ -874,7 +874,15 @@ async def get_frame_image(frame_id: str):
         matches = list(FRAMES_DIR.glob(f"*{frame_id}*.png"))
         if matches: path = matches[0]
         else: raise HTTPException(status_code=404, detail="Frame image not found")
-    return FileResponse(path, media_type="image/png")
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 @app.post("/api/frames/{frame_id}/reprocess")
 async def reprocess_frame(frame_id: str, background_tasks: BackgroundTasks, model_target: Optional[str] = Query(None), payload: Optional[ReprocessRequest] = None):
