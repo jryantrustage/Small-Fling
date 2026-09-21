@@ -50,6 +50,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
     private var wakeLock: PowerManager.WakeLock? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var telemetryJob: Job? = null
+    private var lastExecutedCommand: String? = null
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
     private val store = ViewModelStore()
@@ -119,7 +120,42 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                         )
                     )
                     isBackendOnline.value = isOnline
-                    uploadClient.fetchOrchestrationState().getOrNull()?.let { remoteOrchestration.value = it }
+                    uploadClient.fetchOrchestrationState().getOrNull()?.let { ro ->
+                        remoteOrchestration.value = ro
+                        val cmdKey = "${ro.command}_${ro.updatedAt.ifEmpty { ro.stepLabel }}"
+                        if (ro.command != "NONE" && lastExecutedCommand != cmdKey) {
+                            lastExecutedCommand = cmdKey
+                            Log.i(TAG, "HUD executing remote command: ${ro.command} (source=${ro.source}, key=$cmdKey)")
+                            when (ro.command) {
+                                "CAPTURE_DESKTOP" -> {
+                                    serviceScope.launch {
+                                        DesktopPaginationService.updateStatus("Remote: Capturing desktop screen...")
+                                        val ps = DesktopPaginationService.instance
+                                        val dId = ps?.resolveTargetDisplayId() ?: 0
+                                        val snap = ps?.captureScreenshot(dId)
+                                            ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
+                                            ?: DesktopPaginationService.latestCapturedBitmap
+                                        if (snap != null) {
+                                            DesktopPaginationService.latestCapturedBitmap = snap
+                                            val top = if (pState.currentTopLine > 0) pState.currentTopLine else 1
+                                            val bot = if (pState.currentBottomLine > 0) pState.currentBottomLine else 49
+                                            val page = if (pState.currentPage > 0) pState.currentPage else 1
+                                            val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
+                                            DesktopPaginationService.updateStatus("Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})")
+                                            Log.i(TAG, "Remote capture uploaded: ${res.success}, lines=${res.topLine}-${res.bottomLine}")
+                                        }
+                                    }
+                                }
+                                "BEGIN_AUTO_FLIPPING", "BEGIN" -> {
+                                    DesktopPaginationService.instance?.startPacingEngine(totalLines = pState.targetTotalLines)
+                                }
+                                "PAUSE" -> DesktopPaginationService.instance?.pausePagination()
+                                "RESUME" -> DesktopPaginationService.instance?.resumePagination()
+                                "END" -> DesktopPaginationService.instance?.stopPagination()
+                                "RESTART" -> serviceScope.launch { DesktopPaginationService.instance?.restartFromBeginning() }
+                            }
+                        }
+                    }
                     Log.d(TAG, "HUD telemetry sent: Pg=${pState.currentPage}, Ln=${pState.currentTopLine}-${pState.currentBottomLine}, Pacing=$isRunning, Online=$isOnline")
                 } catch (e: Exception) {
                     isBackendOnline.value = false

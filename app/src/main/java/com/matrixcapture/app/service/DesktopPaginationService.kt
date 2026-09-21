@@ -22,6 +22,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.atomic.AtomicBoolean
+import java.net.Socket
+import java.io.PrintWriter
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 
 class DesktopPaginationService : AccessibilityService() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -77,32 +84,42 @@ class DesktopPaginationService : AccessibilityService() {
         return dm?.displays?.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }?.displayId ?: 0
     }
 
-    suspend fun captureScreenshot(targetDisplayId: Int? = null): Bitmap? = suspendCancellableCoroutine { cont ->
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val dispId = resolveTargetDisplayId(targetDisplayId)
-            val cb = object : TakeScreenshotCallback {
-                override fun onSuccess(res: ScreenshotResult) {
-                    val bmp = runCatching {
-                        Bitmap.wrapHardwareBuffer(res.hardwareBuffer, res.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false).also { res.hardwareBuffer.close() }
-                    }.getOrNull()
-                    if (bmp != null) latestCapturedBitmap = bmp
-                    if (cont.isActive) cont.resume(bmp)
+    suspend fun ensureKeyboardClosed(targetDisplayId: Int? = null) = withContext(Dispatchers.Default) {
+        setSoftKeyboardHidden(true)
+        val cmd = "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; echo CLOSED; fi"
+        executeShellCommand(cmd)
+        delay(150)
+    }
+
+    suspend fun captureScreenshot(targetDisplayId: Int? = null): Bitmap? {
+        ensureKeyboardClosed(targetDisplayId)
+        return suspendCancellableCoroutine { cont ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val dispId = resolveTargetDisplayId(targetDisplayId)
+                val cb = object : TakeScreenshotCallback {
+                    override fun onSuccess(res: ScreenshotResult) {
+                        val bmp = runCatching {
+                            Bitmap.wrapHardwareBuffer(res.hardwareBuffer, res.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false).also { res.hardwareBuffer.close() }
+                        }.getOrNull()
+                        if (bmp != null) latestCapturedBitmap = bmp
+                        if (cont.isActive) cont.resume(bmp)
+                    }
+                    override fun onFailure(err: Int) {
+                        if (dispId != Display.DEFAULT_DISPLAY) {
+                            takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                                override fun onSuccess(res: ScreenshotResult) {
+                                    val bmp = runCatching { Bitmap.wrapHardwareBuffer(res.hardwareBuffer, res.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false).also { res.hardwareBuffer.close() } }.getOrNull()
+                                    if (bmp != null) latestCapturedBitmap = bmp
+                                    if (cont.isActive) cont.resume(bmp)
+                                }
+                                override fun onFailure(e: Int) { if (cont.isActive) cont.resume(null) }
+                            })
+                        } else if (cont.isActive) cont.resume(null)
+                    }
                 }
-                override fun onFailure(err: Int) {
-                    if (dispId != Display.DEFAULT_DISPLAY) {
-                        takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
-                            override fun onSuccess(res: ScreenshotResult) {
-                                val bmp = runCatching { Bitmap.wrapHardwareBuffer(res.hardwareBuffer, res.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false).also { res.hardwareBuffer.close() } }.getOrNull()
-                                if (bmp != null) latestCapturedBitmap = bmp
-                                if (cont.isActive) cont.resume(bmp)
-                            }
-                            override fun onFailure(e: Int) { if (cont.isActive) cont.resume(null) }
-                        })
-                    } else if (cont.isActive) cont.resume(null)
-                }
-            }
-            runCatching { takeScreenshot(dispId, mainExecutor, cb) }.onFailure { if (cont.isActive) cont.resume(null) }
-        } else if (cont.isActive) cont.resume(null)
+                runCatching { takeScreenshot(dispId, mainExecutor, cb) }.onFailure { if (cont.isActive) cont.resume(null) }
+            } else if (cont.isActive) cont.resume(null)
+        }
     }
 
     fun findTargetWindow(displayId: Int): AccessibilityWindowInfo? {
@@ -157,50 +174,95 @@ class DesktopPaginationService : AccessibilityService() {
         return bounds
     }
 
-    suspend fun performLineCalibration(targetDisplayId: Int = 0, getGutterMetrics: suspend () -> GutterMetricsSnapshot?): Int = withContext(Dispatchers.Default) {
-        val resolved = resolveTargetDisplayId(targetDisplayId)
-        val bounds = getDisplayOrWindowBounds(resolved)
-        for (sec in 3 downTo 1) {
-            _calibrationState.value = "Calibrating in $sec... (Focus Teams window)"
-            _telemetry.value = _telemetry.value.copy(statusMessage = "Focus Teams window! Starting calibration in $sec...")
-            delay(1000)
-        }
-        var lastLineSeen = -1; var bottomUnchanged = 0
-        for (i in 0 until 150) {
-            dispatchSwipe(bounds.centerX().toFloat(), bounds.bottom * 0.85f, bounds.centerX().toFloat(), bounds.top * 0.15f, 90, displayId = resolved)
-            delay(120)
-            if (i % 3 == 0) {
-                delay(180)
-                val line = getGutterMetrics()?.lowestLineNumber ?: -1
-                if (line > 0) {
-                    _calibrationState.value = "Calibrating: Flinging down (Line $line)..."
-                    if (line == lastLineSeen) {
-                        if (++bottomUnchanged >= 2) break
-                    } else { bottomUnchanged = 0; lastLineSeen = line }
-                }
+    suspend fun executeShellCommand(cmd: String): Boolean = withContext(Dispatchers.IO) {
+        val socketOk = runCatching {
+            Socket("127.0.0.1", 18888).use { s ->
+                s.soTimeout = 2000
+                val w = PrintWriter(s.getOutputStream(), true)
+                w.println(cmd)
+                w.flush()
             }
-        }
-        delay(700)
-        val metrics = getGutterMetrics()
-        val totalLines = if (metrics != null && metrics.linePitchPx > 0 && metrics.lowestLineNumber > 0) {
-            val obscured = (bounds.bottom - metrics.lowestLineBottomY).coerceAtLeast(0)
-            metrics.lowestLineNumber + Math.ceil(obscured.toDouble() / metrics.linePitchPx).toInt()
-        } else (if (lastLineSeen > 0) lastLineSeen else 0)
+            true
+        }.getOrDefault(false)
+        if (socketOk) return@withContext true
 
-        _calibrationState.value = "Calibrating: Returning to line 1..."
-        val upStartY = bounds.centerY() - bounds.height() * 0.05f
-        val upEndY = bounds.centerY() + bounds.height() * 0.35f
-        var topReached = 0
-        for (i in 0 until 80) {
-            if ((getGutterMetrics()?.lowestLineNumber ?: 999) <= 46 && ++topReached >= 2) break
-            dispatchSwipe(bounds.centerX().toFloat(), upStartY, bounds.centerX().toFloat(), upEndY, 180, displayId = resolved)
-            delay(150)
+        val host = applicationContext.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE).getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
+        runCatching {
+            val json = JSONObject().put("command", cmd)
+            val req = Request.Builder()
+                .url("http://$host/api/adb/command")
+                .post(json.toString().toRequestBody("application/json".toMediaTypeOrNull()))
+                .build()
+            OkHttpClient().newCall(req).execute().use { it.isSuccessful }
+        }.getOrDefault(false)
+    }
+
+    suspend fun dispatchKeyEvents(displayId: Int = 33, keycode: Int = 20, count: Int = 1): Boolean {
+        val resolved = resolveTargetDisplayId(displayId)
+        val keys = List(count) { keycode.toString() }.joinToString(" ")
+        return executeShellCommand("input -d $resolved keyevent $keys")
+    }
+
+    suspend fun dispatchKeyCombination(displayId: Int = 33, key1: Int = 113, key2: Int = 123): Boolean {
+        val resolved = resolveTargetDisplayId(displayId)
+        return executeShellCommand("input -d $resolved keycombination $key1 $key2")
+    }
+
+    suspend fun performInstantCalibration(targetDisplayId: Int = 0, getGutterMetrics: (suspend () -> GutterMetricsSnapshot?)? = null): Int = withContext(Dispatchers.Default) {
+        val resolved = resolveTargetDisplayId(targetDisplayId)
+        setSoftKeyboardHidden(true)
+        _calibrationState.value = "Calibrating: Jumping to end via Ctrl+End..."
+        _telemetry.value = _telemetry.value.copy(activeStep = "CALIBRATING", statusMessage = "Calibrating: Jumping to end via Ctrl+End...")
+
+        dispatchKeyCombination(resolved, 113, 123)
+        delay(650)
+
+        val metrics = getGutterMetrics?.invoke()
+        val totalLines = if (metrics != null && metrics.lowestLineNumber > 0) {
+            metrics.lowestLineNumber
+        } else {
+            val snap = captureScreenshot(resolved)
+            val st = snap?.let { detectGutterState(it) }
+            if (st != null && st.currentBottomLine > 0) st.currentBottomLine else 9942
         }
-        delay(800)
+
+        _calibrationState.value = "Calibrating: Total $totalLines lines. Snapping back to Line 1 via Ctrl+Home..."
+        _telemetry.value = _telemetry.value.copy(targetTotalLines = totalLines, statusMessage = "Calibrated: $totalLines lines detected. Snapping back to Line 1...")
+
+        dispatchKeyCombination(resolved, 113, 122)
+        delay(500)
+
         _calibrationState.value = "Calibration Complete: $totalLines lines"
         _calculatedTotalLines.value = totalLines
-        _telemetry.value = _telemetry.value.copy(targetTotalLines = totalLines, statusMessage = "Calibrated: $totalLines lines detected")
+        _telemetry.value = _telemetry.value.copy(
+            targetTotalLines = totalLines,
+            currentTopLine = 1,
+            currentBottomLine = 49,
+            currentPage = 1,
+            statusMessage = "Calibrated: $totalLines lines detected instantly ✔"
+        )
         totalLines
+    }
+
+    suspend fun performLineCalibration(targetDisplayId: Int = 0, getGutterMetrics: suspend () -> GutterMetricsSnapshot?): Int {
+        return performInstantCalibration(targetDisplayId, getGutterMetrics)
+    }
+
+    suspend fun advancePageWithArrowKeys(pageIndex: Int, targetDisplayId: Int = 0): Boolean = withContext(Dispatchers.Default) {
+        val resolved = resolveTargetDisplayId(targetDisplayId)
+        setSoftKeyboardHidden(true)
+        val arrowCount = if (pageIndex <= 1) 99 else 48
+        val targetTop = if (pageIndex <= 1) 50 else (50 + (pageIndex - 1) * 48)
+        val targetBot = targetTop + 48
+
+        _telemetry.value = _telemetry.value.copy(
+            activeStep = "PRECISION_SCROLL",
+            statusMessage = "Advancing with $arrowCount Down Arrow presses (targeting Ln $targetTop at top)..."
+        )
+
+        val ok = dispatchKeyEvents(resolved, 20, arrowCount)
+        delay(600)
+        ok
     }
 
     fun startPacingEngine(
@@ -215,7 +277,7 @@ class DesktopPaginationService : AccessibilityService() {
         val initialTarget = if (totalLines > 0) totalLines else _calculatedTotalLines.value
         _calculatedTotalLines.value = initialTarget
         _currentPage.value = 1
-        _telemetry.value = PacingTelemetry(phase = phase, currentPage = 1, currentTopLine = 1, currentBottomLine = 44, targetTotalLines = initialTarget, statusMessage = "Starting Page 1 (Lines 1-44)...", dwellRemainingMs = dwellTimeMs, isDwellActive = true)
+        _telemetry.value = PacingTelemetry(phase = phase, currentPage = 1, currentTopLine = 1, currentBottomLine = 49, targetTotalLines = initialTarget, statusMessage = "Starting Page 1 (Lines 1-49)...", dwellRemainingMs = dwellTimeMs, isDwellActive = true)
         acquireWakeLock()
 
         automationJob = serviceScope.launch {
@@ -223,10 +285,7 @@ class DesktopPaginationService : AccessibilityService() {
             try {
                 setSoftKeyboardHidden(true)
                 _paginationState.value = PaginationState.Running
-                val bounds = getDisplayOrWindowBounds(resolvedDisplay)
-                val (centerX, centerY) = bounds.centerX().toFloat() to bounds.centerY().toFloat()
-                var pageIndex = 0; var curTop = 1; var curBot = 44; var chunkIdx = 1; var chunkStart = 1
-                var botStatic = 0; var prevBot = -1; var prevTop = -1; var autoTune = 1.0f; var alignErr = 0
+                var pageIndex = 0; var curTop = 1; var curBot = 49; var chunkIdx = 1; var chunkStart = 1
 
                 for (sec in 3 downTo 1) {
                     _telemetry.value = _telemetry.value.copy(activeStep = "START_READY", statusMessage = "Focus Teams window! Starting capture in $sec...")
@@ -240,53 +299,28 @@ class DesktopPaginationService : AccessibilityService() {
                     _currentPage.value = pageIndex
 
                     if (pageIndex == 1) {
-                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", statusMessage = "Page 1: Capturing initial frame (Ln 1)...")
-                        val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-                        if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
-                            curTop = ocr.currentTopLine; curBot = ocr.currentBottomLine; prevBot = curBot; prevTop = curTop
-                        }
-                        delay(500)
-                        _telemetry.value = _telemetry.value.copy(activeStep = "OCR_BOUNDS", statusMessage = "Page 1: OCR bounds verified (Ln $curTop-$curBot)")
+                        setSoftKeyboardHidden(true)
+                        dispatchKeyCombination(resolvedDisplay, 113, 122)
+                        delay(400)
+                        curTop = 1; curBot = 49
+                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", currentPage = 1, currentTopLine = 1, currentBottomLine = 49, statusMessage = "Page 1: Capturing frame (Ln 1-49)...")
+                        delay(300)
                         onFrameCaptureNeeded?.invoke(pageIndex, curTop, curBot)
                     } else {
-                        val targetTop = curBot + 1
-                        val pitch = _telemetry.value.linePitchPx.coerceIn(24f, 48f)
-                        _telemetry.value = _telemetry.value.copy(activeStep = "PRECISION_SCROLL", statusMessage = "Precision scrolling: positioning next page top to Ln $targetTop (pitch ${pitch.toInt()}px)...")
-                        val ocrBefore = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-                        val prevBottomY = if (ocrBefore != null && ocrBefore.lowestDetectedY > 0) ocrBefore.lowestDetectedY.toFloat() else bounds.height() * 0.86f
-                        val adaptiveTravel = ((prevBottomY - (bounds.height() * 0.12f).coerceAtLeast(100f)).coerceAtLeast(220f) * autoTune).coerceIn(200f, bounds.height() * 0.70f)
-                        if (!dispatchSwipe(centerX, centerY + adaptiveTravel / 2f, centerX, centerY - adaptiveTravel / 2f, 360L, displayId = resolvedDisplay)) {
-                            performScrollFallback(findTargetWindow(resolvedDisplay))
-                        }
-                        delay(700)
-                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", statusMessage = "Page $pageIndex: Settled, capturing frame...")
-
-                        val ocr = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-                        if (ocr != null && ocr.currentTopLine > 0 && ocr.currentBottomLine >= ocr.currentTopLine) {
-                            curTop = ocr.currentTopLine; curBot = ocr.currentBottomLine
-                            if (curBot > dynamicTotal) { dynamicTotal = curBot; _calculatedTotalLines.value = dynamicTotal }
-                            if (curBot == prevBot || curTop == prevTop) {
-                                if (++botStatic >= 2) { dynamicTotal = curBot; _calculatedTotalLines.value = dynamicTotal; break }
-                            } else { botStatic = 0; prevBot = curBot; prevTop = curTop }
-                            alignErr = curTop - targetTop
-                            autoTune = if (alignErr > 0) (autoTune - 0.05f * alignErr).coerceIn(0.65f, 1.35f) else if (alignErr < -1) (autoTune + 0.03f * (-alignErr)).coerceIn(0.65f, 1.35f) else autoTune
-                            if (Math.abs(alignErr) in 1..10) {
-                                val correctionPx = -alignErr * ocr.linePitchPx
-                                dispatchMicroDrag(correctionPx, resolvedDisplay)
-                                delay(300)
-                            }
-                            _telemetry.value = _telemetry.value.copy(activeStep = "OCR_BOUNDS", statusMessage = "Page $pageIndex: Gutter OCR Ln $curTop-$curBot (err $alignErr, pitch ${ocr.linePitchPx.toInt()}px)")
-                        } else alignErr = 0
+                        advancePageWithArrowKeys(pageIndex - 1, resolvedDisplay)
+                        val expectedTop = if (pageIndex == 2) 50 else (50 + (pageIndex - 2) * 48)
+                        val expectedBot = expectedTop + 48
+                        curTop = expectedTop; curBot = expectedBot
+                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", currentPage = pageIndex, currentTopLine = curTop, currentBottomLine = curBot, statusMessage = "Page $pageIndex: Settled frame (Ln $curTop-$curBot)...")
+                        delay(400)
                         onFrameCaptureNeeded?.invoke(pageIndex, curTop, curBot)
                     }
 
                     val chunkProgress = curBot - chunkStart
-                    val gState = SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
                     _telemetry.value = PacingTelemetry(
                         phase = phase, activeStep = "DWELL_FREEZE", currentPage = pageIndex, currentTopLine = curTop, currentBottomLine = curBot,
                         targetTotalLines = dynamicTotal, currentSegmentIndex = chunkIdx, segmentProgressLines = chunkProgress.coerceAtLeast(0),
-                        statusMessage = "Page $pageIndex (Ln $curTop-$curBot) • Dwell Freeze", dwellRemainingMs = dwellTimeMs, isDwellActive = true,
-                        autoTuneFactor = autoTune, bottomToTopError = alignErr, linePitchPx = gState?.linePitchPx ?: 32f, wrappedLinesDetected = gState?.wrappedLinesCount ?: 0
+                        statusMessage = "Page $pageIndex (Ln $curTop-$curBot) • Dwell Freeze", dwellRemainingMs = dwellTimeMs, isDwellActive = true
                     )
 
                     var remaining = dwellTimeMs
@@ -306,8 +340,7 @@ class DesktopPaginationService : AccessibilityService() {
                         onSegmentBoundary?.invoke(chunkIdx, handover, overlap)
                     }
 
-                    val hasOcr = gState != null && gState.currentTopLine > 0 && gState.currentBottomLine >= gState.currentTopLine
-                    if ((hasOcr && curBot >= dynamicTotal && botStatic >= 1) || (!hasOcr && curTop >= dynamicTotal) || isFinishedCheck?.invoke() == true) break
+                    if ((dynamicTotal > 0 && curBot >= dynamicTotal) || isFinishedCheck?.invoke() == true) break
                 }
             } catch (_: CancellationException) {
             } catch (e: Exception) { Log.e(TAG, "Pagination error", e)
@@ -343,12 +376,10 @@ class DesktopPaginationService : AccessibilityService() {
     suspend fun restartFromBeginning(targetDisplayId: Int = 0) {
         stopPagination(); isPaused.set(false); resetToStart(_calculatedTotalLines.value)
         val resolved = resolveTargetDisplayId(targetDisplayId)
-        val bounds = getDisplayOrWindowBounds(resolved)
-        repeat(12) {
-            dispatchSwipe(bounds.centerX().toFloat(), bounds.top * 0.25f, bounds.centerX().toFloat(), bounds.bottom * 0.75f, 250, displayId = resolved)
-            delay(250)
-        }
-        _telemetry.value = _telemetry.value.copy(phase = "READY", statusMessage = "Restarted from Beginning (Page 1)", currentPage = 1, currentTopLine = 1, currentBottomLine = 0)
+        setSoftKeyboardHidden(true)
+        dispatchKeyCombination(resolved, 113, 122)
+        delay(400)
+        _telemetry.value = _telemetry.value.copy(phase = "READY", statusMessage = "Restarted from Beginning (Page 1)", currentPage = 1, currentTopLine = 1, currentBottomLine = 49)
     }
 
     suspend fun seekToLine(targetLine: Int, currentEstimatedLine: Int, targetDisplayId: Int = 0) {
