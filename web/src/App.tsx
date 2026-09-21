@@ -4,7 +4,7 @@ import {
   UploadCloud, Cpu, Coins, FileCode, Layers, RotateCw, RotateCcw,
   AlertCircle, FolderKanban, Plus, Trash2, Ban, ChevronLeft,
   ChevronRight, MoveVertical, Menu, Play, Pause, Square, Camera,
-  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash
+  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash, ArrowDown
 } from 'lucide-react';
 
 const env = import.meta.env;
@@ -628,6 +628,8 @@ export default function App() {
               <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
               <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
               <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
+              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
+              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
               <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
             </>
           ) : orch.status === 'PAUSED' ? (
@@ -636,6 +638,8 @@ export default function App() {
               <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
               <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
               <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
+              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
+              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
               <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
             </>
           ) : (
@@ -643,6 +647,8 @@ export default function App() {
               <button className="btn btn-orch btn-begin" onClick={() => handleOrchCommand('BEGIN')}><Play size={16} /><span>begin Auto Flipping</span></button>
               <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
               <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
+              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
+              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
               {(telemetry.current_top_line > 1 || frames.length > 0) && (
                 <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
               )}

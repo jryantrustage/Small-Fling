@@ -64,12 +64,19 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                                 "COMPLETED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) stopWorkflow()
                             }
                         }
-                        if (ro.command == "CAPTURE_DESKTOP" && lastHandledRemoteCommand != "CAPTURE_DESKTOP_${ro.stepLabel}") {
-                            lastHandledRemoteCommand = "CAPTURE_DESKTOP_${ro.stepLabel}"
+                        val cmdKey = "${ro.command}_${ro.updatedAt.ifEmpty { ro.stepLabel }}"
+                        if (ro.command == "CAPTURE_DESKTOP" && lastHandledRemoteCommand != cmdKey) {
+                            lastHandledRemoteCommand = cmdKey
                             captureDesktopMode()
-                        } else if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != "GET_NEXT_LINE_${ro.stepLabel}") {
-                            lastHandledRemoteCommand = "GET_NEXT_LINE_${ro.stepLabel}"
+                        } else if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != cmdKey) {
+                            lastHandledRemoteCommand = cmdKey
                             getNextPageLine()
+                        } else if ((ro.command == "CALIBRATE_INSTANT" || ro.command == "CALIBRATE") && lastHandledRemoteCommand != cmdKey) {
+                            lastHandledRemoteCommand = cmdKey
+                            calibrateDocument()
+                        } else if ((ro.command == "ADVANCE_PAGE_ARROW" || ro.command == "PAGE_DOWN_ARROW") && lastHandledRemoteCommand != cmdKey) {
+                            lastHandledRemoteCommand = cmdKey
+                            alignAndCaptureNextPage()
                         }
                     }
                 } catch (_: Exception) { _uiState.update { it.copy(isBackendConnected = false) } }
@@ -231,20 +238,21 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun alignAndCaptureNextPage() = viewModelScope.launch {
         val ps = DesktopPaginationService.instance ?: return@launch run { _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled") } }
-        _uiState.update { it.copy(workflowStatus = "Aligning target line...") }
-        val targetTop = uploadClient.getNextPageLine().getOrNull() ?: if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine + 1 else 1
+        val curPage = _uiState.value.currentPage.coerceAtLeast(1)
+        val targetPage = curPage + 1
+        val expectedTop = if (targetPage == 2) 50 else (50 + (targetPage - 2) * 48)
+        val expectedBot = expectedTop + 48
+        _uiState.update { it.copy(workflowStatus = "Advancing to Page $targetPage (targeting Ln $expectedTop at top) via Arrow Keys...") }
         val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
-        val snap = ps.alignAndCaptureNextPage(targetTop, dId) ?: return@launch run { _uiState.update { it.copy(workflowStatus = "Capture failed") } }
-        val page = (_uiState.value.currentPage + 1).coerceAtLeast(1)
-        val curTop = DesktopPaginationService.telemetry.value.currentTopLine
-        val curBot = DesktopPaginationService.telemetry.value.currentBottomLine
-        val actualTop = if (curTop > 0) curTop else targetTop
-        val actualBot = if (curBot > actualTop) curBot else (actualTop + 44)
-        _uiState.update { it.copy(currentPage = page, currentTopLine = actualTop, currentBottomLine = actualBot, workflowStatus = "Uploading Page $page...") }
-        val res = uploadClient.uploadFrame(snap, actualTop, actualBot, page, sync = true)
+        ps.advancePageWithArrowKeys(curPage, dId)
+        delay(DesktopPaginationService.DWELL_TIME_MS)
+        val snap = ps.captureScreenshot(dId) ?: return@launch run { _uiState.update { it.copy(workflowStatus = "Capture failed: Screen image was null") } }
+        DesktopPaginationService.latestCapturedBitmap = snap
+        _uiState.update { it.copy(currentPage = targetPage, currentTopLine = expectedTop, currentBottomLine = expectedBot, workflowStatus = "Uploading Page $targetPage (Lines $expectedTop-$expectedBot)...") }
+        val res = uploadClient.uploadFrame(snap, expectedTop, expectedBot, targetPage, sync = true)
         if (res.success) {
-            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $page (Ln $actualTop-$actualBot) Aligned & Uploaded ✔") }
-            DesktopPaginationService.updateStatus("Page $page (Ln $actualTop-$actualBot) Aligned & Uploaded ✔")
+            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $targetPage (Ln $expectedTop-$expectedBot) Aligned & Uploaded ✔") }
+            DesktopPaginationService.updateStatus("Page $targetPage (Ln $expectedTop-$expectedBot) Aligned & Uploaded ✔")
         } else _uiState.update { it.copy(workflowStatus = "Upload failed: ${res.message}") }
     }
 

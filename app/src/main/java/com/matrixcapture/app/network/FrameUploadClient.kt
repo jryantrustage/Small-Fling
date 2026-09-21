@@ -14,12 +14,12 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
-    private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).writeTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).writeTimeout(90, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build()
 
     data class RecaptureTask(val lineNumber: Int, val reason: String)
     data class UploadResult(val success: Boolean, val topLine: Int = 0, val bottomLine: Int = 0, val extractedLineCount: Int = 0, val message: String = "")
     data class TelemetryData(val deviceId: String = "Pixel 10 Desktop", val isPacing: Boolean = false, val currentPage: Int = 0, val currentTopLine: Int = 0, val currentBottomLine: Int = 0, val targetTotalLines: Int = 0, val dwellCountdownMs: Int = 0, val phase: String = "IDLE", val statusMessage: String = "", val activeStep: String? = null, val source: String = "mobile", val mobilePromptTokens: Int = 0, val mobileCandidatesTokens: Int = 0, val mobileTotalTokens: Int = 0, val autoTuneFactor: Float = 1.0f, val linePitchPx: Float = 32f, val bottomToTopError: Int = 0, val wrappedLinesDetected: Int = 0)
-    data class OrchestrationState(val status: String = "IDLE", val command: String = "NONE", val source: String = "system", val invokedBy: String = "System ⚙️", val activeStep: String = "START_READY", val stepLabel: String = "", val currentPage: Int = 1, val currentTopLine: Int = 0, val currentBottomLine: Int = 0, val nextTargetTop: Int = 0, val targetTotalLines: Int = 0, val statusMessage: String = "")
+    data class OrchestrationState(val status: String = "IDLE", val command: String = "NONE", val source: String = "system", val invokedBy: String = "System ⚙️", val activeStep: String = "START_READY", val stepLabel: String = "", val currentPage: Int = 1, val currentTopLine: Int = 0, val currentBottomLine: Int = 0, val nextTargetTop: Int = 0, val targetTotalLines: Int = 0, val statusMessage: String = "", val updatedAt: String = "")
 
     private fun parseOrchestration(bodyStr: String, fallbackCmd: String, fallbackSrc: String): OrchestrationState {
         val root = JSONObject(bodyStr)
@@ -33,7 +33,8 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
             currentTopLine = telem.optInt("current_top_line", orch.optInt("top_line", 0)),
             currentBottomLine = telem.optInt("current_bottom_line", orch.optInt("bottom_line", 0)),
             nextTargetTop = orch.optInt("next_target_top", 0), targetTotalLines = telem.optInt("target_total_lines", 0),
-            statusMessage = telem.optString("status_message", "")
+            statusMessage = telem.optString("status_message", ""),
+            updatedAt = orch.optString("updated_at", "")
         )
     }
 
@@ -131,6 +132,13 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
                 else Result.failure(IOException("HTTP ${resp.code}"))
             }
         } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun executeAdbCommand(cmd: String): Boolean = withContext(Dispatchers.IO) {
+        val json = JSONObject().apply { put("command", cmd) }
+        try {
+            client.newCall(Request.Builder().url("http://$serverHost/api/adb/command").post(json.toString().toRequestBody("application/json".toMediaTypeOrNull())).build()).execute().use { it.isSuccessful }
+        } catch (_: Exception) { false }
     }
 
     companion object { private const val TAG = "FrameUploadClient" }

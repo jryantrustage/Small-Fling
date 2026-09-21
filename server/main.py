@@ -460,7 +460,6 @@ async def update_telemetry(p: TelemetryUpdateRequest):
     latest_telemetry["last_heartbeat"] = datetime.now().isoformat()
     if p.pacer_calibration: latest_telemetry["pacer_calibration"].update(p.pacer_calibration)
     if p.mobile_tokens: token_stats["mobile_tokens"] = p.mobile_tokens
-    if p.source: orchestration_state["source"], orchestration_state["invoked_by"] = p.source, format_device_name(p.source)
     if p.current_top_line and p.current_top_line > 0: orchestration_state["top_line"] = p.current_top_line
     if p.current_bottom_line and p.current_bottom_line > 0: orchestration_state["bottom_line"], orchestration_state["next_target_top"] = p.current_bottom_line, p.current_bottom_line + 1
     if p.current_page and p.current_page > 0: orchestration_state["page"] = p.current_page
@@ -469,7 +468,6 @@ async def update_telemetry(p: TelemetryUpdateRequest):
     elif p.phase:
         pu = p.phase.upper()
         orchestration_state["active_step"] = "SCREEN_CAPTURE" if ("CAPTURING" in pu or "SCREEN" in pu) else ("OCR_BOUNDS" if ("OCR" in pu or "BOUNDS" in pu) else ("PRECISION_SCROLL" if ("SCROLL" in pu or "PACING" in pu or "ALIGN" in pu) else ("DWELL_FREEZE" if ("DWELL" in pu or "FREEZE" in pu) else ("START_READY" if ("READY" in pu or "STANDBY" in pu) else orchestration_state["active_step"]))))
-    if p.status_message: orchestration_state["step_label"] = p.status_message
     if p.is_pacing: orchestration_state["status"] = "RUNNING"
     elif p.phase == "COMPLETED": orchestration_state["status"], orchestration_state["active_step"] = "COMPLETED", "LOOP_EVAL"
     elif p.phase == "PAUSED": orchestration_state["status"] = "PAUSED"
@@ -482,6 +480,12 @@ async def update_telemetry(p: TelemetryUpdateRequest):
 @app.get("/api/orchestrate")
 async def get_orchestration_state(): return {"orchestration": orchestration_state, "telemetry": get_fresh_telemetry()}
 
+async def ensure_adb_keyboard_closed():
+    try:
+        proc = await asyncio.create_subprocess_exec("adb", "shell", "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; fi", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        await asyncio.wait_for(proc.communicate(), timeout=3.0)
+    except Exception: pass
+
 @app.post("/api/orchestrate")
 async def handle_orchestration_command(payload: OrchestrationRequest):
     global latest_telemetry, orchestration_state
@@ -489,9 +493,11 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     orchestration_state.update({"last_command": cmd, "source": payload.source or "web", "invoked_by": invoker, "updated_at": datetime.now().isoformat()})
 
     if cmd in ("BEGIN", "BEGIN_AUTO_FLIPPING"):
+        await ensure_adb_keyboard_closed()
         orchestration_state.update({"status": "RUNNING", "active_step": "SCREEN_CAPTURE", "step_label": f"Auto Flipping Started by {invoker}"})
         latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Auto Flipping • Invoked by {invoker}"})
     elif cmd == "CAPTURE_DESKTOP":
+        await ensure_adb_keyboard_closed()
         orchestration_state.update({"active_step": "SCREEN_CAPTURE", "step_label": f"Capture Desktop Invoked by {invoker}"})
         latest_telemetry.update({"status_message": f"Capture Desktop Mode • Invoked by {invoker}"})
     elif cmd == "GET_NEXT_LINE":
@@ -508,19 +514,43 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         orchestration_state.update({"status": "PAUSED", "step_label": f"Paused by {invoker}"})
         latest_telemetry.update({"is_pacing": False, "phase": "PAUSED", "status_message": f"Paused • Invoked by {invoker}"})
     elif cmd == "RESUME":
+        await ensure_adb_keyboard_closed()
         orchestration_state.update({"status": "RUNNING", "active_step": "PRECISION_SCROLL", "step_label": f"Resumed by {invoker}"})
         latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Running • Invoked by {invoker}"})
     elif cmd == "END":
         orchestration_state.update({"status": "COMPLETED", "active_step": "LOOP_EVAL", "step_label": f"Ended by {invoker}"})
         latest_telemetry.update({"is_pacing": False, "phase": "COMPLETED", "status_message": f"Completed • Invoked by {invoker}"})
     elif cmd == "RESTART":
+        await ensure_adb_keyboard_closed()
         orchestration_state.update({"status": "RUNNING", "active_step": "START_READY", "step_label": f"Restarted at Line 1 by {invoker}", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1})
         latest_telemetry.update({"current_page": 1, "current_top_line": 1, "current_bottom_line": 0, "is_pacing": True, "phase": "PACING", "status_message": f"Restarted • Invoked by {invoker}"})
+    elif cmd in ("CALIBRATE_INSTANT", "CALIBRATE"):
+        await ensure_adb_keyboard_closed()
+        orchestration_state.update({"active_step": "CALIBRATING", "step_label": f"Instant Calibration by {invoker}"})
+        latest_telemetry.update({"status_message": f"Instant Calibration (Ctrl+End / Ctrl+Home) • Invoked by {invoker}"})
+    elif cmd in ("ADVANCE_PAGE_ARROW", "PAGE_DOWN_ARROW"):
+        await ensure_adb_keyboard_closed()
+        orchestration_state.update({"active_step": "PRECISION_SCROLL", "step_label": f"Arrow Step Invoked by {invoker}"})
+        latest_telemetry.update({"status_message": f"Arrow Step Navigation • Invoked by {invoker}"})
 
     await ws_manager.broadcast({"type": "orchestration_event", "orchestration": orchestration_state, "telemetry": latest_telemetry})
     try: db.save_project_telemetry(get_current_project_id(), latest_telemetry, token_stats)
     except Exception: pass
     return {"status": "success", "command": cmd, "orchestration": orchestration_state, "telemetry": latest_telemetry}
+
+class AdbCommandRequest(BaseModel):
+    command: str
+
+@app.post("/api/adb/command")
+async def execute_adb_command_api(req: AdbCommandRequest):
+    cmd = req.command.strip()
+    try:
+        proc = await asyncio.create_subprocess_exec("adb", "shell", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        return {"status": "ok" if proc.returncode == 0 else "error", "returncode": proc.returncode, "stdout": stdout.decode("utf-8", errors="ignore"), "stderr": stderr.decode("utf-8", errors="ignore")}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
     res = ocr_engine.scan_image(str(image_path))
