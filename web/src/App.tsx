@@ -1,14 +1,27 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Scan, Settings, Search, Check, X,
+  Scan, Settings, Search, Check,
   Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, ArrowRight, Loader2,
-  Monitor, RefreshCw, ChevronDown, Maximize2, Minimize2, Expand, Shrink, Keyboard,
-  AlertTriangle, Eye, EyeOff
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, Loader2,
+  Monitor, ChevronDown, Keyboard
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
 import { useConfirm, Modal } from './ConfirmModal';
+import type {
+  ProjectData,
+  LineData,
+  FrameData,
+  RecaptureItem,
+  TokenStats,
+  FrameBoundingBoxes,
+  AlignmentData,
+  DeviceInfoData,
+} from './types';
+import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
+import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
+import { LiveMonitorDrawer } from './components/LiveMonitorDrawer';
+import { GotoLineModal } from './components/GotoLineModal';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -22,159 +35,6 @@ const POLL_INTERVAL_MS = Number(env.VITE_POLL_INTERVAL_MS) || 1200;
 
 const api = async (p: string, o?: RequestInit) => fetch(`${API_BASE}${p}`, o);
 const apiJson = async <T,>(p: string, o?: RequestInit): Promise<T> => (await api(p, o)).json();
-
-interface ProjectData {
-  id: string; name: string; description: string; target_total_lines: number;
-  status: string; is_active: number; created_at: string; updated_at: string;
-  frame_count?: number; line_count?: number; min_line?: number | null; max_line?: number | null;
-}
-interface LineData {
-  line_number: number; gutter_number?: number; text: string; is_blank: boolean;
-  is_wrapped?: boolean; wrapped_line_count?: number; status: string;
-  frame_id: string; sources?: string[]; confidence?: number; notes: string; updated_at: string;
-}
-interface FrameData {
-  frame_id: string; filename: string; top_line: number; bottom_line: number; page_index: number;
-  file_size: number; status: string; created_at: string; extracted_line_count: number;
-  custom_offset_y?: number; model_used?: string;
-  token_usage?: { prompt_tokens: number; candidates_tokens: number; total_tokens: number };
-}
-interface RecaptureItem { line_number: number; reason: string; requested_at: string; }
-interface TokenStats {
-  total_prompt_tokens: number; total_candidates_tokens: number; total_tokens: number;
-  total_api_calls: number; estimated_cost_usd: number;
-  mobile_tokens?: { prompt_tokens: number; candidates_tokens: number; total_tokens: number };
-}
-interface BoundingBoxItem { x: number; y: number; width: number; height: number; line_number?: number; text_snippet?: string; }
-interface FrameBoundingBoxes { first_line?: BoundingBoxItem; last_line?: BoundingBoxItem; wrapped_lines?: BoundingBoxItem[]; }
-
-interface AlignmentBox {
-  name: string;
-  color: string;
-  hex: string;
-  passed: boolean;
-  status?: 'PASSED' | 'FAILED';
-  detected_value?: string;
-  expected?: string;
-  details?: string;
-  text?: string;
-  line_number?: number;
-  icon?: string;
-  luminance?: number;
-  box_px: [number, number, number, number];
-  box_norm: [number, number, number, number];
-}
-
-interface AlignmentData {
-  status: string;
-  is_aligned: boolean;
-  reason?: string | null;
-  missing?: string[];
-  first_line_number?: number;
-  last_line_number?: number;
-  file_name?: string;
-  boxes?: Record<string, AlignmentBox>;
-  resolution?: { width: number; height: number };
-  timestamp?: string | null;
-}
-
-interface DeviceItem {
-  serial: string;
-  status: string;
-  model: string;
-  displayName?: string;
-  raw?: string;
-}
-
-interface DeviceProfile {
-  id: string;
-  displayName: string;
-  lines_per_page: number;
-  arrow_count_init: number;
-  arrow_count_step: number;
-  step_size: number;
-}
-
-interface DeviceInfoData {
-  status: string;
-  connected: boolean;
-  active_serial: string | null;
-  active_model: string;
-  device_model: 'pixel_8' | 'pixel_10';
-  profile: DeviceProfile;
-  available_profiles: DeviceProfile[];
-  target_serial: string | null;
-  devices: DeviceItem[];
-  displays: {
-    desktop: boolean;
-    phone: boolean;
-  };
-}
-
-const renderBoundingBoxesOverlay = (data: AlignmentData) => {
-  if (!data?.boxes) return null;
-  const boxes = data.boxes;
-  return (
-    <svg className="live-bounding-box-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
-      {Object.entries(boxes).map(([key, b]) => {
-        if (!b?.box_norm) return null;
-        const [nx, ny, nw, nh] = b.box_norm;
-        const x = nx * 1000;
-        const y = ny * 1000;
-        const w = nw * 1000;
-        const h = nh * 1000;
-        const isPassed = b.passed !== false;
-        const strokeColor = isPassed ? (b.hex || '#22c55e') : '#ef4444';
-        const labelText = !isPassed
-          ? `❌ FAIL: ${b.name || key}`
-          : (key === 'first_line' ? `✔ Ln ${b.line_number || data.first_line_number || '?'}` :
-             key === 'last_line' ? `✔ Ln ${b.line_number || data.last_line_number || '?'}` :
-             key === 'file_name' ? `✔ ${b.text || 'Markdown'}` :
-             key === 'teams_logo' ? `✔ ${b.text || 'Teams'}` :
-             key === 'edit_mode' ? '✔ ✏️ Edit Mode' :
-             key === 'dark_mode' ? '✔ 🌙 Dark Mode' : `✔ ${b.name}`);
-        
-        const labelY = y > 30 ? y - 6 : y + h + 15;
-        const textWidth = Math.min(280, Math.max(60, labelText.length * 8 + 12));
-        return (
-          <g key={key}>
-            <rect
-              x={x}
-              y={y}
-              width={w}
-              height={h}
-              fill={isPassed ? `${strokeColor}1a` : 'rgba(239, 68, 68, 0.15)'}
-              stroke={strokeColor}
-              strokeWidth={isPassed ? "2.5" : "3"}
-              strokeDasharray={isPassed ? 'none' : '6,3'}
-            />
-            {/* Label Background pill */}
-            <rect
-              x={Math.max(2, Math.min(998 - textWidth, x))}
-              y={Math.max(2, labelY - 12)}
-              width={textWidth}
-              height="16"
-              fill={isPassed ? "rgba(10, 14, 20, 0.90)" : "rgba(185, 28, 28, 0.95)"}
-              stroke={strokeColor}
-              strokeWidth="1"
-              rx="3"
-            />
-            <text
-              x={Math.max(6, Math.min(998 - textWidth + 5, x + 5))}
-              y={Math.max(13, labelY)}
-              fill={isPassed ? strokeColor : "#ffffff"}
-              fontSize="11"
-              fontFamily="monospace"
-              fontWeight="bold"
-            >
-              {labelText}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-};
 
 function AppContent() {
   const { confirm, alert: showAlert } = useConfirm();
@@ -230,6 +90,59 @@ function AppContent() {
       console.error('Failed to trigger alignment check:', e);
     } finally {
       setIsCheckingAlignment(false);
+    }
+  };
+
+  const [fixingClassifierId, setFixingClassifierId] = useState<string | null>(null);
+  const [isFixingAll, setIsFixingAll] = useState(false);
+
+  const handleFixClassifier = async (classifierId: string) => {
+    setFixingClassifierId(classifierId);
+    try {
+      addTelemetryEvent('SYSTEM', `Executing fix for classifier: ${classifierId}`);
+      const res = await api(`/api/classifiers/fix/${classifierId}`, { method: 'POST' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.current_report) {
+          setAlignmentData(prev => ({
+            ...prev,
+            classifiers: d.current_report,
+            classifier_issues: d.current_report.issues
+          }));
+        }
+        setStreamKey(Date.now());
+        addTelemetryEvent('SYSTEM', d.fix_result?.message || `Fix executed for ${classifierId}`);
+      }
+    } catch (e) {
+      console.error(`Failed to fix classifier ${classifierId}:`, e);
+      addTelemetryEvent('ERROR', `Fix failed for ${classifierId}`);
+    } finally {
+      setFixingClassifierId(null);
+    }
+  };
+
+  const handleFixAllClassifiers = async () => {
+    setIsFixingAll(true);
+    try {
+      addTelemetryEvent('SYSTEM', 'Executing automated remediation for all setup issues');
+      const res = await api('/api/classifiers/fix-all', { method: 'POST' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.current_report) {
+          setAlignmentData(prev => ({
+            ...prev,
+            classifiers: d.current_report,
+            classifier_issues: d.current_report.issues
+          }));
+        }
+        setStreamKey(Date.now());
+        addTelemetryEvent('SYSTEM', 'Auto-fix all classifiers completed ✔');
+      }
+    } catch (e) {
+      console.error('Failed to fix all classifiers:', e);
+      addTelemetryEvent('ERROR', 'Auto-fix all classifiers failed');
+    } finally {
+      setIsFixingAll(false);
     }
   };
 
@@ -295,11 +208,8 @@ function AppContent() {
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
   const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
-  const [gotoLiveMode, setGotoLiveMode] = useState<'desktop' | 'phone'>('desktop');
   const [streamKey, setStreamKey] = useState<number>(Date.now());
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
-  const drawerDeviceDropdownRef = useRef<HTMLDivElement>(null);
-  const modalDeviceDropdownRef = useRef<HTMLDivElement>(null);
 
   // Live Monitor Drawer Resizing & Device Switching State
   const [monitorSize, setMonitorSize] = useState<'sm' | 'md' | 'lg' | 'custom'>('md');
@@ -317,12 +227,9 @@ function AppContent() {
     } catch { return 360; }
   });
   const [isResizingDrawer, setIsResizingDrawer] = useState(false);
-  const [showDrawerDeviceMenu, setShowDrawerDeviceMenu] = useState(false);
-  const [showModalDeviceMenu, setShowModalDeviceMenu] = useState(false);
   const [connectIpInput, setConnectIpInput] = useState('');
   const [isConnectingIp, setIsConnectingIp] = useState(false);
   const [connectStatusMsg, setConnectStatusMsg] = useState('');
-  const [gotoStreamExpanded, setGotoStreamExpanded] = useState(false);
 
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
   const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
@@ -337,12 +244,6 @@ function AppContent() {
       const target = e.target as Node;
       if (deviceDropdownRef.current && !deviceDropdownRef.current.contains(target)) {
         setShowDeviceDropdown(false);
-      }
-      if (drawerDeviceDropdownRef.current && !drawerDeviceDropdownRef.current.contains(target)) {
-        setShowDrawerDeviceMenu(false);
-      }
-      if (modalDeviceDropdownRef.current && !modalDeviceDropdownRef.current.contains(target)) {
-        setShowModalDeviceMenu(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
@@ -549,8 +450,6 @@ function AppContent() {
         await handleSelectSerial(target);
         setConnectIpInput('');
         setShowDeviceDropdown(false);
-        setShowDrawerDeviceMenu(false);
-        setShowModalDeviceMenu(false);
       } else {
         setConnectStatusMsg(d.output || d.message || 'Connection failed');
       }
@@ -1381,81 +1280,21 @@ function AppContent() {
       </header>
 
       {/* Real-time Teams Markdown Alignment Alert Banner */}
-      {!alignmentData.is_aligned && (
-        <div className="alignment-alert-banner">
-          <div className="alignment-alert-content" style={{ flex: 1 }}>
-            <div className="alignment-alert-icon">
-              <AlertTriangle size={22} color="#ff7b72" />
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <span className="alignment-alert-title">
-                  ⚠️ TEAMS MARKDOWN NOT ALIGNED
-                </span>
-                <span style={{ fontSize: '11px', color: '#fca5a5' }}>
-                  {alignmentData.reason || 'Verification failed on one or more critical areas.'}
-                </span>
-              </div>
-
-              {/* 6 Interactive Verification Area Badges */}
-              <div className="alignment-checks-grid">
-                {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
-                  const isPassed = b.passed !== false;
-                  return (
-                    <div
-                      key={key}
-                      className={`alignment-check-badge ${isPassed ? 'passed' : 'failed'}`}
-                      onClick={() => setShowAlignmentModal(true)}
-                      title={`Click for full diagnostics:\n${b.name}: ${isPassed ? 'PASSED' : 'FAILED'}\nDetected: ${b.detected_value || b.text || 'None'}\nCriteria: ${b.expected || ''}\n${b.details || ''}`}
-                    >
-                      <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
-                      <span style={{ fontWeight: 600 }}>{b.name.replace(' / Header', '').replace(' Number', '')}</span>
-                      <span className="alignment-check-status-pill">
-                        {isPassed ? 'PASS' : 'FAIL'}
-                      </span>
-                      <span style={{ fontSize: '10px', opacity: 0.85, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {b.detected_value || b.text || (isPassed ? 'OK' : 'Missing')}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <div className="alignment-alert-actions">
-            <button
-              className="btn-alignment-stream"
-              onClick={() => setShowAlignmentModal(true)}
-              title="Open full AI Verification Diagnostics & Breakdown"
-              style={{ background: 'rgba(239, 68, 68, 0.25)', borderColor: '#ef4444' }}
-            >
-              <Eye size={12} />
-              <span>Inspect Failure Details</span>
-            </button>
-            <button
-              className="btn-alignment-recheck"
-              onClick={handleTriggerAlignmentCheck}
-              disabled={isCheckingAlignment}
-              title="Re-run AI Bounding Box & Alignment Check"
-            >
-              {isCheckingAlignment ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-              <span>Retry AI Verification</span>
-            </button>
-            <button
-              className="btn-alignment-stream"
-              onClick={() => {
-                setShowLiveMonitor(true);
-                setLiveMode('desktop');
-                setStreamKey(Date.now());
-              }}
-              title="Open Desktop Live Stream View"
-            >
-              <Monitor size={12} />
-              <span>Inspect Live Screen</span>
-            </button>
-          </div>
-        </div>
-      )}
+      <AlignmentAlertBanner
+        alignmentData={alignmentData}
+        isCheckingAlignment={isCheckingAlignment}
+        onTriggerCheck={handleTriggerAlignmentCheck}
+        onOpenModal={() => setShowAlignmentModal(true)}
+        onOpenLiveScreen={() => {
+          setShowLiveMonitor(true);
+          setLiveMode('desktop');
+          setStreamKey(Date.now());
+        }}
+        onFixClassifier={handleFixClassifier}
+        onFixAllClassifiers={handleFixAllClassifiers}
+        fixingClassifierId={fixingClassifierId}
+        isFixingAll={isFixingAll}
+      />
 
       {/* Action Bar */}
       <div className="orchestration-bar">
@@ -1937,709 +1776,83 @@ function AppContent() {
         </Modal>
       )}
 
-      {showGotoModal && (
-        <Modal
-          title="Go To Line (Ctrl+G)"
-          onClose={() => {
-            setShowGotoModal(false);
-            setNavStatus('');
-            setShowModalDeviceMenu(false);
-          }}
-          width={gotoStreamExpanded ? '880px' : '620px'}
-        >
-          {/* Target Device Status & In-Modal Device Switcher */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '10px 14px',
-              background: 'rgba(255, 255, 255, 0.03)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '8px',
-              marginBottom: '12px'
-            }}
-          >
-            <div className="drawer-device-selector-wrapper" ref={modalDeviceDropdownRef}>
-              <button
-                type="button"
-                className="drawer-device-btn"
-                onClick={() => setShowModalDeviceMenu(prev => !prev)}
-                title="Click to switch target device or connect by IP"
-                style={{ padding: '4px 10px', fontSize: '12px' }}
-              >
-                <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
-                <Smartphone size={13} color="var(--color-primary)" />
-                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
-                  {deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}
-                </span>
-                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                  ({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)
-                </span>
-                <ChevronDown size={12} style={{ transform: showModalDeviceMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-              </button>
-
-              {showModalDeviceMenu && (
-                <div className="drawer-device-dropdown" style={{ minWidth: '280px', top: 'calc(100% + 4px)' }}>
-                  <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                    {deviceInfo?.devices && deviceInfo.devices.length > 0 ? (
-                      deviceInfo.devices.map(dev => {
-                        const isActive = (deviceInfo.active_serial === dev.serial) || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
-                        return (
-                          <div
-                            key={dev.serial}
-                            className={`device-list-item ${isActive ? 'active' : ''}`}
-                            onClick={() => {
-                              handleSelectSerial(dev.serial);
-                              setShowModalDeviceMenu(false);
-                            }}
-                            style={{ padding: '6px 8px' }}
-                          >
-                            <div className="device-item-left">
-                              <Smartphone size={13} color={isActive ? '#00ff9d' : '#8b949e'} />
-                              <div>
-                                <div className="device-item-title" style={{ fontSize: '11px', color: isActive ? '#00ff9d' : 'var(--text-main)' }}>
-                                  {dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}
-                                </div>
-                                <div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div>
-                              </div>
-                            </div>
-                            {isActive && <Check size={12} color="#00ff9d" />}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>
-                    )}
-                  </div>
-
-                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>CONNECT ADB BY IP</div>
-                  <div className="connect-ip-row">
-                    <input
-                      type="text"
-                      className="connect-ip-input"
-                      placeholder="192.168.86.xx:5555"
-                      value={connectIpInput}
-                      onChange={e => setConnectIpInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                      onClick={() => handleConnectAdbIp()}
-                      disabled={isConnectingIp || !connectIpInput.trim()}
-                    >
-                      {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                    </button>
-                  </div>
-                  {connectStatusMsg && (
-                    <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>
-                      {connectStatusMsg}
-                    </div>
-                  )}
-
-                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
-                  <div className="profile-pills-row">
-                    <button
-                      type="button"
-                      className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`}
-                      onClick={() => { handleSelectDevice('pixel_8'); setShowModalDeviceMenu(false); }}
-                    >
-                      <Smartphone size={10} />
-                      <span>PIXEL 8 (31L)</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`}
-                      onClick={() => { handleSelectDevice('pixel_10'); setShowModalDeviceMenu(false); }}
-                    >
-                      <Smartphone size={10} />
-                      <span>PIXEL 10 (47L)</span>
-                    </button>
-                  </div>
-
-                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>INPUT METHOD & IME</div>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '6px 8px',
-                    borderRadius: '6px',
-                    fontSize: '11px',
-                    fontFamily: 'var(--font-mono)',
-                    background: 'rgba(0, 255, 157, 0.05)',
-                    border: '1px solid rgba(0, 255, 157, 0.25)',
-                    color: '#00ff9d'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <Keyboard size={12} />
-                      <span style={{ fontSize: '10px' }}>HID Active (IME Suppressed)</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline"
-                      style={{ padding: '2px 6px', height: '20px', fontSize: '9px' }}
-                      onClick={handleCloseKeyboard}
-                      disabled={isClosingKeyboard}
-                      title="Force dismiss on-screen virtual keyboard"
-                    >
-                      {isClosingKeyboard ? <Loader2 size={10} className="spin" /> : 'Close IME'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Mode selection + Stream Size Toggle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ display: 'flex', gap: '3px', background: 'rgba(0, 0, 0, 0.4)', padding: '3px', borderRadius: '8px' }}>
-                <button
-                  type="button"
-                  className={`live-tab-btn ${gotoLiveMode === 'desktop' ? 'active' : ''}`}
-                  onClick={() => {
-                    setGotoLiveMode('desktop');
-                    setStreamKey(Date.now());
-                  }}
-                  style={{ fontSize: '11px', padding: '4px 10px' }}
-                  title="View External Display / Desktop Mode (Display 4)"
-                >
-                  <Monitor size={11} />
-                  <span>DESKTOP</span>
-                </button>
-                <button
-                  type="button"
-                  className={`live-tab-btn ${gotoLiveMode === 'phone' ? 'active' : ''}`}
-                  onClick={() => {
-                    setGotoLiveMode('phone');
-                    setStreamKey(Date.now());
-                  }}
-                  style={{ fontSize: '11px', padding: '4px 10px' }}
-                  title="View Phone Built-in Screen (Display 0)"
-                >
-                  <Smartphone size={11} />
-                  <span>PHONE</span>
-                </button>
-              </div>
-
-              {gotoLiveMode === 'desktop' && (
-                <button
-                  type="button"
-                  className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
-                  onClick={() => setShowBoundingBoxes(prev => !prev)}
-                  title="Toggle AI Alignment Bounding Boxes"
-                  style={{ height: '24px', padding: '0 8px' }}
-                >
-                  {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
-                  <span>AI BOXES</span>
-                </button>
-              )}
-
-              <button
-                type="button"
-                className={`live-tab-btn ${gotoStreamExpanded ? 'active' : ''}`}
-                onClick={() => setGotoStreamExpanded(prev => !prev)}
-                style={{ fontSize: '11px', padding: '4px 9px' }}
-                title={gotoStreamExpanded ? "Compact Stream Viewport" : "Expand Stream Viewport"}
-              >
-                {gotoStreamExpanded ? <Shrink size={12} /> : <Expand size={12} />}
-                <span>{gotoStreamExpanded ? 'COMPACT' : 'EXPAND'}</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Embedded Realtime Screen Stream */}
-          <div
-            className={`live-screen-viewport ${gotoLiveMode === 'phone' ? 'phone-mode' : ''}`}
-            style={{
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              marginBottom: '14px',
-              minHeight: gotoStreamExpanded ? (gotoLiveMode === 'phone' ? '540px' : '420px') : '230px',
-              maxHeight: gotoStreamExpanded ? (gotoLiveMode === 'phone' ? '660px' : '520px') : '320px',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <img
-              key={`goto-stream-${gotoLiveMode}-${streamKey}`}
-              className="live-screen-img"
-              src={`${API_BASE}/api/device/stream?mode=${gotoLiveMode}&t=${streamKey}`}
-              alt={`Live ${gotoLiveMode} screen`}
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${gotoLiveMode}&t=${Date.now()}`;
-              }}
-            />
-            {showBoundingBoxes && gotoLiveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
-            <div className="live-screen-overlay-badge">
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
-              <span>REALTIME • {gotoLiveMode.toUpperCase()} VIEW</span>
-            </div>
-            <div className="live-screen-overlay-info">
-              {deviceInfo?.active_model || 'DEVICE'} ({deviceInfo?.active_serial || 'CONNECTED'})
-            </div>
-          </div>
-
-          <div className="modal-form-group">
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-              TARGET LINE NUMBER (FIRST LINE OF LEFT SIDE GUTTER) *
-            </label>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input
-                type="number"
-                min="1"
-                placeholder="e.g. 8761"
-                className="modal-input"
-                style={{ flex: 1, height: '38px', fontSize: '14px', fontFamily: 'var(--font-mono)' }}
-                value={gotoTargetLine}
-                onChange={e => setGotoTargetLine(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleGotoLine();
-                  }
-                }}
-                autoFocus
-              />
-              <button
-                className="btn btn-primary"
-                onClick={handleGotoLine}
-                disabled={isNavigating || !gotoTargetLine}
-                style={{ height: '38px', padding: '0 18px', display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                {isNavigating ? <Loader2 size={14} className="spin" /> : <ArrowRight size={14} />}
-                <span>Go</span>
-              </button>
-            </div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4 }}>
-              Clicking <strong>Go</strong> will send arrow down keypresses to <strong>{deviceInfo?.active_model || 'the device'}</strong> until the top gutter matches this line.
-            </p>
-          </div>
-
-          <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
-              HARDWARE KEYBOARD SHORTCUTS ({deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : 'DEVICE'})
-            </label>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                type="button"
-                className="btn btn-outline"
-                style={{ flex: 1, height: '36px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}
-                onClick={handleSendControlHome}
-                disabled={isNavigating}
-              >
-                control+home
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                style={{ flex: 1, height: '36px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}
-                onClick={handleSendControlEnd}
-                disabled={isNavigating}
-              >
-                control+end
-              </button>
-            </div>
-          </div>
-
-          {navStatus && (
-            <div
-              style={{
-                marginTop: '14px',
-                padding: '10px 14px',
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid var(--border-color)',
-                borderRadius: '6px',
-                fontSize: '12px',
-                color: navStatus.includes('Error') || navStatus.includes('error') ? '#ff7b72' : 'var(--color-primary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              {isNavigating && <Loader2 size={13} className="spin" />}
-              <span>{navStatus}</span>
-            </div>
-          )}
-        </Modal>
-      )}
+      <GotoLineModal
+        isOpen={showGotoModal}
+        onClose={() => {
+          setShowGotoModal(false);
+          setNavStatus('');
+        }}
+        deviceInfo={deviceInfo}
+        deviceModel={deviceModel}
+        alignmentData={alignmentData}
+        showBoundingBoxes={showBoundingBoxes}
+        onToggleBoundingBoxes={() => setShowBoundingBoxes(prev => !prev)}
+        onSelectSerial={handleSelectSerial}
+        onSelectDevice={handleSelectDevice}
+        onConnectAdbIp={handleConnectAdbIp}
+        isConnectingIp={isConnectingIp}
+        connectStatusMsg={connectStatusMsg}
+        onCloseKeyboard={handleCloseKeyboard}
+        isClosingKeyboard={isClosingKeyboard}
+        gotoTargetLine={gotoTargetLine}
+        setGotoTargetLine={setGotoTargetLine}
+        onGotoLine={handleGotoLine}
+        isNavigating={isNavigating}
+        navStatus={navStatus}
+        onSendControlHome={handleSendControlHome}
+        onSendControlEnd={handleSendControlEnd}
+        apiBase={API_BASE}
+        streamKey={streamKey}
+      />
 
       {/* Floating Realtime Device Monitor Drawer with Resizing & Device Switching */}
-      {showLiveMonitor && (
-        <div
-          className={`live-monitor-drawer ${isDrawerMaximized ? 'maximized' : ''} ${isResizingDrawer ? 'resizing' : ''}`}
-          style={{
-            width: isDrawerMaximized ? undefined : `${drawerWidth}px`,
-            height: isDrawerMaximized ? undefined : `${drawerHeight}px`
-          }}
-        >
-          {/* Interactive Multi-Direction Drag Handles */}
-          <div
-            className="live-monitor-resize-handle"
-            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'corner')}
-            title="Drag corner to resize live stream view"
-          />
-          <div
-            className="live-monitor-resize-top"
-            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'top')}
-            title="Drag top edge to adjust height"
-          />
-          <div
-            className="live-monitor-resize-left"
-            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'left')}
-            title="Drag left edge to adjust width"
-          />
-
-          <div className="live-monitor-header">
-            {/* In-drawer Device Selector */}
-            <div className="drawer-device-selector-wrapper" ref={drawerDeviceDropdownRef}>
-              <button
-                type="button"
-                className="drawer-device-btn"
-                onClick={() => setShowDrawerDeviceMenu(prev => !prev)}
-                title="Switch connected target device"
-              >
-                <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
-                <Smartphone size={12} color="var(--color-primary)" />
-                <span>{deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
-                <ChevronDown size={11} style={{ transform: showDrawerDeviceMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-              </button>
-
-              {showDrawerDeviceMenu && (
-                <div className="drawer-device-dropdown">
-                  <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                    {deviceInfo?.devices && deviceInfo.devices.length > 0 ? (
-                      deviceInfo.devices.map(dev => {
-                        const isActive = (deviceInfo.active_serial === dev.serial) || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
-                        return (
-                          <div
-                            key={dev.serial}
-                            className={`device-list-item ${isActive ? 'active' : ''}`}
-                            onClick={() => {
-                              handleSelectSerial(dev.serial);
-                              setShowDrawerDeviceMenu(false);
-                            }}
-                            style={{ padding: '6px 8px' }}
-                          >
-                            <div className="device-item-left">
-                              <Smartphone size={13} color={isActive ? '#00ff9d' : '#8b949e'} />
-                              <div>
-                                <div className="device-item-title" style={{ fontSize: '11px', color: isActive ? '#00ff9d' : 'var(--text-main)' }}>
-                                  {dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}
-                                </div>
-                                <div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div>
-                              </div>
-                            </div>
-                            {isActive && <Check size={12} color="#00ff9d" />}
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>
-                    )}
-                  </div>
-
-                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>CONNECT ADB BY IP</div>
-                  <div className="connect-ip-row">
-                    <input
-                      type="text"
-                      className="connect-ip-input"
-                      placeholder="192.168.86.xx:5555"
-                      value={connectIpInput}
-                      onChange={e => setConnectIpInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                      onClick={() => handleConnectAdbIp()}
-                      disabled={isConnectingIp || !connectIpInput.trim()}
-                    >
-                      {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                    </button>
-                  </div>
-                  {connectStatusMsg && (
-                    <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>
-                      {connectStatusMsg}
-                    </div>
-                  )}
-
-                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
-                  <div className="profile-pills-row">
-                    <button
-                      type="button"
-                      className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`}
-                      onClick={() => { handleSelectDevice('pixel_8'); setShowDrawerDeviceMenu(false); }}
-                    >
-                      <Smartphone size={10} />
-                      <span>PIXEL 8 (31L)</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`}
-                      onClick={() => { handleSelectDevice('pixel_10'); setShowDrawerDeviceMenu(false); }}
-                    >
-                      <Smartphone size={10} />
-                      <span>PIXEL 10 (47L)</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Mode Tabs (Desktop vs Phone) */}
-            <div className="live-monitor-tabs">
-              <button
-                className={`live-tab-btn ${liveMode === 'desktop' ? 'active' : ''}`}
-                onClick={() => handleSwitchLiveMode('desktop')}
-                title="External Display / Desktop Mode (Display 4)"
-              >
-                <Monitor size={11} />
-                <span>DESKTOP</span>
-              </button>
-              <button
-                className={`live-tab-btn ${liveMode === 'phone' ? 'active' : ''}`}
-                onClick={() => handleSwitchLiveMode('phone')}
-                title="Phone Screen (Display 0)"
-              >
-                <Smartphone size={11} />
-                <span>PHONE</span>
-              </button>
-            </div>
-
-            {/* Size Preset Buttons: S, M, L */}
-            <div className="live-size-pill-group" title="Quick size presets">
-              <button
-                type="button"
-                className={`live-size-btn ${monitorSize === 'sm' && !isDrawerMaximized ? 'active' : ''}`}
-                onClick={() => handleSetPresetSize('sm')}
-              >
-                S
-              </button>
-              <button
-                type="button"
-                className={`live-size-btn ${monitorSize === 'md' && !isDrawerMaximized ? 'active' : ''}`}
-                onClick={() => handleSetPresetSize('md')}
-              >
-                M
-              </button>
-              <button
-                type="button"
-                className={`live-size-btn ${monitorSize === 'lg' && !isDrawerMaximized ? 'active' : ''}`}
-                onClick={() => handleSetPresetSize('lg')}
-              >
-                L
-              </button>
-            </div>
-
-            {/* AI Bounding Boxes Toggle Button */}
-            {liveMode === 'desktop' && (
-              <button
-                type="button"
-                className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
-                onClick={() => setShowBoundingBoxes(prev => !prev)}
-                title="Toggle AI Alignment Bounding Boxes (Teams, Filename, Icons, Lines)"
-              >
-                {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
-                <span>AI BOXES</span>
-              </button>
-            )}
-
-            {/* Action buttons */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                onClick={() => setStreamKey(Date.now())}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
-                title="Refresh Stream"
-              >
-                <RefreshCw size={13} />
-              </button>
-              <button
-                onClick={handleToggleDrawerMaximize}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
-                title={isDrawerMaximized ? "Restore Size" : "Maximize Stream View"}
-              >
-                {isDrawerMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-              </button>
-              <button
-                onClick={() => setShowLiveMonitor(false)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
-                title="Close Live Monitor"
-              >
-                <X size={15} />
-              </button>
-            </div>
-          </div>
-
-          {/* Real-time Diagnostics Strip */}
-          {liveMode === 'desktop' && (
-            <div className="alignment-diagnostics-strip">
-              <span
-                style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px', cursor: 'pointer' }}
-                onClick={() => setShowAlignmentModal(true)}
-                title="Click to inspect full AI verification diagnostics"
-              >
-                AI AREAS:
-              </span>
-              {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
-                const isPassed = b.passed !== false;
-                const label = key === 'first_line' ? `Ln ${b.line_number || alignmentData.first_line_number || '?'} (Top)` :
-                              key === 'last_line' ? `Ln ${b.line_number || alignmentData.last_line_number || '?'} (Bottom)` :
-                              key === 'file_name' ? (b.text || 'Filename') :
-                              key === 'teams_logo' ? (b.text || 'Teams Logo') :
-                              key === 'edit_mode' ? 'Edit Mode (✏️)' :
-                              key === 'dark_mode' ? 'Dark Mode (🌙)' : b.name;
-                return (
-                  <div
-                    key={key}
-                    className={`alignment-chip ${isPassed ? 'passed' : 'failed'}`}
-                    onClick={() => setShowAlignmentModal(true)}
-                    title={`${b.name}: ${isPassed ? 'PASSED' : 'FAILED'}\nDetected: ${b.detected_value || b.text || 'None'}\nCriteria: ${b.expected || ''}\n${b.details || ''}\nClick to inspect details`}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
-                    <span>{label}</span>
-                    {!isPassed && <span style={{ fontSize: '9px', fontWeight: 800, color: '#ff7b72', marginLeft: '2px' }}>[FAIL]</span>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`}>
-            <img
-              key={`stream-${liveMode}-${streamKey}`}
-              className="live-screen-img"
-              src={`${API_BASE}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
-              alt={`Live ${liveMode} mode screen`}
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${liveMode}&t=${Date.now()}`;
-              }}
-            />
-            {showBoundingBoxes && liveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
-            <div className="live-screen-overlay-badge">
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
-              <span>LIVE • {liveMode.toUpperCase()}</span>
-            </div>
-            <div className="live-screen-overlay-info">
-              {isDrawerMaximized ? 'MAXIMIZED' : `${drawerWidth}×${drawerHeight}`} • {deviceInfo?.active_serial || 'ADB'}
-            </div>
-          </div>
-        </div>
-      )}
+      <LiveMonitorDrawer
+        isOpen={showLiveMonitor}
+        onClose={() => setShowLiveMonitor(false)}
+        deviceInfo={deviceInfo}
+        deviceModel={deviceModel}
+        alignmentData={alignmentData}
+        liveMode={liveMode}
+        onSwitchLiveMode={handleSwitchLiveMode}
+        monitorSize={monitorSize}
+        onSetPresetSize={handleSetPresetSize}
+        showBoundingBoxes={showBoundingBoxes}
+        onToggleBoundingBoxes={() => setShowBoundingBoxes(prev => !prev)}
+        isDrawerMaximized={isDrawerMaximized}
+        onToggleMaximize={handleToggleDrawerMaximize}
+        drawerWidth={drawerWidth}
+        drawerHeight={drawerHeight}
+        isResizingDrawer={isResizingDrawer}
+        onResizeMouseDown={handleDrawerResizeMouseDown}
+        onSelectSerial={handleSelectSerial}
+        onSelectDevice={handleSelectDevice}
+        onConnectAdbIp={handleConnectAdbIp}
+        isConnectingIp={isConnectingIp}
+        connectStatusMsg={connectStatusMsg}
+        apiBase={API_BASE}
+        streamKey={streamKey}
+        onRefreshStream={() => setStreamKey(Date.now())}
+        onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+      />
 
       {/* AI Alignment & Verification Diagnostics Modal */}
-      {showAlignmentModal && (
-        <Modal
-          title="AI Alignment & Verification Diagnostics"
-          onClose={() => setShowAlignmentModal(false)}
-          width="740px"
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: alignmentData.is_aligned ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.15)', border: `1px solid ${alignmentData.is_aligned ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.4)'}`, borderRadius: '8px', marginBottom: '14px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{ color: alignmentData.is_aligned ? '#22c55e' : '#ef4444' }}>
-                <AlertTriangle size={24} />
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: '13px', color: alignmentData.is_aligned ? '#4ade80' : '#fca5a5', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  {alignmentData.is_aligned ? '✔ All 6 Verification Areas Passed' : '⚠️ Teams Markdown Not Aligned'}
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  {alignmentData.reason || 'All critical bounding boxes and state indicators successfully detected.'}
-                </div>
-              </div>
-            </div>
-            <button
-              className="btn btn-primary"
-              style={{ padding: '6px 14px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}
-              onClick={handleTriggerAlignmentCheck}
-              disabled={isCheckingAlignment}
-            >
-              {isCheckingAlignment ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
-              <span>Re-Verify Now</span>
-            </button>
-          </div>
-
-          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Verification Areas Breakdown (6 Areas):
-          </div>
-
-          <div className="alignment-modal-grid">
-            {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
-              const isPassed = b.passed !== false;
-              return (
-                <div key={key} className={`alignment-modal-card ${isPassed ? 'passed' : 'failed'}`}>
-                  <div className="alignment-card-header">
-                    <div className="alignment-card-title">
-                      <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
-                      <span>{b.name}</span>
-                    </div>
-                    <span className="alignment-check-status-pill" style={{ background: isPassed ? 'rgba(34, 197, 94, 0.25)' : '#ef4444', color: isPassed ? '#4ade80' : '#ffffff' }}>
-                      {isPassed ? 'PASSED' : 'FAILED'}
-                    </span>
-                  </div>
-
-                  <div className="alignment-card-field">
-                    <span className="alignment-card-field-label">Detected:</span>
-                    <span className={`alignment-card-field-val ${isPassed ? 'success' : 'error'}`}>
-                      {b.detected_value || b.text || 'None detected'}
-                    </span>
-                  </div>
-
-                  <div className="alignment-card-field">
-                    <span className="alignment-card-field-label">Criteria:</span>
-                    <span className="alignment-card-field-val">
-                      {b.expected || 'Detection required'}
-                    </span>
-                  </div>
-
-                  {b.details && (
-                    <div className="alignment-card-field">
-                      <span className="alignment-card-field-label">Diagnostics:</span>
-                      <span className="alignment-card-field-val" style={{ color: isPassed ? 'var(--text-muted)' : '#ffb3ba' }}>
-                        {b.details}
-                      </span>
-                    </div>
-                  )}
-
-                  {b.box_px && (
-                    <div className="alignment-card-field">
-                      <span className="alignment-card-field-label">Bounding Box:</span>
-                      <span className="alignment-card-field-val" style={{ color: 'var(--text-muted)' }}>
-                        [{b.box_px.join(', ')}]
-                      </span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-            <button
-              type="button"
-              className="btn btn-outline"
-              onClick={() => {
-                setShowAlignmentModal(false);
-                setShowLiveMonitor(true);
-                setLiveMode('desktop');
-              }}
-            >
-              <Monitor size={13} />
-              <span>Inspect Live Screen</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => setShowAlignmentModal(false)}
-            >
-              Close
-            </button>
-          </div>
-        </Modal>
-      )}
+      <AlignmentDiagnosticsModal
+        isOpen={showAlignmentModal}
+        alignmentData={alignmentData}
+        isCheckingAlignment={isCheckingAlignment}
+        onClose={() => setShowAlignmentModal(false)}
+        onTriggerCheck={handleTriggerAlignmentCheck}
+        onInspectLiveScreen={() => {
+          setShowAlignmentModal(false);
+          setShowLiveMonitor(true);
+          setLiveMode('desktop');
+          setStreamKey(Date.now());
+        }}
+        onFixClassifier={handleFixClassifier}
+        onFixAllClassifiers={handleFixAllClassifiers}
+        fixingClassifierId={fixingClassifierId}
+        isFixingAll={isFixingAll}
+      />
 
       {/* Real-time Telemetry Monitor Toaster */}
       <TelemetryToaster
