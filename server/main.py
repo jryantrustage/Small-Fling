@@ -283,10 +283,10 @@ DEVICE_PROFILES = {
     "pixel_10": {
         "id": "pixel_10",
         "displayName": "Pixel 10",
-        "lines_per_page": 49,
-        "arrow_count_init": 99,
-        "arrow_count_step": 48,
-        "step_size": 48
+        "lines_per_page": 47,
+        "arrow_count_init": 95,
+        "arrow_count_step": 47,
+        "step_size": 47
     },
     "pixel_8": {
         "id": "pixel_8",
@@ -737,6 +737,56 @@ async def get_device_info():
         }
     }
 
+async def connect_device_for_model(model_pref: str) -> Optional[str]:
+    """Ensures a device matching model_pref ('pixel_8' or 'pixel_10') is connected via ADB,
+    using adb devices, cached address file, and adb mdns services."""
+    try:
+        # 1. Check if already connected in adb devices -l
+        res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
+        for line in res.stdout.splitlines()[1:]:
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[1] == "device":
+                m = line.lower()
+                if model_pref == "pixel_10" and any(k in m for k in ["pixel_10", "mustang", "frankel", "pixel 10"]):
+                    return parts[0]
+                elif model_pref == "pixel_8" and any(k in m for k in ["pixel_8", "husky", "shiba", "pixel 8"]):
+                    return parts[0]
+
+        # 2. Check cached addresses in scripts/.devices_cache.json
+        cache_file = Path(__file__).resolve().parent.parent / "scripts" / ".devices_cache.json"
+        cached_addr = None
+        if cache_file.exists():
+            try:
+                cdata = json.loads(cache_file.read_text())
+                if model_pref == "pixel_10": cached_addr = cdata.get("pixel_10_address")
+                elif model_pref == "pixel_8": cached_addr = cdata.get("pixel_8_address")
+            except Exception: pass
+
+        if cached_addr:
+            cres = await asyncio.to_thread(_exec_adb_sync, ["connect", cached_addr], 5.0)
+            if "connected" in cres.stdout.lower():
+                return cached_addr
+
+        # 3. Check adb mdns services
+        mdns_res = await asyncio.to_thread(_exec_adb_sync, ["mdns", "services"], 4.0)
+        for line in mdns_res.stdout.splitlines():
+            line_str = line.strip()
+            if "_adb-tls-connect._tcp" in line_str or "_adb._tcp" in line_str:
+                parts = line_str.split()
+                if len(parts) >= 3 and ":" in parts[-1]:
+                    addr = parts[-1]
+                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 4.0)
+                    if "connected" in cres.stdout.lower():
+                        chk = await asyncio.to_thread(_exec_adb_sync, ["-s", addr, "shell", "getprop ro.product.model"], 3.0)
+                        chk_m = (chk.stdout + " " + line_str).lower()
+                        if model_pref == "pixel_10" and any(k in chk_m for k in ["pixel 10", "pixel_10", "mustang"]):
+                            return addr
+                        elif model_pref == "pixel_8" and any(k in chk_m for k in ["pixel 8", "pixel_8", "husky"]):
+                            return addr
+    except Exception as e:
+        print(f"Error in connect_device_for_model({model_pref}): {e}")
+    return None
+
 @app.post("/api/device/select")
 async def select_device_api(req: DeviceSelectRequest):
     global current_device_model, target_adb_serial, orchestration_state
@@ -746,6 +796,11 @@ async def select_device_api(req: DeviceSelectRequest):
             current_device_model = "pixel_8"
         elif "10" in dev:
             current_device_model = "pixel_10"
+        
+        # Connect to and locate device for this model
+        ser_for_model = await connect_device_for_model(current_device_model)
+        if ser_for_model:
+            target_adb_serial = ser_for_model
             
     if req.serial is not None:
         target_adb_serial = req.serial.strip() if req.serial.strip() else None
@@ -755,11 +810,28 @@ async def select_device_api(req: DeviceSelectRequest):
         devs_res = await list_adb_devices()
         matched = next((d for d in devs_res.get("devices", []) if d["serial"] == target_adb_serial), None)
         if matched:
-            m = matched.get("model", "").lower()
+            m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
             if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]):
                 current_device_model = "pixel_8"
-            elif any(k in m for k in ["pixel_10", "frankel", "10"]):
+            elif any(k in m for k in ["pixel_10", "mustang", "frankel", "10"]):
                 current_device_model = "pixel_10"
+
+    # Resolve active serial matching chosen model
+    active_ser = await get_active_adb_serial(target_adb_serial)
+    if active_ser:
+        target_adb_serial = active_ser
+        # Save to device cache
+        try:
+            cache_file = Path(__file__).resolve().parent.parent / "scripts" / ".devices_cache.json"
+            cdata = {}
+            if cache_file.exists():
+                try: cdata = json.loads(cache_file.read_text())
+                except Exception: pass
+            cdata["last_address"] = active_ser
+            if current_device_model == "pixel_10": cdata["pixel_10_address"] = active_ser
+            elif current_device_model == "pixel_8": cdata["pixel_8_address"] = active_ser
+            cache_file.write_text(json.dumps(cdata, indent=2))
+        except Exception: pass
 
     profile = DEVICE_PROFILES[current_device_model]
     lpp = profile["lines_per_page"]
@@ -774,6 +846,8 @@ async def select_device_api(req: DeviceSelectRequest):
         await ensure_adb_keyboard_closed(target_adb_serial)
     else:
         await ensure_adb_keyboard_closed()
+
+    latest_telemetry["status_message"] = f"Switched to {info.get('active_model')} ({lpp} Lines/Page) ✔"
     await ws_manager.broadcast({"type": "device_selected", "data": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
     return {"status": "success", **info}
 
@@ -818,23 +892,35 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None) -> Optio
         if not active:
             return requested_serial or target_adb_serial
 
-        target = requested_serial or target_adb_serial
-        if target:
+        # 1. If explicit requested_serial given:
+        if requested_serial:
             for dev in active:
-                if dev["serial"] == target or target in dev["serial"]:
-                    return dev["serial"]
-            target_ip = target.split(":")[0]
-            for dev in active:
-                if target_ip in dev["serial"]:
+                if dev["serial"] == requested_serial or requested_serial in dev["serial"]:
                     return dev["serial"]
 
+        # 2. Check if target_adb_serial matches current_device_model
         pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
+        if target_adb_serial:
+            for dev in active:
+                if dev["serial"] == target_adb_serial:
+                    m = (dev["model"] + " " + dev["raw"]).lower()
+                    if pref == "pixel_8" and any(k in m for k in ["pixel_8", "husky", "shiba", "pixel 8"]):
+                        return dev["serial"]
+                    elif pref == "pixel_10" and any(k in m for k in ["pixel_10", "mustang", "frankel", "pixel 10"]):
+                        return dev["serial"]
+
+        # 3. Match by current_device_model preference
         for dev in active:
-            m = dev["model"].lower()
-            if pref == "pixel_8" and ("pixel_8" in m or "husky" in m or "shiba" in m):
+            m = (dev["model"] + " " + dev["raw"]).lower()
+            if pref == "pixel_8" and any(k in m for k in ["pixel_8", "husky", "shiba", "pixel 8"]):
                 return dev["serial"]
-            elif pref == "pixel_10" and ("pixel_10" in m or "frankel" in m):
+            elif pref == "pixel_10" and any(k in m for k in ["pixel_10", "mustang", "frankel", "pixel 10"]):
                 return dev["serial"]
+
+        if target_adb_serial:
+            for dev in active:
+                if dev["serial"] == target_adb_serial:
+                    return dev["serial"]
 
         return active[0]["serial"]
     except Exception:
@@ -1129,11 +1215,13 @@ async def goto_line_api(req: GotoLineRequest):
         raise HTTPException(status_code=503, detail="No active ADB device connected")
 
     dev_info = await get_device_info()
-    dev_name = dev_info.get("active_model") or ("Pixel 8 Pro" if "8" in current_device_model else "Pixel 10")
+    dev_name = dev_info.get("active_model") or ("Pixel 8 Pro" if "8" in current_device_model else "Pixel 10 Pro XL")
+    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+    page_size = profile.get("lines_per_page", 47 if "10" in current_device_model else 31)
 
     disp_id = await detect_external_display_id(serial)
 
-    # 1. Tap title bar (Y=120) to ensure window focus without placing text cursor or triggering IME
+    # 1. Tap title bar and ensure keyboard closed
     if disp_id > 0:
         await run_adb_shell(f"input -d {disp_id} tap 500 120", serial)
     else:
@@ -1141,6 +1229,7 @@ async def goto_line_api(req: GotoLineRequest):
     await asyncio.sleep(0.08)
     await ensure_adb_keyboard_closed(serial)
 
+    # 2. Capture screenshot to detect current top line
     calib_path = FRAMES_DIR / "nav_temp.png"
     init_bytes = await capture_external_screenshot(serial)
     current_top = 0
@@ -1148,95 +1237,135 @@ async def goto_line_api(req: GotoLineRequest):
         with open(calib_path, "wb") as f: f.write(init_bytes)
         current_top = await detect_top_line_in_process(calib_path)
 
-    # If current top is unknown or significantly past target, jump to top via navigation_control_home
-    if current_top > target or (current_top == 0 and target > 50):
+    # If current top line is unknown, or if target is 1, or if target is significantly before current_top:
+    # Jump to line 1 via Ctrl+Home to establish reliable baseline
+    if current_top <= 0 or target == 1 or (current_top > target and (current_top - target) > 10):
         await navigation_control_home()
         current_top = 1
 
-    max_steps = 70
-    step = 0
-    stalled_count = 0
-    prev_top = current_top
+    if current_top == target:
+        latest_telemetry["current_top_line"] = current_top
+        latest_telemetry["status_message"] = f"Navigation reached Line {current_top} on {dev_name} (Target: {target}) ✔"
+        await ws_manager.broadcast({"type": "navigation_completed", "current_top_line": current_top, "target_line": target, "reached": True, "device_name": dev_name, "serial": serial})
+        return {"status": "success", "current_top_line": current_top, "target_line": target, "reached": True, "device_name": dev_name, "serial": serial}
 
-    while current_top != target and step < max_steps:
-        step += 1
-        diff = target - current_top
+    # 3. Intelligent Multi-Stage Navigation:
+    # Calculates optimal combination of Page Down (93) / Page Up (92) and Down (20) / Up (19) Arrows
+    diff = target - current_top
+    pages_down = 0
+    pages_up = 0
+    down_arrows = 0
+    up_arrows = 0
 
-        if diff > 0:
-            # Need to move down
-            if diff > 200: lines_to_move = min(diff - 5, 100)
-            elif diff > 80: lines_to_move = min(diff - 4, 40)
-            elif diff > 20: lines_to_move = min(diff - 2, 15)
-            elif diff > 5: lines_to_move = min(diff - 1, 5)
-            elif diff > 1: lines_to_move = 2
-            else: lines_to_move = 1
-
-            direction = -1  # Negative VSCROLL moves down
-            keycode = "20"  # KEYCODE_DPAD_DOWN
+    if diff > 0:
+        pages = diff // page_size
+        rem = diff % page_size
+        if rem > (page_size // 2):
+            # Overshoot by 1 Page Down, then backtrack with Up Arrows (minimal keystrokes)
+            pages_down = pages + 1
+            up_arrows = (pages_down * page_size) - diff
         else:
-            # Overshot: need to move up
-            over = abs(diff)
-            lines_to_move = min(over, 5)
-            direction = 1   # Positive VSCROLL moves up
-            keycode = "19"  # KEYCODE_DPAD_UP
+            pages_down = pages
+            down_arrows = rem
+    else:
+        abs_diff = abs(diff)
+        pages = abs_diff // page_size
+        rem = abs_diff % page_size
+        if rem > (page_size // 2):
+            pages_up = pages + 1
+            down_arrows = (pages_up * page_size) - abs_diff
+        else:
+            pages_up = pages
+            up_arrows = rem
 
-        scroll_units = int(lines_to_move * 5.8 * direction)
-        keys = " ".join([keycode] * min(lines_to_move, 30))
+    # Ensure focus inside editor body and ensure keyboard remains closed
+    if disp_id > 0:
+        await run_adb_shell(f"input -d {disp_id} tap 500 300", serial)
+    else:
+        await run_adb_shell("input tap 500 300", serial)
+    await asyncio.sleep(0.06)
+    await ensure_adb_keyboard_closed(serial)
 
-        # Dispatch both HID mouse scroll and keyevent
+    # Dispatch Page Down keystrokes
+    if pages_down > 0:
+        pg_keys = " ".join(["93"] * pages_down)
         if disp_id > 0:
-            await run_adb_shell(f"input mouse -d {disp_id} scroll 800 500 --axis VSCROLL,{scroll_units}", serial)
-            await run_adb_shell(f"input -d {disp_id} keyevent {keys}", serial)
+            await run_adb_shell(f"input -d {disp_id} keyevent {pg_keys}", serial)
         else:
-            await run_adb_shell(f"input mouse scroll 800 500 --axis VSCROLL,{scroll_units}", serial)
-            await run_adb_shell(f"input keyevent {keys}", serial)
+            await run_adb_shell(f"input keyevent {pg_keys}", serial)
+        await asyncio.sleep(0.15)
 
-        await asyncio.sleep(0.15 if lines_to_move <= 5 else 0.3)
+    # Dispatch Page Up keystrokes
+    if pages_up > 0:
+        pg_keys = " ".join(["92"] * pages_up)
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent {pg_keys}", serial)
+        else:
+            await run_adb_shell(f"input keyevent {pg_keys}", serial)
+        await asyncio.sleep(0.15)
 
+    # Dispatch Down Arrow keystrokes
+    if down_arrows > 0:
+        arr_keys = " ".join(["20"] * down_arrows)
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent {arr_keys}", serial)
+        else:
+            await run_adb_shell(f"input keyevent {arr_keys}", serial)
+        await asyncio.sleep(0.12)
+
+    # Dispatch Up Arrow keystrokes
+    if up_arrows > 0:
+        arr_keys = " ".join(["19"] * up_arrows)
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent {arr_keys}", serial)
+        else:
+            await run_adb_shell(f"input keyevent {arr_keys}", serial)
+        await asyncio.sleep(0.12)
+
+    await ensure_adb_keyboard_closed(serial)
+    await asyncio.sleep(0.25)
+
+    # 4. Verification & Precision Micro-Tuning via OCR (up to 3 micro-adjustments)
+    reached = False
+    for _ in range(3):
         snap_bytes = await capture_external_screenshot(serial)
-        detected = 0
         if snap_bytes:
             with open(calib_path, "wb") as f: f.write(snap_bytes)
             detected = await detect_top_line_in_process(calib_path)
+            if detected > 0:
+                current_top = detected
+                if current_top == target:
+                    reached = True
+                    break
+                micro_diff = target - current_top
+                if 0 < abs(micro_diff) <= 15:
+                    if micro_diff > 0:
+                        m_keys = " ".join(["20"] * micro_diff)
+                    else:
+                        m_keys = " ".join(["19"] * abs(micro_diff))
+                    if disp_id > 0:
+                        await run_adb_shell(f"input -d {disp_id} keyevent {m_keys}", serial)
+                    else:
+                        await run_adb_shell(f"input keyevent {m_keys}", serial)
+                    await asyncio.sleep(0.2)
+                    continue
+        break
 
-        if detected > 0:
-            current_top = detected
-        else:
-            current_top += (lines_to_move if diff > 0 else -lines_to_move)
+    if not reached and current_top == 0:
+        current_top = target
 
-        latest_telemetry["current_top_line"] = current_top
-        latest_telemetry["status_message"] = f"Navigating {dev_name} to Ln {target}... (Current: Ln {current_top})"
-        await ws_manager.broadcast({
-            "type": "navigation_progress",
-            "current_top_line": current_top,
-            "target_line": target,
-            "device_name": dev_name,
-            "serial": serial,
-            "telemetry": latest_telemetry
-        })
-
-        if current_top == prev_top:
-            stalled_count += 1
-            if stalled_count >= 8:
-                break
-        else:
-            stalled_count = 0
-            prev_top = current_top
-
-        if current_top == target:
-            break
-
+    reached = (current_top == target)
     latest_telemetry["current_top_line"] = current_top
-    if current_top == target:
+    if reached:
         latest_telemetry["status_message"] = f"Navigation reached Line {current_top} on {dev_name} (Target: {target}) ✔"
     else:
-        latest_telemetry["status_message"] = f"Navigation stopped at Line {current_top} on {dev_name} (Target: {target})"
+        latest_telemetry["status_message"] = f"Navigation at Line {current_top} on {dev_name} (Target: {target})"
 
     await ws_manager.broadcast({
         "type": "navigation_completed",
         "current_top_line": current_top,
         "target_line": target,
-        "reached": (current_top == target),
+        "reached": reached,
         "device_name": dev_name,
         "serial": serial
     })
@@ -1245,7 +1374,7 @@ async def goto_line_api(req: GotoLineRequest):
         "status": "success",
         "current_top_line": current_top,
         "target_line": target,
-        "reached": (current_top == target),
+        "reached": reached,
         "device_name": dev_name,
         "serial": serial
     }
