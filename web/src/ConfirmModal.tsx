@@ -50,19 +50,31 @@ export const Modal: React.FC<ModalProps> = ({
   width,
   maxWidth,
   showCloseButton = true,
-  autoFocus = 'confirm',
+  autoFocus = false,
   children,
 }) => {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
+  const onCloseRef = useRef(onClose);
+  const onConfirmRef = useRef(onConfirm);
+  const disabledRef = useRef(disabled);
+  const loadingRef = useRef(loading);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+    onConfirmRef.current = onConfirm;
+    disabledRef.current = disabled;
+    loadingRef.current = loading;
+  });
+
   // Compute effective variant
   const effectiveVariant: ModalVariant = variant || (danger ? 'danger' : 'default');
 
+  // Focus requested button on open only if autoFocus is explicitly requested
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !autoFocus) return;
 
-    // Focus requested button on open
     const timer = setTimeout(() => {
       if (autoFocus === 'confirm' && confirmBtnRef.current) {
         confirmBtnRef.current.focus();
@@ -71,12 +83,20 @@ export const Modal: React.FC<ModalProps> = ({
       }
     }, 50);
 
+    return () => clearTimeout(timer);
+  }, [isOpen, autoFocus]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
-      } else if (e.key === 'Enter' && onConfirm && !disabled && !loading) {
+        onCloseRef.current();
+      } else if (e.key === 'Enter' && onConfirmRef.current && !disabledRef.current && !loadingRef.current) {
         // Only trigger confirm on Enter if target is not a textarea or another button
         const target = e.target as HTMLElement | null;
         if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON')) {
@@ -84,16 +104,15 @@ export const Modal: React.FC<ModalProps> = ({
         }
         e.preventDefault();
         e.stopPropagation();
-        onConfirm();
+        onConfirmRef.current();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
-      clearTimeout(timer);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, onClose, onConfirm, disabled, loading, autoFocus]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
