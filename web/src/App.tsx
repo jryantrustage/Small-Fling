@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Scan, Download, Settings, ZoomIn, ZoomOut, Search, Check, X,
-  UploadCloud, Cpu, Coins, FileCode, Layers, RotateCw, RotateCcw,
-  AlertCircle, FolderKanban, Plus, Trash2, Ban, ChevronLeft,
-  ChevronRight, MoveVertical, Menu, Play, Pause, Square, Camera,
-  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash, ArrowDown, Smartphone
+  Scan, Settings, ZoomIn, ZoomOut, Search, Check, X,
+  Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2, Ban,
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone
 } from 'lucide-react';
 
 const env = import.meta.env;
@@ -16,7 +14,6 @@ const API_BASE = (() => {
   return u || '';
 })();
 const POLL_INTERVAL_MS = Number(env.VITE_POLL_INTERVAL_MS) || 1200;
-const DEFAULT_TARGET_LINES = Number(env.VITE_DEFAULT_TARGET_LINES) || 0;
 
 const api = async (p: string, o?: RequestInit) => fetch(`${API_BASE}${p}`, o);
 const apiJson = async <T,>(p: string, o?: RequestInit): Promise<T> => (await api(p, o)).json();
@@ -43,24 +40,8 @@ interface TokenStats {
   total_api_calls: number; estimated_cost_usd: number;
   mobile_tokens?: { prompt_tokens: number; candidates_tokens: number; total_tokens: number };
 }
-interface TelemetryState {
-  device_id: string; is_pacing: boolean; current_page: number; current_top_line: number;
-  current_bottom_line: number; target_total_lines: number; dwell_countdown_ms: number;
-  phase: string; status_message: string; last_heartbeat: string | null;
-  pacer_calibration?: { auto_tune_factor: number; line_pitch_px: number; bottom_to_top_error: number; wrapped_lines_detected: number };
-}
 interface BoundingBoxItem { x: number; y: number; width: number; height: number; line_number?: number; text_snippet?: string; }
 interface FrameBoundingBoxes { first_line?: BoundingBoxItem; last_line?: BoundingBoxItem; wrapped_lines?: BoundingBoxItem[]; }
-
-const formatDeviceName = (s?: string) => {
-  const v = (s || '').toLowerCase();
-  if (v.includes('web')) return 'Web Studio 💻';
-  if (v.includes('mobile')) return 'Mobile App 📱';
-  if (v.includes('hud')) return 'Floating HUD 🪟';
-  if (v.includes('pacer')) return 'Auto-Pacer ⚡';
-  if (v.includes('api')) return 'Backend API ⚙️';
-  return 'System ⚙️';
-};
 
 const Modal = ({ title, onClose, onConfirm, confirmText = 'Save', confirmIcon: Icon = Check, danger = false, disabled = false, children }: any) => (
   <div className="modal-overlay" onClick={onClose}>
@@ -97,14 +78,6 @@ export default function App() {
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
   const [tokenStats, setTokenStats] = useState<TokenStats>({ total_prompt_tokens: 0, total_candidates_tokens: 0, total_tokens: 0, total_api_calls: 0, estimated_cost_usd: 0 });
-  const [telemetry, setTelemetry] = useState<TelemetryState>({
-    device_id: 'Standby', is_pacing: false, current_page: 0, current_top_line: 0, current_bottom_line: 0,
-    target_total_lines: DEFAULT_TARGET_LINES, dwell_countdown_ms: 0, phase: 'IDLE', status_message: 'Matrix Capture Studio ready', last_heartbeat: null
-  });
-  const [orch, setOrch] = useState({
-    status: 'IDLE', last_command: '', timestamp: 0, source: 'system', invoked_by: 'System ⚙️',
-    active_step: 'START_READY', step_label: 'Line 1 Start Position Set (Ready to Begin)', top_line: 1, bottom_line: 49, next_target_top: 50, page: 1
-  });
 
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<LineData | null>(null);
@@ -115,11 +88,8 @@ export default function App() {
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'issues'>('all');
-  const [zoomMode, setZoomMode] = useState<'fit' | 'actual' | 'custom'>('fit');
+  const [zoomMode, setZoomMode] = useState<'fit' | 'custom'>('fit');
   const [imageZoom, setImageZoom] = useState(1);
-  const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isResetting, setIsResetting] = useState(false);
   const [isScanningOcr, setIsScanningOcr] = useState(false);
   const [scanStatusMsg, setScanStatusMsg] = useState('');
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
@@ -129,6 +99,16 @@ export default function App() {
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
   const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>('pixel_10');
+  const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
+  const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
+
+  const lineListRef = useRef<HTMLDivElement>(null);
+  const prevFramesCountRef = useRef(0);
+  const selectedFrameIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedFrameIdRef.current = selectedFrameId;
+  }, [selectedFrameId]);
 
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
@@ -142,20 +122,14 @@ export default function App() {
       console.error('Failed to select device', e);
     }
   };
-  const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
-
-  const lineListRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const prevFramesCountRef = useRef(0);
 
   const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
 
   const fetchData = async () => {
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, telemetryRes, orchRes, modeRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes] = await Promise.all([
         api('/api/projects'), api('/api/document'), api('/api/frames'),
-        api('/api/recapture-queue'), api('/api/config'), api('/api/telemetry'), api('/api/orchestrate'),
-        api('/api/pipeline/mode')
+        api('/api/recapture-queue'), api('/api/config'), api('/api/pipeline/mode')
       ]);
       if (modeRes && modeRes.ok) {
         const m = await modeRes.json();
@@ -186,22 +160,6 @@ export default function App() {
         const cfg = await cfgRes.json();
         setApiKeyConfigured(!!cfg.gemini_api_key_configured);
         if (cfg.gemini_api_key && !apiKeyInput) setApiKeyInput(cfg.gemini_api_key);
-      }
-      if (telemetryRes.ok) {
-        const t = await telemetryRes.json();
-        setTelemetry(prev => ({ ...prev, ...t }));
-        if (t.device_id) {
-          const d = t.device_id.toLowerCase();
-          if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
-          else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
-        }
-      }
-      if (orchRes.ok) {
-        const o = await orchRes.json();
-        setOrch(o);
-        if (o.device_model) {
-          setDeviceModel(o.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
-        }
       }
     } catch {
       setBackendConnected(false);
@@ -270,8 +228,6 @@ export default function App() {
     if (res.ok) await fetchData();
   };
 
-  const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
-
   const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
     if (e) e.stopPropagation();
     if (!id || deletingFrameId) return;
@@ -335,7 +291,7 @@ export default function App() {
           } else if (msg.type === 'frame_deleted') {
             setFrames(prev => {
               const remaining = prev.filter(f => f && f.frame_id && f.frame_id !== msg.frame_id);
-              if (selectedFrameId === msg.frame_id) {
+              if (selectedFrameIdRef.current === msg.frame_id) {
                 setSelectedFrameId(remaining.length > 0 ? remaining[remaining.length - 1].frame_id : null);
               }
               return remaining;
@@ -345,28 +301,11 @@ export default function App() {
           } else if (msg.type === 'document_updated') {
             setDocumentData(msg.data);
             if (msg.data.token_stats) setTokenStats(msg.data.token_stats);
-          } else if (msg.type === 'telemetry_updated') {
-            setTelemetry(prev => ({ ...prev, ...msg.data }));
-            if (msg.data?.device_id) {
-              const d = msg.data.device_id.toLowerCase();
+          } else if (msg.type === 'device_selected' || msg.type === 'telemetry_updated') {
+            if (msg.data?.device_id || msg.data?.device_model) {
+              const d = (msg.data.device_id || msg.data.device_model || '').toLowerCase();
               if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
               else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
-            }
-          } else if (msg.type === 'orchestration_updated') {
-            setOrch(msg.data);
-            if (msg.data?.device_model) setDeviceModel(msg.data.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
-          } else if (msg.type === 'orchestration_event') {
-            if (msg.orchestration) {
-              setOrch(msg.orchestration);
-              if (msg.orchestration.device_model) setDeviceModel(msg.orchestration.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
-            }
-            if (msg.telemetry) {
-              setTelemetry(prev => ({ ...prev, ...msg.telemetry }));
-              if (msg.telemetry.device_id) {
-                const d = msg.telemetry.device_id.toLowerCase();
-                if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
-                else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
-              }
             }
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
             setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
@@ -375,7 +314,7 @@ export default function App() {
           } else if (msg.type === 'frame_bounding_boxes' && msg.data?.frame_id) {
             setFrameBoundingBoxes(prev => ({ ...prev, [msg.data.frame_id]: msg.data.boxes }));
           } else if (msg.type === 'pipeline_mode_changed') {
-            if (msg.data && msg.data.pipeline_mode) {
+            if (msg.data?.pipeline_mode) {
               setPipelineMode(msg.data.pipeline_mode);
             }
           }
@@ -428,67 +367,15 @@ export default function App() {
     }
   };
 
-  const handleUploadFiles = async (fl: FileList | File[]) => {
-    setIsUploading(true);
+  const handleCaptureDesktop = async () => {
     try {
-      for (const file of Array.from(fl)) {
-        const fd = new FormData();
-        fd.append('file', file);
-        if (activeProject) fd.append('project_id', activeProject.id);
-        const r = await (await api('/api/upload-frame', { method: 'POST', body: fd })).json();
-        if (r.frame) setSelectedFrameId(r.frame.frame_id);
-      }
-      await fetchData();
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const handleResetSession = async () => {
-    if (!window.confirm('Reset all captured frames and restart studio?')) return;
-    setIsResetting(true);
-    try {
-      await api('/api/reset-state', { method: 'POST' });
-      setSelectedFrameId(null);
-      setSelectedLine(null);
-      prevFramesCountRef.current = 0;
-      await fetchData();
-    } finally {
-      setIsResetting(false);
-    }
-  };
-
-  const handleOrchCommand = async (cmd: string) => {
-    const res = await api('/api/orchestrate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: cmd, source: 'web_studio' })
-    });
-    if (res.ok) setOrch(await res.json());
-  };
-
-  const handleGetNextPageLine = async () => {
-    try {
-      const res = await api('/api/next-page-line');
-      if (res.ok) {
-        const data = await res.json();
-        const nextLn = data.next_page_first_line || 1;
-        setScanStatusMsg(`Next Page Line: #${nextLn} (Prior bottom: #${data.last_bottom_line || 0})`);
-        setOrch(prev => ({
-          ...prev,
-          next_target_top: nextLn,
-          step_label: `Next Target Line: #${nextLn} (Queried by Web Studio)`
-        }));
-        await api('/api/orchestrate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ command: 'GET_NEXT_LINE', source: 'web_studio' })
-        });
-        setTimeout(() => setScanStatusMsg(''), 7000);
-        await fetchData();
-      }
-    } catch (err) {
-      console.error('Failed to get next page line:', err);
+      await api('/api/orchestrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'CAPTURE_DESKTOP', source: 'web_studio' })
+      });
+    } catch (e) {
+      console.error('Failed to capture desktop:', e);
     }
   };
 
@@ -542,39 +429,23 @@ export default function App() {
 
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId);
   const totalCombinedTokens = tokenStats.total_tokens + (tokenStats.mobile_tokens?.total_tokens || 0);
-  const isPixel8 = deviceModel === 'pixel_8';
-  const linesPerPage = isPixel8 ? 31 : 49;
-  const initialNextTargetTop = isPixel8 ? 32 : 50;
-  const devDisplayName = isPixel8 ? 'Pixel 8' : 'Pixel 10';
-
-  const DAG_STAGES = [
-    { num: '01', icon: Flag, title: 'Start Position', sub: `Gutter Line 1 Initialized (${devDisplayName})`, pill: `Ln 1 → ${linesPerPage} Ready`, step: 'START_READY', conn: 'SCREEN_CAPTURE' },
-    { num: '02', icon: Camera, title: 'Display 1 Capture', sub: 'Desktop Mode (HDMI TO USB)', pill: '1920x1080 Frame', step: 'SCREEN_CAPTURE', conn: 'OCR_BOUNDS' },
-    { num: '03', icon: Scan, title: 'OCR Bounds', sub: pipelineMode === 'cloud' ? 'Gemini 2.5 Flash Vision' : `${devDisplayName} ML Kit + Ollama`, pill: `Ln ${telemetry.current_top_line || 1} → ${telemetry.current_bottom_line || linesPerPage}`, step: 'OCR_BOUNDS', conn: 'PRECISION_SCROLL' },
-    { num: '04', icon: MoveVertical, title: 'Precision Scroll', sub: 'Align Prior Bottom + 1', pill: `Target Top: Ln ${(telemetry.current_bottom_line && telemetry.current_bottom_line > 0) ? telemetry.current_bottom_line + 1 : initialNextTargetTop}`, step: 'PRECISION_SCROLL', conn: 'DWELL_FREEZE' },
-    { num: '05', icon: Clock, title: '1.5s Dwell Freeze', sub: 'Anti-Blur Frame Settling', pill: telemetry.dwell_countdown_ms > 0 ? `${telemetry.dwell_countdown_ms}ms` : '1,500ms Freeze', step: 'DWELL_FREEZE', conn: 'LOOP_EVAL' },
-    { num: '06', icon: Repeat, title: 'EOF or Loop', sub: 'Page Top Changed?', pill: orch.status === 'COMPLETED' ? 'Document Complete' : 'Cycle to Next Page', step: 'LOOP_EVAL' }
-  ];
+  const devDisplayName = deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
 
   return (
     <div className="app-container">
       {/* Top Header */}
       <header className="app-header">
         <div className="brand-section">
-          <button className="sidebar-toggle-btn" onClick={() => setIsSidebarOpen(p => !p)} title="Toggle Projects Sidebar">
-            <Menu size={15} />
-          </button>
-          <div className="brand-logo"><Scan size={18} /></div>
-          <span className="brand-title">MATRIX CAPTURE <span className="brand-badge">STUDIO 2.5</span></span>
+          <span className="brand-title">MATRIX CAPTURE</span>
           {activeProject && (
-            <div className="active-project-pill" onClick={() => setIsSidebarOpen(true)} title="Active project">
+            <div className="active-project-pill" onClick={() => setIsSidebarOpen(true)} title="Active project (Click to manage)">
               <FolderKanban size={13} color="#00ff9d" />
               <span className="project-name">{activeProject.name}</span>
             </div>
           )}
         </div>
 
-        {/* Realtime Metrics */}
+        {/* Realtime Metrics & Controls */}
         <div className="header-metrics">
           {/* Runtime Capture Pipeline Toggle */}
           <div className="pipeline-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
@@ -614,7 +485,7 @@ export default function App() {
           <div className="device-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
             <button
               onClick={() => handleSelectDevice('pixel_8')}
-              title="Google Pixel 8 (31 lines/page, 63 init / 30 step arrows)"
+              title="Google Pixel 8 (31 lines/page)"
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
                 cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
@@ -628,7 +499,7 @@ export default function App() {
             </button>
             <button
               onClick={() => handleSelectDevice('pixel_10')}
-              title="Google Pixel 10 (49 lines/page, 99 init / 48 step arrows)"
+              title="Google Pixel 10 (49 lines/page)"
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
                 cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
@@ -642,11 +513,6 @@ export default function App() {
             </button>
           </div>
 
-          <div className="metric-pill"><span className="label">FRAMES:</span><span className="value">{frames.length}</span></div>
-          <div className="metric-pill"><span className="label">TOTAL LINES:</span><span className="value">{documentData.total_lines}</span></div>
-          <div className={`metric-pill ${documentData.issue_count > 0 ? 'issues' : ''}`}>
-            <span className="label">ISSUES:</span><span className="value">{documentData.issue_count}</span>
-          </div>
           <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
             <span className="label">SOCKET:</span>
             <span className="value" style={{ color: wsConnected ? '#00ff9d' : '#ff7b72' }}>{wsConnected ? 'LIVE' : 'OFFLINE'}</span>
@@ -664,121 +530,20 @@ export default function App() {
         </div>
 
         <div className="header-actions">
-          <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept="image/*" onChange={(e) => e.target.files && handleUploadFiles(e.target.files)} />
-          <button className="btn btn-outline" onClick={() => fileInputRef.current?.click()}><UploadCloud size={14} /><span>Upload Frame</span></button>
-          <button className="btn btn-outline" onClick={() => setShowConfigModal(true)}><Settings size={14} /><span>{apiKeyConfigured ? 'Gemini API Key ✔' : 'Configure API Key'}</span></button>
-          <a href={`${API_BASE}/api/export-json`} className="btn btn-outline" target="_blank" rel="noreferrer" download><FileCode size={14} color="#58a6ff" /><span>Export VFS/Monaco JSON</span></a>
-          {activeProject && (
-            <button className="btn btn-outline" onClick={() => { setProjectToAbort(activeProject); setShowAbortModal(true); }} style={{ borderColor: 'rgba(255, 123, 114, 0.4)', color: '#ff7b72' }}>
-              <Ban size={14} /><span>Abort Project</span>
-            </button>
-          )}
-          <button className="btn btn-outline" onClick={handleResetSession} disabled={isResetting} style={{ borderColor: 'rgba(255, 123, 114, 0.4)', color: '#ff7b72' }}>
-            <RotateCcw size={14} /><span>{isResetting ? 'Resetting...' : 'Reset Session'}</span>
+          <button className="btn btn-outline" onClick={() => setShowConfigModal(true)}>
+            <Settings size={14} />
+            <span>{apiKeyConfigured ? 'Gemini API Key ✔' : 'Configure API Key'}</span>
           </button>
-          <a href={`${API_BASE}/api/spliced-document-image`} className="btn btn-outline" target="_blank" rel="noreferrer" download="spliced_document.png" style={{ borderColor: 'rgba(0, 255, 157, 0.4)', color: '#00ff9d' }}>
-            <Download size={14} /><span>Export Spliced PNG</span>
-          </a>
-          <a href={`${API_BASE}/api/export-markdown`} className="btn btn-primary" target="_blank" rel="noreferrer" download><Download size={14} /><span>Export Code</span></a>
         </div>
       </header>
 
-      {/* Unified Orchestration Bar */}
+      {/* Action Bar */}
       <div className="orchestration-bar">
-        <div className="orchestration-status-cluster">
-          <div className="orchestration-label-group">
-            <span className="orch-subtitle">SYNCHRONIZED ORCHESTRATION</span>
-            <div className="orch-status-row">
-              <span className={`orch-status-pill status-${(orch.status || 'idle').toLowerCase()}`}><span className="orch-status-dot" />{orch.status || 'IDLE'}</span>
-              <span className="orch-source-tag">{orch.invoked_by ? `Invoked by: ${orch.invoked_by}` : `Invoked by: ${formatDeviceName(orch.source)}`}</span>
-            </div>
-          </div>
-          <div className="orch-telemetry-badge">
-            <Layers size={14} color="#58a6ff" />
-            <span className="orch-telemetry-page">PAGE {telemetry.current_page || 1}</span>
-            <span className="orch-telemetry-lines">Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || linesPerPage}</span>
-            {telemetry.dwell_countdown_ms > 0 && <span className="orch-dwell-tag">{telemetry.dwell_countdown_ms}ms dwell</span>}
-          </div>
-        </div>
-
         <div className="orchestration-actions">
-          {orch.status === 'RUNNING' ? (
-            <>
-              <button className="btn btn-orch btn-pause" onClick={() => handleOrchCommand('PAUSE')}><Pause size={15} /><span>PAUSE</span></button>
-              <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
-              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
-              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
-              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
-              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
-              <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
-            </>
-          ) : orch.status === 'PAUSED' ? (
-            <>
-              <button className="btn btn-orch btn-resume" onClick={() => handleOrchCommand('RESUME')}><Play size={15} /><span>RESUME</span></button>
-              <button className="btn btn-orch btn-end" onClick={() => handleOrchCommand('END')}><Square size={15} /><span>END</span></button>
-              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
-              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
-              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
-              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
-              <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-orch btn-begin" onClick={() => handleOrchCommand('BEGIN')}><Play size={16} /><span>begin Auto Flipping</span></button>
-              <button className="btn btn-orch btn-capture-desktop" onClick={() => handleOrchCommand('CAPTURE_DESKTOP')} title="Capture Desktop Screen"><Camera size={14} /><span>capture desktop mode</span></button>
-              <button className="btn btn-orch btn-next-line" onClick={handleGetNextPageLine} title="Query next page starting line"><Hash size={14} /><span>Get line number of next</span></button>
-              <button className="btn btn-orch btn-calibrate" onClick={() => handleOrchCommand('CALIBRATE_INSTANT')} title="Instant shortcuts calibration (Ctrl+End / Ctrl+Home)"><Zap size={14} /><span>Instant Calibrate</span></button>
-              <button className="btn btn-orch btn-arrow-step" onClick={() => handleOrchCommand('ADVANCE_PAGE_ARROW')} title="Advance page deterministically via Arrow Down"><ArrowDown size={14} /><span>Advance Page (Arrow)</span></button>
-              {(telemetry.current_top_line > 1 || frames.length > 0) && (
-                <button className="btn btn-orch btn-restart" onClick={() => handleOrchCommand('RESTART')}><RotateCcw size={14} /><span>Restart from Beginning</span></button>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Interactive Animated DAG */}
-      <div className="orch-dag-panel">
-        <div className="orch-dag-header">
-          <div className="orch-dag-title">
-            <Sparkles size={14} color="#00ff9d" />
-            <span className="dag-title-text">ORCHESTRATION PIPELINE DAG</span>
-            <span className="dag-status-pill">Active: <strong>{orch.step_label || 'Line 1 Ready to Begin'}</strong></span>
-          </div>
-          <div className="orch-dag-attribution">
-            <span className="dag-device-tag">{orch.invoked_by ? `Invoked by: ${orch.invoked_by}` : `Invoked by: ${formatDeviceName(orch.source)}`}</span>
-          </div>
-        </div>
-
-        <div className="orch-dag-flow">
-          {DAG_STAGES.map((s, idx) => {
-            const Icon = s.icon;
-            const isCompleted = idx < DAG_STAGES.findIndex(x => x.step === (orch.active_step || 'START_READY'));
-            const isActive = (s.step === 'START_READY' && (!orch.active_step || orch.active_step === 'START_READY')) || orch.active_step === s.step;
-            return (
-              <div key={s.num} style={{ display: 'flex', alignItems: 'center' }}>
-                <div className={`dag-node ${isActive ? 'active pulse' : (isCompleted ? 'completed' : '')}`}>
-                  <div className="dag-node-header"><span className="dag-node-num">{s.num}</span><Icon size={14} className="dag-icon" /></div>
-                  <div className="dag-node-title">{s.title}</div>
-                  <div className="dag-node-sub">{s.sub}</div>
-                  <div className={`dag-node-pill ${s.num === '04' ? 'highlight' : ''}`}>{s.pill}</div>
-                </div>
-                {s.conn && (
-                  <div className={`dag-connector ${orch.status === 'RUNNING' && orch.active_step === s.conn ? 'streaming' : ''}`}>
-                    <div className="dag-beam" /><ChevronsRight size={14} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="dag-loopback-rail">
-          <div className="loopback-badge">
-            <Repeat size={12} className={orch.status === 'RUNNING' ? 'spinning' : ''} />
-            <span>Automated Pacing Cycle: Loops back to Display 1 Capture until page top stops advancing (EOF)</span>
-          </div>
-          <div className={`loopback-track ${orch.status === 'RUNNING' ? 'track-animated' : ''}`} />
+          <button className="btn btn-orch btn-capture-desktop" onClick={handleCaptureDesktop} title="Capture Desktop Screen">
+            <Camera size={14} />
+            <span>capture desktop mode</span>
+          </button>
         </div>
       </div>
 
@@ -788,34 +553,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Live Telemetry Banner */}
-      <div className="telemetry-banner">
-        <div className="telemetry-item">
-          <span className={`pacer-status-dot ${telemetry.is_pacing ? 'active' : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' && telemetry.phase !== 'STANDBY' ? 'connected' : 'idle')}`} />
-          <span className="telemetry-label">PACER:</span>
-          <span className="telemetry-val">{telemetry.is_pacing ? telemetry.device_id : (telemetry.device_id !== 'idle' && telemetry.device_id !== 'Standby' ? `${telemetry.device_id} (STANDBY)` : 'STANDBY')}</span>
-          {telemetry.is_pacing && <span className="pacing-badge">AUTO-PACING</span>}
-        </div>
-        <div className="telemetry-item">
-          <Layers size={13} color="#8b949e" /><span className="telemetry-label">PAGE:</span><span className="telemetry-val">#{telemetry.current_page}</span>
-          <span className="telemetry-sub">(Ln {telemetry.current_top_line} → {telemetry.current_bottom_line})</span>
-        </div>
-        <div className="telemetry-item" title="Adaptive closed-loop pacer calibration factor and alignment error">
-          <Cpu size={13} color="#00ff9d" /><span className="telemetry-label">AUTO-TUNE:</span>
-          <span className="telemetry-val" style={{ color: '#00ff9d' }}>{telemetry.pacer_calibration?.auto_tune_factor ? `${telemetry.pacer_calibration.auto_tune_factor.toFixed(2)}x` : '1.00x'}</span>
-          <span className="telemetry-sub">(Err: {telemetry.pacer_calibration?.bottom_to_top_error ?? 0} ln | Pitch: {telemetry.pacer_calibration?.line_pitch_px?.toFixed(1) ?? 32}px)</span>
-        </div>
-        {telemetry.is_pacing && telemetry.dwell_countdown_ms > 0 && (
-          <div className="dwell-progress-wrap">
-            <span className="dwell-label">DWELL FREEZE: {telemetry.dwell_countdown_ms}ms</span>
-            <div className="dwell-bar-bg"><div className="dwell-bar-fill" style={{ width: `${Math.min(100, (telemetry.dwell_countdown_ms / 1500) * 100)}%` }} /></div>
-          </div>
-        )}
-        <div className="telemetry-status-msg">{telemetry.status_message}</div>
-      </div>
-
       {/* 3-Column Studio Workspace */}
-      <div className={`studio-body ${isDraggingOver ? 'drag-over' : ''}`} onDragOver={(e) => { e.preventDefault(); setIsDraggingOver(true); }} onDragLeave={() => setIsDraggingOver(false)} onDrop={(e) => { e.preventDefault(); setIsDraggingOver(false); if (e.dataTransfer.files?.length) handleUploadFiles(e.dataTransfer.files); }}>
+      <div className="studio-body">
         {/* Projects Sidebar */}
         <aside className={`projects-sidebar ${isSidebarOpen ? 'open' : 'collapsed'}`}>
           {isSidebarOpen ? (
@@ -865,21 +604,16 @@ export default function App() {
         <aside className="frames-feed-panel">
           <div className="panel-header">
             <span>Captured Frames ({frames.length})</span>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              {frames.some(f => f.status.startsWith('error')) && (
-                <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}><RotateCw size={11} /> Retry Failed</button>
-              )}
-              <button className="btn btn-sm btn-outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading}>{isUploading ? 'Uploading...' : '+ Add Frame'}</button>
-            </div>
+            {frames.some(f => f.status.startsWith('error')) && (
+              <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}><RotateCw size={11} /> Retry Failed</button>
+            )}
           </div>
 
           <div className="frames-list">
             {sortedFrames.length === 0 ? (
-              <div className="drop-zone-placeholder" onClick={() => fileInputRef.current?.click()}>
-                <UploadCloud size={28} color="#00ff9d" />
-                <span style={{ fontWeight: 600, color: '#e6edf3' }}>Drop 1080p Screenshots Here</span>
-                <span style={{ fontSize: '11px', color: '#8b949e' }}>or click to upload frames manually</span>
-                <span style={{ fontSize: '10px', color: '#58a6ff', marginTop: '6px' }}>Settled {devDisplayName} frames stream here automatically</span>
+              <div className="drop-zone-placeholder" style={{ cursor: 'default' }}>
+                <span style={{ fontWeight: 600, color: '#e6edf3' }}>Captured Frames</span>
+                <span style={{ fontSize: '11px', color: '#8b949e' }}>Settled {devDisplayName} frames appear here automatically</span>
               </div>
             ) : (
               sortedFrames.map((f, idx) => {
@@ -934,40 +668,25 @@ export default function App() {
         {/* Column 2: Frame Inspector */}
         <main className="frame-inspector-panel">
           <div className="panel-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
-                <button className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('spliced')} style={{ fontSize: '11px', padding: '3px 8px' }}>Spliced Document ({frames.length})</button>
-              </div>
-              <span>{inspectorMode === 'spliced' ? `Spliced Stream: ${frames.length} Frames (${documentData.total_lines} Lines)` : activeFrame ? `1080p Frame: Lines ${activeFrame.top_line} → ${activeFrame.bottom_line} (Pg ${activeFrame.page_index})` : '1080p Desktop Frame Inspector'}</span>
+            <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
+              <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
+              <button className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('spliced')} style={{ fontSize: '11px', padding: '3px 8px' }}>Spliced Document ({frames.length})</button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {inspectorMode === 'single' && activeFrame && (
-                <>
-                  <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}>
-                    <Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'Send Image for OCR'}</span>
-                  </button>
-                  <button
-                    className="btn btn-sm btn-outline btn-frame-header-delete"
-                    onClick={(e) => handleDeleteFrame(activeFrame.frame_id, e)}
-                    disabled={deletingFrameId === activeFrame.frame_id}
-                    title="Delete selected frame"
-                  >
-                    <Trash2 size={13} />
-                    <span>{deletingFrameId === activeFrame.frame_id ? 'Deleting...' : 'Delete'}</span>
-                  </button>
-                </>
+                <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}>
+                  <Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'Send Image for OCR'}</span>
+                </button>
               )}
               {scanStatusMsg && <span className="scan-status-pill">{scanStatusMsg}</span>}
               <button className={`btn btn-sm ${zoomMode === 'fit' ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setZoomMode('fit'); setImageZoom(1); }}>Fit</button>
-              <button className={`btn btn-sm ${zoomMode === 'actual' ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setZoomMode('actual'); setImageZoom(1); }}>100% (1080p)</button>
               <button className="btn btn-outline btn-sm" onClick={() => { setZoomMode('custom'); setImageZoom(p => Math.max(0.4, Number((p - 0.2).toFixed(1)))); }}><ZoomOut size={12} /></button>
               <button className="btn btn-outline btn-sm" onClick={() => { setZoomMode('custom'); setImageZoom(p => Math.min(3.0, Number((p + 0.2).toFixed(1)))); }}><ZoomIn size={12} /></button>
             </div>
           </div>
 
-          <div className={`inspector-view-container ${zoomMode === 'actual' ? 'actual-mode' : ''}`}>
+          <div className="inspector-view-container">
             {inspectorMode === 'spliced' ? (
               <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
@@ -1010,19 +729,6 @@ export default function App() {
                           ))}
                         </svg>
                       )}
-                      {/* Image Delete Overlay Control */}
-                      <div className="frame-image-overlay-controls">
-                        <button
-                          className="frame-delete-overlay-btn"
-                          onClick={(e) => handleDeleteFrame(activeFrame.frame_id, e)}
-                          disabled={deletingFrameId === activeFrame.frame_id}
-                          title="Delete selected image (click or tap trash can)"
-                          aria-label="Delete selected image"
-                        >
-                          <Trash2 size={16} />
-                          <span className="overlay-btn-text">{deletingFrameId === activeFrame.frame_id ? 'Deleting...' : 'Delete Frame'}</span>
-                        </button>
-                      </div>
                     </div>
                     <div className="gutter-line-callout bottom">
                       <span className="gutter-callout-icon">▼</span><span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
@@ -1056,7 +762,7 @@ export default function App() {
             {filteredLines.length === 0 ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}>
                 <p>No lines transcribed yet.</p>
-                <p style={{ fontSize: '11px', marginTop: '6px', color: '#8b949e' }}>Tap "CAPTURE SCREEN & ANALYZE" on the mobile HUD to capture and transcribe lines!</p>
+                <p style={{ fontSize: '11px', marginTop: '6px', color: '#8b949e' }}>Capture desktop or mobile screen to transcribe lines.</p>
               </div>
             ) : (
               <table className="clean-lines-table">
@@ -1101,7 +807,7 @@ export default function App() {
       {showAbortModal && projectToAbort && (
         <Modal title="Abort Project & Clear Data" onClose={() => setShowAbortModal(false)} onConfirm={() => handleAbortProject(projectToAbort.id)} confirmText="Confirm Abort & Wipe Data" confirmIcon={Ban} danger={true}>
           <p style={{ fontSize: '13px', color: '#e6edf3', lineHeight: 1.5, marginBottom: '10px' }}>Are you sure you want to abort project <strong style={{ color: '#ff7b72' }}>{projectToAbort.name}</strong>?</p>
-          <p style={{ fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>This will mark the project status as <strong style={{ color: '#ff7b72' }}>ABORTED</strong>, reset active pacing orchestration, and delete all captured screenshot frames and OCR transcribed lines from SQLite.</p>
+          <p style={{ fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>This will mark the project status as <strong style={{ color: '#ff7b72' }}>ABORTED</strong> and delete all captured screenshot frames and OCR transcribed lines from SQLite.</p>
         </Modal>
       )}
     </div>
