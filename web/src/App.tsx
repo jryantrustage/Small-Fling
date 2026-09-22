@@ -284,7 +284,13 @@ function AppContent() {
   const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
-  const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>('pixel_8');
+  const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>(() => {
+    try {
+      const saved = localStorage.getItem('mc_preferred_device_model');
+      if (saved === 'pixel_10' || saved === 'pixel_8') return saved;
+    } catch {}
+    return 'pixel_10';
+  });
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
@@ -502,6 +508,7 @@ function AppContent() {
 
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
+    try { localStorage.setItem('mc_preferred_device_model', dev); } catch {}
     addTelemetryEvent('SYSTEM', `Switching active target to ${dev === 'pixel_8' ? 'Google Pixel 8' : 'Google Pixel 10'}...`);
     try {
       const res = await api('/api/device/select', {
@@ -517,6 +524,7 @@ function AppContent() {
         const lpp = d.profile?.lines_per_page || (dev === 'pixel_8' ? 31 : 47);
         addTelemetryEvent('SYSTEM', `Active device: ${d.active_model || dev} (${lpp} lines/page) ✔`);
         await fetchData();
+        handleTriggerAlignmentCheck();
       }
     } catch (e) {
       console.error('Failed to select device profile', e);
@@ -666,7 +674,22 @@ function AppContent() {
       if (devRes && devRes.ok) {
         const dInfo: DeviceInfoData = await devRes.json();
         setDeviceInfo(dInfo);
-        if (dInfo.device_model) setDeviceModel(dInfo.device_model);
+        const pref = (localStorage.getItem('mc_preferred_device_model') as 'pixel_10' | 'pixel_8') || 'pixel_10';
+        if (dInfo.device_model && dInfo.device_model !== pref) {
+          api('/api/device/select', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_model: pref })
+          }).then(async r => {
+            if (r.ok) {
+              const updated: DeviceInfoData = await r.json();
+              setDeviceInfo(updated);
+              if (updated.device_model) setDeviceModel(updated.device_model);
+            }
+          }).catch(() => {});
+        } else if (dInfo.device_model) {
+          setDeviceModel(dInfo.device_model);
+        }
       }
       if (telRes && telRes.ok) {
         const telJson = await telRes.json();

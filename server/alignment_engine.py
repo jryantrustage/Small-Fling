@@ -315,10 +315,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "hex": "#f8fafc",
             "passed": bool(dark_mode_active),
             "status": "PASSED" if dark_mode_active else "FAILED",
-            "detected_value": f"Luminance {round(mean_lum, 1)}",
-            "expected": "Dark theme background (mean luminance < 55.0)",
-            "details": f"Dark mode active (luminance {round(mean_lum, 1)} < 55.0)" if dark_mode_active else f"Theme too bright (luminance {round(mean_lum, 1)} >= 55.0)",
-            "icon": "moon",
+            "detected_value": f"Luminance {round(mean_lum, 1)}" if dark_mode_active else f"Sun icon displayed (Light Mode, lum: {round(mean_lum, 1)})",
+            "expected": "Dark theme background (mean luminance < 55.0 with moon icon)",
+            "details": f"Dark mode active (luminance {round(mean_lum, 1)} < 55.0)" if dark_mode_active else f"Light mode is active (sun icon displayed, luminance {round(mean_lum, 1)} >= 55.0). Click sun icon in toolbar to switch to Dark Mode (moon icon).",
+            "icon": "moon" if dark_mode_active else "sun",
             "luminance": float(round(float(mean_lum), 1)),
             "box_px": to_clean_box(dark_box),
             "box_norm": to_norm(dark_box)
@@ -355,7 +355,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     if not teams_detected: missing_reasons.append("Teams logo not detected in header")
     if not file_detected: missing_reasons.append("Markdown filename tab not detected")
     if not edit_mode_active: missing_reasons.append("Editor not in edit mode (pencil icon inactive)")
-    if not dark_mode_active: missing_reasons.append("Editor not in dark mode (moon icon inactive)")
+    if not dark_mode_active: missing_reasons.append("Editor in Light Mode (sun icon displayed) - click to toggle Dark Mode (moon icon)")
     if not first_line_detected: missing_reasons.append("First line number not visible in gutter")
     if not last_line_detected: missing_reasons.append("Last line number not visible in gutter")
 

@@ -299,7 +299,24 @@ DEVICE_PROFILES = {
         "step_size": 30
     }
 }
-current_device_model = "pixel_8"
+
+def init_device_model_from_cache() -> str:
+    try:
+        cache_file = Path(__file__).resolve().parent.parent / "scripts" / ".devices_cache.json"
+        if cache_file.exists():
+            cdata = json.loads(cache_file.read_text())
+            last = cdata.get("last_address", "")
+            p10 = cdata.get("pixel_10_address", "")
+            p8 = cdata.get("pixel_8_address", "")
+            if last and last == p10:
+                return "pixel_10"
+            if last and last == p8:
+                return "pixel_8"
+    except Exception:
+        pass
+    return "pixel_10"
+
+current_device_model = init_device_model_from_cache()
 target_adb_serial: Optional[str] = None
 
 def format_device_name(source: Optional[str]) -> str:
@@ -576,7 +593,7 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
     try:
         snap_bytes = await capture_external_screenshot(active_serial)
         if snap_bytes:
-            res = detect_teams_markdown_alignment(snap_bytes)
+            res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes)
             res["timestamp"] = datetime.now().isoformat()
             latest_alignment_status = res
             if not res.get("is_aligned", False):
@@ -685,9 +702,34 @@ async def update_telemetry(p: TelemetryUpdateRequest):
 @app.get("/api/orchestrate")
 async def get_orchestration_state(): return {"orchestration": orchestration_state, "telemetry": get_fresh_telemetry()}
 
+async def is_ime_visible(serial: Optional[str] = None) -> bool:
+    """Checks whether the on-screen soft keyboard is currently visible on any display."""
+    try:
+        ser = await get_active_adb_serial(serial)
+        if not ser: return False
+
+        # Check 1: dumpsys input_method
+        chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
+        out = chk.get("stdout", "")
+        if "mInputShown=true" in out or any(f"mImeWindowVis={v}" in out for v in [1, 2, 3]):
+            return True
+
+        # Check 2: dumpsys window windows for InputMethod with visible surface
+        chk_win = await run_adb_shell("dumpsys window windows", ser)
+        win_lines = chk_win.get("stdout", "").splitlines()
+        for i, line in enumerate(win_lines):
+            if "InputMethod" in line and "Window #" in line:
+                chunk = "\n".join(win_lines[i:min(len(win_lines), i + 25)])
+                if "mHasSurface=true" in chunk or "mViewVisibility=0x0" in chunk:
+                    return True
+        return False
+    except Exception:
+        return False
+
 async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
     """Ensures on-screen soft keyboard (IME) is completely closed/hidden across displays.
-    Enforces secure setting show_ime_with_hard_keyboard=0 and conditionally dismisses visible IME."""
+    Enforces secure setting show_ime_with_hard_keyboard=0, activates MatrixCapture DesktopPaginationService,
+    and safely dismisses visible IME using KEYCODE_ESCAPE without navigating back."""
     try:
         ser = await get_active_adb_serial(serial)
         if not ser:
@@ -696,22 +738,31 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
         # 1. Enforce system setting: suppress soft IME when hard/HID keyboard is active
         await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
 
-        # 2. Check if IME window is currently shown (mInputShown=true or mImeWindowVis=[123])
-        chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
-        out = chk.get("stdout", "")
-        if "mInputShown=true" in out or "mImeWindowVis" in out:
-            disp_id = await detect_external_display_id(ser)
-            # Dismiss on target display first if external desktop display
+        # 2. Activate MatrixCapture Accessibility Service if installed (guarantees OS-level soft keyboard suppression)
+        chk_acc = await run_adb_shell("settings get secure enabled_accessibility_services", ser)
+        acc_str = chk_acc.get("stdout", "")
+        if "DesktopPaginationService" not in acc_str:
+            svc_name = "com.matrixcapture.app/com.matrixcapture.app.service.DesktopPaginationService"
+            new_acc = f"{acc_str.strip()}:{svc_name}" if acc_str.strip() and acc_str.strip() != "null" else svc_name
+            await run_adb_shell(f"settings put secure enabled_accessibility_services {new_acc}", ser)
+            await run_adb_shell("settings put secure accessibility_enabled 1", ser)
+
+        # 3. Ensure companion app is alive on phone screen
+        chk_pid = await run_adb_shell("pidof com.matrixcapture.app", ser)
+        if not chk_pid.get("stdout", "").strip():
+            await run_adb_shell("am start -n com.matrixcapture.app/.ui.MainActivity --display 0", ser)
+
+        disp_id = await detect_external_display_id(ser)
+
+        # 4. Check if IME window is still visible and dismiss via ESCAPE (NEVER keyevent 4 / BACK, which closes the file)
+        if await is_ime_visible(ser):
             if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} keyevent 4", ser)
-            # Dismiss via escape and keyevent 4
+                await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
             await run_adb_shell("input keyevent 111", ser)
-            await asyncio.sleep(0.1)
-            # Re-verify if still visible
-            chk2 = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
-            out2 = chk2.get("stdout", "")
-            if "mInputShown=true" in out2 or "mImeWindowVis" in out2:
-                await run_adb_shell("input keyevent 4", ser)
+            await asyncio.sleep(0.12)
+            if await is_ime_visible(ser):
+                if disp_id > 0:
+                    await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
             return True
         return False
     except Exception:
@@ -1060,8 +1111,9 @@ async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Opti
 
 async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
     """Captures valid PNG bytes from the external display via ADB."""
-    sf_id = await detect_surfaceflinger_display_id(serial)
-    cmd = (["-s", serial] if serial else []) + ["exec-out", "screencap"]
+    ser = await get_active_adb_serial(serial)
+    sf_id = await detect_surfaceflinger_display_id(ser)
+    cmd = (["-s", ser] if ser else []) + ["exec-out", "screencap"]
     if sf_id:
         cmd.extend(["-d", sf_id])
     cmd.append("-p")
@@ -1074,8 +1126,8 @@ async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[
     # Fallback to on-device temp file
     dev_path = "/sdcard/mc_calib_temp.png"
     sc_cmd = f"screencap {'-d ' + sf_id if sf_id else ''} -p {dev_path}"
-    await asyncio.to_thread(_exec_adb_sync, (["-s", serial] if serial else []) + ["shell", sc_cmd], 6.0)
-    pull_res = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", serial] if serial else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
+    await asyncio.to_thread(_exec_adb_sync, (["-s", ser] if ser else []) + ["shell", sc_cmd], 6.0)
+    pull_res = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", ser] if ser else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
     if pull_res.returncode == 0 and pull_res.stdout:
         idx = pull_res.stdout.find(b"\x89PNG\r\n\x1a\n")
         if idx >= 0:
@@ -1161,9 +1213,7 @@ async def get_keyboard_status(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
     if not ser:
         return {"connected": False, "visible": False, "hard_keyboard_suppression": False}
-    chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
-    out = chk.get("stdout", "")
-    vis = bool("mInputShown=true" in out or "mImeWindowVis" in out)
+    vis = await is_ime_visible(ser)
     setting_chk = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", ser)
     suppressed = (setting_chk.get("stdout", "").strip() == "0")
     return {
