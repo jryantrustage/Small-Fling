@@ -32,6 +32,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.matrixcapture.app.data.DeviceModel
 import com.matrixcapture.app.service.DesktopPaginationService
 import com.matrixcapture.app.service.FloatingOverlayService
 import com.matrixcapture.app.service.SegmentRecorderService
@@ -68,6 +69,7 @@ class MainActivity : ComponentActivity() {
                         onBeginOrchestration = { viewModel.beginOrchestration() }, onPauseOrchestration = { viewModel.pauseOrchestration() },
                         onResumeOrchestration = { viewModel.resumeOrchestration() }, onEndOrchestration = { viewModel.endOrchestration() },
                         onRestartOrchestration = { viewModel.restartOrchestration() },
+                        onDeviceModelChange = { viewModel.setDeviceModel(it) },
                         onToggleOverlay = {
                             if (!android.provider.Settings.canDrawOverlays(this)) {
                                 startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, android.net.Uri.parse("package:$packageName")))
@@ -88,7 +90,7 @@ fun MatrixCaptureDashboard(
     onSendCapturesToApi: () -> Unit = {}, onGetNextPageLine: () -> Unit = {}, onCaptureDesktopMode: () -> Unit = {}, onAlignAndCaptureNextPage: () -> Unit = {},
     onStartWorkflow: () -> Unit, onStopWorkflow: () -> Unit, onOpenAccessibility: () -> Unit,
     onBeginOrchestration: () -> Unit = {}, onPauseOrchestration: () -> Unit = {}, onResumeOrchestration: () -> Unit = {},
-    onEndOrchestration: () -> Unit = {}, onRestartOrchestration: () -> Unit = {}, onToggleOverlay: () -> Unit
+    onEndOrchestration: () -> Unit = {}, onRestartOrchestration: () -> Unit = {}, onDeviceModelChange: (DeviceModel) -> Unit = {}, onToggleOverlay: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     val segments by SegmentRecorderService.segmentDetails.collectAsState()
@@ -118,7 +120,8 @@ fun MatrixCaptureDashboard(
         val statusColor = when (statusText) {
             "RUNNING" -> Color(0xFF00FF9D); "PAUSED" -> Color(0xFFD29922); "COMPLETED" -> Color(0xFF58A6FF); "ABORTED" -> Color(0xFFFF7B72); else -> Color(0xFF8B949E)
         }
-        val displayPage = if (uiState.currentTopLine > 0) ((uiState.currentTopLine - 1) / 30 + 1) else 1
+        val resolvedDev = uiState.deviceModel.resolve()
+        val displayPage = uiState.deviceModel.displayPageForTopLine(uiState.currentTopLine)
 
         Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().border(1.dp, statusColor.copy(alpha = 0.6f), RoundedCornerShape(16.dp))) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -142,7 +145,7 @@ fun MatrixCaptureDashboard(
                 Column(modifier = Modifier.fillMaxWidth().background(Color(0xFF0D1117), RoundedCornerShape(12.dp)).padding(14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PAGE $displayPage", color = Color(0xFF58A6FF), fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(if (uiState.currentTopLine > 0 || uiState.currentBottomLine > 0) "Ln ${uiState.currentTopLine} → ${uiState.currentBottomLine}" else "Ln 1 → 30 (Ready)", color = Color(0xFF00FF9D), fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text(if (uiState.currentTopLine > 0 || uiState.currentBottomLine > 0) "Ln ${uiState.currentTopLine} → ${uiState.currentBottomLine}" else "Ln 1 → ${resolvedDev.linesPerPage} (Ready)", color = Color(0xFF00FF9D), fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                     if (uiState.orchestrationStepLabel.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text("DAG: ${uiState.orchestrationStepLabel}", color = Color(0xFFFFA657), fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -308,6 +311,43 @@ fun MatrixCaptureDashboard(
                             colors = ButtonDefaults.buttonColors(containerColor = if (isKeyboardSuppressed) Color(0xFF1F6FEB) else Color(0xFF30363D)),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
                         ) { Text(if (isKeyboardSuppressed) "Restore KB" else "Hide KB", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp, color = Color.White) }
+                    }
+                }
+
+                SettingInputCard("TARGET DEVICE PROFILE") {
+                    val activeResolved = uiState.deviceModel.resolve()
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                DeviceModel.AUTO to "Auto (${activeResolved.displayName})",
+                                DeviceModel.PIXEL_8 to "Pixel 8 (31L)",
+                                DeviceModel.PIXEL_10 to "Pixel 10 (49L)"
+                            ).forEach { (model, label) ->
+                                val isSelected = uiState.deviceModel == model
+                                Button(
+                                    onClick = { onDeviceModelChange(model) },
+                                    modifier = Modifier.weight(1f).height(38.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = if (isSelected) Color(0xFF1F6FEB) else Color(0xFF21262D)),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Text(
+                                        label,
+                                        color = if (isSelected) Color.White else Color(0xFF8B949E),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            "Hardware: ${android.os.Build.MODEL} • Active: ${activeResolved.displayName} (${activeResolved.linesPerPage} lines/pg)",
+                            color = Color(0xFF00FF9D),
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
                     }
                 }
 

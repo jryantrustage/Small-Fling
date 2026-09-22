@@ -17,10 +17,12 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.matrixcapture.app.capture.GutterOcrTracker
 import com.matrixcapture.app.ocr.MlKitOcrEngine
+import com.matrixcapture.app.data.DeviceModel
 import kotlin.coroutines.resume
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.concurrent.atomic.AtomicBoolean
 import java.net.Socket
 import java.io.PrintWriter
@@ -232,12 +234,13 @@ class DesktopPaginationService : AccessibilityService() {
         dispatchKeyCombination(resolved, 113, 122)
         delay(500)
 
+        val targetDevice = _deviceModel.value.resolve()
         _calibrationState.value = "Calibration Complete: $totalLines lines"
         _calculatedTotalLines.value = totalLines
         _telemetry.value = _telemetry.value.copy(
             targetTotalLines = totalLines,
             currentTopLine = 1,
-            currentBottomLine = 49,
+            currentBottomLine = targetDevice.linesPerPage,
             currentPage = 1,
             statusMessage = "Calibrated: $totalLines lines detected instantly ✔"
         )
@@ -251,9 +254,9 @@ class DesktopPaginationService : AccessibilityService() {
     suspend fun advancePageWithArrowKeys(pageIndex: Int, targetDisplayId: Int = 0): Boolean = withContext(Dispatchers.Default) {
         val resolved = resolveTargetDisplayId(targetDisplayId)
         setSoftKeyboardHidden(true)
-        val arrowCount = if (pageIndex <= 1) 99 else 48
-        val targetTop = if (pageIndex <= 1) 50 else (50 + (pageIndex - 1) * 48)
-        val targetBot = targetTop + 48
+        val targetDevice = _deviceModel.value.resolve()
+        val arrowCount = targetDevice.arrowCountForPage(pageIndex)
+        val (targetTop, targetBot) = targetDevice.expectedBounds(pageIndex + 1)
 
         _telemetry.value = _telemetry.value.copy(
             activeStep = "PRECISION_SCROLL",
@@ -274,10 +277,11 @@ class DesktopPaginationService : AccessibilityService() {
     ) {
         if (!isPaginating.compareAndSet(false, true)) return
         val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
+        val targetDevice = _deviceModel.value.resolve()
         val initialTarget = if (totalLines > 0) totalLines else _calculatedTotalLines.value
         _calculatedTotalLines.value = initialTarget
         _currentPage.value = 1
-        _telemetry.value = PacingTelemetry(phase = phase, currentPage = 1, currentTopLine = 1, currentBottomLine = 49, targetTotalLines = initialTarget, statusMessage = "Starting Page 1 (Lines 1-49)...", dwellRemainingMs = dwellTimeMs, isDwellActive = true)
+        _telemetry.value = PacingTelemetry(phase = phase, currentPage = 1, currentTopLine = 1, currentBottomLine = targetDevice.linesPerPage, targetTotalLines = initialTarget, statusMessage = "Starting Page 1 (Lines 1-${targetDevice.linesPerPage})...", dwellRemainingMs = dwellTimeMs, isDwellActive = true)
         acquireWakeLock()
 
         automationJob = serviceScope.launch {
@@ -285,7 +289,7 @@ class DesktopPaginationService : AccessibilityService() {
             try {
                 setSoftKeyboardHidden(true)
                 _paginationState.value = PaginationState.Running
-                var pageIndex = 0; var curTop = 1; var curBot = 49; var chunkIdx = 1; var chunkStart = 1
+                var pageIndex = 0; var curTop = 1; var curBot = targetDevice.linesPerPage; var chunkIdx = 1; var chunkStart = 1
 
                 for (sec in 3 downTo 1) {
                     _telemetry.value = _telemetry.value.copy(activeStep = "START_READY", statusMessage = "Focus Teams window! Starting capture in $sec...")
@@ -302,14 +306,13 @@ class DesktopPaginationService : AccessibilityService() {
                         setSoftKeyboardHidden(true)
                         dispatchKeyCombination(resolvedDisplay, 113, 122)
                         delay(400)
-                        curTop = 1; curBot = 49
-                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", currentPage = 1, currentTopLine = 1, currentBottomLine = 49, statusMessage = "Page 1: Capturing frame (Ln 1-49)...")
+                        curTop = 1; curBot = targetDevice.linesPerPage
+                        _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", currentPage = 1, currentTopLine = 1, currentBottomLine = curBot, statusMessage = "Page 1: Capturing frame (Ln 1-$curBot)...")
                         delay(300)
                         onFrameCaptureNeeded?.invoke(pageIndex, curTop, curBot)
                     } else {
                         advancePageWithArrowKeys(pageIndex - 1, resolvedDisplay)
-                        val expectedTop = if (pageIndex == 2) 50 else (50 + (pageIndex - 2) * 48)
-                        val expectedBot = expectedTop + 48
+                        val (expectedTop, expectedBot) = targetDevice.expectedBounds(pageIndex)
                         curTop = expectedTop; curBot = expectedBot
                         _telemetry.value = _telemetry.value.copy(activeStep = "SCREEN_CAPTURE", currentPage = pageIndex, currentTopLine = curTop, currentBottomLine = curBot, statusMessage = "Page $pageIndex: Settled frame (Ln $curTop-$curBot)...")
                         delay(400)
@@ -376,10 +379,11 @@ class DesktopPaginationService : AccessibilityService() {
     suspend fun restartFromBeginning(targetDisplayId: Int = 0) {
         stopPagination(); isPaused.set(false); resetToStart(_calculatedTotalLines.value)
         val resolved = resolveTargetDisplayId(targetDisplayId)
+        val targetDevice = _deviceModel.value.resolve()
         setSoftKeyboardHidden(true)
         dispatchKeyCombination(resolved, 113, 122)
         delay(400)
-        _telemetry.value = _telemetry.value.copy(phase = "READY", statusMessage = "Restarted from Beginning (Page 1)", currentPage = 1, currentTopLine = 1, currentBottomLine = 49)
+        _telemetry.value = _telemetry.value.copy(phase = "READY", statusMessage = "Restarted from Beginning (Page 1)", currentPage = 1, currentTopLine = 1, currentBottomLine = targetDevice.linesPerPage)
     }
 
     suspend fun seekToLine(targetLine: Int, currentEstimatedLine: Int, targetDisplayId: Int = 0) {
@@ -586,7 +590,8 @@ class DesktopPaginationService : AccessibilityService() {
             latestCapturedBitmap = snapshot
             val finalState = detectGutterState(snapshot) ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
             val finalTop = if (finalState != null && finalState.currentTopLine > 0) finalState.currentTopLine else nextTarget
-            val finalBot = if (finalState != null && finalState.currentBottomLine > 0) finalState.currentBottomLine else (finalTop + 44)
+            val targetDevice = _deviceModel.value.resolve()
+            val finalBot = if (finalState != null && finalState.currentBottomLine > 0) finalState.currentBottomLine else (finalTop + targetDevice.stepSize)
             val newPage = if (_telemetry.value.currentPage > 0) _telemetry.value.currentPage + 1 else 2
             
             _currentPage.value = newPage
@@ -685,14 +690,26 @@ class DesktopPaginationService : AccessibilityService() {
         private val _calibrationState = MutableStateFlow("Uncalibrated (Auto-detect active)"); val calibrationState = _calibrationState.asStateFlow()
         private val _telemetry = MutableStateFlow(PacingTelemetry()); val telemetry = _telemetry.asStateFlow()
         private val _isSoftKeyboardSuppressed = MutableStateFlow(false); val isSoftKeyboardSuppressed = _isSoftKeyboardSuppressed.asStateFlow()
+        private val _deviceModel = MutableStateFlow(DeviceModel.AUTO); val deviceModel = _deviceModel.asStateFlow()
+
+        fun setDeviceModel(model: DeviceModel) {
+            _deviceModel.value = model
+            val resolved = model.resolve()
+            _telemetry.update { old ->
+                if (old.currentBottomLine <= 0 || old.currentBottomLine in listOf(31, 49)) {
+                    old.copy(currentBottomLine = resolved.linesPerPage)
+                } else old
+            }
+        }
 
         fun resetToStart(targetLines: Int = 0) {
             instance?.stopPagination()
+            val targetDevice = _deviceModel.value.resolve()
             _currentPage.value = 1
             _dwellCountdownMs.value = 0L
             _calculatedTotalLines.value = targetLines
             _calibrationState.value = if (targetLines > 0) "Ready (Target: $targetLines lines)" else "Ready (Auto-detect document length)"
-            _telemetry.value = PacingTelemetry(phase = "READY", currentPage = 1, currentTopLine = 0, currentBottomLine = 0, targetTotalLines = targetLines)
+            _telemetry.value = PacingTelemetry(phase = "READY", currentPage = 1, currentTopLine = 1, currentBottomLine = targetDevice.linesPerPage, targetTotalLines = targetLines)
         }
     }
 }
