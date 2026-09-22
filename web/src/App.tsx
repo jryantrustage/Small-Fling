@@ -1855,7 +1855,7 @@ function AppContent() {
               className="modal-input"
               value={newProject.name}
               onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))}
-              onKeyDown={e => { if (e.key === 'Enter' && newProject.name.trim()) handleCreateProject(); }}
+              onKeyDown={e => { if (e.key === 'Enter' && newProject.name.trim()) { e.preventDefault(); handleCreateProject(); } }}
               autoFocus
             />
           </div>
