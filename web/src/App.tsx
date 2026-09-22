@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Check, X,
   Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, ArrowRight, Loader2
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -85,6 +85,22 @@ export default function App() {
   const [eventsLog, setEventsLog] = useState<TelemetryEvent[]>([]);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState<boolean>(false);
   const [showDag, setShowDag] = useState<boolean>(true);
+  const [showGotoModal, setShowGotoModal] = useState<boolean>(false);
+  const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
+  const [isNavigating, setIsNavigating] = useState<boolean>(false);
+  const [navStatus, setNavStatus] = useState<string>('');
+
+  // Global Shortcut: Control + G
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'g' || e.key === 'G')) {
+        e.preventDefault();
+        setShowGotoModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Horizontal Panel Resizing
   const [framesPanelWidth, setFramesPanelWidth] = useState<number>(() => {
@@ -358,6 +374,63 @@ export default function App() {
     }
   };
 
+  const handleGotoLine = async () => {
+    const lineNum = typeof gotoTargetLine === 'number' ? gotoTargetLine : parseInt(String(gotoTargetLine).trim(), 10);
+    if (!lineNum || isNaN(lineNum) || lineNum <= 0) return;
+    setIsNavigating(true);
+    setNavStatus(`Navigating with Arrow Down keys to Line ${lineNum}...`);
+    try {
+      const res = await api('/api/navigation/goto-line', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_line: lineNum })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (data.reached) {
+          setNavStatus(`Reached Line ${data.current_top_line} (Target: ${data.target_line}) ✔`);
+          addTelemetryEvent('SYSTEM', `Go To Line: Reached top line ${data.current_top_line}`);
+        } else {
+          setNavStatus(`Stopped at Line ${data.current_top_line} (Target: ${data.target_line}) ⚠️`);
+          addTelemetryEvent('SYSTEM', `Go To Line: Stopped at line ${data.current_top_line} (Target: ${data.target_line})`);
+        }
+        await fetchData();
+      } else {
+        setNavStatus(`Navigation error: ${data.detail || 'Failed'}`);
+      }
+    } catch (err: any) {
+      setNavStatus(`Error: ${err.message}`);
+    } finally {
+      setIsNavigating(false);
+    }
+  };
+
+  const handleSendControlEnd = async () => {
+    setNavStatus('Sending HID control + end to display mode window...');
+    try {
+      const res = await api('/api/navigation/control-end', { method: 'POST' });
+      const data = await res.json();
+      setNavStatus(`Dispatched control+end! Document end line: ${data.last_line || 'unknown'}`);
+      addTelemetryEvent('SYSTEM', 'Dispatched HID control + end to focused window');
+      await fetchData();
+    } catch (e: any) {
+      setNavStatus(`Error: ${e.message}`);
+    }
+  };
+
+  const handleSendControlHome = async () => {
+    setNavStatus('Sending HID control + home to display mode window...');
+    try {
+      const res = await api('/api/navigation/control-home', { method: 'POST' });
+      const data = await res.json();
+      setNavStatus(`Dispatched control+home! Top line anchored at Line ${data.current_top_line || 1}`);
+      addTelemetryEvent('SYSTEM', 'Dispatched HID control + home to focused window');
+      await fetchData();
+    } catch (e: any) {
+      setNavStatus(`Error: ${e.message}`);
+    }
+  };
+
 
 
   const handleDeleteProject = async (id: string) => {
@@ -486,6 +559,14 @@ export default function App() {
             if (msg.data?.pipeline_mode) {
               setPipelineMode(msg.data.pipeline_mode);
               addTelemetryEvent('SYSTEM', `Pipeline mode: ${msg.data.pipeline_mode}`);
+            }
+          } else if (msg.type === 'navigation_progress') {
+            setNavStatus(`Navigating to Line ${msg.target_line}... (Current: Ln ${msg.current_top_line})`);
+          } else if (msg.type === 'navigation_completed') {
+            if (msg.reached) {
+              setNavStatus(`Reached Line ${msg.current_top_line} (Target: ${msg.target_line}) ✔`);
+            } else {
+              setNavStatus(`Stopped at Line ${msg.current_top_line} (Target: ${msg.target_line}) ⚠️`);
             }
           }
         } catch {}
@@ -688,6 +769,15 @@ export default function App() {
           >
             <Layers size={14} />
             <span>{showDag ? 'Hide Flow DAG' : 'Show Flow DAG'}</span>
+          </button>
+          <button
+            className="btn btn-sm btn-outline"
+            onClick={() => setShowGotoModal(true)}
+            style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}
+            title="Go To Line (Ctrl+G)"
+          >
+            <Compass size={14} />
+            <span>Go To Line (Ctrl+G)</span>
           </button>
         </div>
       </div>
@@ -1141,6 +1231,99 @@ export default function App() {
               autoFocus
             />
           </div>
+        </Modal>
+      )}
+
+      {showGotoModal && (
+        <Modal
+          title="Go To Line (Ctrl+G)"
+          onClose={() => {
+            setShowGotoModal(false);
+            setNavStatus('');
+          }}
+          width="480px"
+        >
+          <div className="modal-form-group">
+            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+              TARGET LINE NUMBER (FIRST LINE OF LEFT SIDE GUTTER) *
+            </label>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input
+                type="number"
+                min="1"
+                placeholder="e.g. 8761"
+                className="modal-input"
+                style={{ flex: 1, height: '38px', fontSize: '14px', fontFamily: 'var(--font-mono)' }}
+                value={gotoTargetLine}
+                onChange={e => setGotoTargetLine(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleGotoLine();
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                className="btn btn-primary"
+                onClick={handleGotoLine}
+                disabled={isNavigating || !gotoTargetLine}
+                style={{ height: '38px', padding: '0 18px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                {isNavigating ? <Loader2 size={14} className="spin" /> : <ArrowRight size={14} />}
+                <span>Go</span>
+              </button>
+            </div>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4 }}>
+              Clicking <strong>Go</strong> will press the down arrow keys until the line number at the top of the left side gutter matches this number.
+            </p>
+          </div>
+
+          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+              HARDWARE NAVIGATION (FOCUSED WINDOW OF DISPLAY MODE APP)
+            </label>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ flex: 1, height: '36px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}
+                onClick={handleSendControlHome}
+                disabled={isNavigating}
+              >
+                control+home
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ flex: 1, height: '36px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}
+                onClick={handleSendControlEnd}
+                disabled={isNavigating}
+              >
+                control+end
+              </button>
+            </div>
+          </div>
+
+          {navStatus && (
+            <div
+              style={{
+                marginTop: '16px',
+                padding: '10px 14px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                fontSize: '12px',
+                color: navStatus.includes('Error') || navStatus.includes('error') ? '#ff7b72' : 'var(--color-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              {isNavigating && <Loader2 size={13} className="spin" />}
+              <span>{navStatus}</span>
+            </div>
+          )}
         </Modal>
       )}
 
