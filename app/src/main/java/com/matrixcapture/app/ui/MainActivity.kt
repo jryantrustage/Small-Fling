@@ -136,9 +136,15 @@ fun MatrixCaptureDashboard(
                             }
                         }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(if (uiState.isBackendConnected) Color(0xFF00FF9D) else Color(0xFFFF7B72)))
-                        Text(if (uiState.isBackendConnected) "SYNCED" else "OFFLINE", color = if (uiState.isBackendConnected) Color(0xFF00FF9D) else Color(0xFF8B949E), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (isKeyboardSuppressed) Color(0xFF00FF9D) else Color(0xFFFF7B72)))
+                            Text(if (isKeyboardSuppressed) "KB CLOSED" else "KB OPEN", color = if (isKeyboardSuppressed) Color(0xFF00FF9D) else Color(0xFFFF7B72), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (uiState.isBackendConnected) Color(0xFF00FF9D) else Color(0xFFFF7B72)))
+                            Text(if (uiState.isBackendConnected) "SYNCED" else "OFFLINE", color = if (uiState.isBackendConnected) Color(0xFF00FF9D) else Color(0xFF8B949E), fontSize = 10.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -374,14 +380,6 @@ fun MatrixCaptureDashboard(
                     )
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DiagBtn("Test Pacer (1.5s Dwell)", onTestPacer)
-                    DiagBtn("repeatedly capture page 1", onCaptureDesktopMode)
-                    DiagBtn("Get line number of next", onGetNextPageLine)
-                    Button(onClick = onAlignAndCaptureNextPage, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
-                        Text("Next Page & Align To Top (Micro-Touch)", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                    }
-                }
 
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF040D0A)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF1F2E28), RoundedCornerShape(8.dp))) {
                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

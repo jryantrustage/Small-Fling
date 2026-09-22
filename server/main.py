@@ -3,8 +3,11 @@ ADB_BIN = shutil.which("adb") or shutil.which("adb.exe") or "adb.exe"
 
 def _exec_adb_sync(args: list, timeout: float = 10.0) -> subprocess.CompletedProcess:
     return subprocess.run([ADB_BIN] + args, capture_output=True, text=True, timeout=timeout, errors="ignore")
+
+def _exec_adb_sync_bin(args: list, timeout: float = 12.0) -> subprocess.CompletedProcess:
+    return subprocess.run([ADB_BIN] + args, capture_output=True, timeout=timeout)
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, Tuple
 from datetime import datetime
 
 from fastapi import FastAPI, Request, File, UploadFile, Form, Query, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
@@ -19,12 +22,15 @@ try:
 except ImportError:
     genai = None
 
+from concurrent.futures import ProcessPoolExecutor
 import config, db
-from ocr_engine import LocalGutterOCREngine
+from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line
 
 db.init_db()
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ALLOWED_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+ocr_executor = ProcessPoolExecutor(max_workers=2)
 
 class WebSocketManager:
     def __init__(self): self.active: List[WebSocket] = []
@@ -47,6 +53,31 @@ ocr_engine = LocalGutterOCREngine(
 active_ocr_engine: str = "auto"
 active_model_target: str = "gemini"
 active_pipeline_mode: str = "cloud"
+
+# Directed Acyclic Graph (DAG) state for deterministic markdown pagination
+dag_state: Dict[str, Any] = {
+    "nodes": {
+        "init_end": {"id": "init_end", "title": "1. End Scan (Ctrl+End)", "status": "idle", "total_lines": 0},
+        "reset_home": {"id": "reset_home", "title": "2. Home Reset (Ctrl+Home)", "status": "idle", "verified": False},
+        "frame_acquire": {"id": "frame_acquire", "title": "3. Frame Acquisition", "status": "idle", "page": 1, "keyboard_closed": True},
+        "arrow_down": {"id": "arrow_down", "title": "4. Arrow Down Step", "status": "idle", "arrow_count": 48},
+        "verification_trigger": {"id": "verification_trigger", "title": "5. Verification Trigger", "status": "idle", "loop_count": 0, "is_complete": False}
+    },
+    "current_active_node": "init_end",
+    "last_trigger_evaluation": None
+}
+
+async def detect_last_line_in_process(image_path: Path) -> int:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(ocr_executor, worker_detect_last_line, str(image_path))
+
+async def verify_first_line_in_process(image_path: Path) -> Tuple[bool, int]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(ocr_executor, worker_verify_first_line, str(image_path))
+
+async def scan_image_in_process(image_path: Path) -> Dict[str, Any]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(ocr_executor, worker_scan_image, str(image_path), config.OLLAMA_URL, config.OLLAMA_VISION_MODEL, 15)
 
 connection_stats: Dict[str, Any] = {
     "total_http_requests": 0, "http_errors_count": 0, "last_connection_error": None,
@@ -261,6 +292,26 @@ orchestration_state: Dict[str, Any] = {
     "device_model": "pixel_10", "lines_per_page": 49, "updated_at": datetime.now().isoformat()
 }
 
+def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
+    tot = latest_telemetry.get("target_total_lines", 0)
+    sorted_f = sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+    is_verified = True
+    if len(sorted_f) >= 2:
+        prev_f = sorted_f[-2]
+        expected_top = prev_f.get("bottom_line", 0) + 1
+        is_verified = (top_line == expected_top or abs(top_line - expected_top) <= 1)
+    
+    is_complete = (tot > 0 and bottom_line >= tot)
+    dag_state["nodes"]["frame_acquire"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
+    dag_state["nodes"]["verification_trigger"].update({
+        "status": "completed" if is_complete else "looping",
+        "verified_top_transition": is_verified,
+        "is_complete": is_complete,
+        "loop_count": dag_state["nodes"]["verification_trigger"].get("loop_count", 0) + 1,
+        "remaining_lines": max(0, tot - bottom_line) if tot > 0 else 0
+    })
+    dag_state["current_active_node"] = "verification_trigger" if is_complete else "arrow_down"
+
 def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, model_desc: str) -> int:
     global document_lines, captured_frames, latest_telemetry
     added = ocr_engine.stitcher.stitch_frame_lines(document_lines, plines, frame_id, model_desc)
@@ -275,6 +326,7 @@ def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, 
         captured_frames[frame_id]["top_line"], captured_frames[frame_id]["bottom_line"] = int(top_g), int(bot_g)
         latest_telemetry["current_top_line"], latest_telemetry["current_bottom_line"] = int(top_g), int(bot_g)
     captured_frames[frame_id]["status"], captured_frames[frame_id]["extracted_line_count"] = "processed", added
+    update_dag_after_frame(frame_id, captured_frames[frame_id].get("top_line", 0), captured_frames[frame_id].get("bottom_line", 0))
     return added
 
 async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
@@ -494,7 +546,15 @@ async def update_telemetry(p: TelemetryUpdateRequest):
     global latest_telemetry, token_stats, orchestration_state
     for k in ["device_id", "is_pacing", "current_page", "current_top_line", "current_bottom_line", "target_total_lines", "dwell_countdown_ms", "phase", "status_message"]:
         val = getattr(p, k)
-        if val is not None: latest_telemetry[k] = val
+        if val is not None:
+            if k == "target_total_lines":
+                if val > 0:
+                    latest_telemetry[k] = val
+                    if p_active := db.get_active_project():
+                        if p_active.get("target_total_lines", 0) <= 0:
+                            db.update_project_target_lines(p_active["id"], val)
+            else:
+                latest_telemetry[k] = val
     latest_telemetry["last_heartbeat"] = datetime.now().isoformat()
     if p.pacer_calibration: latest_telemetry["pacer_calibration"].update(p.pacer_calibration)
     if p.mobile_tokens: token_stats["mobile_tokens"] = p.mobile_tokens
@@ -708,7 +768,7 @@ async def run_adb_shell(cmd: str, serial: Optional[str] = None) -> Dict[str, Any
         return {"status": "error", "message": str(e), "serial": ser}
 
 async def detect_external_display_id(serial: Optional[str] = None) -> int:
-    """Finds external display ID from dumpsys display (e.g. 4 for MB16AMTR Asus ZenScreen)."""
+    """Finds external logical display ID from dumpsys display (e.g. 4 for MB16AMTR Asus ZenScreen)."""
     res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]' | head -n 1", serial)
     if res.get("status") == "ok" and res.get("stdout"):
         m = re.search(r'mDisplayId=(\d+)', res["stdout"])
@@ -716,6 +776,47 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
             val = int(m.group(1))
             if val != 0: return val
     return 4
+
+async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
+    """Finds 64-bit SurfaceFlinger display ID for screencap."""
+    res_sf = await asyncio.to_thread(_exec_adb_sync, (["-s", serial] if serial else []) + ["shell", "dumpsys SurfaceFlinger --display-id"], 5.0)
+    if res_sf.returncode == 0 and res_sf.stdout:
+        for line in res_sf.stdout.splitlines():
+            if ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line:
+                if m := re.search(r'Display\s+(\d+)', line):
+                    return m.group(1)
+        all_ids = re.findall(r'Display\s+(\d+)', res_sf.stdout)
+        if len(all_ids) > 1:
+            return all_ids[1]
+    return None
+
+async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
+    """Captures valid PNG bytes from the external display via ADB."""
+    sf_id = await detect_surfaceflinger_display_id(serial)
+    cmd = (["-s", serial] if serial else []) + ["exec-out", "screencap"]
+    if sf_id:
+        cmd.extend(["-d", sf_id])
+    cmd.append("-p")
+    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 8.0)
+    if cap.returncode == 0 and cap.stdout and cap.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+        return cap.stdout
+
+    # Fallback to on-device temp file
+    dev_path = "/sdcard/mc_calib_temp.png"
+    sc_cmd = f"screencap {'-d ' + sf_id if sf_id else ''} -p {dev_path}"
+    await asyncio.to_thread(_exec_adb_sync, (["-s", serial] if serial else []) + ["shell", sc_cmd], 6.0)
+    pull_res = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", serial] if serial else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
+    if pull_res.returncode == 0 and pull_res.stdout and pull_res.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+        return pull_res.stdout
+    return None
+
+async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None):
+    """Sends HID keycombination with keyboard closed to external screen and global focus."""
+    await ensure_adb_keyboard_closed()
+    disp_id = await detect_external_display_id(serial)
+    if disp_id > 0:
+        await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", serial)
+    await run_adb_shell(f"input keycombination {key1} {key2}", serial)
 
 class AdbCommandRequest(BaseModel):
     command: str
@@ -817,7 +918,7 @@ async def advance_page_api(req: Optional[AdvancePageRequest] = None):
 
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
-    res = ocr_engine.scan_image(str(image_path))
+    res = await scan_image_in_process(image_path)
     top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
     captured_frames[frame_id].update({"top_line": top_ln, "bottom_line": bot_ln, "extracted_line_count": len(lines), "status": "processed", "bounding_boxes": res.get("bounding_boxes", {})})
     if top_ln > 0 and bot_ln > 0:
@@ -825,8 +926,9 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     for item in lines:
         if item.get("line_number"):
             ln = int(item["line_number"])
-            document_lines[ln] = {"line_number": ln, "gutter_number": ln, "text": item.get("text", ""), "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False), "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified", "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98), "notes": "Local Gutter OCR", "updated_at": datetime.now().isoformat()}
+            document_lines[ln] = {"line_number": ln, "gutter_number": ln, "text": item.get("text", ""), "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False), "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified", "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98), "notes": "Local Gutter OCR (Worker Process)", "updated_at": datetime.now().isoformat()}
     save_persisted_state()
+    update_dag_after_frame(frame_id, top_ln, bot_ln)
     return res
 
 async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bottom_line: int = 0, engine: Optional[str] = None, model_target: Optional[str] = None, pipeline_mode: Optional[str] = None) -> Dict[str, Any]:
@@ -1106,17 +1208,236 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
         finfo["status"] = f"error: {str(e)}"; save_persisted_state()
         raise HTTPException(status_code=500, detail=f"OCR scan failed: {str(e)}")
 
+@app.get("/api/dag/status")
+async def get_dag_status():
+    proj = db.get_active_project()
+    target_tot = proj.get("target_total_lines", 0) if proj else latest_telemetry.get("target_total_lines", 0)
+    return {
+        "status": "success",
+        "dag": dag_state,
+        "target_total_lines": target_tot,
+        "current_top_line": latest_telemetry.get("current_top_line", 1),
+        "current_bottom_line": latest_telemetry.get("current_bottom_line", 31),
+        "current_page": latest_telemetry.get("current_page", 1),
+        "active_node": dag_state.get("current_active_node", "init_end")
+    }
+
 @app.get("/api/projects")
 async def list_projects(): return db.get_projects()
 
 @app.get("/api/projects/active")
 async def get_active_project(): return db.get_active_project()
 
+async def perform_full_project_calibration(project_id: str, requested_target: int = 0) -> Tuple[int, bool, int]:
+    """
+    Executes automated HID Ctrl+End -> External Screencap -> Gutter OCR ->
+    HID Ctrl+Home -> External Screencap -> Line 1 Verification.
+    Returns (total_lines, is_home_verified, detected_first_line).
+    """
+    serial = await get_active_adb_serial()
+    total_lines = 0
+    is_verified = False
+    detected_first = 1
+    if not serial:
+        return (requested_target, False, 1)
+
+    try:
+        # 1. Dispatch Ctrl+End: keycode 113 + 123
+        await send_hid_keycombination(113, 123, serial)
+        await asyncio.sleep(0.6)
+        end_bytes = await capture_external_screenshot(serial)
+        if end_bytes:
+            calib_path = FRAMES_DIR / f"calib_end_{project_id}.png"
+            with open(calib_path, "wb") as f: f.write(end_bytes)
+            total_lines = await detect_last_line_in_process(calib_path)
+            if total_lines <= 0:
+                res_scan = await scan_image_in_process(calib_path)
+                total_lines = res_scan.get("bottom_line", 0)
+
+        if total_lines <= 0 and requested_target > 0:
+            total_lines = requested_target
+
+        if total_lines > 0:
+            db.update_project_target_lines(project_id, total_lines)
+            latest_telemetry["target_total_lines"] = total_lines
+            latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
+
+        dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
+        dag_state["nodes"]["reset_home"].update({"status": "active"})
+        dag_state["current_active_node"] = "reset_home"
+
+        await ws_manager.broadcast({
+            "type": "dag_updated", "dag": dag_state,
+            "calibration_event": "end_detected", "total_lines": total_lines
+        })
+
+        # 2. Fast home: Dispatch Ctrl+Home: keycode 113 + 122
+        await send_hid_keycombination(113, 122, serial)
+        await asyncio.sleep(0.6)
+        home_bytes = await capture_external_screenshot(serial)
+        if home_bytes:
+            home_path = FRAMES_DIR / f"calib_home_{project_id}.png"
+            with open(home_path, "wb") as f: f.write(home_bytes)
+            is_verified, detected_first = await verify_first_line_in_process(home_path)
+            if not is_verified:
+                res_scan = await scan_image_in_process(home_path)
+                detected_first = res_scan.get("top_line", 1)
+                is_verified = (detected_first == 1)
+
+        dag_state["nodes"]["reset_home"].update({"status": "completed", "verified": is_verified, "first_line": detected_first})
+        dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
+        dag_state["current_active_node"] = "frame_acquire"
+
+        latest_telemetry["current_top_line"] = 1
+        latest_telemetry["current_page"] = 1
+        latest_telemetry["status_message"] = f"Calibrated: {total_lines} total lines verified via Ctrl+End / Ctrl+Home ✔"
+
+        await ws_manager.broadcast({
+            "type": "dag_updated", "dag": dag_state,
+            "calibration_event": "home_verified", "verified": is_verified, "first_line": detected_first,
+            "telemetry": latest_telemetry
+        })
+    except Exception as e:
+        print(f"[perform_full_project_calibration] Error: {e}")
+
+    return (total_lines, is_verified, detected_first)
+
 @app.post("/api/projects")
 async def create_project(req: ProjectCreateRequest):
     new_proj = db.create_project(name=req.name, description=req.description or "", target_total_lines=req.target_total_lines or 0)
-    load_persisted_state(); await ws_manager.broadcast({"type": "project_switched", "project": new_proj})
+    captured_frames.clear()
+    document_lines.clear()
+    load_persisted_state()
+
+    # Initialize DAG state for new project
+    dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": req.target_total_lines or 0})
+    dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
+    dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
+    dag_state["nodes"]["arrow_down"].update({"status": "idle"})
+    dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
+    dag_state["current_active_node"] = "init_end"
+    await ws_manager.broadcast({"type": "project_switched", "project": new_proj, "dag": dag_state})
+
+    # Automatically execute instant calibration: Ctrl+End -> screencap -> gutter OCR -> Ctrl+Home -> verify
+    total_lines, is_verified, detected_first = await perform_full_project_calibration(new_proj["id"], req.target_total_lines or 0)
+    if total_lines > 0:
+        new_proj["target_total_lines"] = total_lines
+
+    await ws_manager.broadcast({"type": "project_switched", "project": new_proj, "dag": dag_state, "telemetry": latest_telemetry})
     return new_proj
+
+@app.post("/api/projects/{project_id}/calibrate-end")
+async def calibrate_project_end(project_id: str, request: Request):
+    """
+    When a new project is created, the combination of Ctrl+End key and a screen capture
+    is sent to the API, and then OCR in a separate worker process determines the last
+    line number to display the total lines of markdown.
+    """
+    proj = db.get_project(project_id)
+    if not proj: raise HTTPException(status_code=404, detail="Project not found")
+
+    contents = None
+    ct = request.headers.get("content-type", "")
+    if "application/json" in ct:
+        body = await request.json()
+        if b64_str := body.get("image_base64") or body.get("image"):
+            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
+            contents = base64.b64decode(clean_b64)
+    elif "multipart/form-data" in ct:
+        form = await request.form()
+        f_obj = form.get("file")
+        if f_obj and hasattr(f_obj, "read"):
+            contents = await f_obj.read()
+
+    # If no image was explicitly passed, trigger via ADB key combination & screencap
+    if not contents:
+        serial = await get_active_adb_serial()
+        # Ctrl+End: keycode 113 + 123
+        await send_hid_keycombination(113, 123, serial)
+        await asyncio.sleep(0.5)
+        contents = await capture_external_screenshot(serial)
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="Could not capture or receive screenshot for Ctrl+End calibration.")
+
+    calib_path = FRAMES_DIR / f"calib_end_{project_id}.png"
+    with open(calib_path, "wb") as f: f.write(contents)
+
+    total_lines = await detect_last_line_in_process(calib_path)
+    if total_lines <= 0:
+        res_scan = await scan_image_in_process(calib_path)
+        total_lines = res_scan.get("bottom_line", 0)
+
+    if total_lines > 0:
+        db.update_project_target_lines(project_id, total_lines)
+        latest_telemetry["target_total_lines"] = total_lines
+        latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
+    
+    dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
+    dag_state["nodes"]["reset_home"].update({"status": "active"})
+    dag_state["current_active_node"] = "reset_home"
+
+    await ws_manager.broadcast({
+        "type": "dag_updated", "dag": dag_state,
+        "calibration_event": "end_detected", "total_lines": total_lines
+    })
+    return {"status": "success", "project_id": project_id, "total_lines": total_lines, "target_total_lines": total_lines}
+
+@app.post("/api/projects/{project_id}/verify-home")
+async def verify_project_home(project_id: str, request: Request):
+    """
+    Before key down is used during the acquisition phase, the page is returned to line 1
+    by using a combination of Ctrl+Home key, a screen capture is taken, and OCR is used
+    to assure the first line is line number 1.
+    """
+    proj = db.get_project(project_id)
+    if not proj: raise HTTPException(status_code=404, detail="Project not found")
+
+    contents = None
+    ct = request.headers.get("content-type", "")
+    if "application/json" in ct:
+        body = await request.json()
+        if b64_str := body.get("image_base64") or body.get("image"):
+            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
+            contents = base64.b64decode(clean_b64)
+    elif "multipart/form-data" in ct:
+        form = await request.form()
+        f_obj = form.get("file")
+        if f_obj and hasattr(f_obj, "read"):
+            contents = await f_obj.read()
+
+    if not contents:
+        serial = await get_active_adb_serial()
+        # Ctrl+Home: keycode 113 + 122
+        await send_hid_keycombination(113, 122, serial)
+        await asyncio.sleep(0.5)
+        contents = await capture_external_screenshot(serial)
+
+    if not contents:
+        raise HTTPException(status_code=400, detail="Could not capture or receive screenshot for Ctrl+Home verification.")
+
+    home_path = FRAMES_DIR / f"calib_home_{project_id}.png"
+    with open(home_path, "wb") as f: f.write(contents)
+
+    is_verified, detected_first = await verify_first_line_in_process(home_path)
+    if not is_verified:
+        res_scan = await scan_image_in_process(home_path)
+        detected_first = res_scan.get("top_line", 1)
+        is_verified = (detected_first == 1)
+
+    dag_state["nodes"]["reset_home"].update({"status": "completed", "verified": is_verified, "first_line": detected_first})
+    dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
+    dag_state["current_active_node"] = "frame_acquire"
+
+    latest_telemetry["current_top_line"] = 1
+    latest_telemetry["current_page"] = 1
+    latest_telemetry["status_message"] = f"Line 1 Verified at Top (Detected Ln {detected_first}) via Ctrl+Home ✔"
+
+    await ws_manager.broadcast({
+        "type": "dag_updated", "dag": dag_state,
+        "calibration_event": "home_verified", "verified": is_verified, "first_line": detected_first
+    })
+    return {"status": "success", "verified": is_verified, "first_line": detected_first}
 
 @app.post("/api/projects/{project_id}/activate")
 async def activate_project(project_id: str):

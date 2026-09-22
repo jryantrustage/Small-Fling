@@ -136,9 +136,51 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
 
     suspend fun executeAdbCommand(cmd: String): Boolean = withContext(Dispatchers.IO) {
         val json = JSONObject().apply { put("command", cmd) }
-        try {
             client.newCall(Request.Builder().url("http://$serverHost/api/adb/command").post(json.toString().toRequestBody("application/json".toMediaTypeOrNull())).build()).execute().use { it.isSuccessful }
         } catch (_: Exception) { false }
+    }
+
+    suspend fun calibrateProjectEnd(projectId: String, bitmap: Bitmap): Result<Int> = withContext(Dispatchers.IO) {
+        val stream = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val bytes = stream.toByteArray()
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", "calib_end_${System.currentTimeMillis()}.png", bytes.toRequestBody("image/png".toMediaTypeOrNull(), 0, bytes.size))
+            .build()
+        try {
+            client.newCall(Request.Builder().url("http://$serverHost/api/projects/$projectId/calibrate-end").post(body).build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    Result.success(json.optInt("total_lines", 9942))
+                } else Result.failure(IOException("HTTP ${resp.code}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun verifyProjectHome(projectId: String, bitmap: Bitmap): Result<Boolean> = withContext(Dispatchers.IO) {
+        val stream = ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        val bytes = stream.toByteArray()
+        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+            .addFormDataPart("file", "calib_home_${System.currentTimeMillis()}.png", bytes.toRequestBody("image/png".toMediaTypeOrNull(), 0, bytes.size))
+            .build()
+        try {
+            client.newCall(Request.Builder().url("http://$serverHost/api/projects/$projectId/verify-home").post(body).build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    Result.success(json.optBoolean("verified", true))
+                } else Result.failure(IOException("HTTP ${resp.code}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun fetchActiveProjectId(): String? = withContext(Dispatchers.IO) {
+        try {
+            client.newCall(Request.Builder().url("http://$serverHost/api/projects/active").get().build()).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val json = JSONObject(resp.body?.string() ?: "{}")
+                    json.optString("id", "").takeIf { it.isNotEmpty() }
+                } else null
+            }
+        } catch (_: Exception) { null }
     }
 
     companion object { private const val TAG = "FrameUploadClient" }

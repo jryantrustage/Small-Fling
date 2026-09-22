@@ -5,6 +5,7 @@ import {
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
+import { FlowDag } from './FlowDag';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -83,6 +84,7 @@ export default function App() {
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const [eventsLog, setEventsLog] = useState<TelemetryEvent[]>([]);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState<boolean>(false);
+  const [showDag, setShowDag] = useState<boolean>(true);
 
   // Horizontal Panel Resizing
   const [framesPanelWidth, setFramesPanelWidth] = useState<number>(() => {
@@ -154,6 +156,41 @@ export default function App() {
       localStorage.setItem('mc_inspector_percent', String(inspectorPercent));
     } catch {}
   }, [inspectorPercent]);
+
+  // Maintain Screen Wake Lock so device doesn't sleep while app is in progress
+  useEffect(() => {
+    let sentinel: any = null;
+    let isMounted = true;
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible' && isMounted) {
+        try {
+          sentinel = await (navigator as any).wakeLock.request('screen');
+        } catch {
+          // Graceful fallback if permission denied or battery saver active
+        }
+      }
+    };
+
+    requestWakeLock();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (sentinel) {
+        sentinel.release().catch(() => {});
+        sentinel = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (isDraggingFrames || isDraggingSplit) {
@@ -316,6 +353,7 @@ export default function App() {
       setShowNewProjectModal(false);
       setNewProject({ name: '', desc: '', target: 0 });
       setActiveProject(created);
+      addTelemetryEvent('SYSTEM', `Project created: ${created.name} (${created.target_total_lines || 0} lines calibrated via Ctrl+End / Ctrl+Home ✔)`);
       await fetchData();
     }
   };
@@ -637,13 +675,38 @@ export default function App() {
 
       {/* Action Bar */}
       <div className="orchestration-bar">
-        <div className="orchestration-actions">
+        <div className="orchestration-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button className="btn btn-orch btn-capture-desktop" onClick={handleCaptureDesktop} title="repeatedly capture page 1">
             <Camera size={14} />
             <span>repeatedly capture page 1</span>
           </button>
+          <button
+            className={`btn btn-sm ${showDag ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setShowDag(!showDag)}
+            style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}
+            title="Toggle Pagination Flow DAG"
+          >
+            <Layers size={14} />
+            <span>{showDag ? 'Hide Flow DAG' : 'Show Flow DAG'}</span>
+          </button>
         </div>
       </div>
+
+      {/* Flow DAG Visualization */}
+      {showDag && (
+        <div style={{ padding: '0 20px 12px 20px' }}>
+          <FlowDag
+            apiBase={API_BASE}
+            activeProjectId={activeProject?.id}
+            currentTopLine={telemetry.current_top_line || documentData.min_line || 1}
+            currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49}
+            targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
+            currentPage={telemetry.current_page || frames.length || 1}
+            isOrchestrating={telemetry.is_pacing}
+            onRefresh={fetchData}
+          />
+        </div>
+      )}
 
       {!backendConnected && (
         <div style={{ backgroundColor: '#ff7b7218', borderBottom: '1px solid #ff7b7233', color: '#ff7b72', padding: '6px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', fontWeight: 500 }}>

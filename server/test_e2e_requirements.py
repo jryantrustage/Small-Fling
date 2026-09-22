@@ -54,6 +54,8 @@ def create_synthetic_frame_image(filepath: str):
     cv2.imwrite(filepath, img)
     return filepath
 
+import pytest
+@pytest.mark.asyncio
 async def test_full_pipeline():
     print("=== 1. Testing Server Health ===")
     res = requests.get(f"{SERVER_URL}/api/health")
@@ -67,8 +69,10 @@ async def test_full_pipeline():
     print(f"Next Page Line data: {data}")
     assert "next_page_first_line" in data
 
-    print("\n=== 3. Testing WebSocket connection & Real-Time Push ===")
-    test_img_path = "storage/frames/test_synthetic_p09.png"
+    from pathlib import Path
+    frames_dir = Path(__file__).parent / "storage" / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    test_img_path = str(frames_dir / "test_synthetic_p09.png")
     create_synthetic_frame_image(test_img_path)
 
     async with websockets.connect(WS_URL) as ws:
