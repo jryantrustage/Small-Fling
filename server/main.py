@@ -24,7 +24,7 @@ except ImportError:
 
 from concurrent.futures import ProcessPoolExecutor
 import config, db
-from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line
+from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line, worker_detect_top_line
 
 db.init_db()
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
@@ -59,12 +59,18 @@ dag_state: Dict[str, Any] = {
     "nodes": {
         "init_end": {"id": "init_end", "title": "1. End Scan (Ctrl+End)", "status": "idle", "total_lines": 0},
         "reset_home": {"id": "reset_home", "title": "2. Home Reset (Ctrl+Home)", "status": "idle", "verified": False},
-        "frame_acquire": {"id": "frame_acquire", "title": "3. Frame Acquisition", "status": "idle", "page": 1, "keyboard_closed": True},
+        "frame_acquire": {"id": "frame_acquire", "title": "3. Frame Acquisition", "status": "idle", "page": 1},
         "arrow_down": {"id": "arrow_down", "title": "4. Arrow Down Step", "status": "idle", "arrow_count": 48},
-        "verification_trigger": {"id": "verification_trigger", "title": "5. Verification Trigger", "status": "idle", "loop_count": 0, "is_complete": False}
+        "verification_trigger": {"id": "verification_trigger", "title": "5. Terminal Trigger", "status": "idle", "loop_count": 0, "is_complete": False}
     },
-    "current_active_node": "init_end",
-    "last_trigger_evaluation": None
+    "edges": [
+        {"from": "init_end", "to": "reset_home"},
+        {"from": "reset_home", "to": "frame_acquire"},
+        {"from": "frame_acquire", "to": "arrow_down"},
+        {"from": "arrow_down", "to": "verification_trigger"},
+        {"from": "verification_trigger", "to": "frame_acquire", "is_loopback": True}
+    ],
+    "current_active_node": "init_end"
 }
 
 async def detect_last_line_in_process(image_path: Path) -> int:
@@ -74,6 +80,10 @@ async def detect_last_line_in_process(image_path: Path) -> int:
 async def verify_first_line_in_process(image_path: Path) -> Tuple[bool, int]:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(ocr_executor, worker_verify_first_line, str(image_path))
+
+async def detect_top_line_in_process(image_path: Path) -> int:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path))
 
 async def scan_image_in_process(image_path: Path) -> Dict[str, Any]:
     loop = asyncio.get_running_loop()
@@ -915,6 +925,187 @@ async def advance_page_api(req: Optional[AdvancePageRequest] = None):
         "display_id": disp_id,
         "adb_result": res
     }
+
+class GotoLineRequest(BaseModel):
+    target_line: int
+
+@app.post("/api/navigation/goto-line")
+async def goto_line_api(req: GotoLineRequest):
+    target = req.target_line
+    if target <= 0:
+        raise HTTPException(status_code=400, detail="Target line must be greater than 0")
+
+    serial = await get_active_adb_serial()
+    if not serial:
+        raise HTTPException(status_code=503, detail="No active ADB device connected")
+
+    disp_id = await detect_external_display_id(serial)
+    await ensure_adb_keyboard_closed()
+
+    # 1. Tap inside editor window on target display to ensure focus
+    if disp_id > 0:
+        await run_adb_shell(f"input -d {disp_id} tap 500 500", serial)
+    else:
+        await run_adb_shell("input tap 500 500", serial)
+    await asyncio.sleep(0.15)
+
+    calib_path = FRAMES_DIR / "nav_temp.png"
+    init_bytes = await capture_external_screenshot(serial)
+    current_top = 0
+    if init_bytes:
+        with open(calib_path, "wb") as f: f.write(init_bytes)
+        current_top = await detect_top_line_in_process(calib_path)
+
+    # If current top is unknown or significantly past target, jump to top via navigation_control_home
+    if current_top > target or (current_top == 0 and target > 50):
+        await navigation_control_home()
+        current_top = 1
+
+    max_steps = 70
+    step = 0
+    stalled_count = 0
+    prev_top = current_top
+
+    while current_top != target and step < max_steps:
+        step += 1
+        diff = target - current_top
+
+        if diff > 0:
+            # Need to move down
+            if diff > 200: lines_to_move = min(diff - 5, 100)
+            elif diff > 80: lines_to_move = min(diff - 4, 40)
+            elif diff > 20: lines_to_move = min(diff - 2, 15)
+            elif diff > 5: lines_to_move = min(diff - 1, 5)
+            elif diff > 1: lines_to_move = 2
+            else: lines_to_move = 1
+
+            direction = -1  # Negative VSCROLL moves down
+            keycode = "20"  # KEYCODE_DPAD_DOWN
+        else:
+            # Overshot: need to move up
+            over = abs(diff)
+            lines_to_move = min(over, 5)
+            direction = 1   # Positive VSCROLL moves up
+            keycode = "19"  # KEYCODE_DPAD_UP
+
+        scroll_units = int(lines_to_move * 5.8 * direction)
+        keys = " ".join([keycode] * min(lines_to_move, 30))
+
+        # Dispatch both HID mouse scroll and keyevent
+        if disp_id > 0:
+            await run_adb_shell(f"input mouse -d {disp_id} scroll 800 500 --axis VSCROLL,{scroll_units}", serial)
+            await run_adb_shell(f"input -d {disp_id} keyevent {keys}", serial)
+        else:
+            await run_adb_shell(f"input mouse scroll 800 500 --axis VSCROLL,{scroll_units}", serial)
+            await run_adb_shell(f"input keyevent {keys}", serial)
+
+        await asyncio.sleep(0.15 if lines_to_move <= 5 else 0.3)
+
+        snap_bytes = await capture_external_screenshot(serial)
+        detected = 0
+        if snap_bytes:
+            with open(calib_path, "wb") as f: f.write(snap_bytes)
+            detected = await detect_top_line_in_process(calib_path)
+
+        if detected > 0:
+            current_top = detected
+        else:
+            current_top += (lines_to_move if diff > 0 else -lines_to_move)
+
+        latest_telemetry["current_top_line"] = current_top
+        latest_telemetry["status_message"] = f"Navigating to Ln {target}... (Current: Ln {current_top})"
+        await ws_manager.broadcast({
+            "type": "navigation_progress",
+            "current_top_line": current_top,
+            "target_line": target,
+            "telemetry": latest_telemetry
+        })
+
+        if current_top == prev_top:
+            stalled_count += 1
+            if stalled_count >= 8:
+                break
+        else:
+            stalled_count = 0
+            prev_top = current_top
+
+        if current_top == target:
+            break
+
+    latest_telemetry["current_top_line"] = current_top
+    if current_top == target:
+        latest_telemetry["status_message"] = f"Navigation reached Line {current_top} (Target: {target}) ✔"
+    else:
+        latest_telemetry["status_message"] = f"Navigation stopped at Line {current_top} (Target: {target})"
+
+    await ws_manager.broadcast({
+        "type": "navigation_completed",
+        "current_top_line": current_top,
+        "target_line": target,
+        "reached": (current_top == target)
+    })
+
+    return {
+        "status": "success",
+        "current_top_line": current_top,
+        "target_line": target,
+        "reached": (current_top == target)
+    }
+
+@app.post("/api/navigation/control-end")
+async def navigation_control_end():
+    serial = await get_active_adb_serial()
+    if not serial:
+        raise HTTPException(status_code=503, detail="No active ADB device connected")
+    disp_id = await detect_external_display_id(serial)
+
+    # Fast scroll to bottom
+    for _ in range(12):
+        if disp_id > 0:
+            await run_adb_shell(f"input mouse -d {disp_id} scroll 800 500 --axis VSCROLL,-200", serial)
+        else:
+            await run_adb_shell("input mouse scroll 800 500 --axis VSCROLL,-200", serial)
+        await asyncio.sleep(0.04)
+
+    await send_hid_keycombination(113, 123, serial)
+    await asyncio.sleep(0.5)
+    calib_path = FRAMES_DIR / "nav_end.png"
+    snap = await capture_external_screenshot(serial)
+    last_line = 0
+    if snap:
+        with open(calib_path, "wb") as f: f.write(snap)
+        last_line = await detect_last_line_in_process(calib_path)
+    latest_telemetry["status_message"] = f"Dispatched Ctrl+End (End Ln: {last_line}) ✔"
+    await ws_manager.broadcast({"type": "hid_action", "action": "control+end", "last_line": last_line, "telemetry": latest_telemetry})
+    return {"status": "success", "action": "control+end", "last_line": last_line}
+
+@app.post("/api/navigation/control-home")
+async def navigation_control_home():
+    serial = await get_active_adb_serial()
+    if not serial:
+        raise HTTPException(status_code=503, detail="No active ADB device connected")
+    disp_id = await detect_external_display_id(serial)
+
+    # Fast scroll to top
+    for _ in range(12):
+        if disp_id > 0:
+            await run_adb_shell(f"input mouse -d {disp_id} scroll 800 500 --axis VSCROLL,200", serial)
+        else:
+            await run_adb_shell("input mouse scroll 800 500 --axis VSCROLL,200", serial)
+        await asyncio.sleep(0.04)
+
+    await send_hid_keycombination(113, 122, serial)
+    await asyncio.sleep(0.5)
+    calib_path = FRAMES_DIR / "nav_home.png"
+    snap = await capture_external_screenshot(serial)
+    top_line = 1
+    if snap:
+        with open(calib_path, "wb") as f: f.write(snap)
+        top_line = await detect_top_line_in_process(calib_path) or 1
+    latest_telemetry["current_top_line"] = top_line
+    latest_telemetry["status_message"] = f"Dispatched Ctrl+Home (Top Ln: {top_line}) ✔"
+    await ws_manager.broadcast({"type": "hid_action", "action": "control+home", "current_top_line": top_line, "telemetry": latest_telemetry})
+    return {"status": "success", "action": "control+home", "current_top_line": top_line}
 
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:

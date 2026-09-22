@@ -66,6 +66,48 @@ def worker_verify_first_line(image_path: str) -> Tuple[bool, int]:
         print(f"[worker_verify_first_line] Error: {e}")
         return False, 0
 
+def worker_detect_top_line(image_path: str) -> int:
+    """Worker function to detect the line number displayed at the top of the left side gutter."""
+    img = cv2.imread(image_path)
+    if img is None: return 0
+    h, w = img.shape[:2]
+    top_y = int(h * 0.11)
+    bot_y = int(h * 0.95)
+    left_x = max(0, int(w * 0.005))
+    right_x = int(w * 0.070)
+    gutter_col = img[top_y:bot_y, left_x:right_x]
+    ocr = get_rapid_ocr()
+    if ocr is None: return 0
+    try:
+        results, _ = ocr(gutter_col)
+        if not results: return 0
+        candidates = []
+        for bbox, text, score in results:
+            clean = text.strip()
+            pts = np.array(bbox)
+            min_y = int(np.min(pts[:, 1]))
+            # Clean potential OCR character confusions on digits
+            clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1')
+            if re.search(r'[a-zA-Z]{3,}', clean):
+                continue
+            if m := re.search(r'(\d+)', clean_num):
+                try: candidates.append((min_y, int(m.group(1))))
+                except ValueError: pass
+        if not candidates:
+            return 0
+        candidates.sort(key=lambda c: c[0])
+        first_num = candidates[0][1]
+        # Validate continuity if line 2 exists (e.g. correct 6761 -> 8761 when next line is 8762)
+        subsequent = [c[1] for c in candidates[1:4] if c[1] > 1]
+        if subsequent:
+            expected = subsequent[0] - 1
+            if str(first_num)[-2:] == str(expected)[-2:] and first_num != expected:
+                return expected
+        return first_num
+    except Exception as e:
+        print(f"[worker_detect_top_line] Error: {e}")
+        return 0
+
 def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model: str = "", ollama_timeout: int = 15) -> Dict[str, Any]:
     """Top-level multi-process worker for full image OCR, gutter detection & bounding boxes."""
     img = cv2.imread(image_path)
