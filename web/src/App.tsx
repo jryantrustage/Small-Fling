@@ -393,7 +393,7 @@ export default function App() {
 
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
-    addTelemetryEvent('SYSTEM', `Device profile calibrated for ${dev === 'pixel_8' ? 'Google Pixel 8 (31 lines)' : 'Google Pixel 10 (49 lines)'}`);
+    addTelemetryEvent('SYSTEM', `Switching active target to ${dev === 'pixel_8' ? 'Google Pixel 8' : 'Google Pixel 10'}...`);
     try {
       const res = await api('/api/device/select', {
         method: 'POST',
@@ -402,8 +402,12 @@ export default function App() {
       });
       if (res.ok) {
         const d = await res.json();
+        setDeviceInfo(d);
         if (d.device_model) setDeviceModel(d.device_model);
-        setDeviceInfo(prev => prev ? { ...prev, device_model: d.device_model, profile: d.profile } : null);
+        setStreamKey(Date.now());
+        const lpp = d.profile?.lines_per_page || (dev === 'pixel_8' ? 31 : 47);
+        addTelemetryEvent('SYSTEM', `Active device: ${d.active_model || dev} (${lpp} lines/page) ✔`);
+        await fetchData();
       }
     } catch (e) {
       console.error('Failed to select device profile', e);
@@ -963,7 +967,7 @@ export default function App() {
                 {deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}
               </span>
               <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                ({deviceModel === 'pixel_8' ? '31L' : '49L'})
+                ({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)
               </span>
               <ChevronDown size={12} color="#8b949e" style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
@@ -1072,7 +1076,7 @@ export default function App() {
                     onClick={() => handleSelectDevice('pixel_10')}
                   >
                     <Smartphone size={11} />
-                    <span>PIXEL 10 (49L)</span>
+                    <span>PIXEL 10 (47L)</span>
                   </button>
                 </div>
 
@@ -1674,7 +1678,7 @@ export default function App() {
                   {deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}
                 </span>
                 <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                  ({deviceModel === 'pixel_8' ? '31L' : '49L'})
+                  ({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)
                 </span>
                 <ChevronDown size={12} style={{ transform: showModalDeviceMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
               </button>
@@ -1756,7 +1760,7 @@ export default function App() {
                       onClick={() => { handleSelectDevice('pixel_10'); setShowModalDeviceMenu(false); }}
                     >
                       <Smartphone size={10} />
-                      <span>PIXEL 10 (49L)</span>
+                      <span>PIXEL 10 (47L)</span>
                     </button>
                   </div>
 
@@ -2060,7 +2064,7 @@ export default function App() {
                       onClick={() => { handleSelectDevice('pixel_10'); setShowDrawerDeviceMenu(false); }}
                     >
                       <Smartphone size={10} />
-                      <span>PIXEL 10 (49L)</span>
+                      <span>PIXEL 10 (47L)</span>
                     </button>
                   </div>
                 </div>
