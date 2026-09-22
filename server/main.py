@@ -12,9 +12,10 @@ from datetime import datetime
 
 from fastapi import FastAPI, Request, File, UploadFile, Form, Query, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, FileResponse, PlainTextResponse, JSONResponse
+from fastapi.responses import Response, FileResponse, PlainTextResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from PIL import Image
+import cv2, numpy as np
 
 try:
     from google import genai
@@ -29,6 +30,13 @@ from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_la
 db.init_db()
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ALLOWED_ORIGINS, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+@app.on_event("startup")
+async def startup_ensure_keyboard():
+    try:
+        asyncio.create_task(ensure_adb_keyboard_closed())
+    except Exception:
+        pass
 
 ocr_executor = ProcessPoolExecutor(max_workers=2)
 
@@ -289,7 +297,7 @@ DEVICE_PROFILES = {
         "step_size": 30
     }
 }
-current_device_model = "pixel_10"
+current_device_model = "pixel_8"
 target_adb_serial: Optional[str] = None
 
 def format_device_name(source: Optional[str]) -> str:
@@ -598,10 +606,37 @@ async def update_telemetry(p: TelemetryUpdateRequest):
 @app.get("/api/orchestrate")
 async def get_orchestration_state(): return {"orchestration": orchestration_state, "telemetry": get_fresh_telemetry()}
 
-async def ensure_adb_keyboard_closed():
+async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
+    """Ensures on-screen soft keyboard (IME) is completely closed/hidden across displays.
+    Enforces secure setting show_ime_with_hard_keyboard=0 and conditionally dismisses visible IME."""
     try:
-        await asyncio.to_thread(_exec_adb_sync, ["shell", "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; fi"], 3.0)
-    except Exception: pass
+        ser = await get_active_adb_serial(serial)
+        if not ser:
+            return False
+
+        # 1. Enforce system setting: suppress soft IME when hard/HID keyboard is active
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
+
+        # 2. Check if IME window is currently shown (mInputShown=true or mImeWindowVis=[123])
+        chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
+        out = chk.get("stdout", "")
+        if "mInputShown=true" in out or "mImeWindowVis" in out:
+            disp_id = await detect_external_display_id(ser)
+            # Dismiss on target display first if external desktop display
+            if disp_id > 0:
+                await run_adb_shell(f"input -d {disp_id} keyevent 4", ser)
+            # Dismiss via escape and keyevent 4
+            await run_adb_shell("input keyevent 111", ser)
+            await asyncio.sleep(0.1)
+            # Re-verify if still visible
+            chk2 = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
+            out2 = chk2.get("stdout", "")
+            if "mInputShown=true" in out2 or "mImeWindowVis" in out2:
+                await run_adb_shell("input keyevent 4", ser)
+            return True
+        return False
+    except Exception:
+        return False
 
 @app.post("/api/orchestrate")
 async def handle_orchestration_command(payload: OrchestrationRequest):
@@ -663,29 +698,69 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     return {"status": "success", "command": cmd, "orchestration": orchestration_state, "telemetry": latest_telemetry}
 
 class DeviceSelectRequest(BaseModel):
-    device_model: str
+    device_model: Optional[str] = None
     serial: Optional[str] = None
 
 @app.get("/api/device")
+@app.get("/api/device/info")
 async def get_device_info():
-    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+    global current_device_model
+    ser = await get_active_adb_serial()
+    devs_res = await list_adb_devices()
+    devs = devs_res.get("devices", [])
+    matched = next((d for d in devs if d["serial"] == ser), None)
+    active_model_name = matched.get("model", current_device_model) if matched else current_device_model
+    
+    # Auto-adjust current_device_model if not explicitly selected by user
+    if matched and target_adb_serial is None:
+        m = active_model_name.lower()
+        if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]):
+            current_device_model = "pixel_8"
+        elif any(k in m for k in ["pixel_10", "frankel", "10"]):
+            current_device_model = "pixel_10"
+            
+    disp_map = await detect_surfaceflinger_displays(ser) if ser else {}
+    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_8"])
     return {
+        "status": "success",
+        "connected": bool(ser),
+        "active_serial": ser,
+        "active_model": active_model_name.replace("_", " "),
         "device_model": current_device_model,
         "profile": profile,
         "available_profiles": list(DEVICE_PROFILES.values()),
-        "target_serial": target_adb_serial
+        "target_serial": target_adb_serial,
+        "devices": devs,
+        "displays": {
+            "desktop": bool(disp_map.get("desktop")),
+            "phone": bool(disp_map.get("phone"))
+        }
     }
 
 @app.post("/api/device/select")
 async def select_device_api(req: DeviceSelectRequest):
     global current_device_model, target_adb_serial, orchestration_state
-    dev = req.device_model.lower().strip()
-    if "8" in dev:
-        current_device_model = "pixel_8"
-    else:
-        current_device_model = "pixel_10"
+    if req.device_model:
+        dev = req.device_model.lower().strip()
+        if "8" in dev:
+            current_device_model = "pixel_8"
+        elif "10" in dev:
+            current_device_model = "pixel_10"
+            
     if req.serial is not None:
         target_adb_serial = req.serial.strip() if req.serial.strip() else None
+
+    # If serial was provided without model, deduce from device list
+    if target_adb_serial and not req.device_model:
+        devs_res = await list_adb_devices()
+        matched = next((d for d in devs_res.get("devices", []) if d["serial"] == target_adb_serial), None)
+        if matched:
+            m = matched.get("model", "").lower()
+            if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]):
+                current_device_model = "pixel_8"
+            elif any(k in m for k in ["pixel_10", "frankel", "10"]):
+                current_device_model = "pixel_10"
+
     profile = DEVICE_PROFILES[current_device_model]
     lpp = profile["lines_per_page"]
     orchestration_state["device_model"] = current_device_model
@@ -693,8 +768,14 @@ async def select_device_api(req: DeviceSelectRequest):
     if orchestration_state.get("page", 1) <= 1 and (orchestration_state.get("active_step") == "START_READY" or orchestration_state.get("status") == "IDLE"):
         orchestration_state["bottom_line"] = lpp
         orchestration_state["next_target_top"] = lpp + 1
-    await ws_manager.broadcast({"type": "orchestration_event", "orchestration": orchestration_state, "telemetry": latest_telemetry})
-    return {"status": "success", "device_model": current_device_model, "profile": profile, "target_serial": target_adb_serial}
+        
+    info = await get_device_info()
+    if target_adb_serial:
+        await ensure_adb_keyboard_closed(target_adb_serial)
+    else:
+        await ensure_adb_keyboard_closed()
+    await ws_manager.broadcast({"type": "device_selected", "data": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    return {"status": "success", **info}
 
 @app.get("/api/adb/devices")
 async def list_adb_devices():
@@ -714,8 +795,8 @@ async def list_adb_devices():
                     model = p.split(":", 1)[1]
                 elif p.startswith("device:"):
                     if model == "unknown": model = p.split(":", 1)[1]
-            devs.append({"serial": serial, "status": status, "model": model, "raw": line})
-        return {"status": "ok", "devices": devs, "target_serial": target_adb_serial}
+            devs.append({"serial": serial, "status": status, "model": model, "displayName": model.replace("_", " "), "raw": line})
+        return {"status": "ok", "devices": devs, "target_serial": target_adb_serial, "active_serial": await get_active_adb_serial()}
     except Exception as e:
         return {"status": "error", "message": str(e), "devices": [], "target_serial": target_adb_serial}
 
@@ -775,7 +856,7 @@ async def run_adb_shell(cmd: str, serial: Optional[str] = None) -> Dict[str, Any
             "serial": ser
         }
     except Exception as e:
-        return {"status": "error", "message": str(e), "serial": ser}
+        return {"status": "error", "returncode": -1, "stdout": "", "stderr": str(e), "serial": ser}
 
 async def detect_external_display_id(serial: Optional[str] = None) -> int:
     """Finds external logical display ID from dumpsys display (e.g. 4 for MB16AMTR Asus ZenScreen)."""
@@ -787,18 +868,30 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
             if val != 0: return val
     return 4
 
-async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
-    """Finds 64-bit SurfaceFlinger display ID for screencap."""
+async def detect_surfaceflinger_displays(serial: Optional[str] = None) -> Dict[str, str]:
+    """Returns mapping of {'phone': id, 'desktop': id} for 64-bit SurfaceFlinger display IDs."""
     res_sf = await asyncio.to_thread(_exec_adb_sync, (["-s", serial] if serial else []) + ["shell", "dumpsys SurfaceFlinger --display-id"], 5.0)
+    displays = {}
     if res_sf.returncode == 0 and res_sf.stdout:
         for line in res_sf.stdout.splitlines():
-            if ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line:
-                if m := re.search(r'Display\s+(\d+)', line):
-                    return m.group(1)
+            m = re.search(r'Display\s+(\d+)', line)
+            if m:
+                did = m.group(1)
+                if "port=0" in line:
+                    displays["phone"] = did
+                elif ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line:
+                    displays["desktop"] = did
         all_ids = re.findall(r'Display\s+(\d+)', res_sf.stdout)
-        if len(all_ids) > 1:
-            return all_ids[1]
-    return None
+        if "phone" not in displays and len(all_ids) > 0:
+            displays["phone"] = all_ids[0]
+        if "desktop" not in displays and len(all_ids) > 1:
+            displays["desktop"] = all_ids[1]
+    return displays
+
+async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
+    """Finds 64-bit SurfaceFlinger display ID for external desktop screencap."""
+    disps = await detect_surfaceflinger_displays(serial)
+    return disps.get("desktop")
 
 async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
     """Captures valid PNG bytes from the external display via ADB."""
@@ -808,21 +901,116 @@ async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[
         cmd.extend(["-d", sf_id])
     cmd.append("-p")
     cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 8.0)
-    if cap.returncode == 0 and cap.stdout and cap.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
-        return cap.stdout
+    if cap.returncode == 0 and cap.stdout:
+        idx = cap.stdout.find(b"\x89PNG\r\n\x1a\n")
+        if idx >= 0:
+            return cap.stdout[idx:]
 
     # Fallback to on-device temp file
     dev_path = "/sdcard/mc_calib_temp.png"
     sc_cmd = f"screencap {'-d ' + sf_id if sf_id else ''} -p {dev_path}"
     await asyncio.to_thread(_exec_adb_sync, (["-s", serial] if serial else []) + ["shell", sc_cmd], 6.0)
     pull_res = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", serial] if serial else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
-    if pull_res.returncode == 0 and pull_res.stdout and pull_res.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
-        return pull_res.stdout
+    if pull_res.returncode == 0 and pull_res.stdout:
+        idx = pull_res.stdout.find(b"\x89PNG\r\n\x1a\n")
+        if idx >= 0:
+            return pull_res.stdout[idx:]
     return None
+
+async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
+    """Captures screenshot in JPEG format for desktop or phone mode."""
+    ser = await get_active_adb_serial(serial)
+    if not ser: return None
+    
+    disp_map = await detect_surfaceflinger_displays(ser)
+    sf_id = disp_map.get(mode) or (disp_map.get("desktop") if mode == "desktop" else disp_map.get("phone"))
+
+    cmd = ["-s", ser, "exec-out", "screencap"]
+    if sf_id:
+        cmd.extend(["-d", sf_id])
+    cmd.append("-p")
+
+    res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 6.0)
+    if res.returncode == 0 and res.stdout:
+        png_idx = res.stdout.find(b"\x89PNG\r\n\x1a\n")
+        if png_idx >= 0:
+            png_data = res.stdout[png_idx:]
+            img = cv2.imdecode(np.frombuffer(png_data, np.uint8), cv2.IMREAD_COLOR)
+            if img is not None and img.size > 0:
+                h, w = img.shape[:2]
+                if max(h, w) > max_dim:
+                    scale = max_dim / float(max(h, w))
+                    nw, nh = int(w * scale), int(h * scale)
+                    img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+                _, jpg_data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                return jpg_data.tobytes()
+
+    if mode == "desktop":
+        raw_png = await capture_external_screenshot(ser)
+        if raw_png:
+            img = cv2.imdecode(np.frombuffer(raw_png, np.uint8), cv2.IMREAD_COLOR)
+            if img is not None and img.size > 0:
+                h, w = img.shape[:2]
+                if max(h, w) > max_dim:
+                    scale = max_dim / float(max(h, w))
+                    nw, nh = int(w * scale), int(h * scale)
+                    img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+                _, jpg_data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                return jpg_data.tobytes()
+    return None
+
+async def mjpeg_stream_generator(mode: str = "desktop", serial: Optional[str] = None, fps: float = 2.0, quality: int = 75, max_dim: int = 960):
+    interval = 1.0 / max(0.5, min(fps, 4.0))
+    while True:
+        jpg = await capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
+        if jpg:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" +
+                jpg + b"\r\n"
+            )
+        await asyncio.sleep(interval)
+
+@app.get("/api/device/screen")
+async def device_screen_endpoint(mode: str = "desktop", serial: Optional[str] = None, quality: int = Query(80, ge=30, le=95), max_dim: int = Query(1280, ge=480, le=1920)):
+    jpg = await capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
+    if not jpg:
+        raise HTTPException(status_code=503, detail="Failed to capture screen")
+    return Response(content=jpg, media_type="image/jpeg", headers={"Cache-Control": "no-store, must-revalidate"})
+
+@app.get("/api/device/stream")
+async def device_stream_endpoint(mode: str = "desktop", serial: Optional[str] = None, fps: float = Query(2.0, ge=0.5, le=5.0), quality: int = Query(75, ge=30, le=95), max_dim: int = Query(960, ge=480, le=1920)):
+    return StreamingResponse(
+        mjpeg_stream_generator(mode=mode, serial=serial, fps=fps, quality=quality, max_dim=max_dim),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+@app.post("/api/device/close-keyboard")
+async def close_keyboard_endpoint(serial: Optional[str] = None):
+    closed = await ensure_adb_keyboard_closed(serial)
+    return {"status": "ok", "keyboard_closed": closed}
+
+@app.get("/api/device/keyboard-status")
+async def get_keyboard_status(serial: Optional[str] = None):
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"connected": False, "visible": False, "hard_keyboard_suppression": False}
+    chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
+    out = chk.get("stdout", "")
+    vis = bool("mInputShown=true" in out or "mImeWindowVis" in out)
+    setting_chk = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", ser)
+    suppressed = (setting_chk.get("stdout", "").strip() == "0")
+    return {
+        "connected": True,
+        "serial": ser,
+        "visible": vis,
+        "hard_keyboard_suppression": suppressed
+    }
 
 async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None):
     """Sends HID keycombination with keyboard closed to external screen and global focus."""
-    await ensure_adb_keyboard_closed()
+    await ensure_adb_keyboard_closed(serial)
     disp_id = await detect_external_display_id(serial)
     if disp_id > 0:
         await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", serial)
@@ -877,9 +1065,10 @@ async def advance_page_api(req: Optional[AdvancePageRequest] = None):
     cur_page = orchestration_state.get("page", 1)
     arrow_count = profile["arrow_count_init"] if cur_page <= 1 else profile["arrow_count_step"]
 
-    # 1. Tap inside editor window on target display to ensure focus
-    await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
-    await asyncio.sleep(0.15)
+    # 1. Tap title bar (Y=120) to ensure window focus without placing text cursor or triggering IME
+    await run_adb_shell(f"input -d {disp_id} tap 500 120", active_serial)
+    await asyncio.sleep(0.08)
+    await ensure_adb_keyboard_closed(active_serial)
 
     # 2. Dispatch Down Arrow keys
     keys_str = " ".join(["20"] * arrow_count)
@@ -939,15 +1128,18 @@ async def goto_line_api(req: GotoLineRequest):
     if not serial:
         raise HTTPException(status_code=503, detail="No active ADB device connected")
 
-    disp_id = await detect_external_display_id(serial)
-    await ensure_adb_keyboard_closed()
+    dev_info = await get_device_info()
+    dev_name = dev_info.get("active_model") or ("Pixel 8 Pro" if "8" in current_device_model else "Pixel 10")
 
-    # 1. Tap inside editor window on target display to ensure focus
+    disp_id = await detect_external_display_id(serial)
+
+    # 1. Tap title bar (Y=120) to ensure window focus without placing text cursor or triggering IME
     if disp_id > 0:
-        await run_adb_shell(f"input -d {disp_id} tap 500 500", serial)
+        await run_adb_shell(f"input -d {disp_id} tap 500 120", serial)
     else:
-        await run_adb_shell("input tap 500 500", serial)
-    await asyncio.sleep(0.15)
+        await run_adb_shell("input tap 500 120", serial)
+    await asyncio.sleep(0.08)
+    await ensure_adb_keyboard_closed(serial)
 
     calib_path = FRAMES_DIR / "nav_temp.png"
     init_bytes = await capture_external_screenshot(serial)
@@ -1013,11 +1205,13 @@ async def goto_line_api(req: GotoLineRequest):
             current_top += (lines_to_move if diff > 0 else -lines_to_move)
 
         latest_telemetry["current_top_line"] = current_top
-        latest_telemetry["status_message"] = f"Navigating to Ln {target}... (Current: Ln {current_top})"
+        latest_telemetry["status_message"] = f"Navigating {dev_name} to Ln {target}... (Current: Ln {current_top})"
         await ws_manager.broadcast({
             "type": "navigation_progress",
             "current_top_line": current_top,
             "target_line": target,
+            "device_name": dev_name,
+            "serial": serial,
             "telemetry": latest_telemetry
         })
 
@@ -1034,22 +1228,26 @@ async def goto_line_api(req: GotoLineRequest):
 
     latest_telemetry["current_top_line"] = current_top
     if current_top == target:
-        latest_telemetry["status_message"] = f"Navigation reached Line {current_top} (Target: {target}) ✔"
+        latest_telemetry["status_message"] = f"Navigation reached Line {current_top} on {dev_name} (Target: {target}) ✔"
     else:
-        latest_telemetry["status_message"] = f"Navigation stopped at Line {current_top} (Target: {target})"
+        latest_telemetry["status_message"] = f"Navigation stopped at Line {current_top} on {dev_name} (Target: {target})"
 
     await ws_manager.broadcast({
         "type": "navigation_completed",
         "current_top_line": current_top,
         "target_line": target,
-        "reached": (current_top == target)
+        "reached": (current_top == target),
+        "device_name": dev_name,
+        "serial": serial
     })
 
     return {
         "status": "success",
         "current_top_line": current_top,
         "target_line": target,
-        "reached": (current_top == target)
+        "reached": (current_top == target),
+        "device_name": dev_name,
+        "serial": serial
     }
 
 @app.post("/api/navigation/control-end")

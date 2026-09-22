@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Check, X,
   Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, ArrowRight, Loader2
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, ArrowRight, Loader2,
+  Monitor, RefreshCw, ChevronDown, Maximize2, Minimize2, Expand, Shrink, Keyboard
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -44,6 +45,39 @@ interface TokenStats {
 }
 interface BoundingBoxItem { x: number; y: number; width: number; height: number; line_number?: number; text_snippet?: string; }
 interface FrameBoundingBoxes { first_line?: BoundingBoxItem; last_line?: BoundingBoxItem; wrapped_lines?: BoundingBoxItem[]; }
+
+interface DeviceItem {
+  serial: string;
+  status: string;
+  model: string;
+  displayName?: string;
+  raw?: string;
+}
+
+interface DeviceProfile {
+  id: string;
+  displayName: string;
+  lines_per_page: number;
+  arrow_count_init: number;
+  arrow_count_step: number;
+  step_size: number;
+}
+
+interface DeviceInfoData {
+  status: string;
+  connected: boolean;
+  active_serial: string | null;
+  active_model: string;
+  device_model: 'pixel_8' | 'pixel_10';
+  profile: DeviceProfile;
+  available_profiles: DeviceProfile[];
+  target_serial: string | null;
+  devices: DeviceItem[];
+  displays: {
+    desktop: boolean;
+    phone: boolean;
+  };
+}
 
 const Modal = ({ title, onClose, onConfirm, confirmText = 'Save', confirmIcon: Icon = Check, danger = false, disabled = false, width, children }: any) => (
   <div className="modal-overlay" onClick={onClose}>
@@ -141,13 +175,64 @@ export default function App() {
   const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
-  const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>('pixel_10');
+  const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>('pixel_8');
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
+  const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
+  const [showLiveMonitor, setShowLiveMonitor] = useState(false);
+  const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
+  const [gotoLiveMode, setGotoLiveMode] = useState<'desktop' | 'phone'>('desktop');
+  const [streamKey, setStreamKey] = useState<number>(Date.now());
+  const deviceDropdownRef = useRef<HTMLDivElement>(null);
+  const drawerDeviceDropdownRef = useRef<HTMLDivElement>(null);
+  const modalDeviceDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Live Monitor Drawer Resizing & Device Switching State
+  const [monitorSize, setMonitorSize] = useState<'sm' | 'md' | 'lg' | 'custom'>('md');
+  const [isDrawerMaximized, setIsDrawerMaximized] = useState(false);
+  const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mc_live_drawer_width');
+      return saved ? Number(saved) : 520;
+    } catch { return 520; }
+  });
+  const [drawerHeight, setDrawerHeight] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mc_live_drawer_height');
+      return saved ? Number(saved) : 360;
+    } catch { return 360; }
+  });
+  const [isResizingDrawer, setIsResizingDrawer] = useState(false);
+  const [showDrawerDeviceMenu, setShowDrawerDeviceMenu] = useState(false);
+  const [showModalDeviceMenu, setShowModalDeviceMenu] = useState(false);
+  const [connectIpInput, setConnectIpInput] = useState('');
+  const [isConnectingIp, setIsConnectingIp] = useState(false);
+  const [connectStatusMsg, setConnectStatusMsg] = useState('');
+  const [gotoStreamExpanded, setGotoStreamExpanded] = useState(false);
+
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
   const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
 
   const lineListRef = useRef<HTMLDivElement>(null);
   const prevFramesCountRef = useRef(0);
   const selectedFrameIdRef = useRef<string | null>(null);
+
+  // Close device dropdowns on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (deviceDropdownRef.current && !deviceDropdownRef.current.contains(target)) {
+        setShowDeviceDropdown(false);
+      }
+      if (drawerDeviceDropdownRef.current && !drawerDeviceDropdownRef.current.contains(target)) {
+        setShowDrawerDeviceMenu(false);
+      }
+      if (modalDeviceDropdownRef.current && !modalDeviceDropdownRef.current.contains(target)) {
+        setShowModalDeviceMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
   const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any) => {
     const ev: TelemetryEvent = {
@@ -271,32 +356,186 @@ export default function App() {
     selectedFrameIdRef.current = selectedFrameId;
   }, [selectedFrameId]);
 
+  const handleSelectSerial = async (serial: string) => {
+    try {
+      const res = await api('/api/device/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDeviceInfo(prev => prev ? { ...prev, active_serial: d.active_serial, active_model: d.active_model, device_model: d.device_model } : null);
+        if (d.device_model) setDeviceModel(d.device_model);
+        addTelemetryEvent('SYSTEM', `Target device connected: ${d.active_model || serial}`);
+        setStreamKey(Date.now());
+        await fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to select device serial', e);
+    }
+  };
+
+  const [isClosingKeyboard, setIsClosingKeyboard] = useState(false);
+  const handleCloseKeyboard = async () => {
+    setIsClosingKeyboard(true);
+    try {
+      await api('/api/device/close-keyboard', { method: 'POST' });
+      addTelemetryEvent('SYSTEM', 'HID Keyboard: Soft keyboard closed & virtual IME suppressed ✔');
+      setConnectStatusMsg('Keyboard closed ✔');
+      setTimeout(() => setConnectStatusMsg(''), 3000);
+    } catch (e) {
+      console.error('Failed to close keyboard', e);
+    } finally {
+      setIsClosingKeyboard(false);
+    }
+  };
+
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
-    addTelemetryEvent('SYSTEM', `Target device set to ${dev === 'pixel_8' ? 'Google Pixel 8 (31 lines)' : 'Google Pixel 10 (36 lines)'}`);
+    addTelemetryEvent('SYSTEM', `Device profile calibrated for ${dev === 'pixel_8' ? 'Google Pixel 8 (31 lines)' : 'Google Pixel 10 (49 lines)'}`);
     try {
-      await api('/api/device/select', {
+      const res = await api('/api/device/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_model: dev })
       });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.device_model) setDeviceModel(d.device_model);
+        setDeviceInfo(prev => prev ? { ...prev, device_model: d.device_model, profile: d.profile } : null);
+      }
     } catch (e) {
-      console.error('Failed to select device', e);
+      console.error('Failed to select device profile', e);
     }
+  };
+
+  const handleConnectAdbIp = async (ipToConnect?: string) => {
+    const target = (ipToConnect || connectIpInput).trim();
+    if (!target) return;
+    setIsConnectingIp(true);
+    setConnectStatusMsg(`Connecting to ${target}...`);
+    try {
+      const res = await api('/api/adb/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: target })
+      });
+      const d = await res.json();
+      if (res.ok && (d.status === 'ok' || (d.output && d.output.includes('connected')))) {
+        setConnectStatusMsg(`Connected: ${target} ✔`);
+        addTelemetryEvent('SYSTEM', `ADB Connected: ${target}`);
+        await handleSelectSerial(target);
+        setConnectIpInput('');
+        setShowDeviceDropdown(false);
+        setShowDrawerDeviceMenu(false);
+        setShowModalDeviceMenu(false);
+      } else {
+        setConnectStatusMsg(d.output || d.message || 'Connection failed');
+      }
+    } catch (err: any) {
+      setConnectStatusMsg(`Error: ${err.message || 'Connection failed'}`);
+    } finally {
+      setIsConnectingIp(false);
+      setTimeout(() => setConnectStatusMsg(''), 4000);
+    }
+  };
+
+  const handleSetPresetSize = (preset: 'sm' | 'md' | 'lg') => {
+    setMonitorSize(preset);
+    setIsDrawerMaximized(false);
+    let w = 540;
+    let h = 360;
+    if (liveMode === 'desktop') {
+      if (preset === 'sm') { w = 380; h = 260; }
+      else if (preset === 'md') { w = 540; h = 360; }
+      else if (preset === 'lg') { w = 780; h = 500; }
+    } else {
+      if (preset === 'sm') { w = 320; h = 500; }
+      else if (preset === 'md') { w = 380; h = 600; }
+      else if (preset === 'lg') { w = 480; h = 760; }
+    }
+    setDrawerWidth(w);
+    setDrawerHeight(h);
+    try {
+      localStorage.setItem('mc_live_drawer_width', String(w));
+      localStorage.setItem('mc_live_drawer_height', String(h));
+    } catch {}
+  };
+
+  const handleSwitchLiveMode = (mode: 'desktop' | 'phone') => {
+    setLiveMode(mode);
+    setStreamKey(Date.now());
+    if (monitorSize !== 'custom' && !isDrawerMaximized) {
+      let w = mode === 'desktop' ? 540 : 380;
+      let h = mode === 'desktop' ? 360 : 600;
+      if (monitorSize === 'sm') {
+        w = mode === 'desktop' ? 380 : 320;
+        h = mode === 'desktop' ? 260 : 500;
+      } else if (monitorSize === 'lg') {
+        w = mode === 'desktop' ? 780 : 480;
+        h = mode === 'desktop' ? 500 : 760;
+      }
+      setDrawerWidth(w);
+      setDrawerHeight(h);
+      try {
+        localStorage.setItem('mc_live_drawer_width', String(w));
+        localStorage.setItem('mc_live_drawer_height', String(h));
+      } catch {}
+    }
+  };
+
+  const handleDrawerResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingDrawer(true);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = drawerWidth;
+    const startH = drawerHeight;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = startX - moveEvent.clientX;
+      const deltaY = startY - moveEvent.clientY;
+      const newW = Math.max(320, Math.min(window.innerWidth - 60, Math.round(startW + deltaX)));
+      const newH = Math.max(220, Math.min(window.innerHeight - 60, Math.round(startH + deltaY)));
+      setDrawerWidth(newW);
+      setDrawerHeight(newH);
+      setMonitorSize('custom');
+      setIsDrawerMaximized(false);
+    };
+
+    const onMouseUp = () => {
+      setIsResizingDrawer(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      try {
+        localStorage.setItem('mc_live_drawer_width', String(drawerWidth));
+        localStorage.setItem('mc_live_drawer_height', String(drawerHeight));
+      } catch {}
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
 
-  const fetchData = async () => {
+  async function fetchData() {
     const t0 = performance.now();
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes] = await Promise.all([
         api('/api/projects'), api('/api/document'), api('/api/frames'),
         api('/api/recapture-queue'), api('/api/config'), api('/api/pipeline/mode'),
-        api('/api/telemetry')
+        api('/api/telemetry'), api('/api/device/info')
       ]);
       const rtt = Math.round(performance.now() - t0);
       setLatencyMs(rtt);
+      if (devRes && devRes.ok) {
+        const dInfo: DeviceInfoData = await devRes.json();
+        setDeviceInfo(dInfo);
+        if (dInfo.device_model) setDeviceModel(dInfo.device_model);
+      }
       if (telRes && telRes.ok) {
         const telJson = await telRes.json();
         if (telJson.telemetry) setTelemetry(telJson.telemetry);
@@ -377,8 +616,9 @@ export default function App() {
   const handleGotoLine = async () => {
     const lineNum = typeof gotoTargetLine === 'number' ? gotoTargetLine : parseInt(String(gotoTargetLine).trim(), 10);
     if (!lineNum || isNaN(lineNum) || lineNum <= 0) return;
+    const activeName = deviceInfo?.active_model || (deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10');
     setIsNavigating(true);
-    setNavStatus(`Navigating with Arrow Down keys to Line ${lineNum}...`);
+    setNavStatus(`Navigating [${activeName}] with Arrow Down keys to Line ${lineNum}...`);
     try {
       const res = await api('/api/navigation/goto-line', {
         method: 'POST',
@@ -387,12 +627,13 @@ export default function App() {
       });
       const data = await res.json();
       if (res.ok) {
+        const targetDev = data.dev_name || activeName;
         if (data.reached) {
-          setNavStatus(`Reached Line ${data.current_top_line} (Target: ${data.target_line}) ✔`);
-          addTelemetryEvent('SYSTEM', `Go To Line: Reached top line ${data.current_top_line}`);
+          setNavStatus(`[${targetDev}] Reached Line ${data.current_top_line} (Target: ${data.target_line}) ✔`);
+          addTelemetryEvent('SYSTEM', `Go To Line: Reached top line ${data.current_top_line} on ${targetDev}`);
         } else {
-          setNavStatus(`Stopped at Line ${data.current_top_line} (Target: ${data.target_line}) ⚠️`);
-          addTelemetryEvent('SYSTEM', `Go To Line: Stopped at line ${data.current_top_line} (Target: ${data.target_line})`);
+          setNavStatus(`[${targetDev}] Stopped at Line ${data.current_top_line} (Target: ${data.target_line}) ⚠️`);
+          addTelemetryEvent('SYSTEM', `Go To Line: Stopped at line ${data.current_top_line} on ${targetDev}`);
         }
         await fetchData();
       } else {
@@ -406,12 +647,13 @@ export default function App() {
   };
 
   const handleSendControlEnd = async () => {
-    setNavStatus('Sending HID control + end to display mode window...');
+    const activeName = deviceInfo?.active_model || (deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10');
+    setNavStatus(`Sending HID control + end to [${activeName}] display mode window...`);
     try {
       const res = await api('/api/navigation/control-end', { method: 'POST' });
       const data = await res.json();
-      setNavStatus(`Dispatched control+end! Document end line: ${data.last_line || 'unknown'}`);
-      addTelemetryEvent('SYSTEM', 'Dispatched HID control + end to focused window');
+      setNavStatus(`[${activeName}] Dispatched control+end! Document end line: ${data.last_line || 'unknown'}`);
+      addTelemetryEvent('SYSTEM', `Dispatched HID control + end to [${activeName}] focused window`);
       await fetchData();
     } catch (e: any) {
       setNavStatus(`Error: ${e.message}`);
@@ -419,12 +661,13 @@ export default function App() {
   };
 
   const handleSendControlHome = async () => {
-    setNavStatus('Sending HID control + home to display mode window...');
+    const activeName = deviceInfo?.active_model || (deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10');
+    setNavStatus(`Sending HID control + home to [${activeName}] display mode window...`);
     try {
       const res = await api('/api/navigation/control-home', { method: 'POST' });
       const data = await res.json();
-      setNavStatus(`Dispatched control+home! Top line anchored at Line ${data.current_top_line || 1}`);
-      addTelemetryEvent('SYSTEM', 'Dispatched HID control + home to focused window');
+      setNavStatus(`[${activeName}] Dispatched control+home! Top line anchored at Line ${data.current_top_line || 1}`);
+      addTelemetryEvent('SYSTEM', `Dispatched HID control + home to [${activeName}] focused window`);
       await fetchData();
     } catch (e: any) {
       setNavStatus(`Error: ${e.message}`);
@@ -528,8 +771,11 @@ export default function App() {
               const d = (msg.data.device_id || msg.data.device_model || '').toLowerCase();
               if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
               else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
-              addTelemetryEvent('SYSTEM', `Device sync: ${d}`);
+              addTelemetryEvent('SYSTEM', `Device sync: ${msg.data.active_model || d}`);
             }
+            apiJson<DeviceInfoData>('/api/device/info').then(info => {
+              if (info) setDeviceInfo(info);
+            }).catch(() => {});
           } else if (msg.type === 'telemetry_updated') {
             if (msg.data) {
               setTelemetry(prev => ({ ...prev, ...msg.data }));
@@ -704,37 +950,194 @@ export default function App() {
 
         {/* Realtime Metrics & Controls */}
         <div className="header-metrics">
-          {/* Target Device Switcher (Pixel 10 / Pixel 8) */}
-          <div className="device-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
+          {/* Target Device Selector with Dropdown */}
+          <div className="device-selector-wrapper" ref={deviceDropdownRef}>
             <button
-              onClick={() => handleSelectDevice('pixel_8')}
-              title="Google Pixel 8 (31 lines/page)"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
-                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                background: deviceModel === 'pixel_8' ? 'linear-gradient(135deg, #8957e5, #a371f7)' : 'transparent',
-                color: deviceModel === 'pixel_8' ? '#ffffff' : '#8b949e',
-                transition: 'all 0.15s ease'
-              }}
+              className={`device-selector-trigger ${showDeviceDropdown ? 'open' : ''}`}
+              onClick={() => setShowDeviceDropdown(prev => !prev)}
+              title="Select connected Android device and capture profile"
             >
-              <Smartphone size={12} />
-              <span>PIXEL 8 (31L)</span>
+              <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
+              <Smartphone size={13} color={deviceInfo?.connected ? '#00ff9d' : '#8b949e'} />
+              <span style={{ fontWeight: 700, letterSpacing: '0.3px' }}>
+                {deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                ({deviceModel === 'pixel_8' ? '31L' : '49L'})
+              </span>
+              <ChevronDown size={12} color="#8b949e" style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
-            <button
-              onClick={() => handleSelectDevice('pixel_10')}
-              title="Google Pixel 10 (49 lines/page)"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
-                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                background: deviceModel === 'pixel_10' ? 'linear-gradient(135deg, #1f6feb, #388bfd)' : 'transparent',
-                color: deviceModel === 'pixel_10' ? '#ffffff' : '#8b949e',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Smartphone size={12} />
-              <span>PIXEL 10 (49L)</span>
-            </button>
+
+            {showDeviceDropdown && (
+              <div className="device-dropdown-menu">
+                <div className="dropdown-section-title">CONNECTED ADB TARGETS</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {deviceInfo?.devices && deviceInfo.devices.length > 0 ? (
+                    deviceInfo.devices.map(dev => {
+                      const isActive = (deviceInfo.active_serial === dev.serial) || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
+                      return (
+                        <div
+                          key={dev.serial}
+                          className={`device-list-item ${isActive ? 'active' : ''}`}
+                          onClick={() => {
+                            handleSelectSerial(dev.serial);
+                            setShowDeviceDropdown(false);
+                          }}
+                        >
+                          <div className="device-item-left">
+                            <Smartphone size={15} color={isActive ? '#00ff9d' : '#8b949e'} />
+                            <div>
+                              <div className="device-item-title" style={{ color: isActive ? '#00ff9d' : 'var(--text-main)' }}>
+                                {dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}
+                              </div>
+                              <div className="device-item-sub">{dev.serial}</div>
+                            </div>
+                          </div>
+                          {isActive && <Check size={14} color="#00ff9d" />}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ padding: '8px', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                      No ADB devices connected
+                    </div>
+                  )}
+                </div>
+
+                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>CONNECT ADB TARGET (IP:PORT)</div>
+                <div className="connect-ip-row">
+                  <input
+                    type="text"
+                    className="connect-ip-input"
+                    placeholder="192.168.86.xx:5555"
+                    value={connectIpInput}
+                    onChange={e => setConnectIpInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                    onClick={() => handleConnectAdbIp()}
+                    disabled={isConnectingIp || !connectIpInput.trim()}
+                  >
+                    {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
+                  </button>
+                </div>
+                {connectStatusMsg && (
+                  <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>
+                    {connectStatusMsg}
+                  </div>
+                )}
+
+                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>DISPLAY HARDWARE CAPABILITIES</div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <div
+                    style={{
+                      flex: 1, padding: '6px 8px', borderRadius: '6px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                      background: deviceInfo?.displays?.desktop ? 'rgba(0, 255, 157, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                      border: `1px solid ${deviceInfo?.displays?.desktop ? 'rgba(0, 255, 157, 0.3)' : 'var(--border-color)'}`,
+                      color: deviceInfo?.displays?.desktop ? '#00ff9d' : 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', gap: '5px'
+                    }}
+                  >
+                    <Monitor size={12} />
+                    <span>Desktop Mode: {deviceInfo?.displays?.desktop ? 'READY' : 'N/A'}</span>
+                  </div>
+                  <div
+                    style={{
+                      flex: 1, padding: '6px 8px', borderRadius: '6px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                      background: deviceInfo?.displays?.phone ? 'rgba(56, 139, 253, 0.08)' : 'rgba(255, 255, 255, 0.03)',
+                      border: `1px solid ${deviceInfo?.displays?.phone ? 'rgba(56, 139, 253, 0.3)' : 'var(--border-color)'}`,
+                      color: deviceInfo?.displays?.phone ? '#79c0ff' : 'var(--text-muted)',
+                      display: 'flex', alignItems: 'center', gap: '5px'
+                    }}
+                  >
+                    <Smartphone size={12} />
+                    <span>Phone Mode: {deviceInfo?.displays?.phone ? 'READY' : 'N/A'}</span>
+                  </div>
+                </div>
+
+                <div className="dropdown-section-title" style={{ marginTop: '4px' }}>CAPTURE PROFILE CALIBRATION</div>
+                <div className="profile-pills-row">
+                  <button
+                    className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`}
+                    onClick={() => handleSelectDevice('pixel_8')}
+                  >
+                    <Smartphone size={11} />
+                    <span>PIXEL 8 (31L)</span>
+                  </button>
+                  <button
+                    className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`}
+                    onClick={() => handleSelectDevice('pixel_10')}
+                  >
+                    <Smartphone size={11} />
+                    <span>PIXEL 10 (49L)</span>
+                  </button>
+                </div>
+
+                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>INPUT METHOD & IME</div>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontFamily: 'var(--font-mono)',
+                  background: 'rgba(0, 255, 157, 0.05)',
+                  border: '1px solid rgba(0, 255, 157, 0.25)',
+                  color: '#00ff9d'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Keyboard size={13} />
+                    <span>HID Active (IME Suppressed)</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}
+                    onClick={handleCloseKeyboard}
+                    disabled={isClosingKeyboard}
+                    title="Force dismiss on-screen virtual keyboard"
+                  >
+                    {isClosingKeyboard ? <Loader2 size={10} className="spin" /> : 'Close IME'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Realtime Live Screen Monitor Toggle Button */}
+          <button
+            onClick={() => {
+              setShowLiveMonitor(prev => !prev);
+              setStreamKey(Date.now());
+            }}
+            title="Toggle Realtime Device Live Screen Monitor"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '4px 11px',
+              borderRadius: '20px',
+              border: `1px solid ${showLiveMonitor ? '#1f6feb' : 'var(--border-color)'}`,
+              background: showLiveMonitor ? 'linear-gradient(135deg, rgba(31, 111, 235, 0.25), rgba(56, 139, 253, 0.15))' : 'var(--bg-card)',
+              color: showLiveMonitor ? '#79c0ff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 700,
+              fontFamily: 'var(--font-mono)',
+              transition: 'all 0.15s ease',
+              boxShadow: showLiveMonitor ? '0 0 12px rgba(31, 111, 235, 0.3)' : 'none'
+            }}
+          >
+            <Monitor size={12} />
+            <span>LIVE VIEW</span>
+            {showLiveMonitor && (
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 6px #00ff9d' }} />
+            )}
+          </button>
 
           <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
             <span className="label">SOCKET:</span>
@@ -1240,9 +1643,229 @@ export default function App() {
           onClose={() => {
             setShowGotoModal(false);
             setNavStatus('');
+            setShowModalDeviceMenu(false);
           }}
-          width="480px"
+          width={gotoStreamExpanded ? '880px' : '620px'}
         >
+          {/* Target Device Status & In-Modal Device Switcher */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 14px',
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              marginBottom: '12px'
+            }}
+          >
+            <div className="drawer-device-selector-wrapper" ref={modalDeviceDropdownRef}>
+              <button
+                type="button"
+                className="drawer-device-btn"
+                onClick={() => setShowModalDeviceMenu(prev => !prev)}
+                title="Click to switch target device or connect by IP"
+                style={{ padding: '4px 10px', fontSize: '12px' }}
+              >
+                <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
+                <Smartphone size={13} color="var(--color-primary)" />
+                <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                  {deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}
+                </span>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                  ({deviceModel === 'pixel_8' ? '31L' : '49L'})
+                </span>
+                <ChevronDown size={12} style={{ transform: showModalDeviceMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+              </button>
+
+              {showModalDeviceMenu && (
+                <div className="drawer-device-dropdown" style={{ minWidth: '280px', top: 'calc(100% + 4px)' }}>
+                  <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {deviceInfo?.devices && deviceInfo.devices.length > 0 ? (
+                      deviceInfo.devices.map(dev => {
+                        const isActive = (deviceInfo.active_serial === dev.serial) || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
+                        return (
+                          <div
+                            key={dev.serial}
+                            className={`device-list-item ${isActive ? 'active' : ''}`}
+                            onClick={() => {
+                              handleSelectSerial(dev.serial);
+                              setShowModalDeviceMenu(false);
+                            }}
+                            style={{ padding: '6px 8px' }}
+                          >
+                            <div className="device-item-left">
+                              <Smartphone size={13} color={isActive ? '#00ff9d' : '#8b949e'} />
+                              <div>
+                                <div className="device-item-title" style={{ fontSize: '11px', color: isActive ? '#00ff9d' : 'var(--text-main)' }}>
+                                  {dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}
+                                </div>
+                                <div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div>
+                              </div>
+                            </div>
+                            {isActive && <Check size={12} color="#00ff9d" />}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>
+                    )}
+                  </div>
+
+                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>CONNECT ADB BY IP</div>
+                  <div className="connect-ip-row">
+                    <input
+                      type="text"
+                      className="connect-ip-input"
+                      placeholder="192.168.86.xx:5555"
+                      value={connectIpInput}
+                      onChange={e => setConnectIpInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                      onClick={() => handleConnectAdbIp()}
+                      disabled={isConnectingIp || !connectIpInput.trim()}
+                    >
+                      {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
+                    </button>
+                  </div>
+                  {connectStatusMsg && (
+                    <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>
+                      {connectStatusMsg}
+                    </div>
+                  )}
+
+                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
+                  <div className="profile-pills-row">
+                    <button
+                      type="button"
+                      className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`}
+                      onClick={() => { handleSelectDevice('pixel_8'); setShowModalDeviceMenu(false); }}
+                    >
+                      <Smartphone size={10} />
+                      <span>PIXEL 8 (31L)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`}
+                      onClick={() => { handleSelectDevice('pixel_10'); setShowModalDeviceMenu(false); }}
+                    >
+                      <Smartphone size={10} />
+                      <span>PIXEL 10 (49L)</span>
+                    </button>
+                  </div>
+
+                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>INPUT METHOD & IME</div>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontFamily: 'var(--font-mono)',
+                    background: 'rgba(0, 255, 157, 0.05)',
+                    border: '1px solid rgba(0, 255, 157, 0.25)',
+                    color: '#00ff9d'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <Keyboard size={12} />
+                      <span style={{ fontSize: '10px' }}>HID Active (IME Suppressed)</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      style={{ padding: '2px 6px', height: '20px', fontSize: '9px' }}
+                      onClick={handleCloseKeyboard}
+                      disabled={isClosingKeyboard}
+                      title="Force dismiss on-screen virtual keyboard"
+                    >
+                      {isClosingKeyboard ? <Loader2 size={10} className="spin" /> : 'Close IME'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mode selection + Stream Size Toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ display: 'flex', gap: '3px', background: 'rgba(0, 0, 0, 0.4)', padding: '3px', borderRadius: '8px' }}>
+                <button
+                  type="button"
+                  className={`live-tab-btn ${gotoLiveMode === 'desktop' ? 'active' : ''}`}
+                  onClick={() => {
+                    setGotoLiveMode('desktop');
+                    setStreamKey(Date.now());
+                  }}
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                  title="View External Display / Desktop Mode (Display 4)"
+                >
+                  <Monitor size={11} />
+                  <span>DESKTOP</span>
+                </button>
+                <button
+                  type="button"
+                  className={`live-tab-btn ${gotoLiveMode === 'phone' ? 'active' : ''}`}
+                  onClick={() => {
+                    setGotoLiveMode('phone');
+                    setStreamKey(Date.now());
+                  }}
+                  style={{ fontSize: '11px', padding: '4px 10px' }}
+                  title="View Phone Built-in Screen (Display 0)"
+                >
+                  <Smartphone size={11} />
+                  <span>PHONE</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                className={`live-tab-btn ${gotoStreamExpanded ? 'active' : ''}`}
+                onClick={() => setGotoStreamExpanded(prev => !prev)}
+                style={{ fontSize: '11px', padding: '4px 9px' }}
+                title={gotoStreamExpanded ? "Compact Stream Viewport" : "Expand Stream Viewport"}
+              >
+                {gotoStreamExpanded ? <Shrink size={12} /> : <Expand size={12} />}
+                <span>{gotoStreamExpanded ? 'COMPACT' : 'EXPAND'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Embedded Realtime Screen Stream */}
+          <div
+            className={`live-screen-viewport ${gotoLiveMode === 'phone' ? 'phone-mode' : ''}`}
+            style={{
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              marginBottom: '14px',
+              minHeight: gotoStreamExpanded ? (gotoLiveMode === 'phone' ? '540px' : '420px') : '230px',
+              maxHeight: gotoStreamExpanded ? (gotoLiveMode === 'phone' ? '660px' : '520px') : '320px',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <img
+              key={`goto-stream-${gotoLiveMode}-${streamKey}`}
+              className="live-screen-img"
+              src={`${API_BASE}/api/device/stream?mode=${gotoLiveMode}&t=${streamKey}`}
+              alt={`Live ${gotoLiveMode} screen`}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${gotoLiveMode}&t=${Date.now()}`;
+              }}
+            />
+            <div className="live-screen-overlay-badge">
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
+              <span>REALTIME • {gotoLiveMode.toUpperCase()} VIEW</span>
+            </div>
+            <div className="live-screen-overlay-info">
+              {deviceInfo?.active_model || 'DEVICE'} ({deviceInfo?.active_serial || 'CONNECTED'})
+            </div>
+          </div>
+
           <div className="modal-form-group">
             <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
               TARGET LINE NUMBER (FIRST LINE OF LEFT SIDE GUTTER) *
@@ -1275,13 +1898,13 @@ export default function App() {
               </button>
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.4 }}>
-              Clicking <strong>Go</strong> will press the down arrow keys until the line number at the top of the left side gutter matches this number.
+              Clicking <strong>Go</strong> will send arrow down keypresses to <strong>{deviceInfo?.active_model || 'the device'}</strong> until the top gutter matches this line.
             </p>
           </div>
 
-          <div style={{ marginTop: '20px', paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border-color)' }}>
             <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
-              HARDWARE NAVIGATION (FOCUSED WINDOW OF DISPLAY MODE APP)
+              HARDWARE KEYBOARD SHORTCUTS ({deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : 'DEVICE'})
             </label>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
@@ -1308,7 +1931,7 @@ export default function App() {
           {navStatus && (
             <div
               style={{
-                marginTop: '16px',
+                marginTop: '14px',
                 padding: '10px 14px',
                 background: 'rgba(255, 255, 255, 0.04)',
                 border: '1px solid var(--border-color)',
@@ -1325,6 +1948,215 @@ export default function App() {
             </div>
           )}
         </Modal>
+      )}
+
+      {/* Floating Realtime Device Monitor Drawer with Resizing & Device Switching */}
+      {showLiveMonitor && (
+        <div
+          className={`live-monitor-drawer ${isDrawerMaximized ? 'maximized' : ''} ${isResizingDrawer ? 'resizing' : ''}`}
+          style={{
+            width: isDrawerMaximized ? undefined : `${drawerWidth}px`,
+            height: isDrawerMaximized ? undefined : `${drawerHeight}px`
+          }}
+        >
+          {/* Interactive Drag Handle (Top-Left corner) */}
+          {!isDrawerMaximized && (
+            <div
+              className="live-monitor-resize-handle"
+              onMouseDown={handleDrawerResizeMouseDown}
+              title="Drag top-left corner to resize live stream view"
+            />
+          )}
+
+          <div className="live-monitor-header">
+            {/* In-drawer Device Selector */}
+            <div className="drawer-device-selector-wrapper" ref={drawerDeviceDropdownRef}>
+              <button
+                type="button"
+                className="drawer-device-btn"
+                onClick={() => setShowDrawerDeviceMenu(prev => !prev)}
+                title="Switch connected target device"
+              >
+                <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
+                <Smartphone size={12} color="var(--color-primary)" />
+                <span>{deviceInfo?.active_model ? deviceInfo.active_model.toUpperCase() : (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
+                <ChevronDown size={11} style={{ transform: showDrawerDeviceMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+              </button>
+
+              {showDrawerDeviceMenu && (
+                <div className="drawer-device-dropdown">
+                  <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {deviceInfo?.devices && deviceInfo.devices.length > 0 ? (
+                      deviceInfo.devices.map(dev => {
+                        const isActive = (deviceInfo.active_serial === dev.serial) || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
+                        return (
+                          <div
+                            key={dev.serial}
+                            className={`device-list-item ${isActive ? 'active' : ''}`}
+                            onClick={() => {
+                              handleSelectSerial(dev.serial);
+                              setShowDrawerDeviceMenu(false);
+                            }}
+                            style={{ padding: '6px 8px' }}
+                          >
+                            <div className="device-item-left">
+                              <Smartphone size={13} color={isActive ? '#00ff9d' : '#8b949e'} />
+                              <div>
+                                <div className="device-item-title" style={{ fontSize: '11px', color: isActive ? '#00ff9d' : 'var(--text-main)' }}>
+                                  {dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}
+                                </div>
+                                <div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div>
+                              </div>
+                            </div>
+                            {isActive && <Check size={12} color="#00ff9d" />}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>
+                    )}
+                  </div>
+
+                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>CONNECT ADB BY IP</div>
+                  <div className="connect-ip-row">
+                    <input
+                      type="text"
+                      className="connect-ip-input"
+                      placeholder="192.168.86.xx:5555"
+                      value={connectIpInput}
+                      onChange={e => setConnectIpInput(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                      onClick={() => handleConnectAdbIp()}
+                      disabled={isConnectingIp || !connectIpInput.trim()}
+                    >
+                      {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
+                    </button>
+                  </div>
+                  {connectStatusMsg && (
+                    <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>
+                      {connectStatusMsg}
+                    </div>
+                  )}
+
+                  <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
+                  <div className="profile-pills-row">
+                    <button
+                      type="button"
+                      className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`}
+                      onClick={() => { handleSelectDevice('pixel_8'); setShowDrawerDeviceMenu(false); }}
+                    >
+                      <Smartphone size={10} />
+                      <span>PIXEL 8 (31L)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`}
+                      onClick={() => { handleSelectDevice('pixel_10'); setShowDrawerDeviceMenu(false); }}
+                    >
+                      <Smartphone size={10} />
+                      <span>PIXEL 10 (49L)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Mode Tabs (Desktop vs Phone) */}
+            <div className="live-monitor-tabs">
+              <button
+                className={`live-tab-btn ${liveMode === 'desktop' ? 'active' : ''}`}
+                onClick={() => handleSwitchLiveMode('desktop')}
+                title="External Display / Desktop Mode (Display 4)"
+              >
+                <Monitor size={11} />
+                <span>DESKTOP</span>
+              </button>
+              <button
+                className={`live-tab-btn ${liveMode === 'phone' ? 'active' : ''}`}
+                onClick={() => handleSwitchLiveMode('phone')}
+                title="Phone Screen (Display 0)"
+              >
+                <Smartphone size={11} />
+                <span>PHONE</span>
+              </button>
+            </div>
+
+            {/* Size Preset Buttons: S, M, L */}
+            <div className="live-size-pill-group" title="Quick size presets">
+              <button
+                type="button"
+                className={`live-size-btn ${monitorSize === 'sm' && !isDrawerMaximized ? 'active' : ''}`}
+                onClick={() => handleSetPresetSize('sm')}
+              >
+                S
+              </button>
+              <button
+                type="button"
+                className={`live-size-btn ${monitorSize === 'md' && !isDrawerMaximized ? 'active' : ''}`}
+                onClick={() => handleSetPresetSize('md')}
+              >
+                M
+              </button>
+              <button
+                type="button"
+                className={`live-size-btn ${monitorSize === 'lg' && !isDrawerMaximized ? 'active' : ''}`}
+                onClick={() => handleSetPresetSize('lg')}
+              >
+                L
+              </button>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                onClick={() => setStreamKey(Date.now())}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                title="Refresh Stream"
+              >
+                <RefreshCw size={13} />
+              </button>
+              <button
+                onClick={() => setIsDrawerMaximized(prev => !prev)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                title={isDrawerMaximized ? "Restore Size" : "Maximize Stream View"}
+              >
+                {isDrawerMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
+              <button
+                onClick={() => setShowLiveMonitor(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                title="Close Live Monitor"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+
+          <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`}>
+            <img
+              key={`stream-${liveMode}-${streamKey}`}
+              className="live-screen-img"
+              src={`${API_BASE}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
+              alt={`Live ${liveMode} mode screen`}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${liveMode}&t=${Date.now()}`;
+              }}
+            />
+            <div className="live-screen-overlay-badge">
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
+              <span>LIVE • {liveMode.toUpperCase()}</span>
+            </div>
+            <div className="live-screen-overlay-info">
+              {isDrawerMaximized ? 'MAXIMIZED' : `${drawerWidth}×${drawerHeight}`} • {deviceInfo?.active_serial || 'ADB'}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Real-time Telemetry Monitor Toaster */}
