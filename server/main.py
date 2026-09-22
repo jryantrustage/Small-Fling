@@ -26,6 +26,7 @@ except ImportError:
 from concurrent.futures import ProcessPoolExecutor
 import config, db
 from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line, worker_detect_top_line
+from alignment_engine import detect_teams_markdown_alignment
 
 db.init_db()
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
@@ -35,6 +36,7 @@ app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ALLOWED_ORIGINS, al
 async def startup_ensure_keyboard():
     try:
         asyncio.create_task(ensure_adb_keyboard_closed())
+        asyncio.create_task(alignment_monitor_loop())
     except Exception:
         pass
 
@@ -547,6 +549,62 @@ async def set_config(req: ConfigRequest):
 async def get_token_stats():
     return {"server_tokens": {"prompt_tokens": token_stats.get("total_prompt_tokens", 0), "candidates_tokens": token_stats.get("total_candidates_tokens", 0), "total_tokens": token_stats.get("total_tokens", 0), "api_calls": token_stats.get("total_api_calls", 0), "estimated_cost_usd": token_stats.get("estimated_cost_usd", 0.0)}, "mobile_tokens": token_stats.get("mobile_tokens", {}), "total_tokens": token_stats.get("total_tokens", 0) + token_stats.get("mobile_tokens", {}).get("total_tokens", 0)}
 
+latest_alignment_status: Dict[str, Any] = {
+    "status": "teams markdown aligned",
+    "is_aligned": True,
+    "reason": None,
+    "missing": [],
+    "first_line_number": 1,
+    "last_line_number": 47,
+    "file_name": "",
+    "boxes": {
+        "teams_logo": {"name": "Teams Logo / Header", "color": "blue", "hex": "#3b82f6", "passed": True, "text": "Teams", "box_px": [20, 15, 80, 25], "box_norm": [0.015, 0.02, 0.06, 0.035]},
+        "file_name": {"name": "Markdown Filename", "color": "yellow", "hex": "#eab308", "passed": True, "text": "Matrix_main.md", "box_px": [35, 38, 250, 25], "box_norm": [0.027, 0.052, 0.195, 0.035]},
+        "edit_mode": {"name": "Edit Mode (Pencil Icon)", "color": "white", "hex": "#f8fafc", "passed": True, "icon": "pencil", "box_px": [1188, 68, 26, 26], "box_norm": [0.928, 0.094, 0.020, 0.036]},
+        "dark_mode": {"name": "Dark Mode (Moon Icon)", "color": "white", "hex": "#f8fafc", "passed": True, "icon": "moon", "box_px": [1238, 68, 32, 26], "box_norm": [0.967, 0.094, 0.025, 0.036]},
+        "first_line": {"name": "First Line Number", "color": "green", "hex": "#22c55e", "passed": True, "line_number": 1, "box_px": [10, 85, 35, 22], "box_norm": [0.008, 0.118, 0.027, 0.030]},
+        "last_line": {"name": "Last Line Number", "color": "red", "hex": "#ef4444", "passed": True, "line_number": 47, "box_px": [10, 655, 35, 22], "box_norm": [0.008, 0.910, 0.027, 0.030]}
+    },
+    "timestamp": None
+}
+
+async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
+    global latest_alignment_status, orchestration_state, latest_telemetry
+    active_serial = await get_active_adb_serial(serial)
+    if not active_serial:
+        return latest_alignment_status
+    try:
+        snap_bytes = await capture_external_screenshot(active_serial)
+        if snap_bytes:
+            res = detect_teams_markdown_alignment(snap_bytes)
+            res["timestamp"] = datetime.now().isoformat()
+            latest_alignment_status = res
+            if not res.get("is_aligned", False):
+                if orchestration_state.get("status") == "RUNNING":
+                    orchestration_state["status"] = "PAUSED"
+                    orchestration_state["step_label"] = "PAUSED: teams markdown not aligned"
+                    latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({res.get('reason')})"
+            await ws_manager.broadcast({
+                "type": "alignment_status",
+                "alignment": latest_alignment_status,
+                "data": latest_alignment_status,
+                "orchestration": orchestration_state,
+                "telemetry": latest_telemetry
+            })
+    except Exception as e:
+        print(f"[check_and_update_alignment] Error: {e}")
+    return latest_alignment_status
+
+async def alignment_monitor_loop():
+    while True:
+        try:
+            await asyncio.sleep(2.5)
+            serial = await get_active_adb_serial()
+            if serial:
+                await check_and_update_alignment(serial)
+        except Exception:
+            await asyncio.sleep(4.0)
+
 def get_fresh_telemetry() -> Dict[str, Any]:
     t = dict(latest_telemetry); hb = t.get("last_heartbeat")
     if not hb or (datetime.now() - datetime.fromisoformat(hb)).total_seconds() >= 4.0:
@@ -554,10 +612,31 @@ def get_fresh_telemetry() -> Dict[str, Any]:
         if t.get("status_message") in ["Testing Telemetry Sync", "Idle", "Ready"]: t["status_message"] = "Pacer Standby / Awaiting Device Connection"
     return t
 
+@app.get("/api/alignment/status")
+async def get_alignment_status_api():
+    return latest_alignment_status
+
+@app.post("/api/alignment/check")
+async def trigger_alignment_check_api():
+    res = await check_and_update_alignment()
+    return res
+
 @app.get("/api/telemetry")
 async def get_telemetry():
     sl = get_serialized_lines()
-    return {"telemetry": get_fresh_telemetry(), "token_stats": token_stats, "document_summary": {"total_lines": len(document_lines), "min_line": min(document_lines.keys()) if document_lines else 0, "max_line": max(document_lines.keys()) if document_lines else 0, "total_frames": len(captured_frames), "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"), "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])}}
+    return {
+        "telemetry": get_fresh_telemetry(),
+        "token_stats": token_stats,
+        "alignment": latest_alignment_status,
+        "document_summary": {
+            "total_lines": len(document_lines),
+            "min_line": min(document_lines.keys()) if document_lines else 0,
+            "max_line": max(document_lines.keys()) if document_lines else 0,
+            "total_frames": len(captured_frames),
+            "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
+            "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
+        }
+    }
 
 @app.post("/api/telemetry")
 async def update_telemetry(p: TelemetryUpdateRequest):
@@ -1146,6 +1225,28 @@ async def advance_page_api(req: Optional[AdvancePageRequest] = None):
     disp_id = (req.display_id if req and req.display_id is not None else None)
     if disp_id is None:
         disp_id = await detect_external_display_id(active_serial)
+
+    # Pre-flight Alignment Check: ensure Teams markdown editor is aligned
+    align_res = await check_and_update_alignment(active_serial)
+    if not align_res.get("is_aligned", False):
+        orchestration_state.update({
+            "status": "PAUSED",
+            "active_step": "PAUSED",
+            "step_label": "PAUSED: teams markdown not aligned"
+        })
+        latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({align_res.get('reason')})"
+        await ws_manager.broadcast({
+            "type": "alignment_status",
+            "alignment": align_res,
+            "orchestration": orchestration_state,
+            "telemetry": latest_telemetry
+        })
+        return {
+            "status": "paused",
+            "error": "teams markdown not aligned",
+            "reason": align_res.get("reason"),
+            "alignment": align_res
+        }
 
     profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
     cur_page = orchestration_state.get("page", 1)
