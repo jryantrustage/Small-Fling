@@ -154,7 +154,9 @@ latest_telemetry: Dict[str, Any] = {
     "pacer_calibration": {"auto_tune_factor": config.PACER_AUTO_TUNE_FACTOR, "line_pitch_px": config.PACER_LINE_PITCH_PX, "bottom_to_top_error": 0, "wrapped_lines_detected": 0}
 }
 
-def get_current_project_id() -> str: return db.get_active_project()["id"]
+def get_current_project_id() -> Optional[str]:
+    p = db.get_active_project()
+    return p["id"] if p else None
 
 def get_serialized_lines() -> List[Dict[str, Any]]:
     return [
@@ -167,7 +169,15 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
 def load_persisted_state():
     global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
     try:
-        p = db.get_active_project(); pid = p["id"]
+        p = db.get_active_project()
+        if not p:
+            document_lines.clear()
+            captured_frames.clear()
+            latest_telemetry["current_page"] = 0
+            latest_telemetry["current_top_line"] = 0
+            latest_telemetry["current_bottom_line"] = 0
+            return
+        pid = p["id"]
         lines_db = db.get_document_lines(pid)
         document_lines.clear()
         for k, v in lines_db.items(): document_lines[k] = v
@@ -185,6 +195,8 @@ def load_persisted_state():
 def save_persisted_state():
     try:
         pid = get_current_project_id()
+        if not pid:
+            return
         for fid, f in captured_frames.items():
             db.save_frame(pid, fid, f.get("filename", f"{fid}.png"), f.get("top_line", 0), f.get("bottom_line", 0), f.get("page_index", 1), f.get("file_size", 0), f.get("status", "processed"), f.get("extracted_line_count", 0), f.get("custom_offset_y", 0.0), f.get("token_usage", {}), f.get("bounding_boxes", {}), f.get("model_used", ""), f.get("created_at"))
         db.save_document_lines(pid, document_lines); db.save_project_telemetry(pid, latest_telemetry, token_stats)
@@ -533,8 +545,8 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Auto Flipping • Invoked by {invoker}"})
     elif cmd == "CAPTURE_DESKTOP":
         await ensure_adb_keyboard_closed()
-        orchestration_state.update({"active_step": "SCREEN_CAPTURE", "step_label": f"Capture Desktop Invoked by {invoker}"})
-        latest_telemetry.update({"status_message": f"Capture Desktop Mode • Invoked by {invoker}"})
+        orchestration_state.update({"active_step": "SCREEN_CAPTURE", "step_label": f"Repeatedly capture page 1 invoked by {invoker}"})
+        latest_telemetry.update({"status_message": f"repeatedly capture page 1 • Invoked by {invoker}"})
     elif cmd == "GET_NEXT_LINE":
         next_ln = 1
         for f in reversed(sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
@@ -1014,6 +1026,9 @@ async def upload_frame(request: Request, background_tasks: BackgroundTasks):
         bottom_line = lpp
     elif bottom_line <= 0:
         bottom_line = top_line + step
+
+    if not get_current_project_id():
+        raise HTTPException(status_code=400, detail="No active project. Please create a project before capturing or uploading frames.")
 
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
     fid = f"frame_{top_line:05d}_{bottom_line:05d}_{now_str}" if top_line > 0 and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"

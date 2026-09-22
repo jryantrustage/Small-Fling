@@ -28,46 +28,24 @@ def init_db():
         CREATE TABLE IF NOT EXISTS document_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, line_text TEXT NOT NULL, confidence REAL DEFAULT 1.0, frame_id TEXT DEFAULT '', is_verified INTEGER DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (project_id, line_number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS project_telemetry (project_id TEXT PRIMARY KEY, telemetry_json TEXT DEFAULT '{}', token_stats_json TEXT DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         """)
-        c.execute("SELECT COUNT(*) as cnt FROM projects;")
-        if c.fetchone()["cnt"] == 0:
-            now = datetime.now().isoformat()
-            c.execute("INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?);", ("proj_default", "Default Project", "Default MatrixCapture workspace", 0, "active", 1, now, now))
-            c.execute("INSERT INTO project_telemetry VALUES (?, ?, ?, ?);", ("proj_default", "{}", "{}", now))
-            conn.commit()
-        migrate_persisted_json_if_needed(conn)
-
-def migrate_persisted_json_if_needed(conn: sqlite3.Connection):
-    doc_file = DATA_DIR / "persisted_state.json"
-    if not doc_file.exists(): return
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) as cnt FROM frames WHERE project_id = 'proj_default';")
-    if c.fetchone()["cnt"] > 0: return
-    try:
-        with open(doc_file, "r", encoding="utf-8") as f: data = json.load(f)
-        now = datetime.now().isoformat()
-        for fid, f in data.get("frames", {}).items():
-            c.execute("INSERT OR REPLACE INTO frames VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", (fid, "proj_default", f.get("filename", f"{fid}.png"), f.get("top_line", 0), f.get("bottom_line", 0), f.get("page_index", 1), f.get("file_size", 0), f.get("status", "processed"), f.get("extracted_line_count", 0), 0.0, json.dumps(f.get("token_usage", {})), json.dumps(f.get("bounding_boxes", {})), f.get("model_used", ""), f.get("created_at", now)))
-        for lnum_str, ldata in data.get("lines", {}).items():
-            c.execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", ("proj_default", int(lnum_str), ldata.get("text", ""), ldata.get("confidence", 1.0), ldata.get("frame_id", ""), 1 if ldata.get("verified", False) else 0, now))
-        c.execute("INSERT OR REPLACE INTO project_telemetry VALUES (?, ?, ?, ?);", ("proj_default", json.dumps(data.get("latest_telemetry", {})), json.dumps(data.get("token_stats", {})), now))
+        # Clean up any legacy default project and orphaned frames
+        c.execute("DELETE FROM projects WHERE id = 'proj_default';")
         conn.commit()
-    except Exception as e: print(f"[DB] Error migrating persisted_state.json: {e}")
 
-def get_active_project() -> Dict[str, Any]:
+def get_active_project() -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
         c = conn.cursor()
-        for q in ["SELECT * FROM projects WHERE is_active = 1 LIMIT 1;", "SELECT * FROM projects LIMIT 1;"]:
+        for q in ["SELECT * FROM projects WHERE is_active = 1 LIMIT 1;", "SELECT * FROM projects ORDER BY created_at DESC LIMIT 1;"]:
             c.execute(q); row = c.fetchone()
             if row:
-                if not row["is_active"]: c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (row["id"],)); conn.commit()
+                if not row["is_active"]:
+                    c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (row["id"],))
+                    conn.commit()
                 return dict(row)
-        now = datetime.now().isoformat()
-        c.execute("INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?);", ("proj_default", "Default Project", "Default MatrixCapture workspace", 0, "active", 1, now, now))
-        conn.commit()
-        return {"id": "proj_default", "name": "Default Project", "description": "", "target_total_lines": 0, "status": "active", "is_active": 1, "created_at": now, "updated_at": now}
+        return None
 
 def get_projects() -> List[Dict[str, Any]]:
-    sql = "SELECT p.*, COUNT(DISTINCT f.frame_id) as frame_count, COUNT(DISTINCT l.line_number) as line_count, MIN(l.line_number) as min_line, MAX(l.line_number) as max_line FROM projects p LEFT JOIN frames f ON p.id = f.project_id LEFT JOIN document_lines l ON p.id = l.project_id GROUP BY p.id ORDER BY p.updated_at DESC;"
+    sql = "SELECT p.*, COUNT(DISTINCT f.frame_id) as frame_count, COUNT(DISTINCT l.line_number) as line_count, MIN(l.line_number) as min_line, MAX(l.line_number) as max_line FROM projects p LEFT JOIN frames f ON p.id = f.project_id LEFT JOIN document_lines l ON p.id = l.project_id GROUP BY p.id ORDER BY p.created_at DESC;"
     return [dict(r) for r in _execute(sql, fetchall=True)]
 
 def get_project(project_id: str) -> Optional[Dict[str, Any]]:
@@ -88,7 +66,7 @@ def activate_project(project_id: str) -> bool:
     with get_connection() as conn:
         c = conn.cursor()
         if not c.execute("SELECT id FROM projects WHERE id = ?;", (project_id,)).fetchone(): return False
-        c.execute("UPDATE projects SET is_active = 0;"); c.execute("UPDATE projects SET is_active = 1, updated_at = ? WHERE id = ?;", (datetime.now().isoformat(), project_id))
+        c.execute("UPDATE projects SET is_active = 0;"); c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (project_id,))
         conn.commit(); return True
 
 def delete_project(project_id: str) -> bool:
@@ -100,9 +78,8 @@ def delete_project(project_id: str) -> bool:
         c.execute("DELETE FROM projects WHERE id = ?;", (project_id,)); conn.commit()
         for fn in fns: (FRAMES_DIR / fn).unlink(missing_ok=True)
         if was_active:
-            fb = c.execute("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1;").fetchone()
+            fb = c.execute("SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;").fetchone()
             if fb: c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (fb["id"],)); conn.commit()
-            else: init_db()
         return True
 
 def _purge_project_data(project_id: str, new_status: str) -> bool:
@@ -121,7 +98,8 @@ def _purge_project_data(project_id: str, new_status: str) -> bool:
 def abort_project(project_id: str) -> bool: return _purge_project_data(project_id, "aborted")
 def clear_project_data(project_id: str) -> bool: return _purge_project_data(project_id, "active")
 
-def get_frames(project_id: str) -> List[Dict[str, Any]]:
+def get_frames(project_id: Optional[str]) -> List[Dict[str, Any]]:
+    if not project_id: return []
     rows = _execute("SELECT * FROM frames WHERE project_id = ? ORDER BY top_line ASC, page_index ASC, created_at ASC;", (project_id,), fetchall=True)
     res = []
     for r in rows:
@@ -150,7 +128,8 @@ def delete_frame(frame_id: str) -> bool:
         c.execute("DELETE FROM frames WHERE frame_id = ?;", (frame_id,)); c.execute("DELETE FROM document_lines WHERE frame_id = ?;", (frame_id,)); conn.commit()
         (FRAMES_DIR / row["filename"]).unlink(missing_ok=True); return True
 
-def get_document_lines(project_id: str) -> Dict[int, Dict[str, Any]]:
+def get_document_lines(project_id: Optional[str]) -> Dict[int, Dict[str, Any]]:
+    if not project_id: return {}
     rows = _execute("SELECT * FROM document_lines WHERE project_id = ? ORDER BY line_number ASC;", (project_id,), fetchall=True)
     return {r["line_number"]: {"line_number": r["line_number"], "text": r["line_text"], "confidence": r["confidence"], "frame_id": r["frame_id"], "verified": bool(r["is_verified"]), "updated_at": r["updated_at"]} for r in rows}
 
@@ -166,7 +145,8 @@ def save_document_line(project_id: str, line_number: int, text: str, confidence:
     now = datetime.now().isoformat()
     _execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", (project_id, line_number, text, confidence, frame_id, 1 if verified else 0, now))
 
-def get_project_telemetry(project_id: str) -> Dict[str, Any]:
+def get_project_telemetry(project_id: Optional[str]) -> Dict[str, Any]:
+    if not project_id: return {"telemetry": {}, "token_stats": {}}
     row = _execute("SELECT telemetry_json, token_stats_json FROM project_telemetry WHERE project_id = ?;", (project_id,), fetchone=True)
     if not row: return {"telemetry": {}, "token_stats": {}}
     try: tel = json.loads(row["telemetry_json"] or "{}")
