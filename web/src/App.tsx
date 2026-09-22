@@ -53,6 +53,10 @@ interface AlignmentBox {
   color: string;
   hex: string;
   passed: boolean;
+  status?: 'PASSED' | 'FAILED';
+  detected_value?: string;
+  expected?: string;
+  details?: string;
   text?: string;
   line_number?: number;
   icon?: string;
@@ -119,21 +123,19 @@ const renderBoundingBoxesOverlay = (data: AlignmentData) => {
         const y = ny * 1000;
         const w = nw * 1000;
         const h = nh * 1000;
-        const color = b.hex || (
-          b.color === 'green' ? '#22c55e' :
-          b.color === 'red' ? '#ef4444' :
-          b.color === 'yellow' ? '#eab308' :
-          b.color === 'blue' ? '#3b82f6' : '#f8fafc'
-        );
-        const label = key === 'first_line' ? `Ln ${b.line_number || data.first_line_number || '?'}` :
-                      key === 'last_line' ? `Ln ${b.line_number || data.last_line_number || '?'}` :
-                      key === 'file_name' ? (b.text || 'Markdown') :
-                      key === 'teams_logo' ? (b.text || 'Teams') :
-                      key === 'edit_mode' ? '✏️ Edit Mode' :
-                      key === 'dark_mode' ? '🌙 Dark Mode' : b.name;
+        const isPassed = b.passed !== false;
+        const strokeColor = isPassed ? (b.hex || '#22c55e') : '#ef4444';
+        const labelText = !isPassed
+          ? `❌ FAIL: ${b.name || key}`
+          : (key === 'first_line' ? `✔ Ln ${b.line_number || data.first_line_number || '?'}` :
+             key === 'last_line' ? `✔ Ln ${b.line_number || data.last_line_number || '?'}` :
+             key === 'file_name' ? `✔ ${b.text || 'Markdown'}` :
+             key === 'teams_logo' ? `✔ ${b.text || 'Teams'}` :
+             key === 'edit_mode' ? '✔ ✏️ Edit Mode' :
+             key === 'dark_mode' ? '✔ 🌙 Dark Mode' : `✔ ${b.name}`);
         
         const labelY = y > 30 ? y - 6 : y + h + 15;
-        const textWidth = Math.min(260, Math.max(55, label.length * 8 + 10));
+        const textWidth = Math.min(280, Math.max(60, labelText.length * 8 + 12));
         return (
           <g key={key}>
             <rect
@@ -141,31 +143,31 @@ const renderBoundingBoxesOverlay = (data: AlignmentData) => {
               y={y}
               width={w}
               height={h}
-              fill={`${color}1a`}
-              stroke={color}
-              strokeWidth="2.5"
-              strokeDasharray={b.passed ? 'none' : '5,3'}
+              fill={isPassed ? `${strokeColor}1a` : 'rgba(239, 68, 68, 0.15)'}
+              stroke={strokeColor}
+              strokeWidth={isPassed ? "2.5" : "3"}
+              strokeDasharray={isPassed ? 'none' : '6,3'}
             />
             {/* Label Background pill */}
             <rect
               x={Math.max(2, Math.min(998 - textWidth, x))}
               y={Math.max(2, labelY - 12)}
               width={textWidth}
-              height="15"
-              fill="rgba(10, 14, 20, 0.88)"
-              stroke={color}
+              height="16"
+              fill={isPassed ? "rgba(10, 14, 20, 0.90)" : "rgba(185, 28, 28, 0.95)"}
+              stroke={strokeColor}
               strokeWidth="1"
               rx="3"
             />
             <text
-              x={Math.max(6, Math.min(998 - textWidth + 4, x + 4))}
+              x={Math.max(6, Math.min(998 - textWidth + 5, x + 5))}
               y={Math.max(13, labelY)}
-              fill={color}
+              fill={isPassed ? strokeColor : "#ffffff"}
               fontSize="11"
               fontFamily="monospace"
               fontWeight="bold"
             >
-              {label}
+              {labelText}
             </text>
           </g>
         );
@@ -209,6 +211,7 @@ function AppContent() {
   });
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
   const [isCheckingAlignment, setIsCheckingAlignment] = useState<boolean>(false);
+  const [showAlignmentModal, setShowAlignmentModal] = useState<boolean>(false);
 
   const handleTriggerAlignmentCheck = async () => {
     setIsCheckingAlignment(true);
@@ -595,24 +598,28 @@ function AppContent() {
     }
   };
 
-  const handleDrawerResizeMouseDown = (e: React.MouseEvent) => {
+  const handleDrawerResizeMouseDown = (e: React.MouseEvent, direction: 'corner' | 'top' | 'left' = 'corner') => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizingDrawer(true);
     const startX = e.clientX;
     const startY = e.clientY;
-    const startW = drawerWidth;
-    const startH = drawerHeight;
+    const startW = isDrawerMaximized ? Math.max(320, window.innerWidth - 96) : drawerWidth;
+    const startH = isDrawerMaximized ? Math.max(220, window.innerHeight - 72) : drawerHeight;
+    setIsDrawerMaximized(false);
+    setMonitorSize('custom');
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = startX - moveEvent.clientX;
       const deltaY = startY - moveEvent.clientY;
-      const newW = Math.max(320, Math.min(window.innerWidth - 60, Math.round(startW + deltaX)));
-      const newH = Math.max(220, Math.min(window.innerHeight - 60, Math.round(startH + deltaY)));
-      setDrawerWidth(newW);
-      setDrawerHeight(newH);
-      setMonitorSize('custom');
-      setIsDrawerMaximized(false);
+      if (direction === 'corner' || direction === 'left') {
+        const newW = Math.max(320, Math.min(window.innerWidth - 48, Math.round(startW + deltaX)));
+        setDrawerWidth(newW);
+      }
+      if (direction === 'corner' || direction === 'top') {
+        const newH = Math.max(220, Math.min(window.innerHeight - 48, Math.round(startH + deltaY)));
+        setDrawerHeight(newH);
+      }
     };
 
     const onMouseUp = () => {
@@ -627,6 +634,21 @@ function AppContent() {
 
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleToggleDrawerMaximize = () => {
+    if (isDrawerMaximized) {
+      setIsDrawerMaximized(false);
+      if (drawerWidth > window.innerWidth - 120 || drawerHeight > window.innerHeight - 100) {
+        const w = liveMode === 'desktop' ? 780 : 480;
+        const h = liveMode === 'desktop' ? 500 : 760;
+        setDrawerWidth(w);
+        setDrawerHeight(h);
+        setMonitorSize('lg');
+      }
+    } else {
+      setIsDrawerMaximized(true);
+    }
   };
 
   const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
@@ -1338,25 +1360,55 @@ function AppContent() {
       {/* Real-time Teams Markdown Alignment Alert Banner */}
       {!alignmentData.is_aligned && (
         <div className="alignment-alert-banner">
-          <div className="alignment-alert-content">
+          <div className="alignment-alert-content" style={{ flex: 1 }}>
             <div className="alignment-alert-icon">
-              <AlertTriangle size={20} color="#ff7b72" />
+              <AlertTriangle size={22} color="#ff7b72" />
             </div>
-            <div>
-              <div className="alignment-alert-title">
-                ⚠️ teams markdown not aligned
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span className="alignment-alert-title">
+                  ⚠️ TEAMS MARKDOWN NOT ALIGNED
+                </span>
+                <span style={{ fontSize: '11px', color: '#fca5a5' }}>
+                  {alignmentData.reason || 'Verification failed on one or more critical areas.'}
+                </span>
               </div>
-              <div className="alignment-alert-desc">
-                {alignmentData.reason || 'Required bounding boxes (Teams logo, filename, editor icons, line numbers) could not be detected.'}
-                {alignmentData.missing && alignmentData.missing.length > 0 && (
-                  <div style={{ marginTop: '4px', fontSize: '11px', color: '#ffb3ba' }}>
-                    Missing / Misconfigured: {alignmentData.missing.join(', ')}
-                  </div>
-                )}
+
+              {/* 6 Interactive Verification Area Badges */}
+              <div className="alignment-checks-grid">
+                {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
+                  const isPassed = b.passed !== false;
+                  return (
+                    <div
+                      key={key}
+                      className={`alignment-check-badge ${isPassed ? 'passed' : 'failed'}`}
+                      onClick={() => setShowAlignmentModal(true)}
+                      title={`Click for full diagnostics:\n${b.name}: ${isPassed ? 'PASSED' : 'FAILED'}\nDetected: ${b.detected_value || b.text || 'None'}\nCriteria: ${b.expected || ''}\n${b.details || ''}`}
+                    >
+                      <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
+                      <span style={{ fontWeight: 600 }}>{b.name.replace(' / Header', '').replace(' Number', '')}</span>
+                      <span className="alignment-check-status-pill">
+                        {isPassed ? 'PASS' : 'FAIL'}
+                      </span>
+                      <span style={{ fontSize: '10px', opacity: 0.85, maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {b.detected_value || b.text || (isPassed ? 'OK' : 'Missing')}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
           <div className="alignment-alert-actions">
+            <button
+              className="btn-alignment-stream"
+              onClick={() => setShowAlignmentModal(true)}
+              title="Open full AI Verification Diagnostics & Breakdown"
+              style={{ background: 'rgba(239, 68, 68, 0.25)', borderColor: '#ef4444' }}
+            >
+              <Eye size={12} />
+              <span>Inspect Failure Details</span>
+            </button>
             <button
               className="btn-alignment-recheck"
               onClick={handleTriggerAlignmentCheck}
@@ -2198,14 +2250,22 @@ function AppContent() {
             height: isDrawerMaximized ? undefined : `${drawerHeight}px`
           }}
         >
-          {/* Interactive Drag Handle (Top-Left corner) */}
-          {!isDrawerMaximized && (
-            <div
-              className="live-monitor-resize-handle"
-              onMouseDown={handleDrawerResizeMouseDown}
-              title="Drag top-left corner to resize live stream view"
-            />
-          )}
+          {/* Interactive Multi-Direction Drag Handles */}
+          <div
+            className="live-monitor-resize-handle"
+            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'corner')}
+            title="Drag corner to resize live stream view"
+          />
+          <div
+            className="live-monitor-resize-top"
+            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'top')}
+            title="Drag top edge to adjust height"
+          />
+          <div
+            className="live-monitor-resize-left"
+            onMouseDown={(e) => handleDrawerResizeMouseDown(e, 'left')}
+            title="Drag left edge to adjust width"
+          />
 
           <div className="live-monitor-header">
             {/* In-drawer Device Selector */}
@@ -2374,7 +2434,7 @@ function AppContent() {
                 <RefreshCw size={13} />
               </button>
               <button
-                onClick={() => setIsDrawerMaximized(prev => !prev)}
+                onClick={handleToggleDrawerMaximize}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
                 title={isDrawerMaximized ? "Restore Size" : "Maximize Stream View"}
               >
@@ -2393,25 +2453,35 @@ function AppContent() {
           {/* Real-time Diagnostics Strip */}
           {liveMode === 'desktop' && (
             <div className="alignment-diagnostics-strip">
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px' }}>AI AREAS:</span>
-              <div className={`alignment-chip ${alignmentData.boxes?.teams_logo?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#3b82f6' }}>●</span> Teams Logo
-              </div>
-              <div className={`alignment-chip ${alignmentData.boxes?.file_name?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#eab308' }}>●</span> {alignmentData.file_name ? alignmentData.file_name.slice(0, 16) + '...' : 'Filename'}
-              </div>
-              <div className={`alignment-chip ${alignmentData.boxes?.edit_mode?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#ffffff' }}>●</span> Edit Mode (✏️)
-              </div>
-              <div className={`alignment-chip ${alignmentData.boxes?.dark_mode?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#ffffff' }}>●</span> Dark Mode (🌙)
-              </div>
-              <div className={`alignment-chip ${alignmentData.boxes?.first_line?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#22c55e' }}>●</span> Ln {alignmentData.first_line_number || '?'} (Top)
-              </div>
-              <div className={`alignment-chip ${alignmentData.boxes?.last_line?.passed ? 'passed' : 'failed'}`}>
-                <span style={{ color: '#ef4444' }}>●</span> Ln {alignmentData.last_line_number || '?'} (Bottom)
-              </div>
+              <span
+                style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px', cursor: 'pointer' }}
+                onClick={() => setShowAlignmentModal(true)}
+                title="Click to inspect full AI verification diagnostics"
+              >
+                AI AREAS:
+              </span>
+              {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
+                const isPassed = b.passed !== false;
+                const label = key === 'first_line' ? `Ln ${b.line_number || alignmentData.first_line_number || '?'} (Top)` :
+                              key === 'last_line' ? `Ln ${b.line_number || alignmentData.last_line_number || '?'} (Bottom)` :
+                              key === 'file_name' ? (b.text || 'Filename') :
+                              key === 'teams_logo' ? (b.text || 'Teams Logo') :
+                              key === 'edit_mode' ? 'Edit Mode (✏️)' :
+                              key === 'dark_mode' ? 'Dark Mode (🌙)' : b.name;
+                return (
+                  <div
+                    key={key}
+                    className={`alignment-chip ${isPassed ? 'passed' : 'failed'}`}
+                    onClick={() => setShowAlignmentModal(true)}
+                    title={`${b.name}: ${isPassed ? 'PASSED' : 'FAILED'}\nDetected: ${b.detected_value || b.text || 'None'}\nCriteria: ${b.expected || ''}\n${b.details || ''}\nClick to inspect details`}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
+                    <span>{label}</span>
+                    {!isPassed && <span style={{ fontSize: '9px', fontWeight: 800, color: '#ff7b72', marginLeft: '2px' }}>[FAIL]</span>}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -2435,6 +2505,117 @@ function AppContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI Alignment & Verification Diagnostics Modal */}
+      {showAlignmentModal && (
+        <Modal
+          title="AI Alignment & Verification Diagnostics"
+          onClose={() => setShowAlignmentModal(false)}
+          width="740px"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: alignmentData.is_aligned ? 'rgba(34, 197, 94, 0.12)' : 'rgba(239, 68, 68, 0.15)', border: `1px solid ${alignmentData.is_aligned ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.4)'}`, borderRadius: '8px', marginBottom: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ color: alignmentData.is_aligned ? '#22c55e' : '#ef4444' }}>
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: '13px', color: alignmentData.is_aligned ? '#4ade80' : '#fca5a5', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  {alignmentData.is_aligned ? '✔ All 6 Verification Areas Passed' : '⚠️ Teams Markdown Not Aligned'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  {alignmentData.reason || 'All critical bounding boxes and state indicators successfully detected.'}
+                </div>
+              </div>
+            </div>
+            <button
+              className="btn btn-primary"
+              style={{ padding: '6px 14px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px' }}
+              onClick={handleTriggerAlignmentCheck}
+              disabled={isCheckingAlignment}
+            >
+              {isCheckingAlignment ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+              <span>Re-Verify Now</span>
+            </button>
+          </div>
+
+          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Verification Areas Breakdown (6 Areas):
+          </div>
+
+          <div className="alignment-modal-grid">
+            {alignmentData.boxes && Object.entries(alignmentData.boxes).map(([key, b]) => {
+              const isPassed = b.passed !== false;
+              return (
+                <div key={key} className={`alignment-modal-card ${isPassed ? 'passed' : 'failed'}`}>
+                  <div className="alignment-card-header">
+                    <div className="alignment-card-title">
+                      <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
+                      <span>{b.name}</span>
+                    </div>
+                    <span className="alignment-check-status-pill" style={{ background: isPassed ? 'rgba(34, 197, 94, 0.25)' : '#ef4444', color: isPassed ? '#4ade80' : '#ffffff' }}>
+                      {isPassed ? 'PASSED' : 'FAILED'}
+                    </span>
+                  </div>
+
+                  <div className="alignment-card-field">
+                    <span className="alignment-card-field-label">Detected:</span>
+                    <span className={`alignment-card-field-val ${isPassed ? 'success' : 'error'}`}>
+                      {b.detected_value || b.text || 'None detected'}
+                    </span>
+                  </div>
+
+                  <div className="alignment-card-field">
+                    <span className="alignment-card-field-label">Criteria:</span>
+                    <span className="alignment-card-field-val">
+                      {b.expected || 'Detection required'}
+                    </span>
+                  </div>
+
+                  {b.details && (
+                    <div className="alignment-card-field">
+                      <span className="alignment-card-field-label">Diagnostics:</span>
+                      <span className="alignment-card-field-val" style={{ color: isPassed ? 'var(--text-muted)' : '#ffb3ba' }}>
+                        {b.details}
+                      </span>
+                    </div>
+                  )}
+
+                  {b.box_px && (
+                    <div className="alignment-card-field">
+                      <span className="alignment-card-field-label">Bounding Box:</span>
+                      <span className="alignment-card-field-val" style={{ color: 'var(--text-muted)' }}>
+                        [{b.box_px.join(', ')}]
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => {
+                setShowAlignmentModal(false);
+                setShowLiveMonitor(true);
+                setLiveMode('desktop');
+              }}
+            >
+              <Monitor size={13} />
+              <span>Inspect Live Screen</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setShowAlignmentModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* Real-time Telemetry Monitor Toaster */}

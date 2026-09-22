@@ -55,16 +55,16 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 1. BLUE BOX: Teams Logo / Header Dropdown ('Teams')
     # ---------------------------------------------------------
-    # Expected relative area: top-left header bar (y: 1%..8%, x: 1%..18%)
-    y1_t, y2_t = int(h * 0.015), int(h * 0.080)
-    x1_t, x2_t = int(w * 0.012), int(w * 0.180)
+    # Expected relative area: top-left header bar (y: 1%..10%, x: 1%..25%)
+    y1_t, y2_t = int(h * 0.010), int(h * 0.100)
+    x1_t, x2_t = int(w * 0.010), int(w * 0.250)
     crop_teams = img[y1_t:y2_t, x1_t:x2_t]
     teams_detected = False
     teams_text = ""
     teams_box = [x1_t, y1_t, x2_t - x1_t, y2_t - y1_t]
 
     if ocr and crop_teams.size > 0:
-        crop_teams_2x = cv2.resize(crop_teams, (crop_teams.shape[1] * 2, crop_teams.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
+        crop_teams_2x = cv2.resize(crop_teams, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         res_t, _ = ocr(crop_teams_2x)
         if res_t:
             for b, t, s in res_t:
@@ -72,58 +72,78 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                 if "team" in clean.lower():
                     teams_detected = True
                     teams_text = clean
-                    bx1 = x1_t + int(b[0][0] / 2)
-                    by1 = y1_t + int(b[0][1] / 2)
-                    bw = int((b[1][0] - b[0][0]) / 2)
-                    bh = int((b[2][1] - b[1][1]) / 2)
-                    teams_box = [max(0, bx1 - 6), max(0, by1 - 4), bw + 20, bh + 8]
+                    pts = np.array(b) / 1.5
+                    bx1 = int(pts[:, 0].min())
+                    by1 = int(pts[:, 1].min())
+                    bx2 = int(pts[:, 0].max())
+                    by2 = int(pts[:, 1].max())
+                    teams_box = [max(0, x1_t + bx1 - 6), max(0, y1_t + by1 - 4), (bx2 - bx1) + 16, (by2 - by1) + 8]
                     break
 
     # ---------------------------------------------------------
     # 2. YELLOW BOX: Markdown File Name (*.md)
     # ---------------------------------------------------------
-    # Expected relative area: document title tab bar (y: ~4.8%..9.2%, x: ~1.2%..30%)
-    y1_f, y2_f = int(h * 0.048), int(h * 0.090)
-    x1_f, x2_f = int(w * 0.012), int(w * 0.275)
+    # Expected relative area: document title tab bar (y: ~4%..17%, x: ~1%..45%)
+    y1_f, y2_f = int(h * 0.040), int(h * 0.170)
+    x1_f, x2_f = int(w * 0.010), int(w * 0.450)
     crop_file = img[y1_f:y2_f, x1_f:x2_f]
     file_detected = False
     file_name = ""
     file_box = [x1_f, y1_f, x2_f - x1_f, y2_f - y1_f]
 
-    if crop_file.size > 0:
-        gray_f = cv2.cvtColor(crop_file, cv2.COLOR_BGR2GRAY)
-        norm_f = cv2.normalize(gray_f, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-        _, thresh_f = cv2.threshold(norm_f, 100, 255, cv2.THRESH_BINARY)
-        thresh_f_2x = cv2.resize(thresh_f, (thresh_f.shape[1] * 2, thresh_f.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
-        if ocr:
-            res_f, _ = ocr(thresh_f_2x)
-            if res_f:
-                for b, t, s in res_f:
-                    clean = t.strip()
-                    if len(clean) >= 3:
-                        file_detected = True
-                        file_name = clean
-                        bx1 = x1_f + int(b[0][0] / 2)
-                        by1 = y1_f + int(b[0][1] / 2)
-                        bw = int((b[1][0] - b[0][0]) / 2)
-                        bh = int((b[2][1] - b[1][1]) / 2)
-                        file_box = [max(0, bx1 - 6), max(0, by1 - 4), bw + 12, bh + 8]
-                        break
+    if ocr and crop_file.size > 0:
+        # Strategy A: 1.5x scaled RGB (highest accuracy for RapidOCR on desktop captures)
+        crop_f_scaled = cv2.resize(crop_file, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+        res_f, _ = ocr(crop_f_scaled)
+        candidates = []
+        if res_f:
+            for b, t, s in res_f:
+                clean = re.sub(r'^[<←\- \t]+', '', t.strip()).strip()
+                if clean:
+                    candidates.append((clean, b, s, 1.5))
+        
+        # Strategy B fallback: normalized grayscale
+        if not any(c[0].lower().endswith('.md') or len(c[0]) >= 3 for c in candidates):
+            gray_f = cv2.cvtColor(crop_file, cv2.COLOR_BGR2GRAY)
+            norm_f = cv2.normalize(gray_f, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+            norm_f_2x = cv2.resize(norm_f, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+            res_norm, _ = ocr(norm_f_2x)
+            if res_norm:
+                for b, t, s in res_norm:
+                    clean = re.sub(r'^[<←\- \t]+', '', t.strip()).strip()
+                    if clean:
+                        candidates.append((clean, b, s, 2.0))
+
+        # Select best candidate: prioritize *.md, else longest valid title
+        md_matches = [c for c in candidates if '.md' in c[0].lower()]
+        best_candidate = md_matches[0] if md_matches else (candidates[0] if candidates and len(candidates[0][0]) >= 3 else None)
+
+        if best_candidate:
+            c_text, c_b, _, scale = best_candidate
+            file_detected = True
+            file_name = c_text
+            pts = np.array(c_b) / scale
+            bx1 = int(pts[:, 0].min())
+            by1 = int(pts[:, 1].min())
+            bx2 = int(pts[:, 0].max())
+            by2 = int(pts[:, 1].max())
+            file_box = [max(0, x1_f + bx1 - 6), max(0, y1_f + by1 - 4), (bx2 - bx1) + 14, (by2 - by1) + 8]
 
     # ---------------------------------------------------------
     # 3. WHITE BOX 1: Edit Mode ("Pencil Icon" Active)
     # ---------------------------------------------------------
-    # Expected relative area: top-right editor action bar (y: 8%..16%, x: 65%..99%)
-    y1_tb, y2_tb = int(h * 0.080), int(h * 0.160)
-    x1_tb, x2_tb = int(w * 0.650), int(w * 0.990)
+    # Expected relative area: top-right editor action bar (y: 5%..22%, x: 60%..99%)
+    y1_tb, y2_tb = int(h * 0.050), int(h * 0.220)
+    x1_tb, x2_tb = int(w * 0.600), int(w * 0.990)
     crop_tb = img[y1_tb:y2_tb, x1_tb:x2_tb]
 
     edit_mode_active = False
+    blue_pixel_count = 0
     edit_box = [int(w * 0.690), y1_tb, int(w * 0.050), y2_tb - y1_tb]
 
     if crop_tb.size > 0:
         hsv_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
-        blue_mask = cv2.inRange(hsv_tb, np.array([95, 60, 60]), np.array([140, 255, 255]))
+        blue_mask = cv2.inRange(hsv_tb, np.array([95, 50, 50]), np.array([140, 255, 255]))
         blue_pixel_count = int(np.count_nonzero(blue_mask))
         if blue_pixel_count >= 15:
             edit_mode_active = True
@@ -131,6 +151,21 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             min_y, min_x = pts.min(axis=0)
             max_y, max_x = pts.max(axis=0)
             edit_box = [x1_tb + min_x - 6, y1_tb + min_y - 6, (max_x - min_x) + 12, (max_y - min_y) + 12]
+        else:
+            # Check OCR for 'Edit Mode' or 'Edit' text in toolbar
+            if ocr:
+                res_tb, _ = ocr(cv2.resize(crop_tb, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC))
+                if res_tb:
+                    for b, t, s in res_tb:
+                        if 'edit' in t.lower():
+                            edit_mode_active = True
+                            pts = np.array(b) / 1.5
+                            bx1 = int(pts[:, 0].min())
+                            by1 = int(pts[:, 1].min())
+                            bx2 = int(pts[:, 0].max())
+                            by2 = int(pts[:, 1].max())
+                            edit_box = [x1_tb + bx1 - 6, y1_tb + by1 - 6, (bx2 - bx1) + 12, (by2 - by1) + 12]
+                            break
 
     # ---------------------------------------------------------
     # 4. WHITE BOX 2: Dark Mode ("Moon Icon" & Dark Luminance)
@@ -153,74 +188,51 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 5. GREEN BOX: First Line Number (Current Page Top)
     # ---------------------------------------------------------
-    # Narrow left gutter top cell: y: 11%..18%, x: 0.8%..3.8%
-    y1_g, y2_g = int(h * 0.110), int(h * 0.180)
-    x1_g, x2_g = max(0, int(w * 0.008)), int(w * 0.038)
+    # Left gutter region in editor body (y: 18%..45%, x: 0%..6.5%)
+    y1_g, y2_g = int(h * 0.180), int(h * 0.450)
+    x1_g, x2_g = 0, int(w * 0.065)
     crop_green = img[y1_g:y2_g, x1_g:x2_g]
     first_line_num = 0
-    first_line_box = [x1_g, y1_g, x2_g - x1_g, y2_g - y1_g]
+    first_line_box = [x1_g, y1_g, int(w * 0.035), int(h * 0.030)]
 
     if ocr and crop_green.size > 0:
-        crop_g_2x = cv2.resize(crop_green, (crop_green.shape[1] * 2, crop_green.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
-        res_g, _ = ocr(crop_g_2x)
+        crop_g_scaled = cv2.resize(crop_green, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+        res_g, _ = ocr(crop_g_scaled)
         if res_g:
             nums = []
             for b, t, s in res_g:
                 clean_num = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-                if m := re.search(r'\b(\d+)\b', clean_num):
+                if m := re.search(r'^\s*(\d+)', clean_num):
                     try:
                         n_val = int(m.group(1))
-                        bx1 = x1_g + int(b[0][0] / 2)
-                        by1 = y1_g + int(b[0][1] / 2)
-                        bw = int((b[1][0] - b[0][0]) / 2)
-                        bh = int((b[2][1] - b[1][1]) / 2)
-                        nums.append((by1, n_val, [bx1, by1, bw, bh]))
+                        pts = np.array(b) / 2.0
+                        bx1 = int(pts[:, 0].min())
+                        by1 = int(pts[:, 1].min())
+                        bx2 = int(pts[:, 0].max())
+                        by2 = int(pts[:, 1].max())
+                        tight_box = [max(0, x1_g + bx1 - 3), max(0, y1_g + by1 - 3), (bx2 - bx1) + 6, (by2 - by1) + 6]
+                        nums.append((by1, n_val, tight_box))
                     except ValueError: pass
             if nums:
                 nums.sort(key=lambda x: x[0])
                 first_line_num = nums[0][1]
                 first_line_box = nums[0][2]
 
-    # Fallback to wider header context (handles cases where line numbers align with markdown headings e.g. "1 #...")
-    if ocr and first_line_num == 0:
-        y1_gw, y2_gw = int(h * 0.100), int(h * 0.350)
-        x1_gw, x2_gw = max(0, int(w * 0.008)), int(w * 0.120)
-        crop_gw = img[y1_gw:y2_gw, x1_gw:x2_gw]
-        if crop_gw.size > 0:
-            res_gw, _ = ocr(crop_gw)
-            if res_gw:
-                nums_w = []
-                for b, t, s in res_gw:
-                    clean_t = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-                    if m := re.search(r'^\s*(\d+)', clean_t):
-                        try:
-                            n_val = int(m.group(1))
-                            bx1 = x1_gw + int(b[0][0])
-                            by1 = y1_gw + int(b[0][1])
-                            bw = min(int(w * 0.040), int(b[1][0] - b[0][0]))
-                            bh = int(b[2][1] - b[1][1])
-                            nums_w.append((by1, n_val, [bx1, by1, bw, bh]))
-                        except ValueError: pass
-                if nums_w:
-                    nums_w.sort(key=lambda x: x[0])
-                    first_line_num = nums_w[0][1]
-                    first_line_box = nums_w[0][2]
-
     first_line_detected = (first_line_num > 0)
 
     # ---------------------------------------------------------
     # 6. RED BOX: Last Line Number (Current Page Bottom)
     # ---------------------------------------------------------
-    # Narrow left gutter bottom cell: y: 89.5%..98%, x: 0.8%..3.8%
-    y1_r, y2_r = int(h * 0.895), int(h * 0.980)
-    x1_r, x2_r = max(0, int(w * 0.008)), int(w * 0.038)
+    # Left gutter bottom region (y: 82%..99%, x: 0.5%..15%)
+    y1_r, y2_r = int(h * 0.820), int(h * 0.990)
+    x1_r, x2_r = max(0, int(w * 0.005)), int(w * 0.150)
     crop_red = img[y1_r:y2_r, x1_r:x2_r]
     last_line_num = 0
-    last_line_box = [x1_r, y1_r, x2_r - x1_r, y2_r - y1_r]
+    last_line_box = [x1_r, y1_r, int(w * 0.035), int(h * 0.030)]
 
     if ocr and crop_red.size > 0:
-        crop_r_2x = cv2.resize(crop_red, (crop_red.shape[1] * 2, crop_red.shape[0] * 2), interpolation=cv2.INTER_CUBIC)
-        res_r, _ = ocr(crop_r_2x)
+        crop_r_scaled = cv2.resize(crop_red, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+        res_r, _ = ocr(crop_r_scaled)
         if res_r:
             nums = []
             for b, t, s in res_r:
@@ -228,11 +240,13 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                 if m := re.search(r'\b(\d+)\b', clean_num):
                     try:
                         n_val = int(m.group(1))
-                        bx1 = x1_r + int(b[0][0] / 2)
-                        by1 = y1_r + int(b[0][1] / 2)
-                        bw = int((b[1][0] - b[0][0]) / 2)
-                        bh = int((b[2][1] - b[1][1]) / 2)
-                        nums.append((by1, n_val, [bx1, by1, bw, bh]))
+                        pts = np.array(b) / 1.5
+                        bx1 = int(pts[:, 0].min())
+                        by1 = int(pts[:, 1].min())
+                        bx2 = int(pts[:, 0].max())
+                        by2 = int(pts[:, 1].max())
+                        tight_box = [x1_r + bx1 - 3, y1_r + by1 - 3, (bx2 - bx1) + 6, (by2 - by1) + 6]
+                        nums.append((by1, n_val, tight_box))
                     except ValueError: pass
             if nums:
                 nums.sort(key=lambda x: -x[0]) # bottom-most
@@ -242,7 +256,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     last_line_detected = (last_line_num > 0)
 
     # ---------------------------------------------------------
-    # Aggregate Alignment Verdict
+    # Aggregate Alignment Verdict with Rich Diagnostics
     # ---------------------------------------------------------
     def to_clean_box(box):
         return [int(round(float(box[0]))), int(round(float(box[1]))), int(round(float(box[2]))), int(round(float(box[3])))]
@@ -261,6 +275,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "blue",
             "hex": "#3b82f6",
             "passed": bool(teams_detected),
+            "status": "PASSED" if teams_detected else "FAILED",
+            "detected_value": str(teams_text or "Not detected"),
+            "expected": "Header bar containing 'Teams'",
+            "details": f"Found '{teams_text}' in top header" if teams_detected else "No text matching 'Teams' found in top header region",
             "text": str(teams_text or "Teams"),
             "box_px": to_clean_box(teams_box),
             "box_norm": to_norm(teams_box)
@@ -270,6 +288,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "yellow",
             "hex": "#eab308",
             "passed": bool(file_detected),
+            "status": "PASSED" if file_detected else "FAILED",
+            "detected_value": str(file_name or "None detected"),
+            "expected": "Document tab displaying filename (*.md or >= 3 chars)",
+            "details": f"Detected filename tab '{file_name}'" if file_detected else "No document filename tab detected in title region",
             "text": str(file_name),
             "box_px": to_clean_box(file_box),
             "box_norm": to_norm(file_box)
@@ -279,6 +301,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "white",
             "hex": "#f8fafc",
             "passed": bool(edit_mode_active),
+            "status": "PASSED" if edit_mode_active else "FAILED",
+            "detected_value": f"{blue_pixel_count} blue pixels" if blue_pixel_count > 0 else ("Active via toolbar text" if edit_mode_active else "Inactive (0 blue px)"),
+            "expected": "Blue active pencil icon or Edit mode active",
+            "details": "Editor in active edit mode" if edit_mode_active else f"Edit mode inactive (found {blue_pixel_count} blue px, required >= 15)",
             "icon": "pencil",
             "box_px": to_clean_box(edit_box),
             "box_norm": to_norm(edit_box)
@@ -288,6 +314,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "white",
             "hex": "#f8fafc",
             "passed": bool(dark_mode_active),
+            "status": "PASSED" if dark_mode_active else "FAILED",
+            "detected_value": f"Luminance {round(mean_lum, 1)}",
+            "expected": "Dark theme background (mean luminance < 55.0)",
+            "details": f"Dark mode active (luminance {round(mean_lum, 1)} < 55.0)" if dark_mode_active else f"Theme too bright (luminance {round(mean_lum, 1)} >= 55.0)",
             "icon": "moon",
             "luminance": float(round(float(mean_lum), 1)),
             "box_px": to_clean_box(dark_box),
@@ -298,6 +328,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "green",
             "hex": "#22c55e",
             "passed": bool(first_line_detected),
+            "status": "PASSED" if first_line_detected else "FAILED",
+            "detected_value": f"Line {first_line_num}" if first_line_detected else "None detected",
+            "expected": "Top line integer >= 1 in gutter",
+            "details": f"Top line number {first_line_num} detected in gutter" if first_line_detected else "Top line number not found in gutter",
             "line_number": int(first_line_num),
             "box_px": to_clean_box(first_line_box),
             "box_norm": to_norm(first_line_box)
@@ -307,6 +341,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "color": "red",
             "hex": "#ef4444",
             "passed": bool(last_line_detected),
+            "status": "PASSED" if last_line_detected else "FAILED",
+            "detected_value": f"Line {last_line_num}" if last_line_detected else "None detected",
+            "expected": f"Bottom line integer >= {first_line_num or 1} in gutter",
+            "details": f"Bottom line number {last_line_num} detected in gutter" if last_line_detected else "Bottom line number not found in gutter",
             "line_number": int(last_line_num),
             "box_px": to_clean_box(last_line_box),
             "box_norm": to_norm(last_line_box)
@@ -336,3 +374,4 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         "boxes": boxes,
         "resolution": {"width": w, "height": h}
     }
+
