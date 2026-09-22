@@ -3,10 +3,12 @@ import {
   Scan, Settings, Search, Check, X,
   Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, ArrowRight, Loader2,
-  Monitor, RefreshCw, ChevronDown, Maximize2, Minimize2, Expand, Shrink, Keyboard
+  Monitor, RefreshCw, ChevronDown, Maximize2, Minimize2, Expand, Shrink, Keyboard,
+  AlertTriangle, Eye, EyeOff
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
+import { useConfirm, Modal } from './ConfirmModal';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -46,6 +48,32 @@ interface TokenStats {
 interface BoundingBoxItem { x: number; y: number; width: number; height: number; line_number?: number; text_snippet?: string; }
 interface FrameBoundingBoxes { first_line?: BoundingBoxItem; last_line?: BoundingBoxItem; wrapped_lines?: BoundingBoxItem[]; }
 
+interface AlignmentBox {
+  name: string;
+  color: string;
+  hex: string;
+  passed: boolean;
+  text?: string;
+  line_number?: number;
+  icon?: string;
+  luminance?: number;
+  box_px: [number, number, number, number];
+  box_norm: [number, number, number, number];
+}
+
+interface AlignmentData {
+  status: string;
+  is_aligned: boolean;
+  reason?: string | null;
+  missing?: string[];
+  first_line_number?: number;
+  last_line_number?: number;
+  file_name?: string;
+  boxes?: Record<string, AlignmentBox>;
+  resolution?: { width: number; height: number };
+  timestamp?: string | null;
+}
+
 interface DeviceItem {
   serial: string;
   status: string;
@@ -79,27 +107,75 @@ interface DeviceInfoData {
   };
 }
 
-const Modal = ({ title, onClose, onConfirm, confirmText = 'Save', confirmIcon: Icon = Check, danger = false, disabled = false, width, children }: any) => (
-  <div className="modal-overlay" onClick={onClose}>
-    <div className="modal-card" onClick={e => e.stopPropagation()} style={{ ...(danger ? { borderColor: 'rgba(255, 123, 114, 0.5)' } : {}), ...(width ? { width, maxWidth: '95vw' } : {}) }}>
-      <div className="modal-header" style={danger ? { borderBottomColor: 'rgba(255, 123, 114, 0.2)', color: '#ff7b72' } : undefined}>
-        <span>{title}</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer' }}><X size={16} /></button>
-      </div>
-      <div className="modal-body">{children}</div>
-      <div className="modal-footer">
-        <button className="btn btn-outline" onClick={onClose}>{onConfirm ? 'Cancel' : 'Close'}</button>
-        {onConfirm && (
-          <button className={`btn ${danger ? 'btn-outline' : 'btn-primary'}`} style={danger ? { borderColor: '#ff7b72', color: '#ff7b72', background: 'rgba(255, 123, 114, 0.15)' } : undefined} onClick={onConfirm} disabled={disabled}>
-            {Icon && <Icon size={14} />} {confirmText}
-          </button>
-        )}
-      </div>
-    </div>
-  </div>
-);
+const renderBoundingBoxesOverlay = (data: AlignmentData) => {
+  if (!data?.boxes) return null;
+  const boxes = data.boxes;
+  return (
+    <svg className="live-bounding-box-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+      {Object.entries(boxes).map(([key, b]) => {
+        if (!b?.box_norm) return null;
+        const [nx, ny, nw, nh] = b.box_norm;
+        const x = nx * 1000;
+        const y = ny * 1000;
+        const w = nw * 1000;
+        const h = nh * 1000;
+        const color = b.hex || (
+          b.color === 'green' ? '#22c55e' :
+          b.color === 'red' ? '#ef4444' :
+          b.color === 'yellow' ? '#eab308' :
+          b.color === 'blue' ? '#3b82f6' : '#f8fafc'
+        );
+        const label = key === 'first_line' ? `Ln ${b.line_number || data.first_line_number || '?'}` :
+                      key === 'last_line' ? `Ln ${b.line_number || data.last_line_number || '?'}` :
+                      key === 'file_name' ? (b.text || 'Markdown') :
+                      key === 'teams_logo' ? (b.text || 'Teams') :
+                      key === 'edit_mode' ? '✏️ Edit Mode' :
+                      key === 'dark_mode' ? '🌙 Dark Mode' : b.name;
+        
+        const labelY = y > 30 ? y - 6 : y + h + 15;
+        const textWidth = Math.min(260, Math.max(55, label.length * 8 + 10));
+        return (
+          <g key={key}>
+            <rect
+              x={x}
+              y={y}
+              width={w}
+              height={h}
+              fill={`${color}1a`}
+              stroke={color}
+              strokeWidth="2.5"
+              strokeDasharray={b.passed ? 'none' : '5,3'}
+            />
+            {/* Label Background pill */}
+            <rect
+              x={Math.max(2, Math.min(998 - textWidth, x))}
+              y={Math.max(2, labelY - 12)}
+              width={textWidth}
+              height="15"
+              fill="rgba(10, 14, 20, 0.88)"
+              stroke={color}
+              strokeWidth="1"
+              rx="3"
+            />
+            <text
+              x={Math.max(6, Math.min(998 - textWidth + 4, x + 4))}
+              y={Math.max(13, labelY)}
+              fill={color}
+              fontSize="11"
+              fontFamily="monospace"
+              fontWeight="bold"
+            >
+              {label}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
 
-export default function App() {
+function AppContent() {
+  const { confirm, alert: showAlert } = useConfirm();
   const [projects, setProjects] = useState<ProjectData[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -123,6 +199,36 @@ export default function App() {
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const [navStatus, setNavStatus] = useState<string>('');
+
+  // Real-time AI Bounding Boxes & Teams Markdown Alignment
+  const [alignmentData, setAlignmentData] = useState<AlignmentData>({
+    status: 'teams markdown aligned',
+    is_aligned: true,
+    reason: null,
+    boxes: {}
+  });
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
+  const [isCheckingAlignment, setIsCheckingAlignment] = useState<boolean>(false);
+
+  const handleTriggerAlignmentCheck = async () => {
+    setIsCheckingAlignment(true);
+    try {
+      const res = await api('/api/alignment/check', { method: 'POST' });
+      if (res.ok) {
+        const d: AlignmentData = await res.json();
+        setAlignmentData(d);
+        if (d.is_aligned) {
+          addTelemetryEvent('SYSTEM', `Teams markdown aligned: ${d.file_name || 'Document'} (Ln ${d.first_line_number || 1} → ${d.last_line_number || 47}) ✔`);
+        } else {
+          addTelemetryEvent('ERROR', `teams markdown not aligned: ${d.reason || 'Missing areas'}`);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to trigger alignment check:', e);
+    } finally {
+      setIsCheckingAlignment(false);
+    }
+  };
 
   // Global Shortcut: Control + G
   useEffect(() => {
@@ -544,6 +650,7 @@ export default function App() {
         const telJson = await telRes.json();
         if (telJson.telemetry) setTelemetry(telJson.telemetry);
         if (telJson.token_stats) setTokenStats(telJson.token_stats);
+        if (telJson.alignment) setAlignmentData(telJson.alignment);
       }
       if (modeRes && modeRes.ok) {
         const m = await modeRes.json();
@@ -681,7 +788,18 @@ export default function App() {
 
 
   const handleDeleteProject = async (id: string) => {
-    if (!window.confirm('Permanently delete this project?')) return;
+    const targetProject = projects.find(p => p.id === id);
+    const confirmed = await confirm({
+      title: 'Permanently Delete Project?',
+      subtitle: targetProject?.name ? `Project: ${targetProject.name}` : undefined,
+      message: `Are you sure you want to delete project "${targetProject?.name || id}"? All captured frames and OCR transcribed lines will be permanently wiped from the database. This action cannot be undone.`,
+      details: `Project ID: ${id}`,
+      variant: 'danger',
+      confirmText: 'Yes, Delete',
+      cancelText: 'Cancel',
+      confirmIcon: Trash2,
+    });
+    if (!confirmed) return;
     const res = await api(`/api/projects/${id}`, { method: 'DELETE' });
     if (res.ok) await fetchData();
   };
@@ -689,6 +807,18 @@ export default function App() {
   const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
     if (e) e.stopPropagation();
     if (!id || deletingFrameId) return;
+    const targetFrame = frames.find(f => f.frame_id === id);
+    const confirmed = await confirm({
+      title: 'Delete Captured Frame?',
+      subtitle: targetFrame ? `Page ${targetFrame.page_index} • Lines ${targetFrame.top_line} → ${targetFrame.bottom_line}` : undefined,
+      message: 'Are you sure you want to permanently delete this captured frame image and its associated OCR transcribed lines?',
+      details: `Frame ID: ${id.slice(0, 16)}...`,
+      variant: 'danger',
+      confirmText: 'Delete Frame',
+      cancelText: 'Cancel',
+      confirmIcon: Trash2,
+    });
+    if (!confirmed) return;
     setDeletingFrameId(id);
     try {
       const res = await api(`/api/frames/${id}`, { method: 'DELETE' });
@@ -818,6 +948,14 @@ export default function App() {
             } else {
               setNavStatus(`Stopped at Line ${msg.current_top_line} (Target: ${msg.target_line}) ⚠️`);
             }
+          } else if (msg.type === 'alignment_status') {
+            const d = msg.alignment || msg.data;
+            if (d) {
+              setAlignmentData(d);
+              if (!d.is_aligned) {
+                addTelemetryEvent('ERROR', `teams markdown not aligned: ${d.reason || 'Missing areas'}`);
+              }
+            }
           }
         } catch {}
       };
@@ -907,6 +1045,12 @@ export default function App() {
     if (res.ok) {
       setApiKeyConfigured(true);
       setShowConfigModal(false);
+    } else {
+      await showAlert({
+        title: 'Configuration Error',
+        message: 'Failed to update Gemini API key on the backend.',
+        variant: 'danger',
+      });
     }
   };
 
@@ -922,6 +1066,18 @@ export default function App() {
   };
 
   const handleReprocessAllFailed = async () => {
+    const failedFrames = frames.filter(f => f.status.startsWith('error') || f.extracted_line_count === 0);
+    const count = failedFrames.length;
+    const confirmed = await confirm({
+      title: 'Reprocess Failed Frames?',
+      subtitle: `${count} frame${count === 1 ? '' : 's'} identified with issues or unverified status`,
+      message: `Do you want to re-run the OCR extraction pipeline on all failed frames in project "${activeProject?.name || 'current'}"?`,
+      variant: 'warning',
+      confirmText: 'Proceed & Retry',
+      cancelText: 'Cancel',
+      confirmIcon: RotateCw,
+    });
+    if (!confirmed) return;
     await api('/api/reprocess-failed', { method: 'POST' });
     await fetchData();
   };
@@ -1143,6 +1299,24 @@ export default function App() {
             )}
           </button>
 
+          {/* Teams Markdown Alignment Indicator Pill */}
+          <div
+            className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`}
+            onClick={handleTriggerAlignmentCheck}
+            title={alignmentData.is_aligned ? `Teams Markdown Aligned: Ln ${alignmentData.first_line_number || '?'} → ${alignmentData.last_line_number || '?'}` : `Teams Markdown NOT Aligned: ${alignmentData.reason || 'Missing bounding boxes'}`}
+          >
+            <div className={`dot ${alignmentData.is_aligned ? 'pulse-green' : ''}`} style={{ width: '7px', height: '7px', borderRadius: '50%', background: alignmentData.is_aligned ? '#22c55e' : '#ef4444' }} />
+            <span style={{ fontWeight: 700 }}>
+              {alignmentData.is_aligned ? 'TEAMS ALIGNED' : 'NOT ALIGNED'}
+            </span>
+            {alignmentData.first_line_number && alignmentData.last_line_number && (
+              <span style={{ fontSize: '10px', opacity: 0.85 }}>
+                (Ln {alignmentData.first_line_number}-{alignmentData.last_line_number})
+              </span>
+            )}
+            {isCheckingAlignment && <Loader2 size={10} className="spin" />}
+          </div>
+
           <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
             <span className="label">SOCKET:</span>
             <span className="value" style={{ color: wsConnected ? '#00ff9d' : '#ff7b72' }}>{wsConnected ? 'LIVE' : 'OFFLINE'}</span>
@@ -1160,6 +1334,53 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Real-time Teams Markdown Alignment Alert Banner */}
+      {!alignmentData.is_aligned && (
+        <div className="alignment-alert-banner">
+          <div className="alignment-alert-content">
+            <div className="alignment-alert-icon">
+              <AlertTriangle size={20} color="#ff7b72" />
+            </div>
+            <div>
+              <div className="alignment-alert-title">
+                ⚠️ teams markdown not aligned
+              </div>
+              <div className="alignment-alert-desc">
+                {alignmentData.reason || 'Required bounding boxes (Teams logo, filename, editor icons, line numbers) could not be detected.'}
+                {alignmentData.missing && alignmentData.missing.length > 0 && (
+                  <div style={{ marginTop: '4px', fontSize: '11px', color: '#ffb3ba' }}>
+                    Missing / Misconfigured: {alignmentData.missing.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="alignment-alert-actions">
+            <button
+              className="btn-alignment-recheck"
+              onClick={handleTriggerAlignmentCheck}
+              disabled={isCheckingAlignment}
+              title="Re-run AI Bounding Box & Alignment Check"
+            >
+              {isCheckingAlignment ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}
+              <span>Retry AI Verification</span>
+            </button>
+            <button
+              className="btn-alignment-stream"
+              onClick={() => {
+                setShowLiveMonitor(true);
+                setLiveMode('desktop');
+                setStreamKey(Date.now());
+              }}
+              title="Open Desktop Live Stream View"
+            >
+              <Monitor size={12} />
+              <span>Inspect Live Screen</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Action Bar */}
       <div className="orchestration-bar">
@@ -1827,6 +2048,19 @@ export default function App() {
                 </button>
               </div>
 
+              {gotoLiveMode === 'desktop' && (
+                <button
+                  type="button"
+                  className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
+                  onClick={() => setShowBoundingBoxes(prev => !prev)}
+                  title="Toggle AI Alignment Bounding Boxes"
+                  style={{ height: '24px', padding: '0 8px' }}
+                >
+                  {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
+                  <span>AI BOXES</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 className={`live-tab-btn ${gotoStreamExpanded ? 'active' : ''}`}
@@ -1861,6 +2095,7 @@ export default function App() {
                 (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${gotoLiveMode}&t=${Date.now()}`;
               }}
             />
+            {showBoundingBoxes && gotoLiveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
             <div className="live-screen-overlay-badge">
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
               <span>REALTIME • {gotoLiveMode.toUpperCase()} VIEW</span>
@@ -2116,6 +2351,19 @@ export default function App() {
               </button>
             </div>
 
+            {/* AI Bounding Boxes Toggle Button */}
+            {liveMode === 'desktop' && (
+              <button
+                type="button"
+                className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
+                onClick={() => setShowBoundingBoxes(prev => !prev)}
+                title="Toggle AI Alignment Bounding Boxes (Teams, Filename, Icons, Lines)"
+              >
+                {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
+                <span>AI BOXES</span>
+              </button>
+            )}
+
             {/* Action buttons */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button
@@ -2142,6 +2390,31 @@ export default function App() {
             </div>
           </div>
 
+          {/* Real-time Diagnostics Strip */}
+          {liveMode === 'desktop' && (
+            <div className="alignment-diagnostics-strip">
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.4px' }}>AI AREAS:</span>
+              <div className={`alignment-chip ${alignmentData.boxes?.teams_logo?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#3b82f6' }}>●</span> Teams Logo
+              </div>
+              <div className={`alignment-chip ${alignmentData.boxes?.file_name?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#eab308' }}>●</span> {alignmentData.file_name ? alignmentData.file_name.slice(0, 16) + '...' : 'Filename'}
+              </div>
+              <div className={`alignment-chip ${alignmentData.boxes?.edit_mode?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#ffffff' }}>●</span> Edit Mode (✏️)
+              </div>
+              <div className={`alignment-chip ${alignmentData.boxes?.dark_mode?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#ffffff' }}>●</span> Dark Mode (🌙)
+              </div>
+              <div className={`alignment-chip ${alignmentData.boxes?.first_line?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#22c55e' }}>●</span> Ln {alignmentData.first_line_number || '?'} (Top)
+              </div>
+              <div className={`alignment-chip ${alignmentData.boxes?.last_line?.passed ? 'passed' : 'failed'}`}>
+                <span style={{ color: '#ef4444' }}>●</span> Ln {alignmentData.last_line_number || '?'} (Bottom)
+              </div>
+            </div>
+          )}
+
           <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`}>
             <img
               key={`stream-${liveMode}-${streamKey}`}
@@ -2152,6 +2425,7 @@ export default function App() {
                 (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=${liveMode}&t=${Date.now()}`;
               }}
             />
+            {showBoundingBoxes && liveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
             <div className="live-screen-overlay-badge">
               <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
               <span>LIVE • {liveMode.toUpperCase()}</span>
@@ -2186,6 +2460,10 @@ export default function App() {
       />
     </div>
   );
+}
+
+export default function App() {
+  return <AppContent />;
 }
 
 
