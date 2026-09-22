@@ -44,7 +44,7 @@ class DesktopPaginationService : AccessibilityService() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:PaginationWakeLock")
         }
-        if (wakeLock?.isHeld == false) wakeLock?.acquire(60 * 60 * 1000L)
+        if (wakeLock?.isHeld == false) wakeLock?.acquire()
     }
 
     private fun releaseWakeLock() = runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
@@ -211,28 +211,38 @@ class DesktopPaginationService : AccessibilityService() {
     }
 
     suspend fun performInstantCalibration(targetDisplayId: Int = 0, getGutterMetrics: (suspend () -> GutterMetricsSnapshot?)? = null): Int = withContext(Dispatchers.Default) {
+        acquireWakeLock()
         val resolved = resolveTargetDisplayId(targetDisplayId)
-        setSoftKeyboardHidden(true)
+        ensureKeyboardClosed(resolved)
         _calibrationState.value = "Calibrating: Jumping to end via Ctrl+End..."
-        _telemetry.value = _telemetry.value.copy(activeStep = "CALIBRATING", statusMessage = "Calibrating: Jumping to end via Ctrl+End...")
+        _telemetry.value = _telemetry.value.copy(activeStep = "CALIBRATING", statusMessage = "Calibrating: Sending Ctrl+End...")
 
         dispatchKeyCombination(resolved, 113, 123)
-        delay(650)
+        delay(600)
+        ensureKeyboardClosed(resolved)
 
-        val metrics = getGutterMetrics?.invoke()
-        val totalLines = if (metrics != null && metrics.lowestLineNumber > 0) {
-            metrics.lowestLineNumber
-        } else {
-            val snap = captureScreenshot(resolved)
-            val st = snap?.let { detectGutterState(it) }
-            if (st != null && st.currentBottomLine > 0) st.currentBottomLine else 9942
-        }
+        val client = FloatingOverlayService.getUploadClient(applicationContext)
+        val endSnap = captureScreenshot(resolved)
+        val totalLines = if (endSnap != null) {
+            val pid = client.fetchActiveProjectId() ?: "active"
+            client.calibrateProjectEnd(pid, endSnap).getOrNull()
+                ?: endSnap.let { detectGutterState(it)?.currentBottomLine }
+                ?: 0
+        } else 0
 
-        _calibrationState.value = "Calibrating: Total $totalLines lines. Snapping back to Line 1 via Ctrl+Home..."
-        _telemetry.value = _telemetry.value.copy(targetTotalLines = totalLines, statusMessage = "Calibrated: $totalLines lines detected. Snapping back to Line 1...")
+        _calibrationState.value = "Calibrating: Total $totalLines lines. Snapping to Line 1 via Ctrl+Home..."
+        _telemetry.value = _telemetry.value.copy(targetTotalLines = totalLines, statusMessage = "Detected $totalLines lines. Snapping to Line 1...")
 
+        ensureKeyboardClosed(resolved)
         dispatchKeyCombination(resolved, 113, 122)
         delay(500)
+        ensureKeyboardClosed(resolved)
+
+        val homeSnap = captureScreenshot(resolved)
+        if (homeSnap != null) {
+            val pid = client.fetchActiveProjectId() ?: "active"
+            client.verifyProjectHome(pid, homeSnap)
+        }
 
         val targetDevice = _deviceModel.value.resolve()
         _calibrationState.value = "Calibration Complete: $totalLines lines"
@@ -242,7 +252,8 @@ class DesktopPaginationService : AccessibilityService() {
             currentTopLine = 1,
             currentBottomLine = targetDevice.linesPerPage,
             currentPage = 1,
-            statusMessage = "Calibrated: $totalLines lines detected instantly ✔"
+            activeStep = "START_READY",
+            statusMessage = "Calibrated: $totalLines lines verified via Ctrl+End / Ctrl+Home ✔"
         )
         totalLines
     }
@@ -371,6 +382,7 @@ class DesktopPaginationService : AccessibilityService() {
 
     fun resumePagination() {
         if (isPaginating.get() && isPaused.get()) {
+            acquireWakeLock()
             isPaused.set(false); _paginationState.value = PaginationState.Running
             _telemetry.value = _telemetry.value.copy(phase = "PACING", isPacing = true, statusMessage = "Resumed at Page ${_currentPage.value}")
         }
@@ -441,168 +453,39 @@ class DesktopPaginationService : AccessibilityService() {
         }.getOrNull()
     }
 
-    private suspend fun performPageScroll(forward: Boolean, displayId: Int): Boolean {
-        val resolved = resolveTargetDisplayId(displayId)
-        val bounds = getDisplayOrWindowBounds(resolved)
-        val winWidth = bounds.width().toFloat().coerceAtLeast(300f)
-        val winHeight = bounds.height().toFloat().coerceAtLeast(400f)
-        val editorCenterX = bounds.left + winWidth * 0.50f
-        val editorTopMargin = bounds.top + winHeight * 0.20f
-        val editorBottomMargin = bounds.bottom - winHeight * 0.18f
-        val editorCenterY = (editorTopMargin + editorBottomMargin) * 0.5f
-        val stroke = ((editorBottomMargin - editorTopMargin) * 0.70f).coerceIn(180f, 550f)
-        val (startY, endY) = if (forward) (editorCenterY + stroke * 0.5f) to (editorCenterY - stroke * 0.5f)
-        else (editorCenterY - stroke * 0.5f) to (editorCenterY + stroke * 0.5f)
-        return dispatchSwipe(editorCenterX, startY, editorCenterX, endY, 350L, 220L, resolved)
-    }
-
-    suspend fun performPageDown(displayId: Int = 0) = performPageScroll(true, displayId)
-    suspend fun performPageUp(displayId: Int = 0) = performPageScroll(false, displayId)
-
-    suspend fun navigateToNextPageTargetLine(targetTopLine: Int, currentEstimatedTopLine: Int = 0, targetDisplayId: Int = 0): Boolean {
-        val resolved = resolveTargetDisplayId(targetDisplayId)
-        val bounds = getDisplayOrWindowBounds(resolved)
-        
-        val winWidth = bounds.width().toFloat().coerceAtLeast(300f)
-        val winHeight = bounds.height().toFloat().coerceAtLeast(400f)
-        
-        // Editor touch bounds: keep swipes squarely inside the editor, avoiding toolbar (~20%) and bottom bar (~18%)
-        val editorCenterX = bounds.left + winWidth * 0.50f
-        val editorTopMargin = bounds.top + winHeight * 0.20f
-        val editorBottomMargin = bounds.bottom - winHeight * 0.18f
-        val editorCenterY = (editorTopMargin + editorBottomMargin) * 0.5f
-        val usableEditorHeight = (editorBottomMargin - editorTopMargin).coerceAtLeast(200f)
-        val maxStroke = (usableEditorHeight * 0.85f).coerceIn(160f, 650f)
-
-        updateStatus("Orchestrating advance to Target Line $targetTopLine at top...")
-
-        // Step 1: Detect actual currently visible top line on screen
-        val preSnap = captureScreenshot(resolved)
-        val preState = preSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-        val curTop = when {
-            preState != null && preState.currentTopLine > 0 -> preState.currentTopLine
-            currentEstimatedTopLine > 0 -> currentEstimatedTopLine
-            _telemetry.value.currentTopLine > 0 -> _telemetry.value.currentTopLine
-            else -> 1
-        }
-        val targetTopY = preState?.highestDetectedY?.toFloat() ?: (editorTopMargin + 20f)
-        val pitch = (preState?.linePitchPx ?: _telemetry.value.linePitchPx).coerceIn(16f, 48f)
-
-        val lineDelta = targetTopLine - curTop
-        Log.i(TAG, "navigateToNextPageTargetLine: targetTopLine=$targetTopLine, curTop=$curTop, lineDelta=$lineDelta, pitch=$pitch")
-
-        if (lineDelta != 0) {
-            // Step 2: Calculate travel distance.
-            // When lineDelta > 0 (advancing, e.g. Ln 1 -> Ln 50), content must move UP.
-            // For content to move UP, finger swipes UP: startY = centerY + chunk/2, endY = centerY - chunk/2.
-            val totalTravelPx = lineDelta * pitch
-            var remainingTravel = totalTravelPx
-
-            while (Math.abs(remainingTravel) > 5f) {
-                val chunk = remainingTravel.coerceIn(-maxStroke, maxStroke)
-                val startY = editorCenterY + chunk * 0.5f
-                val endY = editorCenterY - chunk * 0.5f
-                val durationMs = (240L + (Math.abs(chunk) / maxStroke * 160L).toLong()).coerceIn(240L, 420L)
-                
-                dispatchSwipe(editorCenterX, startY, editorCenterX, endY, durationMs, holdDurationMs = 220L, displayId = resolved)
-                remainingTravel -= chunk
-                if (Math.abs(remainingTravel) > 5f) {
-                    delay(250)
-                }
-            }
-            delay(500)
-        }
-
-        // Step 3: Multi-iteration closed-loop verification and micro-alignment
-        var currentPitch = pitch
-        for (iter in 1..4) {
-            val checkSnap = captureScreenshot(resolved)
-            val checkState = checkSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-            if (checkState == null || checkState.currentTopLine <= 0) {
-                delay(300)
-                continue
-            }
-            if (checkState.linePitchPx in 14f..50f) {
-                currentPitch = checkState.linePitchPx
-            }
-            val detectedTop = checkState.currentTopLine
-            val error = targetTopLine - detectedTop
-            Log.i(TAG, "navigateToNextPageTargetLine [iter $iter]: detectedTop=$detectedTop, targetTopLine=$targetTopLine, error=$error, pitch=$currentPitch")
-            
-            if (error == 0) {
-                // Sub-line precision: align top Y position to initial top Y position
-                if (targetTopY > 0 && checkState.highestDetectedY > 0) {
-                    val yDiff = checkState.highestDetectedY.toFloat() - targetTopY
-                    if (Math.abs(yDiff) in 4f..60f) {
-                        val subTravel = yDiff.coerceIn(-maxStroke * 0.4f, maxStroke * 0.4f)
-                        val subStartY = (editorCenterY + subTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                        val subEndY = (editorCenterY - subTravel * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                        dispatchSwipe(editorCenterX, subStartY, editorCenterX, subEndY, 240L, 220L, resolved)
-                        delay(350)
-                    }
-                }
-                break
-            } else {
-                // Iterative micro-touch correction:
-                // When error > 0 (content needs to advance further), finger swipes UP: startY > endY.
-                val corrLines = error.coerceIn(-35, 35)
-                val corrTravel = corrLines * currentPitch
-                val corrChunk = corrTravel.coerceIn(-maxStroke, maxStroke)
-                val corrStartY = (editorCenterY + corrChunk * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                val corrEndY = (editorCenterY - corrChunk * 0.5f).coerceIn(editorTopMargin, editorBottomMargin)
-                val corrDuration = (220L + (Math.abs(corrChunk) / maxStroke * 140L).toLong()).coerceIn(220L, 380L)
-                dispatchSwipe(editorCenterX, corrStartY, editorCenterX, corrEndY, corrDuration, 240L, resolved)
-                delay(450)
-            }
-        }
-
-        updateStatus("Target Line $targetTopLine positioned at top of viewport ✔")
-        return true
-    }
+    suspend fun performPageDown(displayId: Int = 0) = dispatchKeyEvents(displayId, 20, _deviceModel.value.resolve().linesPerPage)
+    suspend fun performPageUp(displayId: Int = 0) = dispatchKeyEvents(displayId, 19, _deviceModel.value.resolve().linesPerPage)
 
     suspend fun alignAndCaptureNextPage(targetTopLine: Int? = null, targetDisplayId: Int = 0): Bitmap? {
         val resolved = resolveTargetDisplayId(targetDisplayId)
-        
-        // 1. Read current on-screen position
-        val preSnap = captureScreenshot(resolved)
-        val preState = preSnap?.let { detectGutterState(it) } ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-        val curTop = when {
-            preState != null && preState.currentTopLine > 0 -> preState.currentTopLine
-            _telemetry.value.currentTopLine > 0 -> _telemetry.value.currentTopLine
-            else -> 1
-        }
-        val curBot = when {
-            preState != null && preState.currentBottomLine > 0 -> preState.currentBottomLine
-            _telemetry.value.currentBottomLine > 0 -> _telemetry.value.currentBottomLine
-            else -> curTop + 20
-        }
+        ensureKeyboardClosed(resolved)
 
-        val nextTarget = targetTopLine ?: (curBot + 1)
-        Log.i(TAG, "alignAndCaptureNextPage starting: nextTarget=$nextTarget, curTop=$curTop, curBot=$curBot on display $resolved")
-        
-        // 2. Perform navigation to position nextTarget at top
-        navigateToNextPageTargetLine(nextTarget, curTop, resolved)
+        val curPage = if (_currentPage.value > 0) _currentPage.value else 1
+        val targetDevice = _deviceModel.value.resolve()
+        val arrowCount = targetDevice.arrowCountForPage(curPage)
+        updateStatus("Advancing page with $arrowCount Arrow Down presses...")
+
+        // Positioning the bottom line of code to the top by using the arrow down key
+        dispatchKeyEvents(resolved, 20, arrowCount)
+        delay(400)
+        ensureKeyboardClosed(resolved)
         delay(DWELL_TIME_MS)
-        
-        // 3. Capture settled frame
+
+        // Capture settled frame
         val snapshot = captureScreenshot(resolved)
         if (snapshot != null) {
             latestCapturedBitmap = snapshot
-            val finalState = detectGutterState(snapshot) ?: SegmentRecorderService.instance?.getGutterTracker()?.gutterState?.value
-            val finalTop = if (finalState != null && finalState.currentTopLine > 0) finalState.currentTopLine else nextTarget
-            val targetDevice = _deviceModel.value.resolve()
-            val finalBot = if (finalState != null && finalState.currentBottomLine > 0) finalState.currentBottomLine else (finalTop + targetDevice.stepSize)
-            val newPage = if (_telemetry.value.currentPage > 0) _telemetry.value.currentPage + 1 else 2
-            
+            val (expTop, expBot) = targetDevice.expectedBounds(curPage + 1)
+            val newPage = curPage + 1
             _currentPage.value = newPage
             _telemetry.value = _telemetry.value.copy(
                 currentPage = newPage,
-                currentTopLine = finalTop,
-                currentBottomLine = finalBot,
-                linePitchPx = finalState?.linePitchPx ?: _telemetry.value.linePitchPx,
-                statusMessage = "Line $finalTop at top of Page $newPage ✔"
+                currentTopLine = expTop,
+                currentBottomLine = expBot,
+                activeStep = "SCREEN_CAPTURE",
+                statusMessage = "Page $newPage (Ln $expTop-$expBot) Aligned via Arrow Down ✔"
             )
-            Log.i(TAG, "alignAndCaptureNextPage captured: Page $newPage Top=$finalTop Bot=$finalBot")
+            Log.i(TAG, "alignAndCaptureNextPage captured: Page $newPage Top=$expTop Bot=$expBot via $arrowCount Down keys")
         }
         return snapshot
     }

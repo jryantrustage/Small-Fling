@@ -67,7 +67,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                 wakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:OverlayWakeLock")
             }
             if (wakeLock?.isHeld == false) {
-                wakeLock?.acquire(120 * 60 * 1000L)
+                wakeLock?.acquire()
                 Log.i(TAG, "Screen WakeLock acquired in FloatingOverlayService.")
             }
         } catch (e: Exception) {
@@ -379,19 +379,19 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        when {
-                            !isRunning && !isPaused -> {
-                                Button(
-                                    onClick = { sendCmd("BEGIN_AUTO_FLIPPING") { DesktopPaginationService.instance?.startPacingEngine(totalLines = targetVal) } },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(42.dp)
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("begin Auto Flipping", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
-                                }
-                            }
-                            isRunning -> {
+                    val isKbClosed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (isKbClosed) Color(0xFF00FF9D) else Color(0xFFFF7B72)))
+                            Text(if (isKbClosed) "KB CLOSED" else "KB OPEN", color = if (isKbClosed) Color(0xFF00FF9D) else Color(0xFFFF7B72), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                        Text(if (FloatingOverlayService.isBackendOnline.value) "SYNCED" else "OFFLINE", color = if (FloatingOverlayService.isBackendOnline.value) Color(0xFF00FF9D) else Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    when {
+                        isRunning -> {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = { sendCmd("PAUSE") { DesktopPaginationService.instance?.pausePagination() } },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE3B341)), shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f).height(42.dp)
@@ -409,7 +409,9 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                     Text("END", color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 }
                             }
-                            else -> {
+                        }
+                        isPaused -> {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(
                                     onClick = { sendCmd("RESUME") { DesktopPaginationService.instance?.resumePagination() } },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.weight(1f).height(42.dp)
@@ -428,59 +430,40 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                 }
                             }
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Button(
-                            onClick = {
-                                isCapturing = true
-                                Log.i("FloatingOverlayService", "repeatedly capture page 1 clicked in HUD")
-                                coroutineScope.launch {
-                                    DesktopPaginationService.updateStatus("Capturing desktop screen...")
-                                    val ps = DesktopPaginationService.instance
-                                    val dId = ps?.resolveTargetDisplayId() ?: 0
-                                    val snapshot = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
-                                    if (snapshot != null) {
-                                        DesktopPaginationService.latestCapturedBitmap = snapshot
-                                        val pMode = if (pipelineMode == PipelineMode.CLOUD_GEMINI) "cloud" else "local"
-                                        val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, sync = true, pipelineMode = pMode, modelTarget = if (pMode == "cloud") "gemini" else "ollama")
-                                        DesktopPaginationService.updateStatus(if (res.success) "Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
-                                        Log.i("FloatingOverlayService", "Desktop capture uploaded: success=${res.success}, lines=${res.topLine}-${res.bottomLine}")
-                                    }
-                                    delay(500)
-                                    isCapturing = false
+                        else -> {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = { sendCmd("BEGIN_AUTO_FLIPPING") { DesktopPaginationService.instance?.startPacingEngine(totalLines = targetVal) } },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(42.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("begin Auto Flipping", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1.1f).height(38.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                        ) {
-                            Text(if (isCapturing) "..." else "repeatedly capture page 1", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
-                        }
-
-                        Button(
-                            onClick = {
-                                isGettingNextLine = true
-                                Log.i("FloatingOverlayService", "Get line number of next clicked in HUD")
-                                coroutineScope.launch {
-                                    DesktopPaginationService.updateStatus("Fetching next line...")
-                                    val client = FloatingOverlayService.getUploadClient(context)
-                                    val res = client.getNextPageLine()
-                                    res.onSuccess { nextLn ->
-                                        DesktopPaginationService.updateStatus("Next Line: Ln $nextLn")
-                                    }.onFailure { err ->
-                                        DesktopPaginationService.updateStatus("Next Ln Err: ${err.message}")
-                                    }
-                                    delay(400)
-                                    isGettingNextLine = false
+                                Button(
+                                    onClick = {
+                                        isCapturing = true
+                                        coroutineScope.launch {
+                                            DesktopPaginationService.updateStatus("Capturing desktop screen...")
+                                            val ps = DesktopPaginationService.instance
+                                            val dId = ps?.resolveTargetDisplayId() ?: 0
+                                            val snapshot = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
+                                            if (snapshot != null) {
+                                                DesktopPaginationService.latestCapturedBitmap = snapshot
+                                                val pMode = if (pipelineMode == PipelineMode.CLOUD_GEMINI) "cloud" else "local"
+                                                val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, sync = true, pipelineMode = pMode, modelTarget = if (pMode == "cloud") "gemini" else "ollama")
+                                                DesktopPaginationService.updateStatus(if (res.success) "Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
+                                            }
+                                            delay(500)
+                                            isCapturing = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(36.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                ) {
+                                    Text(if (isCapturing) "..." else "repeatedly capture page 1", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF388BFD).copy(alpha = 0.25f)),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF58A6FF)),
-                            shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1f).height(38.dp),
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                        ) {
-                            Text(if (isGettingNextLine) "..." else "Get line number of next", color = Color(0xFF79C0FF), fontSize = 9.5.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
+                            }
                         }
                     }
 
@@ -499,13 +482,12 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                     }
 
                     AnimatedVisibility(visible = showSettings) {
-                        val activeEngine = SegmentRecorderService.instance?.getGutterTracker()?.ocrEngine?.engineType ?: OcrEngineType.MLKIT
                         Column(
                             modifier = Modifier.fillMaxWidth().padding(top = 10.dp).background(Color(0xFF161B22), RoundedCornerShape(8.dp)).border(1.dp, Color(0xFF30363D), RoundedCornerShape(8.dp)).padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text("ADVANCED HUD CONTROLS", color = Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text("HUD TELEMETRY & SETTINGS", color = Color(0xFF8B949E), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(4.dp))
@@ -513,7 +495,6 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                         .border(1.dp, pipeCol.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
                                         .clickable {
                                             val next = settingsRepo.togglePipelineMode()
-                                            Log.i("FloatingOverlayService", "HUD settings drawer toggled pipeline mode: ${next.label}")
                                             coroutineScope.launch {
                                                 FloatingOverlayService.getUploadClient(context).setServerPipelineMode(if (next == PipelineMode.CLOUD_GEMINI) "cloud" else "local")
                                             }
@@ -523,37 +504,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                     Text("PIPELINE: ${pipelineMode.badge}", color = pipeCol, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            Button(
-                                onClick = {
-                                    isAligningNext = true
-                                    Log.i("FloatingOverlayService", "Align & Next Page triggered from HUD")
-                                    coroutineScope.launch {
-                                        DesktopPaginationService.updateStatus("Fetching next line...")
-                                        val client = FloatingOverlayService.getUploadClient(context)
-                                        val targetTopLine = client.getNextPageLine().getOrNull() ?: (if (botLn > 0) botLn + 1 else 1)
-                                        val pagination = DesktopPaginationService.instance
-                                        val snapshot = pagination?.alignAndCaptureNextPage(targetTopLine, pagination.resolveTargetDisplayId())
-                                        if (snapshot != null) {
-                                            DesktopPaginationService.latestCapturedBitmap = snapshot
-                                            val nextPage = displayPage + 1
-                                            val curTop = DesktopPaginationService.telemetry.value.currentTopLine
-                                            val curBot = DesktopPaginationService.telemetry.value.currentBottomLine
-                                            val actualTop = if (curTop > 0) curTop else targetTopLine
-                                            val actualBot = if (curBot > actualTop) curBot else (actualTop + 44)
-                                            client.uploadFrame(snapshot, actualTop, actualBot, nextPage, true)
-                                            DesktopPaginationService.updateStatus("Page $nextPage (Ln $actualTop-$actualBot) Aligned & Uploaded ✔")
-                                            Log.i("FloatingOverlayService", "Page $nextPage (Ln $actualTop-$actualBot) aligned and uploaded to server.")
-                                        }
-                                        delay(400)
-                                        isAligningNext = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF238636)), shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().height(32.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                            ) {
-                                Text(if (isAligningNext) "Aligning..." else "Next Pg & Align to Top", color = Color.White, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
-                            }
-                            if (targetVal > 0) Text("Target Document Length: $targetVal lines", color = Color(0xFF00FF9D), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                            if (targetVal > 0) Text("Target Document: $targetVal lines", color = Color(0xFF00FF9D), fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                         }
                     }
                 }

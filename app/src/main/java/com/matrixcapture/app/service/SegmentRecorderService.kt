@@ -38,7 +38,7 @@ class SegmentRecorderService : Service() {
     private fun acquireWakeLock() {
         try {
             if (wakeLock == null) wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager).newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:CaptureWakeLock")
-            if (wakeLock?.isHeld == false) wakeLock?.acquire(90 * 60 * 1000L)
+            if (wakeLock?.isHeld == false) wakeLock?.acquire()
         } catch (e: Exception) { Log.e(TAG, "WakeLock error", e) }
     }
 

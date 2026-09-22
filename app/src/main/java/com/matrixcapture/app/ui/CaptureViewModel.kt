@@ -4,7 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.provider.Settings
-import android.util.Log
+import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.matrixcapture.app.capture.DisplayCaptureManager
@@ -21,6 +21,19 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     val uploadClient = FrameUploadClient()
     private val _uiState = MutableStateFlow(UiState())
     val uiState = _uiState.asStateFlow()
+    private var vmWakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireVmWakeLock() = runCatching {
+        if (vmWakeLock == null) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            vmWakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:VmWakeLock")
+        }
+        if (vmWakeLock?.isHeld == false) vmWakeLock?.acquire()
+    }
+
+    private fun releaseVmWakeLock() = runCatching {
+        if (vmWakeLock?.isHeld == true) vmWakeLock?.release()
+    }
 
     init {
         val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
@@ -66,9 +79,15 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                         _uiState.update { it.copy(orchestrationStatus = ro.status, orchestrationInvokedBy = ro.invokedBy, orchestrationActiveStep = ro.activeStep, orchestrationStepLabel = ro.stepLabel, orchestrationNextTargetTop = ro.nextTargetTop) }
                         if (ro.status != prev) {
                             when (ro.status) {
-                                "RUNNING" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) DesktopPaginationService.instance?.resumePagination() else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) startPacingOnly()
+                                "RUNNING" -> {
+                                    acquireVmWakeLock()
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) DesktopPaginationService.instance?.resumePagination() else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) startPacingOnly()
+                                }
                                 "PAUSED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) DesktopPaginationService.instance?.pausePagination()
-                                "COMPLETED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) stopWorkflow()
+                                "COMPLETED", "ABORTED" -> {
+                                    releaseVmWakeLock()
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) stopWorkflow()
+                                }
                             }
                         }
                         val cmdKey = "${ro.command}_${ro.updatedAt.ifEmpty { ro.stepLabel }}"
@@ -116,6 +135,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun startFullWorkflow(resultCode: Int, resultData: Intent) {
         if (_uiState.value.isWorkflowRunning) return
+        acquireVmWakeLock()
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Initializing capture...", errorMessage = null) }
@@ -185,12 +205,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     fun startPacingOnly(totalLines: Int = _uiState.value.targetTotalLines, dwellMs: Long = 1500L) {
         val ps = DesktopPaginationService.instance ?: return run { _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled.") } }
         val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
+        acquireVmWakeLock()
         _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running pacer test on Display $dId...") }
         ps.startPacingEngine(dId, totalLines, dwellMs, "PACING_TEST", onPageAdvanced = { page, top, bot -> _uiState.update { it.copy(workflowStatus = "Page $page (Lines $top-$bot) • Freeze ${dwellMs}ms") } })
     }
 
     fun calibrateDocument() {
         val ps = DesktopPaginationService.instance ?: return run { _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled.") } }
+        acquireVmWakeLock()
         viewModelScope.launch {
             val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
             _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Calibrating line count...") }
@@ -203,8 +225,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun stopWorkflow() = viewModelScope.launch {
+        releaseVmWakeLock()
         DesktopPaginationService.instance?.stopPagination(); SegmentRecorderService.instance?.stopWorkflow()
         _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Stopped by user.") }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        releaseVmWakeLock()
     }
 
     fun captureDesktopMode() = viewModelScope.launch {

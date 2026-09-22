@@ -62,6 +62,12 @@ def create_project(name: str, description: str = "", target_total_lines: int = 0
         conn.commit()
     return get_project(pid) or {}
 
+def update_project_target_lines(project_id: str, target_total_lines: int) -> bool:
+    with get_connection() as conn:
+        conn.cursor().execute("UPDATE projects SET target_total_lines = ?, updated_at = ? WHERE id = ?;", (target_total_lines, datetime.now().isoformat(), project_id))
+        conn.commit()
+    return True
+
 def activate_project(project_id: str) -> bool:
     with get_connection() as conn:
         c = conn.cursor()
