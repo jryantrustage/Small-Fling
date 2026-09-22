@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.matrixcapture.app.capture.DisplayCaptureManager
 import com.matrixcapture.app.network.FrameUploadClient
+import com.matrixcapture.app.data.DeviceModel
 import com.matrixcapture.app.service.DesktopPaginationService
 import com.matrixcapture.app.service.SegmentRecorderService
 import com.matrixcapture.app.splicer.MarkdownAssembler
@@ -30,7 +31,10 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         uploadClient.serverHost = host; _uiState.update { it.copy(serverHost = host) }
 
         val lines = prefs.getInt("target_total_lines", 0).let { if (it in listOf(9487, 9994)) { prefs.edit().putInt("target_total_lines", 0).apply(); 0 } else it }
-        _uiState.update { it.copy(targetTotalLines = lines, calculatedTotalLines = lines) }
+        val savedDeviceStr = prefs.getString("device_model", DeviceModel.AUTO.id)
+        val initialDevice = DeviceModel.fromString(savedDeviceStr)
+        DesktopPaginationService.setDeviceModel(initialDevice)
+        _uiState.update { it.copy(targetTotalLines = lines, calculatedTotalLines = lines, deviceModel = initialDevice) }
         DesktopPaginationService.resetToStart(lines)
 
         viewModelScope.launch { _uiState.update { it.copy(isBackendConnected = uploadClient.testConnection()) } }
@@ -41,6 +45,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         DesktopPaginationService.currentPage.bind { p -> _uiState.update { it.copy(currentPage = p) } }
         DesktopPaginationService.calibrationState.bind { cs -> _uiState.update { it.copy(calibrationStatus = cs) } }
         DesktopPaginationService.calculatedTotalLines.bind { t -> _uiState.update { it.copy(calculatedTotalLines = t) } }
+        DesktopPaginationService.deviceModel.bind { m -> _uiState.update { it.copy(deviceModel = m) } }
 
         viewModelScope.launch {
             while (isActive) {
@@ -51,7 +56,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                     val pt = api?.mobilePromptTokens?.get() ?: 0; val ct = api?.mobileCandidatesTokens?.get() ?: 0; val tt = api?.mobileTotalTokens?.get() ?: 0
                     _uiState.update { it.copy(mobilePromptTokens = pt, mobileCandidatesTokens = ct, mobileTotalTokens = tt, autoTuneFactor = pState.autoTuneFactor, bottomToTopError = pState.bottomToTopError, wrappedLinesDetected = pState.wrappedLinesDetected) }
 
-                    val ok = uploadClient.sendTelemetry(FrameUploadClient.TelemetryData("Pixel 10 Desktop (${_uiState.value.targetDisplay?.name ?: "Display 1"})", DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running, pState.currentPage, pState.currentTopLine, pState.currentBottomLine, pState.targetTotalLines, pState.dwellRemainingMs.toInt(), pState.phase, pState.statusMessage, pState.activeStep, "mobile", pt, ct, tt, pState.autoTuneFactor, pState.linePitchPx, pState.bottomToTopError, pState.wrappedLinesDetected))
+                    val resolvedDevice = DesktopPaginationService.deviceModel.value.resolve()
+                    val devName = "${resolvedDevice.displayName} Desktop (${_uiState.value.targetDisplay?.name ?: "Display 1"})"
+                    val ok = uploadClient.sendTelemetry(FrameUploadClient.TelemetryData(devName, DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running, pState.currentPage, pState.currentTopLine, pState.currentBottomLine, pState.targetTotalLines, pState.dwellRemainingMs.toInt(), pState.phase, pState.statusMessage, pState.activeStep, "mobile", pt, ct, tt, pState.autoTuneFactor, pState.linePitchPx, pState.bottomToTopError, pState.wrappedLinesDetected))
                     _uiState.update { it.copy(isBackendConnected = ok) }
 
                     uploadClient.fetchOrchestrationState().getOrNull()?.let { ro ->
@@ -211,9 +218,10 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
             return@launch
         }
         DesktopPaginationService.latestCapturedBitmap = snap
+        val resolvedDev = DesktopPaginationService.deviceModel.value.resolve()
         val page = _uiState.value.currentPage.coerceAtLeast(1)
         val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 1
-        val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else 49
+        val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else resolvedDev.linesPerPage
         _uiState.update { it.copy(workflowStatus = "Uploading desktop mode capture (Lines $top-$bot)...") }
         val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
         if (res.success) {
@@ -238,10 +246,10 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun alignAndCaptureNextPage() = viewModelScope.launch {
         val ps = DesktopPaginationService.instance ?: return@launch run { _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled") } }
+        val resolvedDev = DesktopPaginationService.deviceModel.value.resolve()
         val curPage = _uiState.value.currentPage.coerceAtLeast(1)
         val targetPage = curPage + 1
-        val expectedTop = if (targetPage == 2) 50 else (50 + (targetPage - 2) * 48)
-        val expectedBot = expectedTop + 48
+        val (expectedTop, expectedBot) = resolvedDev.expectedBounds(targetPage)
         _uiState.update { it.copy(workflowStatus = "Advancing to Page $targetPage (targeting Ln $expectedTop at top) via Arrow Keys...") }
         val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
         ps.advancePageWithArrowKeys(curPage, dId)
@@ -257,6 +265,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun openAccessibilitySettings() = context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK })
+
+    fun setDeviceModel(model: DeviceModel) {
+        val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("device_model", model.id).apply()
+        DesktopPaginationService.setDeviceModel(model)
+        _uiState.update { it.copy(deviceModel = model) }
+        DesktopPaginationService.updateStatus("Device set to: ${model.displayName} (${model.resolve().linesPerPage} lines/pg)")
+    }
 
     private fun updateOrch(cmd: String, st: String) = viewModelScope.launch {
         _uiState.update { it.copy(orchestrationStatus = st, orchestrationInvokedBy = "Mobile App 📱") }
@@ -281,7 +297,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val targetDisplay: DisplayCaptureManager.ExternalDisplayInfo? = null, val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
         val assemblyResult: MarkdownAssembler.AssemblyResult? = null, val errorMessage: String? = null, val orchestrationStatus: String = "IDLE",
         val orchestrationInvokedBy: String = "Web Studio 💻", val orchestrationActiveStep: String = "START_READY", val orchestrationStepLabel: String = "Ready at Ln 1",
-        val orchestrationNextTargetTop: Int? = null
+        val orchestrationNextTargetTop: Int? = null, val deviceModel: DeviceModel = DeviceModel.AUTO
     )
     companion object { private const val TAG = "CaptureViewModel" }
 }

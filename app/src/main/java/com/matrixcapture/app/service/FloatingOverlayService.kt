@@ -105,9 +105,10 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                     val pState = DesktopPaginationService.telemetry.value
                     val isRunning = DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running
                     val geminiApi = SegmentRecorderService.instance?.getGeminiApiService()
+                    val dev = DesktopPaginationService.deviceModel.value.resolve()
                     val isOnline = uploadClient.sendTelemetry(
                         FrameUploadClient.TelemetryData(
-                            deviceId = "Pixel 10 Desktop (HUD Active)", isPacing = isRunning,
+                            deviceId = "${dev.displayName} Desktop (HUD Active)", isPacing = isRunning,
                             currentPage = pState.currentPage, currentTopLine = pState.currentTopLine,
                             currentBottomLine = pState.currentBottomLine, targetTotalLines = pState.targetTotalLines,
                             dwellCountdownMs = pState.dwellRemainingMs.toInt(), phase = pState.phase,
@@ -137,8 +138,9 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                                             ?: DesktopPaginationService.latestCapturedBitmap
                                         if (snap != null) {
                                             DesktopPaginationService.latestCapturedBitmap = snap
+                                            val resolvedDevice = DesktopPaginationService.deviceModel.value.resolve()
                                             val top = if (pState.currentTopLine > 0) pState.currentTopLine else 1
-                                            val bot = if (pState.currentBottomLine > 0) pState.currentBottomLine else 49
+                                            val bot = if (pState.currentBottomLine > 0) pState.currentBottomLine else resolvedDevice.linesPerPage
                                             val page = if (pState.currentPage > 0) pState.currentPage else 1
                                             val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
                                             DesktopPaginationService.updateStatus("Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})")
@@ -296,8 +298,10 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
             var isAligningNext by remember { mutableStateOf(false) }
             var isGettingNextLine by remember { mutableStateOf(false) }
             val displayPage = if (telemetry.currentPage > 0) telemetry.currentPage else (if (currentPage > 0) currentPage else 1)
+            val devModel by DesktopPaginationService.deviceModel.collectAsState()
+            val resolvedDevice = devModel.resolve()
             val topLn = if (telemetry.currentTopLine > 0) telemetry.currentTopLine else 1
-            val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else 44
+            val botLn = if (telemetry.currentBottomLine > 0) telemetry.currentBottomLine else resolvedDevice.linesPerPage
             val targetVal = if (telemetry.targetTotalLines > 0) telemetry.targetTotalLines else (if (calculatedTotalLines > 0) calculatedTotalLines else 0)
             val isRunning = paginationState is DesktopPaginationService.PaginationState.Running
             val isPaused = paginationState is DesktopPaginationService.PaginationState.Paused

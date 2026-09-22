@@ -4,7 +4,7 @@ import {
   UploadCloud, Cpu, Coins, FileCode, Layers, RotateCw, RotateCcw,
   AlertCircle, FolderKanban, Plus, Trash2, Ban, ChevronLeft,
   ChevronRight, MoveVertical, Menu, Play, Pause, Square, Camera,
-  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash, ArrowDown
+  Clock, Repeat, Flag, ChevronsRight, Sparkles, Cloud, Zap, Hash, ArrowDown, Smartphone
 } from 'lucide-react';
 
 const env = import.meta.env;
@@ -128,6 +128,20 @@ export default function App() {
   const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
+  const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>('pixel_10');
+
+  const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
+    setDeviceModel(dev);
+    try {
+      await api('/api/device/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_model: dev })
+      });
+    } catch (e) {
+      console.error('Failed to select device', e);
+    }
+  };
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
 
   const lineListRef = useRef<HTMLDivElement>(null);
@@ -176,8 +190,19 @@ export default function App() {
       if (telemetryRes.ok) {
         const t = await telemetryRes.json();
         setTelemetry(prev => ({ ...prev, ...t }));
+        if (t.device_id) {
+          const d = t.device_id.toLowerCase();
+          if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
+          else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
+        }
       }
-      if (orchRes.ok) setOrch(await orchRes.json());
+      if (orchRes.ok) {
+        const o = await orchRes.json();
+        setOrch(o);
+        if (o.device_model) {
+          setDeviceModel(o.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
+        }
+      }
     } catch {
       setBackendConnected(false);
     }
@@ -322,8 +347,27 @@ export default function App() {
             if (msg.data.token_stats) setTokenStats(msg.data.token_stats);
           } else if (msg.type === 'telemetry_updated') {
             setTelemetry(prev => ({ ...prev, ...msg.data }));
+            if (msg.data?.device_id) {
+              const d = msg.data.device_id.toLowerCase();
+              if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
+              else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
+            }
           } else if (msg.type === 'orchestration_updated') {
             setOrch(msg.data);
+            if (msg.data?.device_model) setDeviceModel(msg.data.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
+          } else if (msg.type === 'orchestration_event') {
+            if (msg.orchestration) {
+              setOrch(msg.orchestration);
+              if (msg.orchestration.device_model) setDeviceModel(msg.orchestration.device_model === 'pixel_8' ? 'pixel_8' : 'pixel_10');
+            }
+            if (msg.telemetry) {
+              setTelemetry(prev => ({ ...prev, ...msg.telemetry }));
+              if (msg.telemetry.device_id) {
+                const d = msg.telemetry.device_id.toLowerCase();
+                if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
+                else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
+              }
+            }
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
             setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
           } else if (msg.type === 'frame_error' && msg.data?.frame_id) {
@@ -498,12 +542,16 @@ export default function App() {
 
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId);
   const totalCombinedTokens = tokenStats.total_tokens + (tokenStats.mobile_tokens?.total_tokens || 0);
+  const isPixel8 = deviceModel === 'pixel_8';
+  const linesPerPage = isPixel8 ? 31 : 49;
+  const initialNextTargetTop = isPixel8 ? 32 : 50;
+  const devDisplayName = isPixel8 ? 'Pixel 8' : 'Pixel 10';
 
   const DAG_STAGES = [
-    { num: '01', icon: Flag, title: 'Start Position', sub: 'Gutter Line 1 Initialized', pill: 'Ln 1 Set & Ready', step: 'START_READY', conn: 'SCREEN_CAPTURE' },
+    { num: '01', icon: Flag, title: 'Start Position', sub: `Gutter Line 1 Initialized (${devDisplayName})`, pill: `Ln 1 → ${linesPerPage} Ready`, step: 'START_READY', conn: 'SCREEN_CAPTURE' },
     { num: '02', icon: Camera, title: 'Display 1 Capture', sub: 'Desktop Mode (HDMI TO USB)', pill: '1920x1080 Frame', step: 'SCREEN_CAPTURE', conn: 'OCR_BOUNDS' },
-    { num: '03', icon: Scan, title: 'OCR Bounds', sub: pipelineMode === 'cloud' ? 'Gemini 2.5 Flash Vision' : 'Pixel 10 ML Kit + Ollama', pill: `Ln ${telemetry.current_top_line || 1} → ${telemetry.current_bottom_line || 49}`, step: 'OCR_BOUNDS', conn: 'PRECISION_SCROLL' },
-    { num: '04', icon: MoveVertical, title: 'Precision Scroll', sub: 'Align Prior Bottom + 1', pill: `Target Top: Ln ${(telemetry.current_bottom_line && telemetry.current_bottom_line > 0) ? telemetry.current_bottom_line + 1 : 50}`, step: 'PRECISION_SCROLL', conn: 'DWELL_FREEZE' },
+    { num: '03', icon: Scan, title: 'OCR Bounds', sub: pipelineMode === 'cloud' ? 'Gemini 2.5 Flash Vision' : `${devDisplayName} ML Kit + Ollama`, pill: `Ln ${telemetry.current_top_line || 1} → ${telemetry.current_bottom_line || linesPerPage}`, step: 'OCR_BOUNDS', conn: 'PRECISION_SCROLL' },
+    { num: '04', icon: MoveVertical, title: 'Precision Scroll', sub: 'Align Prior Bottom + 1', pill: `Target Top: Ln ${(telemetry.current_bottom_line && telemetry.current_bottom_line > 0) ? telemetry.current_bottom_line + 1 : initialNextTargetTop}`, step: 'PRECISION_SCROLL', conn: 'DWELL_FREEZE' },
     { num: '05', icon: Clock, title: '1.5s Dwell Freeze', sub: 'Anti-Blur Frame Settling', pill: telemetry.dwell_countdown_ms > 0 ? `${telemetry.dwell_countdown_ms}ms` : '1,500ms Freeze', step: 'DWELL_FREEZE', conn: 'LOOP_EVAL' },
     { num: '06', icon: Repeat, title: 'EOF or Loop', sub: 'Page Top Changed?', pill: orch.status === 'COMPLETED' ? 'Document Complete' : 'Cycle to Next Page', step: 'LOOP_EVAL' }
   ];
@@ -548,7 +596,7 @@ export default function App() {
             <button
               onClick={() => handleTogglePipelineMode('local')}
               disabled={isSwitchingPipeline}
-              title="Local Mode: Pixel 10 ML Kit Gutter OCR + Laptop Ollama Vision"
+              title={`Local Mode: ${devDisplayName} ML Kit Gutter OCR + Laptop Ollama Vision`}
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
                 cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
@@ -559,6 +607,38 @@ export default function App() {
             >
               <Zap size={13} color={pipelineMode === 'local' ? '#ffdf5d' : '#8b949e'} />
               <span>LOCAL</span>
+            </button>
+          </div>
+
+          {/* Target Device Switcher (Pixel 10 / Pixel 8) */}
+          <div className="device-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
+            <button
+              onClick={() => handleSelectDevice('pixel_8')}
+              title="Google Pixel 8 (31 lines/page, 63 init / 30 step arrows)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
+                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                background: deviceModel === 'pixel_8' ? 'linear-gradient(135deg, #8957e5, #a371f7)' : 'transparent',
+                color: deviceModel === 'pixel_8' ? '#ffffff' : '#8b949e',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Smartphone size={12} />
+              <span>PIXEL 8 (31L)</span>
+            </button>
+            <button
+              onClick={() => handleSelectDevice('pixel_10')}
+              title="Google Pixel 10 (49 lines/page, 99 init / 48 step arrows)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
+                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
+                background: deviceModel === 'pixel_10' ? 'linear-gradient(135deg, #1f6feb, #388bfd)' : 'transparent',
+                color: deviceModel === 'pixel_10' ? '#ffffff' : '#8b949e',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Smartphone size={12} />
+              <span>PIXEL 10 (49L)</span>
             </button>
           </div>
 
@@ -616,7 +696,7 @@ export default function App() {
           <div className="orch-telemetry-badge">
             <Layers size={14} color="#58a6ff" />
             <span className="orch-telemetry-page">PAGE {telemetry.current_page || 1}</span>
-            <span className="orch-telemetry-lines">Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || 49}</span>
+            <span className="orch-telemetry-lines">Ln {telemetry.current_top_line || 1} → {telemetry.current_bottom_line || linesPerPage}</span>
             {telemetry.dwell_countdown_ms > 0 && <span className="orch-dwell-tag">{telemetry.dwell_countdown_ms}ms dwell</span>}
           </div>
         </div>
@@ -799,7 +879,7 @@ export default function App() {
                 <UploadCloud size={28} color="#00ff9d" />
                 <span style={{ fontWeight: 600, color: '#e6edf3' }}>Drop 1080p Screenshots Here</span>
                 <span style={{ fontSize: '11px', color: '#8b949e' }}>or click to upload frames manually</span>
-                <span style={{ fontSize: '10px', color: '#58a6ff', marginTop: '6px' }}>Settled Pixel 10 frames stream here automatically</span>
+                <span style={{ fontSize: '10px', color: '#58a6ff', marginTop: '6px' }}>Settled {devDisplayName} frames stream here automatically</span>
               </div>
             ) : (
               sortedFrames.map((f, idx) => {

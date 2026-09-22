@@ -1,4 +1,8 @@
-import os, json, glob, re, asyncio, io, base64, urllib.request
+import os, json, glob, re, asyncio, io, base64, hashlib, shutil, subprocess, urllib.request
+ADB_BIN = shutil.which("adb") or shutil.which("adb.exe") or "adb.exe"
+
+def _exec_adb_sync(args: list, timeout: float = 10.0) -> subprocess.CompletedProcess:
+    return subprocess.run([ADB_BIN] + args, capture_output=True, text=True, timeout=timeout, errors="ignore")
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
@@ -214,13 +218,35 @@ class PipelineModeRequest(BaseModel):
 class ReprocessRequest(BaseModel):
     model_target: Optional[str] = None
 
+DEVICE_PROFILES = {
+    "pixel_10": {
+        "id": "pixel_10",
+        "displayName": "Pixel 10",
+        "lines_per_page": 49,
+        "arrow_count_init": 99,
+        "arrow_count_step": 48,
+        "step_size": 48
+    },
+    "pixel_8": {
+        "id": "pixel_8",
+        "displayName": "Pixel 8",
+        "lines_per_page": 31,
+        "arrow_count_init": 63,
+        "arrow_count_step": 30,
+        "step_size": 30
+    }
+}
+current_device_model = "pixel_10"
+target_adb_serial: Optional[str] = None
+
 def format_device_name(source: Optional[str]) -> str:
     s = (source or "").lower()
     return "Web Studio 💻" if "web" in s else ("Mobile App 📱" if "mobile" in s else ("Floating HUD 🪟" if "hud" in s else ("Auto-Pacer ⚡" if "pacer" in s else ("Backend API ⚙️" if "api" in s else "System ⚙️"))))
 
 orchestration_state: Dict[str, Any] = {
     "status": "IDLE", "last_command": "NONE", "source": "system", "invoked_by": "System ⚙️", "active_step": "START_READY",
-    "step_label": "Line 1 Start Position Set (Ready to Begin)", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1, "updated_at": datetime.now().isoformat()
+    "step_label": "Line 1 Start Position Set (Ready to Begin)", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1,
+    "device_model": "pixel_10", "lines_per_page": 49, "updated_at": datetime.now().isoformat()
 }
 
 def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, model_desc: str) -> int:
@@ -464,6 +490,16 @@ async def update_telemetry(p: TelemetryUpdateRequest):
     if p.current_bottom_line and p.current_bottom_line > 0: orchestration_state["bottom_line"], orchestration_state["next_target_top"] = p.current_bottom_line, p.current_bottom_line + 1
     if p.current_page and p.current_page > 0: orchestration_state["page"] = p.current_page
 
+    if p.device_id:
+        did = p.device_id.lower()
+        if "pixel 8" in did or "pixel_8" in did:
+            current_device_model = "pixel_8"
+        elif "pixel 10" in did or "pixel_10" in did:
+            current_device_model = "pixel_10"
+        prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+        orchestration_state["device_model"] = current_device_model
+        orchestration_state["lines_per_page"] = prof["lines_per_page"]
+
     if p.active_step: orchestration_state["active_step"] = p.active_step
     elif p.phase:
         pu = p.phase.upper()
@@ -482,8 +518,7 @@ async def get_orchestration_state(): return {"orchestration": orchestration_stat
 
 async def ensure_adb_keyboard_closed():
     try:
-        proc = await asyncio.create_subprocess_exec("adb", "shell", "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; fi", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        await asyncio.wait_for(proc.communicate(), timeout=3.0)
+        await asyncio.to_thread(_exec_adb_sync, ["shell", "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; fi"], 3.0)
     except Exception: pass
 
 @app.post("/api/orchestrate")
@@ -522,7 +557,14 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         latest_telemetry.update({"is_pacing": False, "phase": "COMPLETED", "status_message": f"Completed • Invoked by {invoker}"})
     elif cmd == "RESTART":
         await ensure_adb_keyboard_closed()
-        orchestration_state.update({"status": "RUNNING", "active_step": "START_READY", "step_label": f"Restarted at Line 1 by {invoker}", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1})
+        profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+        lpp = profile["lines_per_page"]
+        orchestration_state.update({
+            "status": "RUNNING", "active_step": "START_READY",
+            "step_label": f"Restarted at Line 1 by {invoker}",
+            "top_line": 1, "bottom_line": lpp, "next_target_top": lpp + 1, "page": 1,
+            "device_model": current_device_model, "lines_per_page": lpp
+        })
         latest_telemetry.update({"current_page": 1, "current_top_line": 1, "current_bottom_line": 0, "is_pacing": True, "phase": "PACING", "status_message": f"Restarted • Invoked by {invoker}"})
     elif cmd in ("CALIBRATE_INSTANT", "CALIBRATE"):
         await ensure_adb_keyboard_closed()
@@ -538,18 +580,228 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     except Exception: pass
     return {"status": "success", "command": cmd, "orchestration": orchestration_state, "telemetry": latest_telemetry}
 
+class DeviceSelectRequest(BaseModel):
+    device_model: str
+    serial: Optional[str] = None
+
+@app.get("/api/device")
+async def get_device_info():
+    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+    return {
+        "device_model": current_device_model,
+        "profile": profile,
+        "available_profiles": list(DEVICE_PROFILES.values()),
+        "target_serial": target_adb_serial
+    }
+
+@app.post("/api/device/select")
+async def select_device_api(req: DeviceSelectRequest):
+    global current_device_model, target_adb_serial, orchestration_state
+    dev = req.device_model.lower().strip()
+    if "8" in dev:
+        current_device_model = "pixel_8"
+    else:
+        current_device_model = "pixel_10"
+    if req.serial is not None:
+        target_adb_serial = req.serial.strip() if req.serial.strip() else None
+    profile = DEVICE_PROFILES[current_device_model]
+    lpp = profile["lines_per_page"]
+    orchestration_state["device_model"] = current_device_model
+    orchestration_state["lines_per_page"] = lpp
+    if orchestration_state.get("page", 1) <= 1 and (orchestration_state.get("active_step") == "START_READY" or orchestration_state.get("status") == "IDLE"):
+        orchestration_state["bottom_line"] = lpp
+        orchestration_state["next_target_top"] = lpp + 1
+    await ws_manager.broadcast({"type": "orchestration_event", "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    return {"status": "success", "device_model": current_device_model, "profile": profile, "target_serial": target_adb_serial}
+
+@app.get("/api/adb/devices")
+async def list_adb_devices():
+    try:
+        res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 5.0)
+        lines = res.stdout.splitlines()
+        devs = []
+        for line in lines[1:]:
+            line = line.strip()
+            if not line or line.startswith("*"): continue
+            parts = line.split()
+            serial = parts[0]
+            status = parts[1] if len(parts) > 1 else "unknown"
+            model = "unknown"
+            for p in parts[2:]:
+                if p.startswith("model:"):
+                    model = p.split(":", 1)[1]
+                elif p.startswith("device:"):
+                    if model == "unknown": model = p.split(":", 1)[1]
+            devs.append({"serial": serial, "status": status, "model": model, "raw": line})
+        return {"status": "ok", "devices": devs, "target_serial": target_adb_serial}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "devices": [], "target_serial": target_adb_serial}
+
+async def get_active_adb_serial(requested_serial: Optional[str] = None) -> Optional[str]:
+    """Finds the most reliable active ADB device serial for commands."""
+    try:
+        res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
+        lines = res.stdout.splitlines()
+        active = []
+        for line in lines[1:]:
+            line = line.strip()
+            if not line or line.startswith("*"): continue
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "device":
+                model = "unknown"
+                for p in parts[2:]:
+                    if p.startswith("model:"): model = p.split(":", 1)[1]
+                active.append({"serial": parts[0], "model": model, "raw": line})
+        if not active:
+            return requested_serial or target_adb_serial
+
+        target = requested_serial or target_adb_serial
+        if target:
+            for dev in active:
+                if dev["serial"] == target or target in dev["serial"]:
+                    return dev["serial"]
+            target_ip = target.split(":")[0]
+            for dev in active:
+                if target_ip in dev["serial"]:
+                    return dev["serial"]
+
+        pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
+        for dev in active:
+            m = dev["model"].lower()
+            if pref == "pixel_8" and ("pixel_8" in m or "husky" in m or "shiba" in m):
+                return dev["serial"]
+            elif pref == "pixel_10" and ("pixel_10" in m or "frankel" in m):
+                return dev["serial"]
+
+        return active[0]["serial"]
+    except Exception:
+        return requested_serial or target_adb_serial
+
+async def run_adb_shell(cmd: str, serial: Optional[str] = None) -> Dict[str, Any]:
+    ser = await get_active_adb_serial(serial)
+    args = []
+    if ser:
+        args.extend(["-s", ser])
+    args.extend(["shell", cmd])
+    try:
+        res = await asyncio.to_thread(_exec_adb_sync, args, 12.0)
+        return {
+            "status": "ok" if res.returncode == 0 else "error",
+            "returncode": res.returncode,
+            "stdout": res.stdout,
+            "stderr": res.stderr,
+            "serial": ser
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e), "serial": ser}
+
+async def detect_external_display_id(serial: Optional[str] = None) -> int:
+    """Finds external display ID from dumpsys display (e.g. 4 for MB16AMTR Asus ZenScreen)."""
+    res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]' | head -n 1", serial)
+    if res.get("status") == "ok" and res.get("stdout"):
+        m = re.search(r'mDisplayId=(\d+)', res["stdout"])
+        if m:
+            val = int(m.group(1))
+            if val != 0: return val
+    return 4
+
 class AdbCommandRequest(BaseModel):
     command: str
+    serial: Optional[str] = None
+
+class AdbConnectRequest(BaseModel):
+    address: str
+
+class AdbPairRequest(BaseModel):
+    address: str
+    code: str
+
+@app.post("/api/adb/connect")
+async def adb_connect_api(req: AdbConnectRequest):
+    addr = req.address.strip()
+    try:
+        res = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 8.0)
+        return {"status": "ok" if "connected" in res.stdout.lower() else "error", "output": res.stdout.strip(), "address": addr}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/api/adb/pair")
+async def adb_pair_api(req: AdbPairRequest):
+    addr = req.address.strip()
+    code = req.code.strip()
+    try:
+        res = await asyncio.to_thread(_exec_adb_sync, ["pair", addr, code], 10.0)
+        return {"status": "ok" if "successfully" in res.stdout.lower() else "error", "output": res.stdout.strip(), "address": addr}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @app.post("/api/adb/command")
 async def execute_adb_command_api(req: AdbCommandRequest):
-    cmd = req.command.strip()
-    try:
-        proc = await asyncio.create_subprocess_exec("adb", "shell", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-        return {"status": "ok" if proc.returncode == 0 else "error", "returncode": proc.returncode, "stdout": stdout.decode("utf-8", errors="ignore"), "stderr": stderr.decode("utf-8", errors="ignore")}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    return await run_adb_shell(req.command.strip(), req.serial)
+
+class AdvancePageRequest(BaseModel):
+    display_id: Optional[int] = None
+    serial: Optional[str] = None
+
+@app.post("/api/advance-page")
+async def advance_page_api(req: Optional[AdvancePageRequest] = None):
+    active_serial = await get_active_adb_serial(req.serial if req else None)
+    disp_id = (req.display_id if req and req.display_id is not None else None)
+    if disp_id is None:
+        disp_id = await detect_external_display_id(active_serial)
+
+    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+    cur_page = orchestration_state.get("page", 1)
+    arrow_count = profile["arrow_count_init"] if cur_page <= 1 else profile["arrow_count_step"]
+
+    # 1. Tap inside editor window on target display to ensure focus
+    await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
+    await asyncio.sleep(0.15)
+
+    # 2. Dispatch Down Arrow keys
+    keys_str = " ".join(["20"] * arrow_count)
+    res = await run_adb_shell(f"input -d {disp_id} keyevent {keys_str}", active_serial)
+    await asyncio.sleep(0.4)
+
+    # 3. Calculate next bounds: top = last_bottom + 1
+    last_bottom = 0
+    for f in reversed(sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
+        if f.get("bottom_line", 0) > 0:
+            last_bottom = f["bottom_line"]
+            break
+    if last_bottom == 0:
+        last_bottom = profile["lines_per_page"]
+
+    next_page = cur_page + 1
+    next_top = last_bottom + 1
+    next_bot = next_top + profile["step_size"]
+
+    orchestration_state.update({
+        "page": next_page,
+        "top_line": next_top,
+        "bottom_line": next_bot,
+        "next_target_top": next_bot + 1,
+        "active_step": "PRECISION_SCROLL",
+        "step_label": f"Page {next_page} (Lines {next_top} → {next_bot})",
+        "status": "RUNNING"
+    })
+    latest_telemetry.update({
+        "current_page": next_page,
+        "current_top_line": next_top,
+        "current_bottom_line": next_bot,
+        "status_message": f"Page {next_page} Advanced ({arrow_count} arrows) • Lines {next_top} → {next_bot}"
+    })
+    await ws_manager.broadcast({"type": "orchestration_event", "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    return {
+        "status": "ok",
+        "page": next_page,
+        "top_line": next_top,
+        "bottom_line": next_bot,
+        "next_target_top": next_bot + 1,
+        "arrow_count": arrow_count,
+        "display_id": disp_id,
+        "adb_result": res
+    }
 
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
@@ -728,6 +980,41 @@ async def upload_frame(request: Request, background_tasks: BackgroundTasks):
     try: pidx = int(page_index) if page_index and int(page_index) > 0 else len(captured_frames) + 1
     except (ValueError, TypeError): pidx = len(captured_frames) + 1
 
+    content_hash = hashlib.sha256(contents).hexdigest()
+    sorted_frames = sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+
+    profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
+    lpp = profile["lines_per_page"]
+    step = profile["step_size"]
+
+    # Deduplication: If the image is byte-for-byte identical to the last frame, reject duplicate
+    if sorted_frames:
+        last_f = sorted_frames[-1]
+        if last_f.get("content_hash") == content_hash:
+            return {
+                "status": "warning",
+                "is_duplicate": True,
+                "frame_id": last_f["frame_id"],
+                "page_index": last_f.get("page_index", 1),
+                "top_line": last_f.get("top_line", top_line),
+                "bottom_line": last_f.get("bottom_line", bottom_line),
+                "message": f"Screen has not scrolled. Identical to existing Frame {last_f['frame_id']} (Lines {last_f.get('top_line')}..{last_f.get('bottom_line')}). Advance page before capturing."
+            }
+
+    # Enforce next page starts strictly at previous bottom + 1
+    if sorted_frames and pidx > 1:
+        last_bot = sorted_frames[-1].get("bottom_line", 0)
+        if last_bot > 0:
+            if top_line <= 1 or top_line <= last_bot:
+                top_line = last_bot + 1
+            if bottom_line <= top_line:
+                bottom_line = top_line + step
+    elif top_line <= 0:
+        top_line = 1
+        bottom_line = lpp
+    elif bottom_line <= 0:
+        bottom_line = top_line + step
+
     now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
     fid = f"frame_{top_line:05d}_{bottom_line:05d}_{now_str}" if top_line > 0 and bottom_line > 0 else f"frame_p{pidx:03d}_{now_str}"
     fn = f"{fid}.png"; tpath = FRAMES_DIR / fn
@@ -744,7 +1031,8 @@ async def upload_frame(request: Request, background_tasks: BackgroundTasks):
 
     captured_frames[fid] = {
         "frame_id": fid, "filename": fn, "top_line": top_line, "bottom_line": bottom_line,
-        "page_index": pidx, "file_size": len(contents), "status": "awaiting_review" if not sync else "queued",
+        "page_index": pidx, "file_size": len(contents), "content_hash": content_hash,
+        "status": "awaiting_review" if not sync else "queued",
         "created_at": datetime.now().isoformat(), "extracted_line_count": 0,
         "model_type": model_type or mt,
         "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
