@@ -435,7 +435,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                         Button(
                             onClick = {
                                 isCapturing = true
-                                Log.i("FloatingOverlayService", "capture desktop mode clicked in HUD")
+                                Log.i("FloatingOverlayService", "repeatedly capture page 1 clicked in HUD")
                                 coroutineScope.launch {
                                     DesktopPaginationService.updateStatus("Capturing desktop screen...")
                                     val ps = DesktopPaginationService.instance
@@ -455,7 +455,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.weight(1.1f).height(38.dp),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                         ) {
-                            Text(if (isCapturing) "..." else "capture desktop mode", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
+                            Text(if (isCapturing) "..." else "repeatedly capture page 1", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, maxLines = 1)
                         }
 
                         Button(

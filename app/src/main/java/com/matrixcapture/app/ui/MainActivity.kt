@@ -205,7 +205,7 @@ fun MatrixCaptureDashboard(
                     Button(onClick = onCaptureDesktopMode, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.CameraAlt, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            Text("capture desktop mode", color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                            Text("repeatedly capture page 1", color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                         }
                     }
                     if (uiState.currentTopLine > 1 || uiState.uploadedFramesCount > 0) RestartBtn(onRestartOrchestration)
@@ -376,7 +376,7 @@ fun MatrixCaptureDashboard(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     DiagBtn("Test Pacer (1.5s Dwell)", onTestPacer)
-                    DiagBtn("capture desktop mode", onCaptureDesktopMode)
+                    DiagBtn("repeatedly capture page 1", onCaptureDesktopMode)
                     DiagBtn("Get line number of next", onGetNextPageLine)
                     Button(onClick = onAlignAndCaptureNextPage, modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
                         Text("Next Page & Align To Top (Micro-Touch)", color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 12.sp)

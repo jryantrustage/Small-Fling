@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Scan, Settings, ZoomIn, ZoomOut, Search, Check, X,
-  Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2, Ban,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone
+  Scan, Settings, Search, Check, X,
+  Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu
 } from 'lucide-react';
+import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -43,16 +44,16 @@ interface TokenStats {
 interface BoundingBoxItem { x: number; y: number; width: number; height: number; line_number?: number; text_snippet?: string; }
 interface FrameBoundingBoxes { first_line?: BoundingBoxItem; last_line?: BoundingBoxItem; wrapped_lines?: BoundingBoxItem[]; }
 
-const Modal = ({ title, onClose, onConfirm, confirmText = 'Save', confirmIcon: Icon = Check, danger = false, disabled = false, children }: any) => (
+const Modal = ({ title, onClose, onConfirm, confirmText = 'Save', confirmIcon: Icon = Check, danger = false, disabled = false, width, children }: any) => (
   <div className="modal-overlay" onClick={onClose}>
-    <div className="modal-card" onClick={e => e.stopPropagation()} style={danger ? { borderColor: 'rgba(255, 123, 114, 0.5)' } : undefined}>
+    <div className="modal-card" onClick={e => e.stopPropagation()} style={{ ...(danger ? { borderColor: 'rgba(255, 123, 114, 0.5)' } : {}), ...(width ? { width, maxWidth: '95vw' } : {}) }}>
       <div className="modal-header" style={danger ? { borderBottomColor: 'rgba(255, 123, 114, 0.2)', color: '#ff7b72' } : undefined}>
         <span>{title}</span>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer' }}><X size={16} /></button>
       </div>
       <div className="modal-body">{children}</div>
       <div className="modal-footer">
-        <button className="btn btn-outline" onClick={onClose}>Cancel</button>
+        <button className="btn btn-outline" onClick={onClose}>{onConfirm ? 'Cancel' : 'Close'}</button>
         {onConfirm && (
           <button className={`btn ${danger ? 'btn-outline' : 'btn-primary'}`} style={danger ? { borderColor: '#ff7b72', color: '#ff7b72', background: 'rgba(255, 123, 114, 0.15)' } : undefined} onClick={onConfirm} disabled={disabled}>
             {Icon && <Icon size={14} />} {confirmText}
@@ -68,8 +69,6 @@ export default function App() {
   const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [showAbortModal, setShowAbortModal] = useState(false);
-  const [projectToAbort, setProjectToAbort] = useState<ProjectData | null>(null);
   const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0 });
 
   const [documentData, setDocumentData] = useState<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[] }>({
@@ -79,17 +78,43 @@ export default function App() {
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
   const [tokenStats, setTokenStats] = useState<TokenStats>({ total_prompt_tokens: 0, total_candidates_tokens: 0, total_tokens: 0, total_api_calls: 0, estimated_cost_usd: 0 });
 
+  // Telemetry & Network Monitoring
+  const [telemetry, setTelemetry] = useState<TelemetryData>({});
+  const [latencyMs, setLatencyMs] = useState<number>(0);
+  const [eventsLog, setEventsLog] = useState<TelemetryEvent[]>([]);
+  const [isTelemetryExpanded, setIsTelemetryExpanded] = useState<boolean>(false);
+
+  // Horizontal Panel Resizing
+  const [framesPanelWidth, setFramesPanelWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mc_frames_panel_width');
+      return saved ? Math.max(180, Math.min(650, Number(saved))) : 280;
+    } catch {
+      return 280;
+    }
+  });
+  const [isDraggingFrames, setIsDraggingFrames] = useState(false);
+
+  const [inspectorPercent, setInspectorPercent] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('mc_inspector_percent');
+      return saved ? Math.max(20, Math.min(80, Number(saved))) : 48;
+    } catch {
+      return 48;
+    }
+  });
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false);
+
   const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<LineData | null>(null);
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
   const [editText, setEditText] = useState('');
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets'>('pipeline');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'issues'>('all');
-  const [zoomMode, setZoomMode] = useState<'fit' | 'custom'>('fit');
-  const [imageZoom, setImageZoom] = useState(1);
   const [isScanningOcr, setIsScanningOcr] = useState(false);
   const [scanStatusMsg, setScanStatusMsg] = useState('');
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
@@ -106,12 +131,96 @@ export default function App() {
   const prevFramesCountRef = useRef(0);
   const selectedFrameIdRef = useRef<string | null>(null);
 
+  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any) => {
+    const ev: TelemetryEvent = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date().toLocaleTimeString(),
+      category,
+      message,
+      data
+    };
+    setEventsLog(prev => [...prev.slice(-99), ev]);
+  }, []);
+
+  // Persist resizer panel widths
+  useEffect(() => {
+    try {
+      localStorage.setItem('mc_frames_panel_width', String(framesPanelWidth));
+    } catch {}
+  }, [framesPanelWidth]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('mc_inspector_percent', String(inspectorPercent));
+    } catch {}
+  }, [inspectorPercent]);
+
+  useEffect(() => {
+    if (isDraggingFrames || isDraggingSplit) {
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  }, [isDraggingFrames, isDraggingSplit]);
+
+  const handleFramesResizerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingFrames(true);
+    const startX = e.clientX;
+    const startWidth = framesPanelWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const newWidth = Math.max(180, Math.min(650, startWidth + delta));
+      setFramesPanelWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingFrames(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleSplitResizerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSplit(true);
+    const inspectorPanel = document.querySelector('.frame-inspector-panel') as HTMLElement;
+    const linesPanel = document.querySelector('.line-inspector-panel') as HTMLElement;
+    if (!inspectorPanel || !linesPanel) return;
+
+    const availableWidth = inspectorPanel.offsetWidth + linesPanel.offsetWidth;
+    const inspectorLeft = inspectorPanel.getBoundingClientRect().left;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const currentX = moveEvent.clientX;
+      const currentInspectorWidth = currentX - inspectorLeft;
+      const pct = Math.max(20, Math.min(80, (currentInspectorWidth / availableWidth) * 100));
+      setInspectorPercent(Math.round(pct));
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingSplit(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
   useEffect(() => {
     selectedFrameIdRef.current = selectedFrameId;
   }, [selectedFrameId]);
 
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
+    addTelemetryEvent('SYSTEM', `Target device set to ${dev === 'pixel_8' ? 'Google Pixel 8 (31 lines)' : 'Google Pixel 10 (36 lines)'}`);
     try {
       await api('/api/device/select', {
         method: 'POST',
@@ -126,11 +235,20 @@ export default function App() {
   const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
 
   const fetchData = async () => {
+    const t0 = performance.now();
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes] = await Promise.all([
         api('/api/projects'), api('/api/document'), api('/api/frames'),
-        api('/api/recapture-queue'), api('/api/config'), api('/api/pipeline/mode')
+        api('/api/recapture-queue'), api('/api/config'), api('/api/pipeline/mode'),
+        api('/api/telemetry')
       ]);
+      const rtt = Math.round(performance.now() - t0);
+      setLatencyMs(rtt);
+      if (telRes && telRes.ok) {
+        const telJson = await telRes.json();
+        if (telJson.telemetry) setTelemetry(telJson.telemetry);
+        if (telJson.token_stats) setTokenStats(telJson.token_stats);
+      }
       if (modeRes && modeRes.ok) {
         const m = await modeRes.json();
         if (m.pipeline_mode) setPipelineMode(m.pipeline_mode);
@@ -175,8 +293,10 @@ export default function App() {
   const handleSwitchProject = async (id: string) => {
     const res = await api(`/api/projects/${id}/activate`, { method: 'POST' });
     if (res.ok) {
-      const p = await res.json();
+      const data = await res.json();
+      const p = data.project || data;
       setActiveProject(p);
+      setProjects(prev => prev.map(proj => ({ ...proj, is_active: proj.id === id ? 1 : 0 })));
       setSelectedFrameId(null);
       setSelectedLine(null);
       prevFramesCountRef.current = 0;
@@ -200,27 +320,7 @@ export default function App() {
     }
   };
 
-  const handleAbortProject = async (id: string) => {
-    const res = await api(`/api/projects/${id}/abort`, { method: 'POST' });
-    if (res.ok) {
-      setShowAbortModal(false);
-      setProjectToAbort(null);
-      setSelectedFrameId(null);
-      setSelectedLine(null);
-      await fetchData();
-    }
-  };
 
-  const handleClearProjectData = async (id: string) => {
-    if (!window.confirm('Clear all frames and OCR lines for this project?')) return;
-    const res = await api(`/api/projects/${id}/clear`, { method: 'POST' });
-    if (res.ok) {
-      setSelectedFrameId(null);
-      setSelectedLine(null);
-      prevFramesCountRef.current = 0;
-      await fetchData();
-    }
-  };
 
   const handleDeleteProject = async (id: string) => {
     if (!window.confirm('Permanently delete this project?')) return;
@@ -272,8 +372,16 @@ export default function App() {
       const host = window.location.host;
       const base = API_BASE.startsWith('http') ? API_BASE.replace(/^http/, 'ws') : `${proto}//${host}`;
       ws = new WebSocket(`${base}/ws`);
-      ws.onopen = () => { setWsConnected(true); setBackendConnected(true); };
-      ws.onclose = () => { setWsConnected(false); timer = setTimeout(connectWs, 3000); };
+      ws.onopen = () => {
+        setWsConnected(true);
+        setBackendConnected(true);
+        addTelemetryEvent('WS', 'Connected to real-time telemetry stream');
+      };
+      ws.onclose = () => {
+        setWsConnected(false);
+        addTelemetryEvent('WS', 'WebSocket disconnected, reconnecting...');
+        timer = setTimeout(connectWs, 3000);
+      };
       ws.onerror = () => ws?.close();
       ws.onmessage = (e) => {
         try {
@@ -286,6 +394,7 @@ export default function App() {
               return i >= 0 ? clean.map((f, idx) => idx === i ? nf : f) : [...clean, nf];
             });
             setSelectedFrameId(nf.frame_id);
+            addTelemetryEvent('FRAME', `New frame received: ${nf.frame_id.slice(0, 8)} (Pg ${nf.page_index}, ${nf.extracted_line_count || 0} ln)`);
             apiJson<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[]; token_stats?: TokenStats }>('/api/document')
               .then(doc => { setDocumentData(doc); if (doc.token_stats) setTokenStats(doc.token_stats); });
           } else if (msg.type === 'frame_deleted') {
@@ -296,26 +405,49 @@ export default function App() {
               }
               return remaining;
             });
+            addTelemetryEvent('FRAME', `Frame ${msg.frame_id?.slice(0, 8)} deleted`);
             apiJson<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[]; token_stats?: TokenStats }>('/api/document')
               .then(doc => { setDocumentData(doc); if (doc.token_stats) setTokenStats(doc.token_stats); });
           } else if (msg.type === 'document_updated') {
             setDocumentData(msg.data);
             if (msg.data.token_stats) setTokenStats(msg.data.token_stats);
-          } else if (msg.type === 'device_selected' || msg.type === 'telemetry_updated') {
+            addTelemetryEvent('SYSTEM', `Document synced: ${msg.data.total_lines || 0} total lines`);
+          } else if (msg.type === 'device_selected') {
             if (msg.data?.device_id || msg.data?.device_model) {
               const d = (msg.data.device_id || msg.data.device_model || '').toLowerCase();
               if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
               else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
+              addTelemetryEvent('SYSTEM', `Device sync: ${d}`);
+            }
+          } else if (msg.type === 'telemetry_updated') {
+            if (msg.data) {
+              setTelemetry(prev => ({ ...prev, ...msg.data }));
+              if (msg.data?.device_id || msg.data?.device_model) {
+                const d = (msg.data.device_id || msg.data.device_model || '').toLowerCase();
+                if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
+                else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
+              }
+              addTelemetryEvent('SYSTEM', `Telemetry sync: ${msg.data.phase || msg.data.status_message || 'updated'}`);
+            }
+          } else if (msg.type === 'orchestration_event') {
+            if (msg.telemetry) {
+              setTelemetry(msg.telemetry);
+              if (msg.telemetry.phase) {
+                addTelemetryEvent('PACER', `Pacer ${msg.telemetry.phase}: ${msg.telemetry.status_message || ''}`);
+              }
             }
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
             setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
+            addTelemetryEvent('OCR', `Frame ${msg.data.frame_id.slice(0, 8)} OCR processed (${msg.data.extracted_line_count || 0} ln)`);
           } else if (msg.type === 'frame_error' && msg.data?.frame_id) {
             setFrames(prev => prev.filter(f => f && f.frame_id).map(f => f.frame_id === msg.data.frame_id ? { ...f, status: `error: ${msg.data.error}` } : f));
+            addTelemetryEvent('ERROR', `Frame ${msg.data.frame_id.slice(0, 8)} failed: ${msg.data.error}`);
           } else if (msg.type === 'frame_bounding_boxes' && msg.data?.frame_id) {
             setFrameBoundingBoxes(prev => ({ ...prev, [msg.data.frame_id]: msg.data.boxes }));
           } else if (msg.type === 'pipeline_mode_changed') {
             if (msg.data?.pipeline_mode) {
               setPipelineMode(msg.data.pipeline_mode);
+              addTelemetryEvent('SYSTEM', `Pipeline mode: ${msg.data.pipeline_mode}`);
             }
           }
         } catch {}
@@ -323,10 +455,11 @@ export default function App() {
     };
     connectWs();
     return () => { if (ws) ws.close(); clearTimeout(timer); };
-  }, []);
+  }, [addTelemetryEvent]);
 
   const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
     setIsSwitchingPipeline(true);
+    addTelemetryEvent('SYSTEM', `Switching pipeline mode to ${mode}`);
     try {
       const res = await api('/api/pipeline/mode', {
         method: 'POST',
@@ -368,6 +501,10 @@ export default function App() {
   };
 
   const handleCaptureDesktop = async () => {
+    if (!activeProject) {
+      setShowNewProjectModal(true);
+      return;
+    }
     try {
       await api('/api/orchestrate', {
         method: 'POST',
@@ -375,7 +512,7 @@ export default function App() {
         body: JSON.stringify({ command: 'CAPTURE_DESKTOP', source: 'web_studio' })
       });
     } catch (e) {
-      console.error('Failed to capture desktop:', e);
+      console.error('Failed to trigger repeatedly capture page 1:', e);
     }
   };
 
@@ -434,6 +571,7 @@ export default function App() {
   return (
     <div className="app-container">
       {/* Top Header */}
+      {/* Top Header */}
       <header className="app-header">
         <div className="brand-section">
           <span className="brand-title">MATRIX CAPTURE</span>
@@ -447,40 +585,6 @@ export default function App() {
 
         {/* Realtime Metrics & Controls */}
         <div className="header-metrics">
-          {/* Runtime Capture Pipeline Toggle */}
-          <div className="pipeline-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
-            <button
-              onClick={() => handleTogglePipelineMode('cloud')}
-              disabled={isSwitchingPipeline}
-              title="Cloud Mode: Gemini 2.5 Flash Vision Multimodal"
-              style={{
-                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
-                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                background: pipelineMode === 'cloud' ? 'linear-gradient(135deg, #1f6feb, #388bfd)' : 'transparent',
-                color: pipelineMode === 'cloud' ? '#ffffff' : '#8b949e',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Cloud size={13} />
-              <span>CLOUD</span>
-            </button>
-            <button
-              onClick={() => handleTogglePipelineMode('local')}
-              disabled={isSwitchingPipeline}
-              title={`Local Mode: ${devDisplayName} ML Kit Gutter OCR + Laptop Ollama Vision`}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '5px', padding: '4px 9px', borderRadius: '16px', border: 'none',
-                cursor: 'pointer', fontSize: '11px', fontWeight: 700, fontFamily: 'var(--font-mono)',
-                background: pipelineMode === 'local' ? 'linear-gradient(135deg, #238636, #2ea043)' : 'transparent',
-                color: pipelineMode === 'local' ? '#ffffff' : '#8b949e',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Zap size={13} color={pipelineMode === 'local' ? '#ffdf5d' : '#8b949e'} />
-              <span>LOCAL</span>
-            </button>
-          </div>
-
           {/* Target Device Switcher (Pixel 10 / Pixel 8) */}
           <div className="device-mode-pill" style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '20px', padding: '2px 3px', gap: '3px' }}>
             <button
@@ -522,17 +626,11 @@ export default function App() {
               <span className="label">RECAPTURE:</span><span className="value" style={{ color: '#bc8cff' }}>{recaptureQueue.length}</span>
             </div>
           )}
-          <div className="metric-pill token-pill" title={`Prompt: ${tokenStats.total_prompt_tokens.toLocaleString()} | Completion: ${tokenStats.total_candidates_tokens.toLocaleString()}`}>
-            <Coins size={13} color="#00ff9d" />
-            <span className="label">TOKENS:</span><span className="value">{totalCombinedTokens.toLocaleString()}</span>
-            <span className="cost-tag">${tokenStats.estimated_cost_usd.toFixed(4)}</span>
-          </div>
         </div>
 
         <div className="header-actions">
-          <button className="btn btn-outline" onClick={() => setShowConfigModal(true)}>
-            <Settings size={14} />
-            <span>{apiKeyConfigured ? 'Gemini API Key ✔' : 'Configure API Key'}</span>
+          <button className="gear-btn" onClick={() => setShowConfigModal(true)} title="Studio Settings & Secrets" aria-label="Settings">
+            <Settings size={16} />
           </button>
         </div>
       </header>
@@ -540,9 +638,9 @@ export default function App() {
       {/* Action Bar */}
       <div className="orchestration-bar">
         <div className="orchestration-actions">
-          <button className="btn btn-orch btn-capture-desktop" onClick={handleCaptureDesktop} title="Capture Desktop Screen">
+          <button className="btn btn-orch btn-capture-desktop" onClick={handleCaptureDesktop} title="repeatedly capture page 1">
             <Camera size={14} />
-            <span>capture desktop mode</span>
+            <span>repeatedly capture page 1</span>
           </button>
         </div>
       </div>
@@ -571,23 +669,23 @@ export default function App() {
 
               <div className="projects-list">
                 {projects.map(p => (
-                  <div key={p.id} className={`project-card ${p.id === activeProject?.id ? 'active' : ''} ${p.status === 'aborted' ? 'aborted' : ''}`} onClick={() => handleSwitchProject(p.id)}>
-                    <div className="project-card-top">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className={`project-status-dot ${p.id === activeProject?.id ? 'active' : ''}`} />
-                        <span className="project-title">{p.name}</span>
+                    <div key={p.id} className={`project-card ${p.id === activeProject?.id ? 'active' : ''}`} onClick={() => handleSwitchProject(p.id)}>
+                      <div className="project-card-top">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                          <span className={`project-status-dot ${p.id === activeProject?.id ? 'active' : ''}`} />
+                          <span className="project-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        </div>
+                        <button
+                          className="btn-text-danger"
+                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id); }}
+                          title="Delete project"
+                          style={{ padding: '2px 4px', opacity: 0.8 }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
-                      {p.id === activeProject?.id ? <span className="active-badge">ACTIVE</span> : p.status === 'aborted' ? <span style={{ fontSize: '9px', color: '#ff7b72', border: '1px solid rgba(255,123,114,0.3)', padding: '1px 4px', borderRadius: '3px' }}>ABORTED</span> : null}
                     </div>
-                    {p.description && <p className="project-desc">{p.description}</p>}
-                    <div className="project-stats"><span>Status: {p.status}</span>{p.target_total_lines > 0 && <span>• Target: {p.target_total_lines} ln</span>}</div>
-                    <div className="project-actions" onClick={e => e.stopPropagation()}>
-                      <button className="btn-text-muted" onClick={() => handleClearProjectData(p.id)}>Clear Data</button>
-                      {p.status !== 'aborted' && <button className="btn-text-danger" onClick={() => { setProjectToAbort(p); setShowAbortModal(true); }}><Ban size={11} /> Abort</button>}
-                      {projects.length > 1 && <button className="btn-text-danger" onClick={() => handleDeleteProject(p.id)}><Trash2 size={11} /></button>}
-                    </div>
-                  </div>
-                ))}
+                  ))}
               </div>
               <div className="sidebar-footer"><div className="db-indicator"><span className="db-dot" /><span>SQLite3: matrix_capture.db</span></div></div>
             </div>
@@ -600,8 +698,10 @@ export default function App() {
           )}
         </aside>
 
-        {/* Column 1: Captured Frame Feed */}
-        <aside className="frames-feed-panel">
+        {activeProject ? (
+          <>
+            {/* Column 1: Captured Frame Feed */}
+            <aside className="frames-feed-panel" style={{ width: `${framesPanelWidth}px`, flexShrink: 0 }}>
           <div className="panel-header">
             <span>Captured Frames ({frames.length})</span>
             {frames.some(f => f.status.startsWith('error')) && (
@@ -665,8 +765,20 @@ export default function App() {
           </div>
         </aside>
 
+        {/* Horizontal Resizer: Captured Frames Sidebar */}
+        <div
+          className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`}
+          onMouseDown={handleFramesResizerMouseDown}
+          onDoubleClick={() => setFramesPanelWidth(280)}
+          title="Drag to horizontally resize Captured Frames feed (Double-click to reset to 280px)"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          <div className="panel-resizer-line" />
+        </div>
+
         {/* Column 2: Frame Inspector */}
-        <main className="frame-inspector-panel">
+        <main className="frame-inspector-panel" style={{ flex: `${inspectorPercent} 1 0`, minWidth: '220px' }}>
           <div className="panel-header">
             <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
               <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
@@ -680,21 +792,18 @@ export default function App() {
                 </button>
               )}
               {scanStatusMsg && <span className="scan-status-pill">{scanStatusMsg}</span>}
-              <button className={`btn btn-sm ${zoomMode === 'fit' ? 'btn-primary' : 'btn-outline'}`} onClick={() => { setZoomMode('fit'); setImageZoom(1); }}>Fit</button>
-              <button className="btn btn-outline btn-sm" onClick={() => { setZoomMode('custom'); setImageZoom(p => Math.max(0.4, Number((p - 0.2).toFixed(1)))); }}><ZoomOut size={12} /></button>
-              <button className="btn btn-outline btn-sm" onClick={() => { setZoomMode('custom'); setImageZoom(p => Math.min(3.0, Number((p + 0.2).toFixed(1)))); }}><ZoomIn size={12} /></button>
             </div>
           </div>
 
           <div className="inspector-view-container">
             {inspectorMode === 'spliced' ? (
               <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                <div style={{ display: 'center', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={14} color="#00ff9d" /><span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>CONTINUOUS SPLICED CANVAS · {frames.length} FRAMES</span></div>
                   <span style={{ fontSize: '11px', color: '#8b949e', fontFamily: 'monospace' }}>Auto-spliced by first & last gutter lines</span>
                 </div>
-                <div className={`source-image-wrapper ${zoomMode}`} style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}>
-                  <img src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} alt="Spliced Continuous Document" style={{ width: zoomMode === 'fit' ? '100%' : 'auto', display: 'block' }} />
+                <div className="source-image-wrapper fit">
+                  <img src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} alt="Spliced Continuous Document" style={{ width: '100%', display: 'block' }} />
                 </div>
               </div>
             ) : (
@@ -714,7 +823,7 @@ export default function App() {
                       <span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">START LINE NUMBER (TOP GUTTER):</span>
                       <span className="gutter-callout-value">{activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Detecting...'}</span>
                     </div>
-                    <div className={`source-image-wrapper ${zoomMode}`} style={zoomMode === 'custom' ? { transform: `scale(${imageZoom})`, transformOrigin: 'top left' } : undefined}>
+                    <div className="source-image-wrapper fit">
                       <img src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image?t=${encodeURIComponent(activeFrame.created_at || '')}`} alt={activeFrame.frame_id} />
                       {frameBoundingBoxes[activeFrame.frame_id] && (
                         <svg className="bbox-svg-overlay" viewBox="0 0 1920 1080" preserveAspectRatio="none">
@@ -743,8 +852,20 @@ export default function App() {
           </div>
         </main>
 
+        {/* Horizontal Resizer: Image View vs Verified Lines */}
+        <div
+          className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`}
+          onMouseDown={handleSplitResizerMouseDown}
+          onDoubleClick={() => setInspectorPercent(48)}
+          title="Drag to horizontally resize Image View vs Verified Lines split (Double-click to reset to 48/52)"
+          role="separator"
+          aria-orientation="vertical"
+        >
+          <div className="panel-resizer-line" />
+        </div>
+
         {/* Column 3: Table */}
-        <section className="line-inspector-panel">
+        <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
           <div className="panel-header">
             <span>Verified Lines ({filteredLines.length})</span>
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -758,7 +879,7 @@ export default function App() {
             <input type="text" className="search-input" placeholder="Search lines by text or line number..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
           </div>
 
-          <div className="lines-table-container" ref={lineListRef}>
+          <div className="lines-table-container" ref={lineListRef} style={{ paddingBottom: isTelemetryExpanded ? '340px' : '40px' }}>
             {filteredLines.length === 0 ? (
               <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}>
                 <p>No lines transcribed yet.</p>
@@ -779,7 +900,9 @@ export default function App() {
             )}
           </div>
         </section>
-      </div>
+      </>
+    ) : null}
+  </div>
 
       {/* Modals */}
       {editingLine && (
@@ -790,26 +913,197 @@ export default function App() {
       )}
 
       {showConfigModal && (
-        <Modal title="Gemini Cloud OCR Configuration" onClose={() => setShowConfigModal(false)} onConfirm={handleSaveApiKey} confirmText="Save Key">
-          <p style={{ fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>Enter your Gemini API key to enable instant structured OCR on settled 1080p desktop frames.</p>
-          <input type="password" placeholder="AIzaSy..." className="search-input" style={{ width: '100%', padding: '8px 12px' }} value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} />
+        <Modal
+          title="Studio Settings"
+          width="520px"
+          onClose={() => setShowConfigModal(false)}
+          onConfirm={settingsTab === 'secrets' ? handleSaveApiKey : undefined}
+          confirmText="Save Key"
+        >
+          {/* Settings Tabs */}
+          <div className="modal-tabs">
+            <button
+              className={`modal-tab ${settingsTab === 'pipeline' ? 'active' : ''}`}
+              onClick={() => setSettingsTab('pipeline')}
+              type="button"
+            >
+              <Cpu size={14} />
+              <span>Pipeline Engine</span>
+            </button>
+            <button
+              className={`modal-tab ${settingsTab === 'secrets' ? 'active' : ''}`}
+              onClick={() => setSettingsTab('secrets')}
+              type="button"
+            >
+              <Key size={14} />
+              <span>Secrets</span>
+            </button>
+          </div>
+
+          {/* Pipeline Tab Content */}
+          {settingsTab === 'pipeline' && (
+            <div className="settings-tab-content">
+              <div style={{ marginBottom: '10px' }}>
+                <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.5px' }}>
+                  ACTIVE OCR PIPELINE
+                </span>
+              </div>
+
+              <div className="pipeline-choices">
+                {/* Cloud Pipeline Choice */}
+                <div
+                  className={`pipeline-choice-card ${pipelineMode === 'cloud' ? 'active cloud-active' : ''}`}
+                  onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('cloud')}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="pipeline-choice-icon" style={{ color: '#58a6ff' }}>
+                    <Cloud size={18} />
+                  </div>
+                  <div className="pipeline-choice-info">
+                    <div className="pipeline-choice-title">
+                      <span>Cloud Pipeline (Gemini 2.5 Flash)</span>
+                      {pipelineMode === 'cloud' && <span className="badge-active-pill" style={{ background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff', borderColor: 'rgba(88, 166, 255, 0.3)' }}>ACTIVE</span>}
+                    </div>
+                    <p className="pipeline-choice-desc">
+                      Fast, high-fidelity cloud vision model. Processes full-resolution settled frames with zero local GPU load.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Local Pipeline Choice */}
+                <div
+                  className={`pipeline-choice-card ${pipelineMode === 'local' ? 'active' : ''}`}
+                  onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('local')}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="pipeline-choice-icon" style={{ color: 'var(--color-primary)' }}>
+                    <Zap size={18} />
+                  </div>
+                  <div className="pipeline-choice-info">
+                    <div className="pipeline-choice-title">
+                      <span>Local Pipeline (MiniCPM-V 2.6)</span>
+                      {pipelineMode === 'local' && <span className="badge-active-pill">ACTIVE</span>}
+                    </div>
+                    <p className="pipeline-choice-desc">
+                      100% offline vision-language model execution via local engine. Zero network calls and private inference.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Token & Telemetry Usage Box */}
+              <div className="token-metrics-box">
+                <div className="token-metrics-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Coins size={13} color="var(--color-primary)" />
+                    <span>TOKEN & TELEMETRY USAGE</span>
+                  </div>
+                  <span style={{ color: 'var(--color-primary)', fontWeight: 700 }}>
+                    ${tokenStats.estimated_cost_usd.toFixed(4)} USD
+                  </span>
+                </div>
+
+                <div className="token-metrics-grid">
+                  <div className="token-metric-item">
+                    <span className="lbl">Total Tokens</span>
+                    <span className="val">{totalCombinedTokens.toLocaleString()}</span>
+                  </div>
+                  <div className="token-metric-item">
+                    <span className="lbl">API Calls</span>
+                    <span className="val">{tokenStats.total_api_calls}</span>
+                  </div>
+                  <div className="token-metric-item">
+                    <span className="lbl">Prompt Tokens</span>
+                    <span className="val">{tokenStats.total_prompt_tokens.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Secrets Tab Content */}
+          {settingsTab === 'secrets' && (
+            <div className="settings-tab-content">
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    GEMINI API KEY
+                  </label>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      background: apiKeyConfigured ? 'rgba(0, 255, 157, 0.12)' : 'rgba(255, 123, 114, 0.12)',
+                      color: apiKeyConfigured ? 'var(--color-primary)' : '#ff7b72',
+                      border: `1px solid ${apiKeyConfigured ? 'rgba(0, 255, 157, 0.25)' : 'rgba(255, 123, 114, 0.25)'}`
+                    }}
+                  >
+                    {apiKeyConfigured ? '● CONFIGURED & ACTIVE' : '○ NOT CONFIGURED'}
+                  </span>
+                </div>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, margin: '6px 0 12px' }}>
+                  Enter your Google Gemini API key to enable Cloud OCR line detection and document transcription.
+                </p>
+                <input
+                  type="password"
+                  placeholder={apiKeyConfigured ? '••••••••••••••••••••••••••••••••' : 'AIzaSy...'}
+                  className="modal-input"
+                  style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                  value={apiKeyInput}
+                  onChange={e => setApiKeyInput(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+          )}
         </Modal>
       )}
 
       {showNewProjectModal && (
         <Modal title="Create New Project" onClose={() => setShowNewProjectModal(false)} onConfirm={handleCreateProject} confirmText="Create & Activate" confirmIcon={Plus} disabled={!newProject.name.trim()}>
-          <div className="modal-form-group"><label>PROJECT NAME *</label><input type="text" placeholder="e.g. Small-Fling Core" className="modal-input" value={newProject.name} onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))} autoFocus /></div>
-          <div className="modal-form-group"><label>DESCRIPTION (OPTIONAL)</label><input type="text" placeholder="Desktop screen capture scan" className="modal-input" value={newProject.desc} onChange={e => setNewProject(p => ({ ...p, desc: e.target.value }))} /></div>
-          <div className="modal-form-group"><label>TARGET TOTAL LINES</label><input type="number" placeholder="0 (unspecified)" className="modal-input" value={newProject.target || ''} onChange={e => setNewProject(p => ({ ...p, target: Number(e.target.value) || 0 }))} /></div>
+          <div className="modal-form-group">
+            <label>PROJECT NAME *</label>
+            <input
+              type="text"
+              placeholder="e.g. Small-Fling Core"
+              className="modal-input"
+              value={newProject.name}
+              onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter' && newProject.name.trim()) handleCreateProject(); }}
+              autoFocus
+            />
+          </div>
         </Modal>
       )}
 
-      {showAbortModal && projectToAbort && (
-        <Modal title="Abort Project & Clear Data" onClose={() => setShowAbortModal(false)} onConfirm={() => handleAbortProject(projectToAbort.id)} confirmText="Confirm Abort & Wipe Data" confirmIcon={Ban} danger={true}>
-          <p style={{ fontSize: '13px', color: '#e6edf3', lineHeight: 1.5, marginBottom: '10px' }}>Are you sure you want to abort project <strong style={{ color: '#ff7b72' }}>{projectToAbort.name}</strong>?</p>
-          <p style={{ fontSize: '12px', color: '#8b949e', lineHeight: 1.5 }}>This will mark the project status as <strong style={{ color: '#ff7b72' }}>ABORTED</strong> and delete all captured screenshot frames and OCR transcribed lines from SQLite.</p>
-        </Modal>
-      )}
+      {/* Real-time Telemetry Monitor Toaster */}
+      <TelemetryToaster
+        telemetry={telemetry}
+        tokenStats={tokenStats}
+        documentSummary={{
+          total_lines: documentData.total_lines,
+          min_line: documentData.min_line,
+          max_line: documentData.max_line,
+          total_frames: frames.length,
+          issue_count: documentData.issue_count,
+          verified_overlap_lines: documentData.lines.filter(l => l.status === 'verified_overlap').length
+        }}
+        wsConnected={wsConnected}
+        backendConnected={backendConnected}
+        latencyMs={latencyMs}
+        pipelineMode={pipelineMode}
+        deviceModel={deviceModel}
+        eventsLog={eventsLog}
+        onClearEvents={() => setEventsLog([])}
+        onExpandedChange={setIsTelemetryExpanded}
+      />
     </div>
   );
 }
+
+
