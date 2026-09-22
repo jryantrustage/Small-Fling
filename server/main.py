@@ -2307,8 +2307,10 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
 
 if __name__ == "__main__":
     import uvicorn, sys
-    try: uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True)
+    try:
+        uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True)
     except OSError as e:
-        if getattr(e, 'winerror', None) == 10048 or getattr(e, 'errno', None) == 10048:
-            print(f"[ERROR] Port {config.SERVER_PORT} is in use."); sys.exit(1)
-        else: raise
+        if getattr(e, 'winerror', None) in (10048, 10013) or getattr(e, 'errno', None) in (10048, 10013):
+            print(f"[ERROR] Port {config.SERVER_PORT} is in use or blocked by access permissions."); sys.exit(1)
+        else:
+            raise

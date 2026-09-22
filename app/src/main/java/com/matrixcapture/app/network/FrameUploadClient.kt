@@ -136,6 +136,7 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
 
     suspend fun executeAdbCommand(cmd: String): Boolean = withContext(Dispatchers.IO) {
         val json = JSONObject().apply { put("command", cmd) }
+        try {
             client.newCall(Request.Builder().url("http://$serverHost/api/adb/command").post(json.toString().toRequestBody("application/json".toMediaTypeOrNull())).build()).execute().use { it.isSuccessful }
         } catch (_: Exception) { false }
     }
