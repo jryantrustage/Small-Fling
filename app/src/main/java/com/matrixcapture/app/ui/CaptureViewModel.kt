@@ -93,7 +93,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                         val cmdKey = "${ro.command}_${ro.updatedAt.ifEmpty { ro.stepLabel }}"
                         if (ro.command == "CAPTURE_DESKTOP" && lastHandledRemoteCommand != cmdKey) {
                             lastHandledRemoteCommand = cmdKey
-                            captureDesktopMode()
+                            android.util.Log.i("CaptureViewModel", "Ignored CAPTURE_DESKTOP: actuator disabled")
                         } else if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != cmdKey) {
                             lastHandledRemoteCommand = cmdKey
                             getNextPageLine()
@@ -235,33 +235,12 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         releaseVmWakeLock()
     }
 
-    fun captureDesktopMode() = viewModelScope.launch {
-        _uiState.update { it.copy(workflowStatus = "Capturing desktop screen...") }
-        val ps = DesktopPaginationService.instance
-        val dId = ps?.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId) ?: 0
-        // ALWAYS capture fresh screenshot first to prevent showing stale cached images
-        val snap = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
-        if (snap == null) {
-            _uiState.update { it.copy(workflowStatus = "Capture failed: No screen image.") }
-            return@launch
-        }
-        DesktopPaginationService.latestCapturedBitmap = snap
-        val resolvedDev = DesktopPaginationService.deviceModel.value.resolve()
-        val page = _uiState.value.currentPage.coerceAtLeast(1)
-        val top = if (_uiState.value.currentTopLine > 0) _uiState.value.currentTopLine else 1
-        val bot = if (_uiState.value.currentBottomLine > 0) _uiState.value.currentBottomLine else resolvedDev.linesPerPage
-        _uiState.update { it.copy(workflowStatus = "Uploading desktop mode capture (Lines $top-$bot)...") }
-        val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
-        if (res.success) {
-            _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Desktop Capture (Lines ${res.topLine}-${res.bottomLine}) Uploaded ✔") }
-            DesktopPaginationService.updateStatus("Desktop Capture (Lines ${res.topLine}-${res.bottomLine}) Uploaded ✔")
-        } else {
-            _uiState.update { it.copy(workflowStatus = "Capture failed: ${res.message}") }
-        }
+    fun captureDesktopMode() {
+        android.util.Log.i("CaptureViewModel", "captureDesktopMode is disabled")
     }
 
-    fun sendCapturesToPythonApi() = viewModelScope.launch {
-        captureDesktopMode()
+    fun sendCapturesToPythonApi() {
+        android.util.Log.i("CaptureViewModel", "sendCapturesToPythonApi is disabled")
     }
 
     fun getNextPageLine() = viewModelScope.launch {

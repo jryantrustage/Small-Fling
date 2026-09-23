@@ -10,6 +10,9 @@ from .editor_classifiers import (
     LightModeClassifier,
     ViewModeClassifier,
     KeyboardOpenClassifier,
+    ModalOverlayClassifier,
+    MatrixAppOverlayClassifier,
+    OcrDegradedClassifier,
 )
 
 
@@ -23,6 +26,9 @@ class ClassifierRegistry:
         self.register(KeyboardOpenClassifier())
         self.register(ViewModeClassifier())
         self.register(LightModeClassifier())
+        self.register(ModalOverlayClassifier())
+        self.register(MatrixAppOverlayClassifier())
+        self.register(OcrDegradedClassifier())
 
     def register(self, classifier: BaseClassifier) -> None:
         """Register a new classifier."""

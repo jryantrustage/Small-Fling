@@ -238,6 +238,9 @@ function AppContent() {
   const prevFramesCountRef = useRef(0);
   const selectedFrameIdRef = useRef<string | null>(null);
 
+  const lastPacerMsgRef = useRef<string>('');
+  const lastTelemMsgRef = useRef<string>('');
+
   // Close device dropdowns on outside click
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -862,13 +865,21 @@ function AppContent() {
                 if (d.includes('pixel 8') || d.includes('pixel_8')) setDeviceModel('pixel_8');
                 else if (d.includes('pixel 10') || d.includes('pixel_10')) setDeviceModel('pixel_10');
               }
-              addTelemetryEvent('SYSTEM', `Telemetry sync: ${msg.data.phase || msg.data.status_message || 'updated'}`);
+              const telemMsg = `Telemetry sync: ${msg.data.phase || msg.data.status_message || 'updated'}`;
+              if (telemMsg !== lastTelemMsgRef.current) {
+                lastTelemMsgRef.current = telemMsg;
+                addTelemetryEvent('SYSTEM', telemMsg);
+              }
             }
           } else if (msg.type === 'orchestration_event') {
             if (msg.telemetry) {
               setTelemetry(msg.telemetry);
               if (msg.telemetry.phase) {
-                addTelemetryEvent('PACER', `Pacer ${msg.telemetry.phase}: ${msg.telemetry.status_message || ''}`);
+                const pacerMsg = `Pacer ${msg.telemetry.phase}: ${msg.telemetry.status_message || ''}`;
+                if (pacerMsg !== lastPacerMsgRef.current) {
+                  lastPacerMsgRef.current = pacerMsg;
+                  addTelemetryEvent('PACER', pacerMsg);
+                }
               }
             }
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
@@ -951,21 +962,6 @@ function AppContent() {
     }
   };
 
-  const handleCaptureDesktop = async () => {
-    if (!activeProject) {
-      setShowNewProjectModal(true);
-      return;
-    }
-    try {
-      await api('/api/orchestrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'CAPTURE_DESKTOP', source: 'web_studio' })
-      });
-    } catch (e) {
-      console.error('Failed to trigger repeatedly capture page 1:', e);
-    }
-  };
 
   const handleSaveLineEdit = async () => {
     if (!editingLine) return;
@@ -1299,9 +1295,14 @@ function AppContent() {
       {/* Action Bar */}
       <div className="orchestration-bar">
         <div className="orchestration-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button className="btn btn-orch btn-capture-desktop" onClick={handleCaptureDesktop} title="repeatedly capture page 1">
+          <button
+            className="btn btn-orch btn-capture-desktop"
+            disabled
+            title="Desktop capture actuator disabled"
+            style={{ opacity: 0.5, cursor: 'not-allowed' }}
+          >
             <Camera size={14} />
-            <span>repeatedly capture page 1</span>
+            <span>desktop capture (disabled)</span>
           </button>
           <button
             className={`btn btn-sm ${showDag ? 'btn-primary' : 'btn-outline'}`}

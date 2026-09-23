@@ -149,11 +149,90 @@ orchestration_state: Dict[str, Any] = {
 
 dag_state: Dict[str, Any] = {
     "nodes": {
-        "init_end": {"id": "init_end", "title": "1. End Scan (Ctrl+End)", "status": "idle", "total_lines": 0},
-        "reset_home": {"id": "reset_home", "title": "2. Home Reset (Ctrl+Home)", "status": "idle", "verified": False},
-        "frame_acquire": {"id": "frame_acquire", "title": "3. Frame Acquisition", "status": "idle", "page": 1},
-        "arrow_down": {"id": "arrow_down", "title": "4. Arrow Down Step", "status": "idle", "arrow_count": 48},
-        "verification_trigger": {"id": "verification_trigger", "title": "5. Terminal Trigger", "status": "idle", "loop_count": 0, "is_complete": False}
+        "init_end": {
+            "id": "init_end",
+            "title": "1. Determine Total Lines (Ctrl+End)",
+            "description": "Send HID Ctrl+End, verify gutter position at EOF, display total lines by OCR of last line of EOF.",
+            "status": "idle",
+            "total_lines": 0
+        },
+        "reset_home": {
+            "id": "reset_home",
+            "title": "2. Return to Line 1 (Ctrl+Home)",
+            "description": "Send HID Ctrl+Home to return to line 1, verify line 1 is in the top position in gutter.",
+            "status": "idle",
+            "verified": False
+        },
+        "frame_acquire": {
+            "id": "frame_acquire",
+            "title": "3. Screen Capture & Acquisition",
+            "description": "Screen capture and acquisition: offload to dedicated OCR worker process.",
+            "status": "idle",
+            "page": 1
+        },
+        "arrow_down": {
+            "id": "arrow_down",
+            "title": "4. Intelligent Navigation (Down Arrow)",
+            "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
+            "status": "idle",
+            "arrow_count": 48
+        },
+        "verification_trigger": {
+            "id": "verification_trigger",
+            "title": "5. Verify Trigger",
+            "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
+            "status": "idle",
+            "loop_count": 0,
+            "is_complete": False,
+            "config": {
+                "prevent_trigger_on_issue": True,
+                "qualifiers": {
+                    "modal_overlay": {
+                        "name": "Modal Overlay Check",
+                        "description": "Is a modal appearing over the teams markdown?",
+                        "enabled": True,
+                        "severity": "blocking"
+                    },
+                    "matrix_app_overlay": {
+                        "name": "Matrix App Capture Check",
+                        "description": "Is the mobile app matrix capture appearing over the teams markdown?",
+                        "enabled": True,
+                        "severity": "blocking"
+                    },
+                    "ocr_degraded": {
+                        "name": "OCR Quality Degradation Check",
+                        "description": "Has the result of the previous ocr capture degraded?",
+                        "enabled": True,
+                        "severity": "blocking"
+                    },
+                    "keyboard_open": {
+                        "name": "Virtual Keyboard Check",
+                        "description": "Is the software keyboard active or covering content?",
+                        "enabled": True,
+                        "severity": "blocking"
+                    },
+                    "light_mode": {
+                        "name": "Theme Qualifier",
+                        "description": "Ensure editor is in dark mode (prevent light theme wash out)",
+                        "enabled": False,
+                        "severity": "warning"
+                    },
+                    "view_mode": {
+                        "name": "Edit Mode Qualifier",
+                        "description": "Ensure document is in edit mode with gutter line numbers visible",
+                        "enabled": True,
+                        "severity": "blocking"
+                    }
+                }
+            },
+            "trigger_decision": {
+                "allowed": True,
+                "prevented": False,
+                "reasons": [],
+                "evaluated_at": None,
+                "qualifier_statuses": {}
+            }
+        }
     },
     "edges": [
         {"from": "init_end", "to": "reset_home"},
@@ -239,6 +318,83 @@ def save_persisted_state():
     except Exception as e:
         print(f"Error saving state to SQLite: {e}")
 
+def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """
+    Evaluates configured deterministic qualifiers to determine if DAG Node 5 trigger
+    should proceed or be prevented.
+    """
+    node_5 = dag_state["nodes"].get("verification_trigger", {})
+    cfg = node_5.get("config", {})
+    prevent_enforced = cfg.get("prevent_trigger_on_issue", True)
+    qualifiers_cfg = cfg.get("qualifiers", {})
+
+    active_issues = []
+    # Check latest issues cached from classifiers or telemetry
+    known_issues = eval_results or latest_telemetry.get("classifier_issues", [])
+    issue_map = {item.get("classifier_id", ""): item for item in known_issues}
+
+    # Also evaluate OCR degradation directly from captured frames
+    sorted_f = sorted(captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+    if sorted_f:
+        last_f = sorted_f[-1]
+        status = last_f.get("status", "")
+        cnt = last_f.get("extracted_line_count", 0)
+        if status.startswith("error"):
+            issue_map["ocr_degraded"] = {
+                "classifier_id": "ocr_degraded",
+                "issue_detected": True,
+                "issue_name": "previous ocr capture degraded",
+                "details": f"Previous frame failed OCR: {status}"
+            }
+        elif len(sorted_f) >= 2:
+            prev_f = sorted_f[-2]
+            prev_cnt = prev_f.get("extracted_line_count", 0)
+            if prev_cnt >= 20 and cnt < 5:
+                issue_map["ocr_degraded"] = {
+                    "classifier_id": "ocr_degraded",
+                    "issue_detected": True,
+                    "issue_name": "previous ocr capture degraded",
+                    "details": f"OCR line count dropped severely ({prev_cnt} -> {cnt} lines)"
+                }
+        elif cnt == 0 and status == "processed":
+            issue_map["ocr_degraded"] = {
+                "classifier_id": "ocr_degraded",
+                "issue_detected": True,
+                "issue_name": "previous ocr capture degraded",
+                "details": "0 lines extracted from previous page"
+            }
+
+    reasons = []
+    qualifier_statuses = {}
+
+    for q_id, q_info in qualifiers_cfg.items():
+        is_enabled = q_info.get("enabled", True)
+        issue = issue_map.get(q_id)
+        has_issue = bool(issue and issue.get("issue_detected", False))
+
+        qualifier_statuses[q_id] = {
+            "name": q_info.get("name", q_id),
+            "description": q_info.get("description", ""),
+            "enabled": is_enabled,
+            "severity": q_info.get("severity", "blocking"),
+            "issue_detected": has_issue,
+            "details": (issue.get("details") or issue.get("issue_name")) if has_issue else "Clean / Satisfied"
+        }
+
+        if prevent_enforced and is_enabled and has_issue:
+            reasons.append(f"{q_info.get('name')}: {qualifier_statuses[q_id]['details']}")
+
+    is_prevented = len(reasons) > 0
+    decision = {
+        "allowed": not is_prevented,
+        "prevented": is_prevented,
+        "reasons": reasons,
+        "evaluated_at": datetime.now().isoformat(),
+        "qualifier_statuses": qualifier_statuses
+    }
+    node_5["trigger_decision"] = decision
+    return decision
+
 def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
     global orchestration_state, latest_telemetry, dag_state
     cur_p = orchestration_state.get("page", 1)
@@ -261,17 +417,30 @@ def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
         is_verified = (top_line == expected_top or abs(top_line - expected_top) <= 1)
 
     is_complete = (target > 0 and bottom_line >= target)
+
+    # Evaluate deterministic qualifiers for Node 5 trigger decision
+    decision = evaluate_dag_node_5_trigger_sync()
+
+    node_status = "completed" if is_complete else ("prevented" if decision["prevented"] else "looping")
+
     dag_state["nodes"]["frame_acquire"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
     dag_state["nodes"]["verification_trigger"].update({
-        "status": "completed" if is_complete else "looping",
+        "status": node_status,
         "verified_top_transition": is_verified,
         "is_complete": is_complete,
+        "trigger_decision": decision,
         "loop_count": dag_state["nodes"]["verification_trigger"].get("loop_count", 0) + 1,
         "remaining_lines": max(0, target - bottom_line) if target > 0 else 0
     })
-    dag_state["current_active_node"] = "verification_trigger" if is_complete else "arrow_down"
 
-    if is_complete:
+    if decision["prevented"]:
+        dag_state["current_active_node"] = "verification_trigger"
+        orchestration_state["status"] = "PAUSED_QUALIFIER_ISSUE"
+        orchestration_state["step_label"] = f"Trigger Prevented: {', '.join(decision['reasons'][:2])}"
+    else:
+        dag_state["current_active_node"] = "verification_trigger" if is_complete else "arrow_down"
+
+    if is_complete and not decision["prevented"]:
         orchestration_state["status"] = "COMPLETED"
         orchestration_state["step_label"] = f"Transcription Complete (Target {target} Lines Met) ✔"
         latest_telemetry["phase"] = "COMPLETED"
