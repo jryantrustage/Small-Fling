@@ -304,3 +304,204 @@ class KeyboardOpenClassifier(BaseClassifier):
             actions_taken=actions,
             metadata={"ime_still_visible": still_open}
         )
+
+
+class ModalOverlayClassifier(BaseClassifier):
+    id = "modal_overlay"
+    issue_description = "modal appearing over teams markdown"
+    fix_description = "dismiss modal dialog"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        img = context.image_cv
+        if img is None and context.image_bytes:
+            nparr = np.frombuffer(context.image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                details="No image available for modal check"
+            )
+
+        h, w = img.shape[:2]
+        center_crop = img[int(h * 0.20):int(h * 0.80), int(w * 0.20):int(w * 0.80)]
+        gray_center = cv2.cvtColor(center_crop, cv2.COLOR_BGR2GRAY)
+
+        edges = cv2.Canny(gray_center, 50, 150)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        has_modal = False
+        details = "No modal detected over teams markdown"
+        target_coords = None
+        min_modal_area = (h * 0.25) * (w * 0.25)
+
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            area = cw * ch
+            if area > min_modal_area and 0.4 < (cw / max(1, ch)) < 3.0:
+                has_modal = True
+                target_coords = (int(w * 0.20 + x + cw / 2), int(h * 0.20 + y + ch / 2))
+                details = f"Modal dialog bounding box detected ({cw}x{ch} px) over editor"
+                break
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=has_modal,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=details,
+            target_coordinates=target_coords
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        actions = []
+        actions.append("Dispatched KEYCODE_ESCAPE (111) to dismiss modal")
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
+        await run_adb_shell("input keyevent 111", serial)
+        await asyncio.sleep(0.3)
+        return FixResult(
+            classifier_id=self.id,
+            success=True,
+            message="Sent Escape to dismiss modal dialog",
+            actions_taken=actions
+        )
+
+
+class MatrixAppOverlayClassifier(BaseClassifier):
+    id = "matrix_app_overlay"
+    issue_description = "mobile app matrix capture appearing over teams markdown"
+    fix_description = "minimize or reposition matrix capture overlay"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        img = context.image_cv
+        if img is None and context.image_bytes:
+            nparr = np.frombuffer(context.image_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                details="No image available for overlay check"
+            )
+
+        h, w = img.shape[:2]
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        lower_matrix_green = np.array([45, 160, 140])
+        upper_matrix_green = np.array([90, 255, 255])
+        mask = cv2.inRange(hsv, lower_matrix_green, upper_matrix_green)
+
+        # Check document text capture area (excluding top status bar)
+        doc_mask = mask[int(h * 0.15):int(h * 0.90), int(w * 0.10):int(w * 0.85)]
+        green_pixel_count = int(np.count_nonzero(doc_mask))
+
+        is_overlapping = green_pixel_count > 120
+        details = (
+            f"Matrix Capture overlay detected over editor ({green_pixel_count} green pixels)"
+            if is_overlapping else "Matrix Capture overlay not obscuring editor text"
+        )
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=is_overlapping,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=details,
+            metadata={"green_pixel_count": green_pixel_count}
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        actions = []
+        actions.append("Tapped Teams window title bar to re-focus editor in front of overlay")
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} tap 500 120", serial)
+        await run_adb_shell("input tap 500 120", serial)
+        await asyncio.sleep(0.3)
+        return FixResult(
+            classifier_id=self.id,
+            success=True,
+            message="Re-focused Teams window to clear overlay",
+            actions_taken=actions
+        )
+
+
+class OcrDegradedClassifier(BaseClassifier):
+    id = "ocr_degraded"
+    issue_description = "previous ocr capture degraded"
+    fix_description = "re-acquire settled frame with enhanced dwell"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        from services import state
+        frames = list(state.captured_frames.values())
+        if not frames:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                details="No previous frames captured yet (healthy)"
+            )
+
+        sorted_f = sorted(frames, key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+        last_frame = sorted_f[-1]
+
+        status = last_frame.get("status", "")
+        extracted_cnt = last_frame.get("extracted_line_count", 0)
+        is_error = status.startswith("error")
+
+        is_degraded = False
+        reason = f"Previous OCR healthy ({extracted_cnt} lines extracted)"
+
+        if is_error:
+            is_degraded = True
+            reason = f"Previous frame {last_frame.get('frame_id', '')[:8]} failed OCR: {status}"
+        elif len(sorted_f) >= 2:
+            prev_frame = sorted_f[-2]
+            prev_cnt = prev_frame.get("extracted_line_count", 0)
+            if prev_cnt >= 20 and extracted_cnt < 5:
+                is_degraded = True
+                reason = f"OCR line count dropped from {prev_cnt} to {extracted_cnt} lines on page {last_frame.get('page_index')}"
+        elif extracted_cnt == 0 and status == "processed":
+            is_degraded = True
+            reason = f"0 lines extracted from page {last_frame.get('page_index')}"
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=is_degraded,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=reason,
+            metadata={"last_extracted_count": extracted_cnt, "status": status}
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        from services import state
+        frames = list(state.captured_frames.values())
+        if frames:
+            sorted_f = sorted(frames, key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+            last_frame = sorted_f[-1]
+            last_frame["status"] = "queued"
+            top = last_frame.get("top_line", 1)
+            state.recapture_queue.append({"line_number": top, "page_index": last_frame.get("page_index", 1)})
+        return FixResult(
+            classifier_id=self.id,
+            success=True,
+            message="Queued previous frame for re-capture and re-OCR",
+            actions_taken=["Flagged frame for recapture with extended settle dwell"]
+        )

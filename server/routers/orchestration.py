@@ -1,7 +1,8 @@
 import asyncio
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from pydantic import BaseModel
 
 import config
 import db
@@ -100,6 +101,13 @@ async def update_telemetry(p: TelemetryUpdateRequest):
                 )
             )
         )
+    # Clean up status_message if stuck on desktop capture
+    if state.latest_telemetry.get("status_message") and "Desktop Captured" in state.latest_telemetry["status_message"]:
+        state.latest_telemetry["status_message"] = "Ready"
+
+    prev_status = state.orchestration_state.get("status")
+    prev_step = state.orchestration_state.get("active_step")
+
     if p.is_pacing:
         state.orchestration_state["status"] = "RUNNING"
     elif p.phase == "COMPLETED":
@@ -108,7 +116,10 @@ async def update_telemetry(p: TelemetryUpdateRequest):
         state.orchestration_state["status"] = "PAUSED"
     elif p.phase in ["STANDBY", "IDLE"] and state.orchestration_state["status"] == "RUNNING":
         state.orchestration_state["status"] = "IDLE"
-    state.orchestration_state["updated_at"] = datetime.now().isoformat()
+
+    if (state.orchestration_state.get("status") != prev_status or 
+        state.orchestration_state.get("active_step") != prev_step):
+        state.orchestration_state["updated_at"] = datetime.now().isoformat()
 
     await state.ws_manager.broadcast({
         "type": "orchestration_event",
@@ -137,9 +148,27 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         state.orchestration_state.update({"status": "RUNNING", "active_step": "SCREEN_CAPTURE", "step_label": f"Auto Flipping Started by {invoker}"})
         state.latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Auto Flipping • Invoked by {invoker}"})
     elif cmd == "CAPTURE_DESKTOP":
-        await ensure_adb_keyboard_closed()
-        state.orchestration_state.update({"active_step": "SCREEN_CAPTURE", "step_label": f"Repeatedly capture page 1 invoked by {invoker}"})
-        state.latest_telemetry.update({"status_message": f"repeatedly capture page 1 • Invoked by {invoker}"})
+        # Pace desktop capture actuator is disabled to prevent overwhelming API calls
+        state.orchestration_state.update({
+            "last_command": "NONE",
+            "active_step": "START_READY",
+            "step_label": "Desktop capture actuator disabled"
+        })
+        state.latest_telemetry.update({
+            "status_message": "Desktop capture actuator disabled"
+        })
+        await state.ws_manager.broadcast({
+            "type": "orchestration_event",
+            "orchestration": state.orchestration_state,
+            "telemetry": state.latest_telemetry
+        })
+        return {
+            "status": "disabled",
+            "command": cmd,
+            "message": "Desktop capture actuator is disabled.",
+            "orchestration": state.orchestration_state,
+            "telemetry": state.latest_telemetry
+        }
     elif cmd == "GET_NEXT_LINE":
         next_ln = 1
         for f in reversed(sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
@@ -198,6 +227,7 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
 async def get_dag_status():
     proj = db.get_active_project()
     target_tot = proj.get("target_total_lines", 0) if proj else state.latest_telemetry.get("target_total_lines", 0)
+    node_5 = state.dag_state["nodes"].get("verification_trigger", {})
     return {
         "status": "success",
         "dag": state.dag_state,
@@ -205,7 +235,84 @@ async def get_dag_status():
         "current_top_line": state.latest_telemetry.get("current_top_line", 1),
         "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 31),
         "current_page": state.latest_telemetry.get("current_page", 1),
-        "active_node": state.dag_state.get("current_active_node", "init_end")
+        "active_node": state.dag_state.get("current_active_node", "init_end"),
+        "node_5_config": node_5.get("config", {}),
+        "trigger_decision": node_5.get("trigger_decision", {})
+    }
+
+class DagNode5ConfigPayload(BaseModel):
+    prevent_trigger_on_issue: Optional[bool] = None
+    qualifiers: Optional[Dict[str, Dict[str, Any]]] = None
+
+@router.get("/api/dag/nodes/node_5/config")
+async def get_dag_node_5_config():
+    node_5 = state.dag_state["nodes"].get("verification_trigger", {})
+    return {
+        "status": "success",
+        "node_id": "verification_trigger",
+        "config": node_5.get("config", {}),
+        "trigger_decision": node_5.get("trigger_decision", {}),
+        "status_code": node_5.get("status", "idle")
+    }
+
+@router.post("/api/dag/nodes/node_5/config")
+async def update_dag_node_5_config(payload: DagNode5ConfigPayload):
+    node_5 = state.dag_state["nodes"].get("verification_trigger", {})
+    cfg = node_5.setdefault("config", {})
+    if payload.prevent_trigger_on_issue is not None:
+        cfg["prevent_trigger_on_issue"] = payload.prevent_trigger_on_issue
+    if payload.qualifiers is not None:
+        for q_id, q_data in payload.qualifiers.items():
+            if q_id in cfg.get("qualifiers", {}):
+                cfg["qualifiers"][q_id].update(q_data)
+
+    decision = state.evaluate_dag_node_5_trigger_sync()
+    await state.ws_manager.broadcast({
+        "type": "dag_node_configured",
+        "node_id": "verification_trigger",
+        "config": cfg,
+        "trigger_decision": decision,
+        "dag": state.dag_state
+    })
+    return {
+        "status": "success",
+        "config": cfg,
+        "trigger_decision": decision
+    }
+
+@router.post("/api/dag/nodes/node_5/evaluate")
+async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
+    try:
+        try:
+            from classifiers.registry import classifier_registry
+            from classifiers.base import ClassifierContext
+        except ImportError:
+            from server.classifiers.registry import classifier_registry
+            from server.classifiers.base import ClassifierContext
+        from services.adb_service import get_active_adb_serial, detect_external_display_id, capture_external_screenshot
+        
+        active_serial = await get_active_adb_serial(serial)
+        disp_id = await detect_external_display_id(active_serial)
+        snap = await capture_external_screenshot(active_serial)
+        context = ClassifierContext(
+            serial=active_serial,
+            display_id=disp_id,
+            image_bytes=snap,
+            alignment_data=state.latest_alignment_status
+        )
+        await classifier_registry.evaluate_all(context)
+        issues = classifier_registry.get_latest_issues()
+        decision = state.evaluate_dag_node_5_trigger_sync(issues)
+    except Exception:
+        decision = state.evaluate_dag_node_5_trigger_sync()
+
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state
+    })
+    return {
+        "status": "success",
+        "trigger_decision": decision
     }
 
 @router.get("/api/pipeline/mode")

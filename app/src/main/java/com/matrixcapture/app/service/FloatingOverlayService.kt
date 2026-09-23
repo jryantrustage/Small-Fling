@@ -129,24 +129,7 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                             Log.i(TAG, "HUD executing remote command: ${ro.command} (source=${ro.source}, key=$cmdKey)")
                             when (ro.command) {
                                 "CAPTURE_DESKTOP" -> {
-                                    serviceScope.launch {
-                                        DesktopPaginationService.updateStatus("Remote: Capturing desktop screen...")
-                                        val ps = DesktopPaginationService.instance
-                                        val dId = ps?.resolveTargetDisplayId() ?: 0
-                                        val snap = ps?.captureScreenshot(dId)
-                                            ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot()
-                                            ?: DesktopPaginationService.latestCapturedBitmap
-                                        if (snap != null) {
-                                            DesktopPaginationService.latestCapturedBitmap = snap
-                                            val resolvedDevice = DesktopPaginationService.deviceModel.value.resolve()
-                                            val top = if (pState.currentTopLine > 0) pState.currentTopLine else 1
-                                            val bot = if (pState.currentBottomLine > 0) pState.currentBottomLine else resolvedDevice.linesPerPage
-                                            val page = if (pState.currentPage > 0) pState.currentPage else 1
-                                            val res = uploadClient.uploadFrame(snap, top, bot, page, sync = true)
-                                            DesktopPaginationService.updateStatus("Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})")
-                                            Log.i(TAG, "Remote capture uploaded: ${res.success}, lines=${res.topLine}-${res.bottomLine}")
-                                        }
-                                    }
+                                    Log.i(TAG, "HUD ignoring CAPTURE_DESKTOP: actuator disabled")
                                 }
                                 "BEGIN_AUTO_FLIPPING", "BEGIN" -> {
                                     DesktopPaginationService.instance?.startPacingEngine(totalLines = pState.targetTotalLines)
@@ -441,27 +424,13 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                                     Text("begin Auto Flipping", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                                 }
                                 Button(
-                                    onClick = {
-                                        isCapturing = true
-                                        coroutineScope.launch {
-                                            DesktopPaginationService.updateStatus("Capturing desktop screen...")
-                                            val ps = DesktopPaginationService.instance
-                                            val dId = ps?.resolveTargetDisplayId() ?: 0
-                                            val snapshot = ps?.captureScreenshot(dId) ?: SegmentRecorderService.instance?.getCaptureManager()?.captureSettledSnapshot() ?: DesktopPaginationService.latestCapturedBitmap
-                                            if (snapshot != null) {
-                                                DesktopPaginationService.latestCapturedBitmap = snapshot
-                                                val pMode = if (pipelineMode == PipelineMode.CLOUD_GEMINI) "cloud" else "local"
-                                                val res = FloatingOverlayService.getUploadClient(context).uploadFrame(snapshot, topLn, botLn, displayPage, sync = true, pipelineMode = pMode, modelTarget = if (pMode == "cloud") "gemini" else "ollama")
-                                                DesktopPaginationService.updateStatus(if (res.success) "Desktop Captured ✔ (Ln ${res.topLine}-${res.bottomLine})" else "Upload Failed: ${res.message}")
-                                            }
-                                            delay(500)
-                                            isCapturing = false
-                                        }
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(36.dp),
+                                    onClick = { },
+                                    enabled = false,
+                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = Color(0xFF161B22), disabledContentColor = Color(0xFF8B949E)),
+                                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                                 ) {
-                                    Text(if (isCapturing) "..." else "repeatedly capture page 1", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    Text("desktop capture (disabled)", color = Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }
