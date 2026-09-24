@@ -297,18 +297,10 @@ async def is_ime_visible(serial: Optional[str] = None) -> bool:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
 
-        chk = await run_adb_shell("dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true'", ser)
+        chk = await run_adb_shell("dumpsys input_method | grep -E 'mInputShown=true|mImeWindowVis=[123]'", ser)
         out = chk.get("stdout", "")
         if "mInputShown=true" in out or any(f"mImeWindowVis={v}" in out for v in [1, 2, 3]):
             return True
-
-        chk_win = await run_adb_shell("dumpsys window windows", ser)
-        win_lines = chk_win.get("stdout", "").splitlines()
-        for i, line in enumerate(win_lines):
-            if "InputMethod" in line and "Window #" in line:
-                chunk = "\n".join(win_lines[i:min(len(win_lines), i + 25)])
-                if "mHasSurface=true" in chunk or "mViewVisibility=0x0" in chunk:
-                    return True
         return False
     except Exception:
         return False
@@ -329,29 +321,17 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
             await run_adb_shell(f"settings put secure enabled_accessibility_services {new_acc}", ser)
             await run_adb_shell("settings put secure accessibility_enabled 1", ser)
 
-        chk_pid = await run_adb_shell("pidof com.matrixcapture.app", ser)
-        if not chk_pid.get("stdout", "").strip():
-            await run_adb_shell("am start -n com.matrixcapture.app/.ui.MainActivity --display 0", ser)
-
-        disp_id = await detect_external_display_id(ser)
-
         if await is_ime_visible(ser):
             # 1. Broadcast to MatrixCapture Accessibility Service to suppress IME
             await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", ser)
-            # 2. KEYCODE_BACK (4) directly instructs Android IME to collapse
-            if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} keyevent 4", ser)
-            await run_adb_shell("input -d 0 keyevent 4", ser)
-            await run_adb_shell("input keyevent 4", ser)
-            await asyncio.sleep(0.15)
-
+            # 2. Dismiss IME on display 0 (phone screen only, never external display)
+            await run_adb_shell("input -d 0 keyevent 111", ser)
+            await asyncio.sleep(0.1)
             if await is_ime_visible(ser):
-                if disp_id > 0:
-                    await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
-                await run_adb_shell("input keyevent 111", ser)
-                await run_adb_shell("input keyevent 4", ser)
-                await asyncio.sleep(0.12)
+                await run_adb_shell("input -d 0 keyevent 4", ser)
             return True
+        return False
+    except Exception:
         return False
     except Exception:
         return False
@@ -396,8 +376,6 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", serial)
     else:
         await run_adb_shell(f"input keycombination {key1} {key2}", serial)
-    await asyncio.sleep(0.05)
-    await run_adb_shell(f"input keycombination {key1} {key2}", serial)
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
     from services import state
