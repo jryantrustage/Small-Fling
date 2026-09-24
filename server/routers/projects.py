@@ -50,17 +50,16 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
                 res_scan = await state.scan_image_in_process(calib_path)
                 total_lines = res_scan.get("bottom_line", 0)
 
-        if total_lines <= 0 and requested_target > 0:
-            total_lines = requested_target
-
         if total_lines > 0:
             db.update_project_target_lines(project_id, total_lines)
             state.latest_telemetry["target_total_lines"] = total_lines
             state.latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
-
-        state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
-        state.dag_state["nodes"]["reset_home"].update({"status": "active"})
-        state.dag_state["current_active_node"] = "reset_home"
+            state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
+            state.dag_state["nodes"]["reset_home"].update({"status": "active"})
+            state.dag_state["current_active_node"] = "reset_home"
+        else:
+            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0})
+            state.latest_telemetry["status_message"] = "Calibration failed: No lines detected at EOF."
 
         await state.ws_manager.broadcast({
             "type": "dag_updated",
@@ -115,19 +114,19 @@ async def create_project(req: ProjectCreateRequest):
     state.document_lines.clear()
     state.load_persisted_state()
 
-    # Initialize DAG state for new project
-    state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": req.target_total_lines or 0})
+    # Initialize DAG state for new project in clean, uncalibrated IDLE state
+    target_lines = req.target_total_lines or 0
+    state.dag_state["nodes"]["init_end"].update({"status": "idle", "total_lines": target_lines})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
     state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
     state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
     state.dag_state["current_active_node"] = "init_end"
-    await state.ws_manager.broadcast({"type": "project_switched", "project": new_proj, "dag": state.dag_state})
-
-    # Automatically execute instant calibration: Ctrl+End -> screencap -> gutter OCR -> Ctrl+Home -> verify
-    total_lines, is_verified, detected_first = await perform_full_project_calibration(new_proj["id"], req.target_total_lines or 0)
-    if total_lines > 0:
-        new_proj["target_total_lines"] = total_lines
+    state.latest_telemetry["target_total_lines"] = target_lines
+    state.latest_telemetry["current_top_line"] = 0
+    state.latest_telemetry["current_bottom_line"] = 0
+    state.latest_telemetry["phase"] = "IDLE"
+    state.latest_telemetry["status_message"] = "Project ready. DAG waiting for invocation."
 
     await state.ws_manager.broadcast({
         "type": "project_switched",
@@ -194,10 +193,12 @@ async def calibrate_project_end(project_id: str, request: Request):
         db.update_project_target_lines(project_id, total_lines)
         state.latest_telemetry["target_total_lines"] = total_lines
         state.latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
-
-    state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
-    state.dag_state["nodes"]["reset_home"].update({"status": "active"})
-    state.dag_state["current_active_node"] = "reset_home"
+        state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
+        state.dag_state["nodes"]["reset_home"].update({"status": "active"})
+        state.dag_state["current_active_node"] = "reset_home"
+    else:
+        state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0})
+        state.latest_telemetry["status_message"] = "Calibration failed: 0 lines detected at EOF via Ctrl+End"
 
     await state.ws_manager.broadcast({
         "type": "dag_updated",
@@ -205,7 +206,7 @@ async def calibrate_project_end(project_id: str, request: Request):
         "calibration_event": "end_detected",
         "total_lines": total_lines
     })
-    return {"status": "success", "project_id": project_id, "total_lines": total_lines, "target_total_lines": total_lines}
+    return {"status": "success" if total_lines > 0 else "warning", "project_id": project_id, "total_lines": total_lines, "target_total_lines": total_lines}
 
 @router.post("/api/projects/{project_id}/verify-home")
 async def verify_project_home(project_id: str, request: Request):
@@ -238,17 +239,20 @@ async def verify_project_home(project_id: str, request: Request):
         detected_first = res_scan.get("top_line", 1)
         is_verified = (detected_first == 1)
 
+    node_status = "completed" if is_verified else "error"
     state.dag_state["nodes"]["reset_home"].update({
-        "status": "completed",
+        "status": node_status,
         "verified": is_verified,
         "first_line": detected_first
     })
-    state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
-    state.dag_state["current_active_node"] = "frame_acquire"
-
-    state.latest_telemetry["current_top_line"] = 1
-    state.latest_telemetry["current_page"] = 1
-    state.latest_telemetry["status_message"] = f"Line 1 Verified at Top (Detected Ln {detected_first}) via Ctrl+Home ✔"
+    if is_verified:
+        state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
+        state.dag_state["current_active_node"] = "frame_acquire"
+        state.latest_telemetry["current_top_line"] = 1
+        state.latest_telemetry["current_page"] = 1
+        state.latest_telemetry["status_message"] = "Line 1 Verified at Top via Ctrl+Home ✔"
+    else:
+        state.latest_telemetry["status_message"] = f"Line 1 Verification Failed (Detected Ln {detected_first}) via Ctrl+Home"
 
     await state.ws_manager.broadcast({
         "type": "dag_updated",

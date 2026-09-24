@@ -28,7 +28,21 @@ current_device_model = init_device_model_from_cache()
 target_adb_serial: Optional[str] = None
 
 def _exec_adb_sync(args: List[str], timeout: float = 4.0, text: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run([(getattr(config, "ADB_PATH", None) or "adb")] + args, capture_output=True, text=text, timeout=timeout)
+    try:
+        return subprocess.run(
+            [(getattr(config, "ADB_PATH", None) or "adb")] + args,
+            capture_output=True,
+            text=text,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL
+        )
+    except Exception as e:
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=-1,
+            stdout="" if text else b"",
+            stderr=str(e).encode() if not text else str(e)
+        )
 
 def _exec_adb_sync_bin(args: List[str], timeout: float = 6.0) -> subprocess.CompletedProcess:
     return _exec_adb_sync(args, timeout=timeout, text=False)
@@ -85,7 +99,7 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None) -> Optio
             if len(parts) >= 2 and parts[1] == "device":
                 model = next((p.split(":", 1)[1] for p in parts[2:] if p.startswith("model:")), "unknown")
                 active.append({"serial": parts[0], "model": model, "raw": line.strip()})
-        if not active: return requested_serial or target_adb_serial
+        if not active: return None
         if requested_serial:
             for dev in active:
                 if dev["serial"] == requested_serial or requested_serial in dev["serial"]: return dev["serial"]
@@ -102,7 +116,7 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None) -> Optio
                 if dev["serial"] == target_adb_serial: return dev["serial"]
         return active[0]["serial"]
     except Exception:
-        return requested_serial or target_adb_serial
+        return None
 
 async def connect_device_for_model(model_pref: str) -> Optional[str]:
     try:
@@ -165,6 +179,7 @@ async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Opti
 
 async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
     ser = await get_active_adb_serial(serial)
+    if not ser: return None
     sf_id = await detect_surfaceflinger_display_id(ser)
     cmd = (["-s", ser] if ser else []) + ["exec-out", "screencap"] + (["-d", sf_id] if sf_id else []) + ["-p"]
     cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 8.0)

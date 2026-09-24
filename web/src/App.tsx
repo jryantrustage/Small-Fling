@@ -48,7 +48,7 @@ function AppContent() {
   const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', desc: '', target: 100 });
+  const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0 });
   const [documentData, setDocumentData] = useState<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[] }>({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
@@ -363,7 +363,7 @@ function AppContent() {
       body: JSON.stringify({ name: newProject.name, description: newProject.desc, target_total_lines: newProject.target })
     });
     if (res.ok) {
-      setNewProject({ name: '', desc: '', target: 100 });
+      setNewProject({ name: '', desc: '', target: 0 });
       setShowNewProjectModal(false);
       await fetchData();
     }
@@ -695,7 +695,7 @@ function AppContent() {
 
       {showDag && (
         <div style={{ padding: '0 20px 12px 20px' }}>
-          <FlowDag apiBase={API_BASE} activeProjectId={activeProject?.id} currentTopLine={telemetry.current_top_line || documentData.min_line || 1} currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49} targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0} currentPage={telemetry.current_page || frames.length || 1} isOrchestrating={telemetry.is_pacing} onRefresh={fetchData} />
+          <FlowDag apiBase={API_BASE} activeProjectId={activeProject?.id} activeDeviceSerial={deviceInfo?.active_serial} currentTopLine={telemetry.current_top_line || documentData.min_line || 1} currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49} targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0} currentPage={telemetry.current_page || frames.length || 1} isOrchestrating={telemetry.is_pacing} onRefresh={fetchData} />
         </div>
       )}
 
