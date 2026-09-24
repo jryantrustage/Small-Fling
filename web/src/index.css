@@ -1698,6 +1698,44 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.adb-mode-tabs {
+  display: flex;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 2px;
+}
+
+.adb-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.adb-tab-btn:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.adb-tab-btn.active {
+  background: rgba(56, 139, 253, 0.18);
+  color: #58a6ff;
+  border-color: rgba(56, 139, 253, 0.4);
+}
+
+.adb-tab-btn.active.pair-tab {
+  background: rgba(163, 113, 247, 0.18);
+  color: #d2a8ff;
+  border-color: rgba(163, 113, 247, 0.4);
+}
+
 .connect-ip-input {
   flex: 1;
   background: transparent;

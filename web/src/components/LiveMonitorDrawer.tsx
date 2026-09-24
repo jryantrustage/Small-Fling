@@ -28,6 +28,9 @@ interface LiveMonitorDrawerProps {
   onConnectAdbIp: (ip?: string) => Promise<void> | void;
   isConnectingIp: boolean;
   connectStatusMsg: string;
+  onPairAdb?: (target: string, code: string) => Promise<void> | void;
+  isPairing?: boolean;
+  pairStatusMsg?: string;
   apiBase: string;
   streamKey: number;
   onRefreshStream: () => void;
@@ -58,13 +61,25 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
   onConnectAdbIp,
   isConnectingIp,
   connectStatusMsg,
+  onPairAdb,
+  isPairing = false,
+  pairStatusMsg = '',
   apiBase,
   streamKey,
   onRefreshStream,
   onOpenAlignmentModal,
 }) => {
   const [showDrawerDeviceMenu, setShowDrawerDeviceMenu] = useState(false);
-  const [connectIpInput, setConnectIpInput] = useState('');
+  const [connectTab, setConnectTab] = useState<'connect' | 'pair'>('connect');
+  const [connectIpInput, setConnectIpInput] = useState(() => {
+    try {
+      return localStorage.getItem('mc_last_adb_target') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [pairIpInput, setPairIpInput] = useState('');
+  const [pairCodeInput, setPairCodeInput] = useState('');
   const drawerDeviceDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -201,43 +216,114 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
                 )}
               </div>
 
-              <div className="dropdown-section-title" style={{ marginTop: '6px' }}>
-                CONNECT ADB BY IP
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px' }}>
+                <div className="dropdown-section-title" style={{ padding: 0 }}>WIRELESS ADB</div>
+                <div className="adb-mode-tabs">
+                  <button
+                    type="button"
+                    className={`adb-tab-btn ${connectTab === 'connect' ? 'active' : ''}`}
+                    onClick={() => setConnectTab('connect')}
+                  >
+                    Connect
+                  </button>
+                  <button
+                    type="button"
+                    className={`adb-tab-btn pair-tab ${connectTab === 'pair' ? 'active' : ''}`}
+                    onClick={() => setConnectTab('pair')}
+                  >
+                    Pair New
+                  </button>
+                </div>
               </div>
-              <div className="connect-ip-row">
-                <input
-                  type="text"
-                  className="connect-ip-input"
-                  placeholder="192.168.86.xx:5555"
-                  value={connectIpInput}
-                  onChange={(e) => setConnectIpInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') onConnectAdbIp(connectIpInput);
-                  }}
-                />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                  onClick={() => onConnectAdbIp(connectIpInput)}
-                  disabled={isConnectingIp || !connectIpInput.trim()}
-                >
-                  {isConnectingIp ? (
-                    <Loader2 size={10} className="spin" />
-                  ) : (
-                    'Connect'
+
+              {connectTab === 'connect' ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div className="connect-ip-row">
+                    <input
+                      type="text"
+                      className="connect-ip-input"
+                      placeholder="192.168.86.xx:5555"
+                      value={connectIpInput}
+                      onChange={(e) => setConnectIpInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') onConnectAdbIp(connectIpInput);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                      onClick={() => onConnectAdbIp(connectIpInput)}
+                      disabled={isConnectingIp || !connectIpInput.trim()}
+                    >
+                      {isConnectingIp ? (
+                        <Loader2 size={10} className="spin" />
+                      ) : (
+                        'Connect'
+                      )}
+                    </button>
+                  </div>
+                  {connectStatusMsg && (
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {connectStatusMsg}
+                    </div>
                   )}
-                </button>
-              </div>
-              {connectStatusMsg && (
-                <div
-                  style={{
-                    fontSize: '10px',
-                    color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72',
-                    marginTop: '2px',
-                  }}
-                >
-                  {connectStatusMsg}
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', lineHeight: '1.2', padding: '0 2px' }}>
+                    💡 Tip: Pairing persists across toggles. Only update the port if previously paired.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div className="connect-ip-row">
+                    <input
+                      type="text"
+                      className="connect-ip-input"
+                      placeholder="Pair IP:Port (e.g. 192.168.86.81:37123)"
+                      value={pairIpInput}
+                      onChange={(e) => setPairIpInput(e.target.value)}
+                    />
+                  </div>
+                  <div className="connect-ip-row">
+                    <input
+                      type="text"
+                      className="connect-ip-input"
+                      placeholder="6-digit Pairing Code"
+                      value={pairCodeInput}
+                      onChange={(e) => setPairCodeInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && onPairAdb) onPairAdb(pairIpInput, pairCodeInput);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
+                      onClick={() => onPairAdb && onPairAdb(pairIpInput, pairCodeInput)}
+                      disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim() || !onPairAdb}
+                    >
+                      {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
+                    </button>
+                  </div>
+                  {pairStatusMsg && (
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {pairStatusMsg}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', lineHeight: '1.2', padding: '0 2px' }}>
+                    From "Pair device with pairing code" on your phone.
+                  </div>
                 </div>
               )}
 
