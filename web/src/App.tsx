@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Check, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, Loader2,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Shield
+  Monitor, ChevronDown, Info, Eye, EyeOff, Shield, Keyboard
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -118,7 +118,8 @@ function AppContent() {
   const [connectIpInput, setConnectIpInput] = useState(() => localStorage.getItem('mc_last_adb_target') || '');
   const [isConnectingIp, setIsConnectingIp] = useState(false);
   const [connectStatusMsg, setConnectStatusMsg] = useState('');
-  const [pairIpInput] = useState('');
+  const [connectTab, setConnectTab] = useState<'connect' | 'pair'>('connect');
+  const [pairIpInput, setPairIpInput] = useState('');
   const [pairCodeInput, setPairCodeInput] = useState('');
   const [isPairing, setIsPairing] = useState(false);
   const [pairStatusMsg, setPairStatusMsg] = useState('');
@@ -555,35 +556,99 @@ function AppContent() {
 
         <div className="header-center">
           <div className="device-selector-wrapper" ref={deviceDropdownRef}>
-            <button className="device-selector-btn" onClick={() => setShowDeviceDropdown(p => !p)}>
+            <button className={`device-selector-btn ${showDeviceDropdown ? 'open' : ''}`} onClick={() => setShowDeviceDropdown(p => !p)} title="Select connected Android device & capture profile">
               <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
               <Smartphone size={13} color="var(--color-primary)" />
               <span>{devDisplayName}</span>
               <span className="device-spec">({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)</span>
-              <ChevronDown size={11} style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none' }} />
+              <ChevronDown size={11} style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
 
             {showDeviceDropdown && (
               <div className="device-dropdown">
                 <div className="dropdown-section-title">CONNECTED TARGET</div>
-                {deviceInfo?.devices?.length ? deviceInfo.devices.map(dev => (
-                  <div key={dev.serial} className={`device-list-item ${deviceInfo.active_serial === dev.serial ? 'active' : ''}`} onClick={() => handleSelectSerial(dev.serial)}>
-                    <div className="device-item-left"><Smartphone size={14} /><div><div className="device-item-title">{dev.displayName || dev.model}</div><div className="device-item-sub">{dev.serial}</div></div></div>
-                    {deviceInfo.active_serial === dev.serial && <Check size={14} color="#00ff9d" />}
-                  </div>
-                )) : <div style={{ padding: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>No ADB devices connected</div>}
-
-                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>QUICK IP CONNECT</div>
-                <div className="connect-ip-row">
-                  <input type="text" className="connect-ip-input" placeholder="192.168.86.xx:5555" value={connectIpInput} onChange={e => setConnectIpInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleConnectAdbIp()} />
-                  <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }} onClick={() => handleConnectAdbIp()} disabled={isConnectingIp}>{isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {deviceInfo?.devices?.length ? deviceInfo.devices.map(dev => {
+                    const isActive = deviceInfo.active_serial === dev.serial || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
+                    return (
+                      <div key={dev.serial} className={`device-list-item ${isActive ? 'active' : ''}`} onClick={() => { handleSelectSerial(dev.serial); setShowDeviceDropdown(false); }}>
+                        <div className="device-item-left">
+                          <Smartphone size={14} color={isActive ? '#00ff9d' : '#8b949e'} />
+                          <div>
+                            <div className="device-item-title" style={{ color: isActive ? '#00ff9d' : 'var(--text-main)' }}>{dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}</div>
+                            <div className="device-item-sub">{dev.serial}</div>
+                          </div>
+                        </div>
+                        {isActive && <Check size={14} color="#00ff9d" />}
+                      </div>
+                    );
+                  }) : <div className="device-empty-hint">No ADB devices connected</div>}
                 </div>
-                {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{connectStatusMsg}</div>}
 
-                <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+                  <div className="dropdown-section-title" style={{ padding: 0 }}>WIRELESS ADB</div>
+                  <div className="adb-mode-tabs">
+                    <button type="button" className={`adb-tab-btn ${connectTab === 'connect' ? 'active' : ''}`} onClick={() => setConnectTab('connect')}>Connect</button>
+                    <button type="button" className={`adb-tab-btn pair-tab ${connectTab === 'pair' ? 'active' : ''}`} onClick={() => setConnectTab('pair')}>Pair New</button>
+                  </div>
+                </div>
+
+                {connectTab === 'connect' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div className="connect-ip-row">
+                      <input type="text" className="connect-ip-input" placeholder="192.168.86.xx:5555" value={connectIpInput} onChange={e => setConnectIpInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleConnectAdbIp()} />
+                      <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }} onClick={() => handleConnectAdbIp()} disabled={isConnectingIp || !connectIpInput.trim()}>{isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}</button>
+                    </div>
+                    {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>{connectStatusMsg}</div>}
+                    <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.3', padding: '0 2px' }}>
+                      💡 Tip: Pairing persists across toggles. If you just toggled debugging, only update the port.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <div className="connect-ip-row">
+                      <input type="text" className="connect-ip-input" placeholder="Pair IP:Port (e.g. 192.168.86.81:37123)" value={pairIpInput} onChange={e => setPairIpInput(e.target.value)} />
+                    </div>
+                    <div className="connect-ip-row">
+                      <input type="text" className="connect-ip-input" placeholder="6-digit Pairing Code" value={pairCodeInput} onChange={e => setPairCodeInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handlePairAdb(); }} />
+                      <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }} onClick={() => handlePairAdb()} disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}>
+                        {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
+                      </button>
+                    </div>
+                    {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>{pairStatusMsg}</div>}
+                    <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.3', padding: '0 2px' }}>
+                      Tap "Pair device with pairing code" on phone to view the pairing port & 6-digit code.
+                    </div>
+                  </div>
+                )}
+
+                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>DISPLAY HARDWARE CAPABILITIES</div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <div className={`capability-card ${deviceInfo?.displays?.desktop ? 'ready' : 'na'}`}>
+                    <Monitor size={12} />
+                    <span>Desktop Mode: {deviceInfo?.displays?.desktop ? 'READY' : 'N/A'}</span>
+                  </div>
+                  <div className={`capability-card phone ${deviceInfo?.displays?.phone ? 'ready' : 'na'}`}>
+                    <Smartphone size={12} />
+                    <span>Phone Mode: {deviceInfo?.displays?.phone ? 'READY' : 'N/A'}</span>
+                  </div>
+                </div>
+
+                <div className="dropdown-section-title" style={{ marginTop: '6px' }}>CAPTURE PROFILE CALIBRATION</div>
                 <div className="profile-pills-row">
-                  <button className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => handleSelectDevice('pixel_8')}><Smartphone size={11} /><span>PIXEL 8</span></button>
-                  <button className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => handleSelectDevice('pixel_10')}><Smartphone size={11} /><span>PIXEL 10</span></button>
+                  <button className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => handleSelectDevice('pixel_8')}><Smartphone size={11} /><span>PIXEL 8 (31L)</span></button>
+                  <button className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => handleSelectDevice('pixel_10')}><Smartphone size={11} /><span>PIXEL 10 (47L)</span></button>
+                </div>
+
+                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>INPUT METHOD & IME</div>
+                <div className="ime-control-card">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Keyboard size={13} />
+                    <span>HID Active (IME Suppressed)</span>
+                  </div>
+                  <button type="button" className="btn btn-sm btn-outline" style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }} onClick={handleCloseKeyboard} disabled={isClosingKeyboard} title="Force dismiss on-screen virtual keyboard">
+                    {isClosingKeyboard ? <Loader2 size={10} className="spin" /> : 'Close IME'}
+                  </button>
                 </div>
               </div>
             )}
