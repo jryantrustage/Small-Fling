@@ -825,7 +825,6 @@ function AppContent() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Monitor size={14} color="#00ff9d" />
                         <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>LIVE DESKTOP · MARKDOWN VIEW</span>
-                        <span style={{ fontSize: '9px', fontFamily: 'monospace', background: 'rgba(0, 255, 157, 0.12)', color: '#00ff9d', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.25)' }}>USB3 Video / DirectShow</span>
                       </div>
                       <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={() => setShowBoundingBoxes(p => !p)} style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}>
                         {showBoundingBoxes ? <Eye size={10} /> : <EyeOff size={10} />}<span>AI BOXES</span>

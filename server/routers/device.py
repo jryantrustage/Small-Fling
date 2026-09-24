@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response, Request
 from fastapi.responses import StreamingResponse
 from typing import Optional, Dict, Any
 from pathlib import Path
@@ -95,25 +95,16 @@ async def get_device_live_meta_endpoint(mode: str = "desktop", serial: Optional[
 
 @router.get("/api/device/capture-source")
 async def get_device_capture_source_endpoint(serial: Optional[str] = None):
-    from services.capture_card_service import capture_card_mgr
-    card_info = capture_card_mgr.list_video_sources()
     ser = await adb.get_active_adb_serial(serial)
-    
-    # Check if capture card is actively readable or busy
-    card_status = "not_found"
-    if card_info.get("has_capture_card"):
-        card = card_info["capture_cards"][0]
-        # Quick non-blocking probe
-        card_status = "detected"
-        
+    disp_map = await adb.detect_surfaceflinger_displays(ser) if ser else {}
+    has_ext = bool(disp_map.get("desktop"))
     return {
         "status": "ok",
-        "has_capture_card": card_info.get("has_capture_card", False),
-        "capture_card": card_info["capture_cards"][0] if card_info.get("has_capture_card") else None,
-        "all_video_devices": card_info.get("devices", []),
+        "has_external_display": has_ext,
         "adb_connected": bool(ser),
         "adb_serial": ser,
-        "preferred_source": "capture_card" if card_info.get("has_capture_card") else ("adb" if ser else "none"),
+        "displays": disp_map,
+        "preferred_source": "adb",
         "display_awake_policies": {
             "active": True,
             "stay_on_while_plugged_in": 7,
@@ -153,24 +144,32 @@ async def get_keyboard_status(serial: Optional[str] = None):
     }
 
 @router.post("/api/adb/connect")
-async def adb_connect(req: AdbConnectRequest):
+@router.post("/api/device/connect-ip")
+async def adb_connect(req: Request):
     import asyncio, subprocess
-    addr = req.address.strip()
+    data = await req.json()
+    addr = (data.get("address") or data.get("ip") or "").strip()
+    if not addr:
+        raise HTTPException(status_code=400, detail="Missing IP address/port")
     p = await asyncio.to_thread(subprocess.run, ["adb", "connect", addr], capture_output=True, text=True, timeout=8.0)
     out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
     is_success = (p.returncode == 0) and ("connected to" in out.lower() or "already connected" in out.lower())
     if is_success:
         adb.target_adb_serial = addr
-        active = await adb.get_active_adb_serial(addr)
+        active = await adb.get_active_adb_serial(addr, force_refresh=True)
         if active:
             adb.target_adb_serial = active
     return {"status": "ok" if is_success else "error", "output": out}
 
 @router.post("/api/adb/pair")
-async def adb_pair(req: AdbPairRequest):
+@router.post("/api/device/pair-ip")
+async def adb_pair(req: Request):
     import asyncio, subprocess
-    addr = req.address.strip()
-    code = req.code.strip()
+    data = await req.json()
+    addr = (data.get("address") or data.get("ip") or "").strip()
+    code = (data.get("code") or "").strip()
+    if not addr or not code:
+        raise HTTPException(status_code=400, detail="Missing IP address or pairing code")
     p = await asyncio.to_thread(subprocess.run, ["adb", "pair", addr, code], capture_output=True, text=True, timeout=10.0)
     out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
     is_success = (p.returncode == 0) and ("successfully paired" in out.lower() or ("paired" in out.lower() and "fail" not in out.lower()))
