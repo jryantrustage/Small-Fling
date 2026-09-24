@@ -151,12 +151,16 @@ async def connect_device_for_model(model_pref: str) -> Optional[str]:
     return None
 
 async def detect_external_display_id(serial: Optional[str] = None) -> int:
+    global current_device_model
     ser = await get_active_adb_serial(serial)
-    res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]' | head -n 1", ser)
-    if res.get("status") == "ok" and res.get("stdout"):
-        m = re.search(r'mDisplayId=(\d+)', res["stdout"])
-        if m and int(m.group(1)) != 0: return int(m.group(1))
-    return 4
+    if ser:
+        res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]|displayId=[1-9]' | head -n 5", ser)
+        if res.get("status") == "ok" and res.get("stdout"):
+            for line in res["stdout"].splitlines():
+                m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
+                if m and int(m.group(1)) != 0:
+                    return int(m.group(1))
+    return 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
 async def detect_surfaceflinger_displays(serial: Optional[str] = None) -> Dict[str, str]:
     ser = await get_active_adb_serial(serial)
@@ -177,31 +181,128 @@ async def detect_surfaceflinger_displays(serial: Optional[str] = None) -> Dict[s
 async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
     return (await detect_surfaceflinger_displays(serial)).get("desktop")
 
-async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
-    ser = await get_active_adb_serial(serial)
-    if not ser: return None
-    sf_id = await detect_surfaceflinger_display_id(ser)
-    cmd = (["-s", ser] if ser else []) + ["exec-out", "screencap"] + (["-d", sf_id] if sf_id else []) + ["-p"]
-    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 8.0)
-    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)): return png_bytes
+from services.capture_card_service import capture_card_mgr
 
+async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
+    # 1. Try Hardware Video Capture Card (USB3 Video / DirectShow) first
+    try:
+        jpg, meta = capture_card_mgr.grab_frame(quality=90, max_dim=1920)
+        if jpg:
+            return jpg
+    except Exception as ce:
+        print(f"[capture_external_screenshot] Capture card read note: {ce}")
+
+    # 2. Multi-strategy ADB screencap
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return None
+
+    ext_id = str(await detect_external_display_id(ser))
+    sf_id = await detect_surfaceflinger_display_id(ser)
+    ids_to_try = [i for i in [ext_id, sf_id] if i]
+    if not ids_to_try:
+        ids_to_try = ["13", "4", "2", "1"]
+
+    for did in ids_to_try:
+        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
+        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 5.0)
+        if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+            return png_bytes
+
+    # Fallback without -d
+    cmd_default = ["-s", ser, "exec-out", "screencap", "-p"]
+    cap_def = await asyncio.to_thread(_exec_adb_sync_bin, cmd_default, 5.0)
+    if cap_def.returncode == 0 and (png_bytes := _extract_png_bytes(cap_def.stdout)):
+        return png_bytes
+
+    # Fallback to file pull
     dev_path = "/sdcard/mc_calib_temp.png"
-    await asyncio.to_thread(_exec_adb_sync, (["-s", ser] if ser else []) + ["shell", f"screencap {'-d ' + sf_id if sf_id else ''} -p {dev_path}"], 6.0)
-    pull = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", ser] if ser else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
+    await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", f"screencap -p {dev_path}"], 5.0)
+    pull = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", f"cat {dev_path} && rm -f {dev_path}"], 5.0)
     return _extract_png_bytes(pull.stdout) if pull.returncode == 0 else None
 
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
-    ser = await get_active_adb_serial(serial)
-    if not ser: return None
-    disp_map = await detect_surfaceflinger_displays(ser)
-    sf_id = disp_map.get(mode) or (disp_map.get("desktop") if mode == "desktop" else disp_map.get("phone"))
-    cmd = ["-s", ser, "exec-out", "screencap"] + (["-d", sf_id] if sf_id else []) + ["-p"]
-    res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 6.0)
-    if res.returncode == 0 and (jpg := _png_to_jpeg(_extract_png_bytes(res.stdout), quality, max_dim)):
-        return jpg
+    # Priority 1: Hardware Capture Card for desktop mode
     if mode == "desktop":
-        return _png_to_jpeg(await capture_external_screenshot(ser), quality, max_dim)
+        try:
+            jpg, meta = capture_card_mgr.grab_frame(quality=quality, max_dim=max_dim)
+            if jpg:
+                return jpg
+        except Exception:
+            pass
+
+    # Priority 2: ADB Screencap
+    ser = await get_active_adb_serial(serial)
+    if ser:
+        if mode == "desktop":
+            raw_bytes = await capture_external_screenshot(ser)
+            if raw_bytes:
+                return _png_to_jpeg(raw_bytes, quality, max_dim)
+        else:
+            cmd = ["-s", ser, "exec-out", "screencap", "-p"]
+            res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
+            if res.returncode == 0 and (jpg := _png_to_jpeg(_extract_png_bytes(res.stdout), quality, max_dim)):
+                return jpg
+
+    # Priority 3: Branded HUD Standby frame rather than 503 error
+    if mode == "desktop":
+        sources = capture_card_mgr.list_video_sources()
+        if sources.get("has_capture_card"):
+            return capture_card_mgr.create_hud_standby_frame(
+                title="DESKTOP CAPTURE CARD IN USE",
+                subtitle="USB3 Video is open in Windows Camera App",
+                hint="Close Windows Camera app to stream directly in Matrix Capture Studio."
+            )
+        else:
+            return capture_card_mgr.create_hud_standby_frame(
+                title="LIVE DESKTOP STANDBY",
+                subtitle="Awaiting ADB or HDMI Capture Card connection",
+                hint="Connect via Wireless ADB (.\\scripts\\pixel_device_helper.ps1 connect) or plug in HDMI Capture Card."
+            )
     return None
+
+async def configure_display_awake_policies(serial: Optional[str] = None):
+    ser = await get_active_adb_serial(serial)
+    if not ser: return
+    try:
+        # Stay awake on AC, USB, Wireless power (1 | 2 | 4 = 7)
+        await run_adb_shell("settings put global stay_on_while_plugged_in 7", ser)
+        # Maximum screen off timeout (~24.8 days)
+        await run_adb_shell("settings put system screen_off_timeout 2147483647", ser)
+        # Disable sleep timeout
+        await run_adb_shell("settings put global sleep_timeout -1", ser)
+        # Force power stay on
+        await run_adb_shell("svc power stayon true", ser)
+        # Disable doze/ambient sleep
+        await run_adb_shell("settings put secure doze_enabled 0", ser)
+    except Exception:
+        pass
+
+async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
+    ser = await get_active_adb_serial(serial)
+    if not ser: return
+    try:
+        # Send keyevent 224 (KEYCODE_WAKEUP) to reset sleep counter
+        await run_adb_shell("input keyevent 224", ser)
+        # In Android Desktop Mode, external displays time out due to inactivity unless input events occur on them
+        ext_id = await detect_external_display_id(ser)
+        if ext_id and ext_id > 0:
+            await run_adb_shell(f"input -d {ext_id} keyevent 224", ser)
+            # Simulated micro-motion to reset external display inactivity timer
+            await run_adb_shell(f"input -d {ext_id} motionevent MOVE 500 500", ser)
+    except Exception:
+        pass
+
+async def awake_keepalive_loop():
+    while True:
+        try:
+            await asyncio.sleep(20.0)
+            ser = await get_active_adb_serial()
+            if ser:
+                await configure_display_awake_policies(ser)
+                await pulse_display_awake_heartbeat(ser)
+        except Exception:
+            await asyncio.sleep(10.0)
 
 async def mjpeg_stream_generator(mode: str = "desktop", serial: Optional[str] = None, fps: float = 2.0, quality: int = 75, max_dim: int = 960):
     interval = 1.0 / max(0.5, min(fps, 4.0))
@@ -262,10 +363,38 @@ async def get_device_info() -> Dict[str, Any]:
     }
 
 async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None):
-    await ensure_adb_keyboard_closed(serial)
-    disp_id = await detect_external_display_id(serial)
-    cmd = f"input -d {disp_id} keycombination {key1} {key2}" if disp_id > 0 else f"input keycombination {key1} {key2}"
-    await run_adb_shell(cmd, serial)
+    from services import state
+    # 1. Update orchestration state so connected Android app immediately executes it via HTTP
+    cmd_name = "CTRL_END" if key2 == 123 else ("CTRL_HOME" if key2 == 122 else f"KEY_{key1}_{key2}")
+    state.orchestration_state.update({
+        "last_command": cmd_name,
+        "updated_at": datetime.now().isoformat(),
+        "source": "studio"
+    })
+
+    # 2. Silently ensure soft keyboard is suppressed without sending destructive Back/Escape
+    ser = await get_active_adb_serial(serial)
+    if ser:
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
+
+        disp_id = await detect_external_display_id(ser)
+        model_disp = 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+
+        # Dispatch to detected display
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", ser)
+        # Dispatch to model-specific display (e.g. 9 on Pixel 10, 4 on Pixel 8)
+        if model_disp != disp_id:
+            await run_adb_shell(f"input -d {model_disp} keycombination {key1} {key2}", ser)
+
+        # Dispatch to global focused window (vital for desktop freeform windows)
+        await asyncio.sleep(0.04)
+        await run_adb_shell(f"input keycombination {key1} {key2}", ser)
+
+        # For EOF / Line 1 jump, also send KEYCODE_MOVE_END (123) / KEYCODE_MOVE_HOME (122)
+        if key2 in [122, 123]:
+            await asyncio.sleep(0.02)
+            await run_adb_shell(f"input keyevent {key2}", ser)
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
     from services import state

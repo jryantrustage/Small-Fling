@@ -14,6 +14,7 @@ from services import state
 from services.adb_service import (
     ensure_adb_keyboard_closed,
     alignment_monitor_loop,
+    awake_keepalive_loop,
 )
 from services.ocr_service import (
     check_ollama_status,
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     try:
         asyncio.create_task(ensure_adb_keyboard_closed())
         asyncio.create_task(alignment_monitor_loop())
+        asyncio.create_task(awake_keepalive_loop())
     except Exception:
         pass
     yield
