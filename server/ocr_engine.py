@@ -18,53 +18,86 @@ def get_rapid_ocr():
         except Exception as e: print(f"[Worker] RapidOCR init error: {e}")
     return _rapid_ocr_instance
 
-def worker_detect_last_line(image_path: str) -> int:
-    """Worker function to rapidly detect the last line number on screen (used after Ctrl+End)."""
-    img = cv2.imread(image_path)
-    if img is None: return 0
+def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
+    """
+    Finds the vertical gutter column of line numbers in an editor image.
+    Self-adapts whether the editor is fullscreen (x ~ 18) or has a sidebar open (x ~ 301).
+    Returns list of (y_pos, line_num) sorted by Y.
+    """
+    if img is None: return []
     h, w = img.shape[:2]
-    # Crop gutter (left 25%) focusing on the lower 75% for speed and precision
-    gutter_crop = img[:, :int(w * 0.25)]
+    top_y = int(h * 0.10)
+    bot_y = int(h * 0.90)
+    sub = img[top_y:bot_y, :int(w * 0.40)]
     ocr = get_rapid_ocr()
-    if ocr is None: return 0
+    if ocr is None: return []
     try:
-        results, _ = ocr(gutter_crop)
-        if not results: return 0
-        line_nums = []
+        results, _ = ocr(sub)
+        if not results: return []
+        
+        candidates = []
         for bbox, text, score in results:
             clean = text.strip()
-            # Match integers or numbers within symbols
-            if m := re.search(r'\b(\d{1,7})\b', clean):
-                try: line_nums.append(int(m.group(1)))
+            pts = np.array(bbox)
+            x_min = int(np.min(pts[:, 0]))
+            y_min = top_y + int(np.min(pts[:, 1]))
+            clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1')
+            if m := re.search(r'^(\d+)', clean_num):
+                try:
+                    num = int(m.group(1))
+                    if 0 < num < 500000:
+                        candidates.append((x_min, y_min, num))
                 except ValueError: pass
-        return max(line_nums) if line_nums else 0
+        
+        if not candidates: return []
+        
+        # Cluster candidates by X-coordinate (within 24px tolerance)
+        clusters = {}
+        for x, y, num in candidates:
+            matched_k = None
+            for k in clusters:
+                if abs(k - x) <= 24:
+                    matched_k = k
+                    break
+            if matched_k is None:
+                matched_k = x
+                clusters[matched_k] = []
+            clusters[matched_k].append((y, num))
+        
+        best_gutter = []
+        for k, items in clusters.items():
+            if len(items) > len(best_gutter):
+                best_gutter = sorted(items, key=lambda it: it[0])
+        
+        # Filter monotonically non-decreasing order
+        valid = []
+        for y_pos, num in best_gutter:
+            if not valid or num >= valid[-1][1]:
+                valid.append((y_pos, num))
+            elif valid and str(valid[-1][1])[:-2] + str(num) == str(valid[-1][1] + 1):
+                valid.append((y_pos, valid[-1][1] + 1))
+        return valid if valid else best_gutter
     except Exception as e:
-        print(f"[worker_detect_last_line] Error: {e}")
-        return 0
+        print(f"[find_gutter_numbers_cluster] Error: {e}")
+        return []
+
+def worker_detect_last_line(image_path: str) -> int:
+    """Worker function to rapidly and accurately detect the last line number on screen (used after Ctrl+End)."""
+    img = cv2.imread(image_path)
+    if img is None: return 0
+    gutter = find_gutter_numbers_cluster(img)
+    if gutter:
+        return gutter[-1][1]
+    return 0
 
 def worker_verify_first_line(image_path: str) -> Tuple[bool, int]:
     """Worker function to verify that line 1 is visible at top of gutter (used after Ctrl+Home)."""
     img = cv2.imread(image_path)
     if img is None: return False, 0
-    h, w = img.shape[:2]
-    # Focus on top-left gutter (y < 40%, x < 25%)
-    top_gutter = img[:int(h * 0.40), :int(w * 0.25)]
-    ocr = get_rapid_ocr()
-    if ocr is None: return False, 0
-    try:
-        results, _ = ocr(top_gutter)
-        if not results: return False, 0
-        line_nums = []
-        for bbox, text, score in results:
-            if m := re.search(r'\b(\d{1,7})\b', text.strip()):
-                try: line_nums.append(int(m.group(1)))
-                except ValueError: pass
-        if not line_nums: return False, 0
-        min_ln = min(line_nums)
-        return (min_ln == 1), min_ln
-    except Exception as e:
-        print(f"[worker_verify_first_line] Error: {e}")
-        return False, 0
+    gutter = find_gutter_numbers_cluster(img)
+    if not gutter: return False, 0
+    first_ln = gutter[0][1]
+    return (first_ln == 1), first_ln
 
 def worker_detect_top_line(image_path: str) -> int:
     """Worker function to detect the line number displayed at the top of the left side gutter."""

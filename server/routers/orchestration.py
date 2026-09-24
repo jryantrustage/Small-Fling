@@ -265,45 +265,306 @@ async def get_dag_status():
         "trigger_decision": node_5.get("trigger_decision", {})
     }
 
+NODE_ALIAS_MAP = {
+    "node_1": "init_end",
+    "node_1_end": "init_end",
+    "init_end": "init_end",
+    "node_2": "reset_home",
+    "node_2_home": "reset_home",
+    "reset_home": "reset_home",
+    "node_3": "frame_acquire",
+    "frame_acquire": "frame_acquire",
+    "node_4": "arrow_down",
+    "arrow_down": "arrow_down",
+    "node_5": "verification_trigger",
+    "verification_trigger": "verification_trigger",
+}
+
 class DagNode5ConfigPayload(BaseModel):
     prevent_trigger_on_issue: Optional[bool] = None
     qualifiers: Optional[Dict[str, Dict[str, Any]]] = None
 
-@router.get("/api/dag/nodes/node_5/config")
-async def get_dag_node_5_config():
-    node_5 = state.dag_state["nodes"].get("verification_trigger", {})
+@router.get("/api/dag/nodes/{node_id}/config")
+async def get_dag_node_config(node_id: str):
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
     return {
         "status": "success",
-        "node_id": "verification_trigger",
-        "config": node_5.get("config", {}),
-        "trigger_decision": node_5.get("trigger_decision", {}),
-        "status_code": node_5.get("status", "idle")
+        "node_id": target_key,
+        "title": node.get("title", ""),
+        "config": node.get("config", {}),
+        "status_code": node.get("status", "idle"),
+        "trigger_decision": node.get("trigger_decision", {}) if target_key == "verification_trigger" else None
     }
 
-@router.post("/api/dag/nodes/node_5/config")
-async def update_dag_node_5_config(payload: DagNode5ConfigPayload):
-    node_5 = state.dag_state["nodes"].get("verification_trigger", {})
-    cfg = node_5.setdefault("config", {})
-    if payload.prevent_trigger_on_issue is not None:
-        cfg["prevent_trigger_on_issue"] = payload.prevent_trigger_on_issue
-    if payload.qualifiers is not None:
-        for q_id, q_data in payload.qualifiers.items():
-            if q_id in cfg.get("qualifiers", {}):
-                cfg["qualifiers"][q_id].update(q_data)
+@router.post("/api/dag/nodes/{node_id}/config")
+async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
+    cfg = node.setdefault("config", {})
+    
+    if target_key == "verification_trigger":
+        if "prevent_trigger_on_issue" in payload and payload["prevent_trigger_on_issue"] is not None:
+            cfg["prevent_trigger_on_issue"] = bool(payload["prevent_trigger_on_issue"])
+        if "qualifiers" in payload and isinstance(payload["qualifiers"], dict):
+            for q_id, q_data in payload["qualifiers"].items():
+                if q_id in cfg.get("qualifiers", {}):
+                    cfg["qualifiers"][q_id].update(q_data)
+        decision = state.evaluate_dag_node_5_trigger_sync()
+        node["trigger_decision"] = decision
+    else:
+        cfg.update(payload)
+        decision = None
 
-    decision = state.evaluate_dag_node_5_trigger_sync()
     await state.ws_manager.broadcast({
         "type": "dag_node_configured",
-        "node_id": "verification_trigger",
+        "node_id": target_key,
         "config": cfg,
         "trigger_decision": decision,
         "dag": state.dag_state
     })
     return {
         "status": "success",
+        "node_id": target_key,
         "config": cfg,
         "trigger_decision": decision
     }
+
+@router.post("/api/dag/nodes/{node_id}/run")
+async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = None):
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
+
+    payload = payload or {}
+    serial = payload.get("serial")
+    from services.adb_service import (
+        get_active_adb_serial, send_hid_keycombination, capture_external_screenshot,
+        run_adb_shell, detect_external_display_id
+    )
+    active_serial = await get_active_adb_serial(serial)
+    cfg = node.get("config", {})
+
+    state.dag_state["current_active_node"] = target_key
+    node["status"] = "active"
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state,
+        "running_node": target_key
+    })
+
+    try:
+        if target_key == "init_end":
+            # 1. Dispatch Ctrl+End
+            k1 = int(cfg.get("key1", 113))
+            k2 = int(cfg.get("key2", 123))
+            delay = float(cfg.get("settle_delay_ms", 800)) / 1000.0
+            await send_hid_keycombination(k1, k2, active_serial)
+            await asyncio.sleep(delay)
+            
+            snap_bytes = await capture_external_screenshot(active_serial)
+            total_lines = 0
+            if snap_bytes:
+                calib_path = state.FRAMES_DIR / "dag_node1_end.png"
+                with open(calib_path, "wb") as f:
+                    f.write(snap_bytes)
+                total_lines = await state.detect_last_line_in_process(calib_path)
+                if total_lines <= 0:
+                    res_scan = await state.scan_image_in_process(calib_path)
+                    total_lines = res_scan.get("bottom_line", 0)
+
+            if total_lines <= 0 and cfg.get("manual_total_lines", 0) > 0:
+                total_lines = int(cfg["manual_total_lines"])
+
+            if total_lines > 0:
+                proj = db.get_active_project()
+                if proj:
+                    db.update_project_target_lines(proj["id"], total_lines)
+                state.latest_telemetry["target_total_lines"] = total_lines
+                state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
+            
+            node.update({"status": "completed", "total_lines": total_lines})
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "init_end",
+                "total_lines": total_lines,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "init_end",
+                "total_lines": total_lines,
+                "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔"
+            }
+
+        elif target_key == "reset_home":
+            # 2. Dispatch Ctrl+Home
+            k1 = int(cfg.get("key1", 113))
+            k2 = int(cfg.get("key2", 122))
+            delay = float(cfg.get("settle_delay_ms", 800)) / 1000.0
+            await send_hid_keycombination(k1, k2, active_serial)
+            await asyncio.sleep(delay)
+
+            snap_bytes = await capture_external_screenshot(active_serial)
+            is_verified = False
+            detected_first = 0
+            if snap_bytes:
+                calib_path = state.FRAMES_DIR / "dag_node2_home.png"
+                with open(calib_path, "wb") as f:
+                    f.write(snap_bytes)
+                is_verified, detected_first = await state.verify_first_line_in_process(calib_path)
+                if not is_verified:
+                    top_det = await state.detect_top_line_in_process(calib_path)
+                    if top_det == 1:
+                        is_verified = True
+                        detected_first = 1
+
+            node.update({
+                "status": "completed" if is_verified else "error",
+                "verified": is_verified,
+                "first_line": detected_first
+            })
+            state.latest_telemetry["current_top_line"] = detected_first or 1
+            state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 {'verified' if is_verified else 'unverified'} at top (detected Ln {detected_first})"
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "reset_home",
+                "verified": is_verified,
+                "first_line": detected_first,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success" if is_verified else "warning",
+                "node_id": "reset_home",
+                "verified": is_verified,
+                "first_line": detected_first,
+                "message": f"Line 1 {'verified at top gutter' if is_verified else f'detection returned Ln {detected_first}'} via Ctrl+Home"
+            }
+
+        elif target_key == "frame_acquire":
+            # 3. Single frame acquire
+            snap_bytes = await capture_external_screenshot(active_serial)
+            if not snap_bytes:
+                raise HTTPException(status_code=500, detail="Failed to capture screen")
+            frame_id = f"test_{int(datetime.now().timestamp())}"
+            frame_path = state.FRAMES_DIR / f"frame_{frame_id}.png"
+            with open(frame_path, "wb") as f:
+                f.write(snap_bytes)
+            scan_res = await state.scan_image_in_process(frame_path)
+            top_ln = scan_res.get("top_line", 1)
+            bot_ln = scan_res.get("bottom_line", 47)
+            node.update({"status": "completed", "top_line": top_ln, "bottom_line": bot_ln})
+            state.latest_telemetry["current_top_line"] = top_ln
+            state.latest_telemetry["current_bottom_line"] = bot_ln
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "frame_acquire",
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "frame_acquire",
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "scan": scan_res,
+                "message": f"Acquired frame: Ln {top_ln} → {bot_ln} ✔"
+            }
+
+        elif target_key == "arrow_down":
+            # 4. Step down
+            step_count = int(cfg.get("step_count", 47))
+            key_delay = float(cfg.get("key_delay_ms", 8)) / 1000.0
+            disp_id = await detect_external_display_id(active_serial)
+            for _ in range(step_count):
+                if disp_id > 0:
+                    await run_adb_shell(f"input -d {disp_id} keyevent 20", active_serial)
+                else:
+                    await run_adb_shell("input keyevent 20", active_serial)
+                if key_delay > 0:
+                    await asyncio.sleep(key_delay)
+            await asyncio.sleep(0.4)
+            snap_bytes = await capture_external_screenshot(active_serial)
+            new_top = 0
+            if snap_bytes:
+                calib_path = state.FRAMES_DIR / "dag_node4_step.png"
+                with open(calib_path, "wb") as f:
+                    f.write(snap_bytes)
+                new_top = await state.detect_top_line_in_process(calib_path)
+                if new_top > 0:
+                    state.latest_telemetry["current_top_line"] = new_top
+            node.update({"status": "completed", "arrow_count": step_count, "new_top_line": new_top})
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "arrow_down",
+                "step_count": step_count,
+                "new_top_line": new_top,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "arrow_down",
+                "step_count": step_count,
+                "new_top_line": new_top,
+                "message": f"Stepped {step_count} down arrows: New top Ln {new_top} ✔"
+            }
+
+        elif target_key == "verification_trigger":
+            # 5. Evaluate qualifiers and test trigger
+            try:
+                try:
+                    from classifiers.registry import classifier_registry
+                    from classifiers.base import ClassifierContext
+                except ImportError:
+                    from server.classifiers.registry import classifier_registry
+                    from server.classifiers.base import ClassifierContext
+                disp_id = await detect_external_display_id(active_serial)
+                snap = await capture_external_screenshot(active_serial)
+                context = ClassifierContext(
+                    serial=active_serial,
+                    display_id=disp_id,
+                    image_bytes=snap,
+                    alignment_data=state.latest_alignment_status
+                )
+                await classifier_registry.evaluate_all(context)
+                issues = classifier_registry.get_latest_issues()
+                decision = state.evaluate_dag_node_5_trigger_sync(issues)
+            except Exception:
+                decision = state.evaluate_dag_node_5_trigger_sync()
+
+            node.update({
+                "status": "completed" if decision.get("allowed") else "prevented",
+                "trigger_decision": decision
+            })
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "verification_trigger",
+                "trigger_decision": decision
+            })
+            return {
+                "status": "success",
+                "node_id": "verification_trigger",
+                "trigger_decision": decision,
+                "allowed": decision.get("allowed", False),
+                "prevented": decision.get("prevented", True),
+                "message": "Trigger allowed ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported node {target_key}")
+    except Exception as e:
+        node["status"] = "error"
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/dag/nodes/node_5/evaluate")
 async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
