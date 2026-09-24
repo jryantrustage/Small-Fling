@@ -34,6 +34,7 @@
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="false"
+            android:lockTaskMode="if_whitelisted"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -64,6 +65,48 @@
         <service
             android:name=".service.FloatingOverlayService"
             android:exported="false" />
+
+        <!-- Dedicated External Kiosk Mode Presentation Activity -->
+        <activity
+            android:name=".kiosk.KioskPresentationActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="false"
+            android:lockTaskMode="if_whitelisted"
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- Kiosk Device Admin / DPC Receiver -->
+        <receiver
+            android:name=".kiosk.KioskAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin_kiosk" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.LOCK_TASK_ENTERING" />
+                <action android:name="android.app.action.LOCK_TASK_EXITING" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Kiosk RPC Command Receiver -->
+        <receiver
+            android:name=".kiosk.KioskCommandReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.matrixcapture.app.action.LOCK_EXTERNAL_DISPLAY" />
+                <action android:name="com.matrixcapture.app.action.RELEASE_LOCK" />
+                <action android:name="com.matrixcapture.app.action.QUERY_STATUS" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

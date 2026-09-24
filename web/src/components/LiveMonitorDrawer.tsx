@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Smartphone, ChevronDown, Check, Loader2, Monitor, RefreshCw,
-  Maximize2, Minimize2, X, Eye, EyeOff, Info
+  Maximize2, Minimize2, X, Eye, EyeOff, Info, Shield
 } from 'lucide-react';
 import type { DeviceInfoData, AlignmentData } from '../types';
 import { LiveMetaInfoPopover } from './LiveMetaInfoPopover';
@@ -36,6 +36,7 @@ interface LiveMonitorDrawerProps {
   streamKey: number;
   onRefreshStream: () => void;
   onOpenAlignmentModal: () => void;
+  onOpenDeviceConfig?: () => void;
 }
 import { renderBoundingBoxesOverlay } from './BoundingBoxesOverlay';
 
@@ -69,6 +70,7 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
   streamKey,
   onRefreshStream,
   onOpenAlignmentModal,
+  onOpenDeviceConfig,
 }) => {
   const [showDrawerDeviceMenu, setShowDrawerDeviceMenu] = useState(false);
   const [connectTab, setConnectTab] = useState<'connect' | 'pair'>('connect');
@@ -458,6 +460,19 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
           <Info size={11} />
           <span>INFO</span>
         </button>
+
+        {/* Kiosk Mode & Device Config Drawer Button */}
+        {onOpenDeviceConfig && (
+          <button
+            type="button"
+            className="live-info-btn"
+            onClick={onOpenDeviceConfig}
+            title="Open Dedicated External Desktop Kiosk Lockdown & Display Routing Controls"
+          >
+            <Shield size={11} color="#00ff9d" />
+            <span>KIOSK</span>
+          </button>
+        )}
 
         {/* Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
