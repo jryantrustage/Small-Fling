@@ -239,3 +239,35 @@ export interface LiveViewMeta {
   };
 }
 
+export interface ConnectedDisplay {
+  displayId: number;
+  name: string;
+  uniqueId?: string;
+  width: number;
+  height: number;
+  refreshRate: number;
+  category: 'INTERNAL' | 'PRESENTATION' | string;
+  isExternal: boolean;
+  isPrimary: boolean;
+}
+
+export interface KioskTelemetry {
+  connected: boolean;
+  serial: string | null;
+  lock_status: 'UNLOCKED' | 'PINNED' | 'LOCKED_TASK_EXTERNAL';
+  kiosk_mode: 'freeform' | 'mirrored' | 'kiosk';
+  target_display_id: number;
+  locked_package: string;
+  locked_task_id: number;
+  foreground_package: string;
+  device_owner_active: boolean;
+  active_admin_active: boolean;
+  displays: ConnectedDisplay[];
+  active_display_count: number;
+  external_resolution?: string;
+  peripheral_restrictions: {
+    suppress_hotkeys: boolean;
+    disable_status_bar: boolean;
+    prevent_sleep: boolean;
+  };
+}

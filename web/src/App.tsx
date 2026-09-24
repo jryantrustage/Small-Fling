@@ -3,7 +3,7 @@ import {
   Scan, Settings, Search, Check,
   Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, Loader2,
-  Monitor, ChevronDown, Keyboard, Info, Eye, EyeOff
+  Monitor, ChevronDown, Keyboard, Info, Eye, EyeOff, Shield
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -21,6 +21,7 @@ import type {
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
 import { LiveMonitorDrawer } from './components/LiveMonitorDrawer';
+import { DeviceConfigDrawer } from './components/DeviceConfigDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
 import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
 import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
@@ -285,6 +286,7 @@ function AppContent() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
+  const [showDeviceConfigDrawer, setShowDeviceConfigDrawer] = useState(false);
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
 
   // Live Monitor Drawer Resizing & Device Switching State
@@ -1426,6 +1428,17 @@ function AppContent() {
             )}
           </button>
 
+          {/* Dedicated Kiosk Mode & Device Config Drawer Button */}
+          <button
+            type="button"
+            onClick={() => setShowDeviceConfigDrawer(prev => !prev)}
+            title="Manage External Desktop Displays & Kiosk Mode Lockdown"
+            className={`kiosk-nav-btn ${showDeviceConfigDrawer ? 'active' : ''}`}
+          >
+            <Shield size={12} />
+            <span>KIOSK LOCK</span>
+          </button>
+
           {/* Teams Markdown Alignment Indicator Pill */}
           <div
             className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`}
@@ -2161,6 +2174,16 @@ function AppContent() {
         streamKey={streamKey}
         onRefreshStream={() => setStreamKey(Date.now())}
         onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+        onOpenDeviceConfig={() => setShowDeviceConfigDrawer(true)}
+      />
+
+      {/* Dedicated Remote Desktop Kiosk & Device Configuration Drawer */}
+      <DeviceConfigDrawer
+        isOpen={showDeviceConfigDrawer}
+        onClose={() => setShowDeviceConfigDrawer(false)}
+        apiBase={API_BASE}
+        activeSerial={deviceInfo?.active_serial}
+        onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
       />
 
       {/* AI Alignment & Verification Diagnostics Modal */}

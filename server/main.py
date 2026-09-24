@@ -29,6 +29,7 @@ from routers import (
     frames_document,
     orchestration,
     classifiers,
+    kiosk,
 )
 
 db.init_db()
@@ -186,6 +187,7 @@ app.include_router(projects.router)
 app.include_router(frames_document.router)
 app.include_router(orchestration.router)
 app.include_router(classifiers.router)
+app.include_router(kiosk.router)
 
 if __name__ == "__main__":
     import uvicorn
