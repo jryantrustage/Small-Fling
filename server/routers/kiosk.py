@@ -17,6 +17,10 @@ class KioskReleaseRequest(BaseModel):
     admin_pin: Optional[str] = None
     serial: Optional[str] = None
 
+class KioskAutoRefreshRequest(BaseModel):
+    display_id: Optional[int] = None
+    serial: Optional[str] = None
+
 @router.get("/displays")
 async def get_displays_endpoint(serial: Optional[str] = None):
     displays = await kiosk_service.get_connected_displays(serial)
@@ -53,3 +57,13 @@ async def release_lock_endpoint(req: KioskReleaseRequest):
 @router.post("/provision-admin")
 async def provision_admin_endpoint(serial: Optional[str] = None):
     return await kiosk_service.provision_device_admin(serial)
+
+@router.post("/auto-refresh")
+async def auto_refresh_endpoint(req: KioskAutoRefreshRequest):
+    res = await kiosk_service.auto_refresh_external_display(
+        display_id=req.display_id,
+        serial=req.serial
+    )
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Failed to auto-refresh display"))
+    return res

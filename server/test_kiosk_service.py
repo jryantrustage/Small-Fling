@@ -44,3 +44,12 @@ def test_kiosk_lock_and_release_lifecycle():
     rel_data = rel_res.json()
     assert rel_data.get("status") == "ok"
     assert rel_data.get("kiosk_state", {}).get("lock_status") == "UNLOCKED"
+
+def test_kiosk_auto_refresh_endpoint():
+    res = client.post("/api/device/kiosk/auto-refresh", json={
+        "display_id": 14
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data.get("status") == "ok"
+    assert "refreshed_tasks" in data

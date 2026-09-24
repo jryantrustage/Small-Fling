@@ -51,6 +51,12 @@ class KioskCommandReceiver : BroadcastReceiver() {
             ACTION_QUERY_STATUS -> {
                 KioskManager.refreshConnectedDisplays()
             }
+
+            ACTION_AUTO_REFRESH_DISPLAY -> {
+                val displayId = intent.getIntExtra(EXTRA_DISPLAY_ID, -1)
+                val resolvedId = if (displayId > 0) displayId else KioskManager.findExternalDisplayId()
+                KioskManager.triggerAutoRefreshOnReconnect(resolvedId)
+            }
         }
     }
 
@@ -60,6 +66,7 @@ class KioskCommandReceiver : BroadcastReceiver() {
         const val ACTION_LOCK_EXTERNAL_DISPLAY = "com.matrixcapture.app.action.LOCK_EXTERNAL_DISPLAY"
         const val ACTION_RELEASE_LOCK = "com.matrixcapture.app.action.RELEASE_LOCK"
         const val ACTION_QUERY_STATUS = "com.matrixcapture.app.action.QUERY_STATUS"
+        const val ACTION_AUTO_REFRESH_DISPLAY = "com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY"
 
         const val EXTRA_DISPLAY_ID = "display_id"
         const val EXTRA_PACKAGE_ID = "package_id"
