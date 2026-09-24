@@ -157,28 +157,50 @@ dag_state: Dict[str, Any] = {
             "title": "1. Determine Total Lines (Ctrl+End)",
             "description": "Send HID Ctrl+End, verify gutter position at EOF, display total lines by OCR of last line of EOF.",
             "status": "idle",
-            "total_lines": 0
+            "total_lines": 0,
+            "config": {
+                "key1": 113,
+                "key2": 123,
+                "settle_delay_ms": 800,
+                "manual_total_lines": 0
+            }
         },
         "reset_home": {
             "id": "reset_home",
             "title": "2. Return to Line 1 (Ctrl+Home)",
             "description": "Send HID Ctrl+Home to return to line 1, verify line 1 is in the top position in gutter.",
             "status": "idle",
-            "verified": False
+            "verified": False,
+            "config": {
+                "key1": 113,
+                "key2": 122,
+                "settle_delay_ms": 800,
+                "expected_line": 1
+            }
         },
         "frame_acquire": {
             "id": "frame_acquire",
             "title": "3. Screen Capture & Acquisition",
             "description": "Screen capture and acquisition: offload to dedicated OCR worker process.",
             "status": "idle",
-            "page": 1
+            "page": 1,
+            "config": {
+                "mode": "desktop",
+                "ocr_worker_timeout_s": 15,
+                "save_frame": True
+            }
         },
         "arrow_down": {
             "id": "arrow_down",
             "title": "4. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
-            "arrow_count": 48
+            "arrow_count": 47,
+            "config": {
+                "step_mode": "auto",
+                "step_count": 47,
+                "key_delay_ms": 8
+            }
         },
         "verification_trigger": {
             "id": "verification_trigger",
