@@ -137,6 +137,29 @@ async def create_project(req: ProjectCreateRequest):
     })
     return new_proj
 
+async def extract_request_image(request: Request) -> Optional[bytes]:
+    ct = request.headers.get("content-type", "")
+    if "application/json" in ct:
+        body = await request.json()
+        if b64_str := body.get("image_base64") or body.get("image"):
+            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
+            try:
+                return base64.b64decode(clean_b64)
+            except Exception:
+                pass
+    elif "multipart/form-data" in ct:
+        form = await request.form()
+        f_obj = form.get("file")
+        if f_obj and hasattr(f_obj, "read"):
+            return await f_obj.read()
+        if b64_form := form.get("image_base64") or form.get("image"):
+            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", str(b64_form).strip())
+            try:
+                return base64.b64decode(clean_b64)
+            except Exception:
+                pass
+    return None
+
 @router.post("/api/projects/{project_id}/calibrate-end")
 async def calibrate_project_end(project_id: str, request: Request):
     """
@@ -148,20 +171,7 @@ async def calibrate_project_end(project_id: str, request: Request):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    contents = None
-    ct = request.headers.get("content-type", "")
-    if "application/json" in ct:
-        body = await request.json()
-        if b64_str := body.get("image_base64") or body.get("image"):
-            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
-            contents = base64.b64decode(clean_b64)
-    elif "multipart/form-data" in ct:
-        form = await request.form()
-        f_obj = form.get("file")
-        if f_obj and hasattr(f_obj, "read"):
-            contents = await f_obj.read()
-
-    # If no image was explicitly passed, trigger via ADB key combination & screencap
+    contents = await extract_request_image(request)
     if not contents:
         serial = await get_active_adb_serial()
         await send_hid_keycombination(113, 123, serial)
@@ -208,19 +218,7 @@ async def verify_project_home(project_id: str, request: Request):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    contents = None
-    ct = request.headers.get("content-type", "")
-    if "application/json" in ct:
-        body = await request.json()
-        if b64_str := body.get("image_base64") or body.get("image"):
-            clean_b64 = re.sub(r"^data:image/[^;]+;base64,", "", b64_str.strip())
-            contents = base64.b64decode(clean_b64)
-    elif "multipart/form-data" in ct:
-        form = await request.form()
-        f_obj = form.get("file")
-        if f_obj and hasattr(f_obj, "read"):
-            contents = await f_obj.read()
-
+    contents = await extract_request_image(request)
     if not contents:
         serial = await get_active_adb_serial()
         await send_hid_keycombination(113, 122, serial)

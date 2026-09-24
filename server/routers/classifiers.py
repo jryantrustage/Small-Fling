@@ -13,14 +13,10 @@ if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
 try:
-    from classifiers.registry import classifier_registry
-    from classifiers.base import ClassifierContext
+    from server.classifiers import classifier_registry, create_classifier_context
 except ImportError:
-    from server.classifiers.registry import classifier_registry
-    from server.classifiers.base import ClassifierContext
+    from classifiers import classifier_registry, create_classifier_context
 from services.adb_service import (
-    get_active_adb_serial,
-    detect_external_display_id,
     capture_external_screenshot,
     check_and_update_alignment
 )
@@ -39,17 +35,7 @@ async def get_classifiers_status(serial: Optional[str] = None):
     Evaluates all registered classifiers on the current device screen and state.
     Returns detected setup issues and available fixing actions.
     """
-    active_serial = await get_active_adb_serial(serial)
-    disp_id = await detect_external_display_id(active_serial)
-    snap = await capture_external_screenshot(active_serial)
-
-    context = ClassifierContext(
-        serial=active_serial,
-        display_id=disp_id,
-        image_bytes=snap,
-        alignment_data=state.latest_alignment_status
-    )
-
+    context = await create_classifier_context(serial)
     await classifier_registry.evaluate_all(context)
     report = classifier_registry.get_status_report()
 
@@ -65,8 +51,8 @@ async def get_classifiers_status(serial: Optional[str] = None):
 
     return {
         "status": "success",
-        "serial": active_serial,
-        "display_id": disp_id,
+        "serial": context.serial,
+        "display_id": context.display_id,
         **report
     }
 
@@ -76,25 +62,14 @@ async def fix_single_classifier(classifier_id: str, serial: Optional[str] = None
     """
     Executes the fix action for a specific classifier (e.g. 'light_mode', 'view_mode', 'keyboard_open').
     """
-    active_serial = await get_active_adb_serial(serial)
-    disp_id = await detect_external_display_id(active_serial)
-    snap = await capture_external_screenshot(active_serial)
-
-    context = ClassifierContext(
-        serial=active_serial,
-        display_id=disp_id,
-        image_bytes=snap,
-        alignment_data=state.latest_alignment_status
-    )
-
+    context = await create_classifier_context(serial)
     res = await classifier_registry.fix_classifier(classifier_id, context)
 
     # Trigger alignment refresh so diagnostics and UI update immediately
-    await check_and_update_alignment(active_serial)
+    await check_and_update_alignment(context.serial)
 
     # Re-evaluate classifiers after fix
-    new_snap = await capture_external_screenshot(active_serial)
-    context.image_bytes = new_snap
+    context.image_bytes = await capture_external_screenshot(context.serial)
     context.alignment_data = state.latest_alignment_status
     await classifier_registry.evaluate_all(context)
 
@@ -122,23 +97,12 @@ async def fix_all_classifiers(serial: Optional[str] = None):
     """
     Runs automated remediation for all detected setup issues in priority order.
     """
-    active_serial = await get_active_adb_serial(serial)
-    disp_id = await detect_external_display_id(active_serial)
-    snap = await capture_external_screenshot(active_serial)
-
-    context = ClassifierContext(
-        serial=active_serial,
-        display_id=disp_id,
-        image_bytes=snap,
-        alignment_data=state.latest_alignment_status
-    )
-
+    context = await create_classifier_context(serial)
     fix_results = await classifier_registry.fix_all(context)
 
     # Refresh alignment and re-evaluate
-    await check_and_update_alignment(active_serial)
-    new_snap = await capture_external_screenshot(active_serial)
-    context.image_bytes = new_snap
+    await check_and_update_alignment(context.serial)
+    context.image_bytes = await capture_external_screenshot(context.serial)
     context.alignment_data = state.latest_alignment_status
     await classifier_registry.evaluate_all(context)
 

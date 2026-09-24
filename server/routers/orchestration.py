@@ -23,6 +23,19 @@ from services.ocr_service import (
 
 router = APIRouter(tags=["Orchestration & Telemetry"])
 
+try:
+    from server.classifiers import classifier_registry, create_classifier_context
+except ImportError:
+    from classifiers import classifier_registry, create_classifier_context
+
+async def evaluate_node_5_decision(serial: Optional[str] = None):
+    try:
+        context = await create_classifier_context(serial)
+        await classifier_registry.evaluate_all(context)
+        return state.evaluate_dag_node_5_trigger_sync(classifier_registry.get_latest_issues())
+    except Exception:
+        return state.evaluate_dag_node_5_trigger_sync()
+
 class DismissItemPayload(BaseModel):
     item_id: str
     dismissed: bool = True
@@ -59,19 +72,11 @@ async def get_dismissed_alignment_items_api():
 
 @router.get("/api/telemetry")
 async def get_telemetry():
-    sl = state.get_serialized_lines()
     return {
         "telemetry": state.get_fresh_telemetry(),
         "token_stats": state.token_stats,
         "alignment": state.latest_alignment_status,
-        "document_summary": {
-            "total_lines": len(state.document_lines),
-            "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
-            "max_line": max(state.document_lines.keys()) if state.document_lines else 0,
-            "total_frames": len(state.captured_frames),
-            "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
-            "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
-        }
+        "document_summary": state.get_document_metrics()
     }
 
 @router.post("/api/telemetry")
@@ -521,26 +526,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
         elif target_key == "verification_trigger":
             # 5. Evaluate qualifiers and test trigger
-            try:
-                try:
-                    from classifiers.registry import classifier_registry
-                    from classifiers.base import ClassifierContext
-                except ImportError:
-                    from server.classifiers.registry import classifier_registry
-                    from server.classifiers.base import ClassifierContext
-                disp_id = await detect_external_display_id(active_serial)
-                snap = await capture_external_screenshot(active_serial)
-                context = ClassifierContext(
-                    serial=active_serial,
-                    display_id=disp_id,
-                    image_bytes=snap,
-                    alignment_data=state.latest_alignment_status
-                )
-                await classifier_registry.evaluate_all(context)
-                issues = classifier_registry.get_latest_issues()
-                decision = state.evaluate_dag_node_5_trigger_sync(issues)
-            except Exception:
-                decision = state.evaluate_dag_node_5_trigger_sync()
+            decision = await evaluate_node_5_decision(active_serial)
 
             node.update({
                 "status": "completed" if decision.get("allowed") else "prevented",
@@ -568,37 +554,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
 @router.post("/api/dag/nodes/node_5/evaluate")
 async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
-    try:
-        try:
-            from classifiers.registry import classifier_registry
-            from classifiers.base import ClassifierContext
-        except ImportError:
-            from server.classifiers.registry import classifier_registry
-            from server.classifiers.base import ClassifierContext
-        from services.adb_service import get_active_adb_serial, detect_external_display_id, capture_external_screenshot
-        
-        active_serial = await get_active_adb_serial(serial)
-        disp_id = await detect_external_display_id(active_serial)
-        snap = await capture_external_screenshot(active_serial)
-        context = ClassifierContext(
-            serial=active_serial,
-            display_id=disp_id,
-            image_bytes=snap,
-            alignment_data=state.latest_alignment_status
-        )
-        await classifier_registry.evaluate_all(context)
-        issues = classifier_registry.get_latest_issues()
-        decision = state.evaluate_dag_node_5_trigger_sync(issues)
-    except Exception:
-        decision = state.evaluate_dag_node_5_trigger_sync()
-
+    decision = await evaluate_node_5_decision(serial)
     await state.ws_manager.broadcast({
         "type": "dag_updated",
-        "dag": state.dag_state
+        "dag": state.dag_state,
+        "node_id": "verification_trigger",
+        "trigger_decision": decision
     })
     return {
         "status": "success",
-        "trigger_decision": decision
+        "node_id": "verification_trigger",
+        "trigger_decision": decision,
+        "allowed": decision.get("allowed", False),
+        "prevented": decision.get("prevented", True),
+        "message": "Trigger allowed ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"
     }
 
 @router.get("/api/pipeline/mode")

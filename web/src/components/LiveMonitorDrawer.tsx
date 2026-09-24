@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import type { DeviceInfoData, AlignmentData } from '../types';
 import { LiveMetaInfoPopover } from './LiveMetaInfoPopover';
+import { useAgoTimer } from '../hooks/useAgoTimer';
 
 interface LiveMonitorDrawerProps {
   isOpen: boolean;
@@ -85,20 +86,7 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
   const [pairCodeInput, setPairCodeInput] = useState('');
   const drawerDeviceDropdownRef = useRef<HTMLDivElement>(null);
   const [showInfoPopover, setShowInfoPopover] = useState(false);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date>(new Date());
-  const [agoSec, setAgoSec] = useState(0);
-
-  useEffect(() => {
-    setLastRefreshedAt(new Date());
-    setAgoSec(0);
-  }, [streamKey]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setAgoSec(Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [lastRefreshedAt]);
+  const { secondsAgo: agoSec } = useAgoTimer(streamKey);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {

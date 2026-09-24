@@ -32,9 +32,20 @@ from routers import (
     kiosk,
 )
 
+from contextlib import asynccontextmanager
+
 db.init_db()
 
-app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        asyncio.create_task(ensure_adb_keyboard_closed())
+        asyncio.create_task(alignment_monitor_loop())
+    except Exception:
+        pass
+    yield
+
+app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ALLOWED_ORIGINS,
@@ -42,14 +53,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-async def startup_tasks():
-    try:
-        asyncio.create_task(ensure_adb_keyboard_closed())
-        asyncio.create_task(alignment_monitor_loop())
-    except Exception:
-        pass
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -83,7 +86,6 @@ async def health():
 async def get_system_status():
     ollama_status = await asyncio.to_thread(check_ollama_status)
     p = db.get_active_project()
-    sl = state.get_serialized_lines()
     return {
         "status": "online",
         "timestamp": datetime.now().isoformat(),
@@ -107,17 +109,9 @@ async def get_system_status():
         },
         "gemini": {
             "configured": bool(config.GEMINI_API_KEY),
-            "api_key_preview": f"{config.GEMINI_API_KEY[:6]}...{config.GEMINI_API_KEY[-4:]}" if len(config.GEMINI_API_KEY) > 10 else ("Set" if config.GEMINI_API_KEY else "Missing")
+            "api_key_preview": config.get_api_key_preview()
         },
-        "metrics": {
-            "document_lines": len(state.document_lines),
-            "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
-            "max_line": max(state.document_lines.keys()) if state.document_lines else 0,
-            "captured_frames": len(state.captured_frames),
-            "pending_recaptures": len(state.recapture_queue),
-            "verified_overlaps": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
-            "issues_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
-        },
+        "metrics": state.get_document_metrics(),
         "telemetry": state.get_fresh_telemetry(),
         "token_stats": state.token_stats,
         "connection_stats": connection_stats,
@@ -126,10 +120,9 @@ async def get_system_status():
 
 @app.get("/api/config")
 async def get_config():
-    k = config.GEMINI_API_KEY
     return {
-        "api_key_configured": bool(k),
-        "api_key_preview": f"{k[:6]}...{k[-4:]}" if len(k) > 10 else ("Set" if k else "Missing")
+        "api_key_configured": bool(config.GEMINI_API_KEY),
+        "api_key_preview": config.get_api_key_preview()
     }
 
 @app.post("/api/config")

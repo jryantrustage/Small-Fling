@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertTriangle, Layers, Clock, ShieldCheck
 } from 'lucide-react';
 import type { LiveViewMeta, AlignmentData } from '../types';
+import { useAgoTimer } from '../hooks/useAgoTimer';
 
 interface LiveMetaInfoPopoverProps {
   isOpen: boolean;
@@ -26,39 +27,28 @@ export const LiveMetaInfoPopover: React.FC<LiveMetaInfoPopoverProps> = ({
 }) => {
   const [meta, setMeta] = useState<LiveViewMeta | null>(null);
   const [loading, setLoading] = useState(false);
-  const [lastFetchTime, setLastFetchTime] = useState<Date>(new Date());
-  const [secondsAgo, setSecondsAgo] = useState(0);
+  const { secondsAgo, resetTimer } = useAgoTimer(streamKey);
 
   const fetchMeta = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await fetch(`${apiBase}/api/device/live-meta?mode=${liveMode}&t=${Date.now()}`);
       if (res.ok) {
         const data: LiveViewMeta = await res.json();
         setMeta(data);
-        setLastFetchTime(new Date());
-        setSecondsAgo(0);
+        resetTimer();
       }
     } catch (e) {
       console.error('Failed to fetch live metadata:', e);
     } finally {
       setLoading(false);
     }
-  }, [apiBase, liveMode]);
+  }, [apiBase, liveMode, resetTimer]);
 
   useEffect(() => {
     if (isOpen) {
       fetchMeta();
     }
   }, [isOpen, streamKey, fetchMeta]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const timer = setInterval(() => {
-      setSecondsAgo(Math.floor((Date.now() - lastFetchTime.getTime()) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [isOpen, lastFetchTime]);
 
   if (!isOpen) return null;
 
@@ -101,6 +91,7 @@ export const LiveMetaInfoPopover: React.FC<LiveMetaInfoPopoverProps> = ({
               type="button"
               className="btn btn-sm btn-outline live-meta-refresh-btn"
               onClick={() => {
+                setLoading(true);
                 fetchMeta();
                 onRefresh();
               }}
@@ -135,7 +126,7 @@ export const LiveMetaInfoPopover: React.FC<LiveMetaInfoPopoverProps> = ({
                 <span className="stat-value highlight-green">
                   {secondsAgo <= 1 ? 'Just now' : `${secondsAgo}s ago`}
                   <span className="sub-timestamp">
-                    ({lastFetchTime.toLocaleTimeString()})
+                    ({meta?.timestamp ? new Date(meta.timestamp).toLocaleTimeString() : 'Live'})
                   </span>
                 </span>
               </div>

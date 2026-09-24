@@ -25,6 +25,7 @@ import { DeviceConfigDrawer } from './components/DeviceConfigDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
 import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
 import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
+import { useAgoTimer } from './hooks/useAgoTimer';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -58,6 +59,20 @@ function AppContent() {
   const [telemetry, setTelemetry] = useState<TelemetryData>({});
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const [eventsLog, setEventsLog] = useState<TelemetryEvent[]>([]);
+  const [streamKey, setStreamKey] = useState<number>(0);
+  const refreshStream = useCallback(() => setStreamKey(k => k + 1), []);
+
+  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any) => {
+    const ev: TelemetryEvent = {
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      timestamp: new Date().toLocaleTimeString(),
+      category,
+      message,
+      data
+    };
+    setEventsLog(prev => [...prev.slice(-99), ev]);
+  }, []);
+
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState<boolean>(false);
   const [showDag, setShowDag] = useState<boolean>(true);
   const [showGotoModal, setShowGotoModal] = useState<boolean>(false);
@@ -153,24 +168,27 @@ function AppContent() {
   const [fixingClassifierId, setFixingClassifierId] = useState<string | null>(null);
   const [isFixingAll, setIsFixingAll] = useState(false);
 
+  const applyClassifierResult = useCallback((d: any, defaultMsg: string) => {
+    if (d.alignment) {
+      setAlignmentData(d.alignment);
+    } else if (d.current_report) {
+      setAlignmentData(prev => ({
+        ...prev,
+        classifiers: d.current_report,
+        classifier_issues: d.current_report.issues
+      }));
+    }
+    refreshStream();
+    addTelemetryEvent('SYSTEM', d.fix_result?.message || defaultMsg);
+  }, [refreshStream, addTelemetryEvent]);
+
   const handleFixClassifier = async (classifierId: string) => {
     setFixingClassifierId(classifierId);
     try {
       addTelemetryEvent('SYSTEM', `Executing fix for classifier: ${classifierId}`);
       const res = await api(`/api/classifiers/fix/${classifierId}`, { method: 'POST' });
       if (res.ok) {
-        const d = await res.json();
-        if (d.alignment) {
-          setAlignmentData(d.alignment);
-        } else if (d.current_report) {
-          setAlignmentData(prev => ({
-            ...prev,
-            classifiers: d.current_report,
-            classifier_issues: d.current_report.issues
-          }));
-        }
-        setStreamKey(Date.now());
-        addTelemetryEvent('SYSTEM', d.fix_result?.message || `Fix executed for ${classifierId}`);
+        applyClassifierResult(await res.json(), `Fix executed for ${classifierId}`);
       }
     } catch (e) {
       console.error(`Failed to fix classifier ${classifierId}:`, e);
@@ -186,18 +204,7 @@ function AppContent() {
       addTelemetryEvent('SYSTEM', 'Executing automated remediation for all setup issues');
       const res = await api('/api/classifiers/fix-all', { method: 'POST' });
       if (res.ok) {
-        const d = await res.json();
-        if (d.alignment) {
-          setAlignmentData(d.alignment);
-        } else if (d.current_report) {
-          setAlignmentData(prev => ({
-            ...prev,
-            classifiers: d.current_report,
-            classifier_issues: d.current_report.issues
-          }));
-        }
-        setStreamKey(Date.now());
-        addTelemetryEvent('SYSTEM', 'Auto-fix all classifiers completed ✔');
+        applyClassifierResult(await res.json(), 'Auto-fix all classifiers completed ✔');
       }
     } catch (e) {
       console.error('Failed to fix all classifiers:', e);
@@ -256,23 +263,9 @@ function AppContent() {
   const [wsConnected, setWsConnected] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
   const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
-  const [streamKey, setStreamKey] = useState<number>(Date.now());
   const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
-  const [inspectorLastRefreshedAt, setInspectorLastRefreshedAt] = useState<Date>(new Date());
-  const [inspectorAgoSec, setInspectorAgoSec] = useState(0);
-
-  useEffect(() => {
-    setInspectorLastRefreshedAt(new Date());
-    setInspectorAgoSec(0);
-  }, [streamKey]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setInspectorAgoSec(Math.floor((Date.now() - inspectorLastRefreshedAt.getTime()) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [inspectorLastRefreshedAt]);
+  const { secondsAgo: inspectorAgoSec } = useAgoTimer(streamKey);
 
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
@@ -340,16 +333,6 @@ function AppContent() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any) => {
-    const ev: TelemetryEvent = {
-      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      timestamp: new Date().toLocaleTimeString(),
-      category,
-      message,
-      data
-    };
-    setEventsLog(prev => [...prev.slice(-99), ev]);
-  }, []);
 
   // Persist resizer panel widths
   useEffect(() => {
@@ -474,7 +457,7 @@ function AppContent() {
         setDeviceInfo(prev => prev ? { ...prev, active_serial: d.active_serial, active_model: d.active_model, device_model: d.device_model } : null);
         if (d.device_model) setDeviceModel(d.device_model);
         addTelemetryEvent('SYSTEM', `Target device connected: ${d.active_model || serial}`);
-        setStreamKey(Date.now());
+        refreshStream();
         await fetchData();
       }
     } catch (e) {
@@ -511,7 +494,7 @@ function AppContent() {
         const d = await res.json();
         setDeviceInfo(d);
         if (d.device_model) setDeviceModel(d.device_model);
-        setStreamKey(Date.now());
+        refreshStream();
         const lpp = d.profile?.lines_per_page || (dev === 'pixel_8' ? 31 : 47);
         addTelemetryEvent('SYSTEM', `Active device: ${d.active_model || dev} (${lpp} lines/page) ✔`);
         await fetchData();
@@ -611,7 +594,7 @@ function AppContent() {
 
   const handleSwitchLiveMode = (mode: 'desktop' | 'phone') => {
     setLiveMode(mode);
-    setStreamKey(Date.now());
+    refreshStream();
     if (monitorSize !== 'custom' && !isDrawerMaximized) {
       let w = mode === 'desktop' ? 540 : 380;
       let h = mode === 'desktop' ? 360 : 600;
@@ -686,7 +669,7 @@ function AppContent() {
 
   const sortedFrames = [...frames].filter(f => f && f.frame_id).sort((a, b) => a.top_line !== b.top_line ? a.top_line - b.top_line : a.page_index - b.page_index);
 
-  async function fetchData() {
+  const fetchData = useCallback(async () => {
     const t0 = performance.now();
     try {
       const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes] = await Promise.all([
@@ -741,8 +724,13 @@ function AppContent() {
         const framesJson: FrameData[] = await framesRes.json();
         const validFrames = Array.isArray(framesJson) ? framesJson.filter(f => f && f.frame_id) : [];
         setFrames(validFrames);
-        if (validFrames.length > 0 && (validFrames.length > prevFramesCountRef.current || !selectedFrameId || !validFrames.some(f => f.frame_id === selectedFrameId))) {
-          setSelectedFrameId(validFrames[validFrames.length - 1].frame_id);
+        if (validFrames.length > 0) {
+          setSelectedFrameId(currId => {
+            if (!currId || !validFrames.some(f => f.frame_id === currId) || validFrames.length > prevFramesCountRef.current) {
+              return validFrames[validFrames.length - 1].frame_id;
+            }
+            return currId;
+          });
         }
         prevFramesCountRef.current = validFrames.length;
       }
@@ -750,18 +738,18 @@ function AppContent() {
       if (cfgRes.ok) {
         const cfg = await cfgRes.json();
         setApiKeyConfigured(!!cfg.gemini_api_key_configured);
-        if (cfg.gemini_api_key && !apiKeyInput) setApiKeyInput(cfg.gemini_api_key);
+        if (cfg.gemini_api_key) setApiKeyInput(prev => prev || cfg.gemini_api_key);
       }
     } catch {
       setBackendConnected(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
     const iv = setInterval(fetchData, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
-  }, [selectedFrameId]);
+  }, [fetchData]);
 
   const handleSwitchProject = async (id: string) => {
     const res = await api(`/api/projects/${id}/activate`, { method: 'POST' });
@@ -1726,7 +1714,7 @@ function AppContent() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               {inspectorMode === 'live' && (
                 <>
-                  <div className="live-refreshed-badge" title={`Refreshed at ${inspectorLastRefreshedAt.toLocaleTimeString()}`}>
+                  <div className="live-refreshed-badge" title={`Refreshed ${inspectorAgoSec <= 1 ? 'just now' : `${inspectorAgoSec}s ago`}`}>
                     <span className="dot" />
                     <span>{inspectorAgoSec <= 1 ? 'LIVE' : `${inspectorAgoSec}s ago`}</span>
                   </div>
