@@ -104,9 +104,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const targetLines = telemetry.target_total_lines || 100;
+  const targetLines = telemetry.target_total_lines || 0;
   const currentBottom = telemetry.current_bottom_line || documentSummary.max_line || 0;
-  const progressPercent = Math.min(100, Math.max(0, Math.round((currentBottom / targetLines) * 100)));
+  const progressPercent = targetLines > 0 ? Math.min(100, Math.max(0, Math.round((currentBottom / targetLines) * 100))) : 0;
   const totalTokens = tokenStats.total_tokens + (tokenStats.mobile_tokens?.total_tokens || 0);
 
   const getHeartbeatAge = () => {
@@ -164,7 +164,12 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
             {(['overview', 'pacer', 'tokens', 'events'] as const).map(tab => {
               const icons = { overview: Activity, pacer: Radio, tokens: Coins, events: Terminal };
               const Icon = icons[tab];
-              const labels = { overview: 'Overview', pacer: 'Pacer & Device', tokens: 'Tokens & Cost', events: `Log (${eventsLog.length})` };
+              const labels = {
+                overview: 'Overview',
+                pacer: 'Device',
+                tokens: 'Tokens & Cost',
+                events: eventsLog.length > 0 ? `Log (${eventsLog.length})` : 'Log'
+              };
               return (
                 <button key={tab} className={`toaster-tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
                   <Icon size={12} /><span>{labels[tab]}</span>
@@ -177,9 +182,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
             {activeTab === 'overview' && (
               <div className="toaster-tab-content">
                 <div className="telemetry-section-card">
-                  <div className="section-card-header"><span>DOCUMENT CAPTURE PROGRESS</span><span className="progress-percent">{progressPercent}%</span></div>
-                  <div className="telemetry-progress-bar-bg"><div className="telemetry-progress-bar-fill" style={{ width: `${progressPercent}%` }} /></div>
-                  <div className="telemetry-progress-sub"><span>Line {currentBottom} of {targetLines} target lines</span><span>{documentSummary.total_frames} frames captured</span></div>
+                  <div className="section-card-header"><span>DOCUMENT CAPTURE PROGRESS</span><span className="progress-percent">{targetLines > 0 ? `${progressPercent}%` : '—'}</span></div>
+                  <div className="telemetry-progress-bar-bg"><div className="telemetry-progress-bar-fill" style={{ width: targetLines > 0 ? `${progressPercent}%` : '0%' }} /></div>
+                  <div className="telemetry-progress-sub"><span>{targetLines > 0 ? `Line ${currentBottom} of ${targetLines} target lines` : 'Awaiting calibration (Ctrl+End)'}</span><span>{documentSummary.total_frames} frames captured</span></div>
                 </div>
                 <div className="telemetry-tiles-grid">
                   <div className="telemetry-tile"><span className="tile-label">STATUS</span><span className="tile-value" style={{ color: phaseStyle.text, fontSize: '11px' }}>{telemetry.status_message || 'Matrix Capture Studio ready'}</span></div>

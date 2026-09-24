@@ -30,14 +30,17 @@ class DismissItemPayload(BaseModel):
     dismissed: bool = True
 
 @router.get("/api/alignment/status")
+@router.get("/api/device/alignment")
 async def get_alignment_status_api():
     return state.latest_alignment_status
 
 @router.post("/api/alignment/check")
+@router.post("/api/device/alignment/check")
 async def trigger_alignment_check_api():
     return await check_and_update_alignment()
 
 @router.post("/api/alignment/dismiss")
+@router.post("/api/device/alignment/dismiss-item")
 async def dismiss_alignment_item_api(payload: DismissItemPayload):
     if payload.dismissed: state.dismissed_alignment_items.add(payload.item_id)
     else: state.dismissed_alignment_items.discard(payload.item_id)
@@ -249,9 +252,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 state.latest_telemetry["target_total_lines"] = total_lines
                 state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
 
-            node.update({"status": "completed", "total_lines": total_lines})
+            node_status = "completed" if total_lines > 0 else "error"
+            node.update({"status": node_status, "total_lines": total_lines})
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end", "total_lines": total_lines, "telemetry": state.latest_telemetry})
-            return {"status": "success", "node_id": "init_end", "total_lines": total_lines, "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔"}
+            return {
+                "status": "success" if total_lines > 0 else "warning",
+                "node_id": "init_end",
+                "total_lines": total_lines,
+                "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔" if total_lines > 0 else "Ctrl+End sent, but could not detect EOF last line in gutter. Please verify document or connect device."
+            }
 
         elif target_key == "reset_home":
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)

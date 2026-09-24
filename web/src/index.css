@@ -323,10 +323,11 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .toaster-latency-pill { font-size: 10px; color: var(--text-muted); background: rgba(0, 0, 0, 0.25); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--border-color); }
 .toaster-btn-icon { background: transparent; border: 1px solid transparent; color: var(--text-muted); cursor: pointer; padding: 3px 5px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
 .toaster-btn-icon:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.06); border-color: var(--border-highlight); }
-.toaster-tabs { display: flex; border-bottom: 1px solid var(--border-color); background: rgba(13, 17, 23, 0.4); }
-.toaster-tab { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 8px 4px; font-family: var(--font-mono); font-size: 10px; font-weight: 600; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); cursor: pointer; transition: all 0.15s ease; }
-.toaster-tab:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.02); }
-.toaster-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); background: rgba(0, 255, 157, 0.04); }
+.toaster-tabs { display: flex; border-bottom: 1px solid var(--border-color); background: rgba(13, 17, 23, 0.6); overflow-x: auto; -ms-overflow-style: none; }
+.toaster-tabs::-webkit-scrollbar { display: none; }
+.toaster-tab { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 8px; font-family: var(--font-mono); font-size: 10.5px; font-weight: 600; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
+.toaster-tab:hover { color: var(--text-main); background: rgba(255, 255, 255, 0.03); }
+.toaster-tab.active { color: var(--color-primary); border-bottom-color: var(--color-primary); background: rgba(0, 255, 157, 0.06); }
 .toaster-body { max-height: 310px; overflow-y: auto; padding: 12px; }
 .telemetry-section-card { background: rgba(13, 17, 23, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
 .section-card-header { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.5px; }

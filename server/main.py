@@ -161,14 +161,16 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
         "dwell_countdown_ms": 0, "phase": "IDLE", "status_message": "Matrix Capture Studio ready",
         "last_heartbeat": None
     })
-    try:
-        for f in state.FRAMES_DIR.glob("*.png"):
-            try:
-                f.unlink()
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # Reset DAG nodes to clean idle state
+    if "nodes" in state.dag_state:
+        state.dag_state["nodes"]["init_end"].update({"status": "idle", "total_lines": tlines})
+        state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
+        state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
+        state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
+        state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
+    state.dag_state["current_active_node"] = "init_end"
+    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
+
     state.save_persisted_state()
     return {"status": "success", "message": f"Reset to clean state (target {tlines} lines)."}
 
