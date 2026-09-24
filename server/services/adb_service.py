@@ -1,4 +1,4 @@
-import asyncio, json, os, re, subprocess
+import asyncio, json, os, re, subprocess, time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -89,32 +89,106 @@ async def list_adb_devices() -> Dict[str, Any]:
     except Exception as e:
         return {"status": "error", "error": str(e), "devices": []}
 
-async def get_active_adb_serial(requested_serial: Optional[str] = None) -> Optional[str]:
-    global current_device_model, target_adb_serial
+# Concurrency lock to serialize screencap execution over ADB
+_screencap_lock = asyncio.Lock()
+
+# Short-TTL in-memory frame cache to prevent redundant screencaps across views
+_frame_cache: Dict[str, Dict[str, Any]] = {
+    "desktop": {"bytes": None, "raw_png": None, "ts": 0.0},
+    "phone": {"bytes": None, "raw_png": None, "ts": 0.0}
+}
+
+# Display mapping cache
+_display_map_cache: Dict[str, str] = {}
+_display_map_cache_ts: float = 0.0
+
+# Active serial cache & reconnect debounce
+_active_serial_cache: Optional[str] = None
+_active_serial_cache_ts: float = 0.0
+_last_reconnect_ts: float = 0.0
+
+# Cached standby frame
+_standby_frame_cache: Dict[str, bytes] = {}
+
+def _get_or_create_standby_frame(mode: str = "desktop") -> bytes:
+    if mode in _standby_frame_cache:
+        return _standby_frame_cache[mode]
+    img = np.zeros((540, 960, 3), dtype=np.uint8)
+    img[:] = (23, 17, 13) # #0d1117 in BGR
+    title = f"MATRIX CAPTURE STUDIO  |  {mode.upper()} VIEW"
+    sub = "Awaiting live display stream from Android device..."
+    cv2.putText(img, title, (60, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (157, 255, 0), 2, cv2.LINE_AA)
+    cv2.putText(img, sub, (60, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (158, 148, 139), 1, cv2.LINE_AA)
+    _, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    frame_bytes = jpg.tobytes()
+    _standby_frame_cache[mode] = frame_bytes
+    return frame_bytes
+
+async def get_active_adb_serial(requested_serial: Optional[str] = None, force_refresh: bool = False) -> Optional[str]:
+    global current_device_model, target_adb_serial, _active_serial_cache, _active_serial_cache_ts, _last_reconnect_ts
+    now = time.time()
+    if not force_refresh and not requested_serial and _active_serial_cache and (now - _active_serial_cache_ts < 3.5):
+        return _active_serial_cache
+
     try:
-        res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
+        res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 2.0)
         active = []
         for line in res.stdout.splitlines()[1:]:
             parts = line.strip().split()
             if len(parts) >= 2 and parts[1] == "device":
                 model = next((p.split(":", 1)[1] for p in parts[2:] if p.startswith("model:")), "unknown")
                 active.append({"serial": parts[0], "model": model, "raw": line.strip()})
-        if not active: return None
+        if not active:
+            _active_serial_cache = None
+            _active_serial_cache_ts = now
+            # Debounced auto-reconnect to cached wireless address (at most once every 12s)
+            if now - _last_reconnect_ts > 12.0:
+                _last_reconnect_ts = now
+                cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+                if cf.exists():
+                    try:
+                        cdata = json.loads(cf.read_text())
+                        pref = cdata.get("last_address") or (cdata.get("pixel_10_address") if "10" in current_device_model.lower() else cdata.get("pixel_8_address"))
+                        if pref:
+                            cres = await asyncio.to_thread(_exec_adb_sync, ["connect", pref], 2.0)
+                            if "connected" in cres.stdout.lower() or "already" in cres.stdout.lower():
+                                _active_serial_cache = pref
+                                _active_serial_cache_ts = time.time()
+                                return pref
+                    except Exception:
+                        pass
+            return None
+
+        found_serial = None
         if requested_serial:
             for dev in active:
-                if dev["serial"] == requested_serial or requested_serial in dev["serial"]: return dev["serial"]
+                if dev["serial"] == requested_serial or requested_serial in dev["serial"]:
+                    found_serial = dev["serial"]
+                    break
 
-        pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
-        p8_keys, p10_keys = ["pixel_8", "husky", "shiba", "pixel 8"], ["pixel_10", "mustang", "frankel", "pixel 10"]
-        keys = p8_keys if pref == "pixel_8" else p10_keys
+        if not found_serial:
+            pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
+            p8_keys, p10_keys = ["pixel_8", "husky", "shiba", "pixel 8"], ["pixel_10", "mustang", "frankel", "pixel 10"]
+            keys = p8_keys if pref == "pixel_8" else p10_keys
 
-        for dev in active:
-            m = (dev["model"] + " " + dev["raw"]).lower()
-            if any(k in m for k in keys): return dev["serial"]
-        if target_adb_serial:
             for dev in active:
-                if dev["serial"] == target_adb_serial: return dev["serial"]
-        return active[0]["serial"]
+                m = (dev["model"] + " " + dev["raw"]).lower()
+                if any(k in m for k in keys):
+                    found_serial = dev["serial"]
+                    break
+
+        if not found_serial and target_adb_serial:
+            for dev in active:
+                if dev["serial"] == target_adb_serial:
+                    found_serial = dev["serial"]
+                    break
+
+        if not found_serial:
+            found_serial = active[0]["serial"]
+
+        _active_serial_cache = found_serial
+        _active_serial_cache_ts = now
+        return found_serial
     except Exception:
         return None
 
@@ -154,7 +228,7 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
     global current_device_model
     ser = await get_active_adb_serial(serial)
     if ser:
-        res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]|displayId=[1-9]' | head -n 5", ser)
+        res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]|displayId=[1-9]' | head -n 5", ser, timeout=2.5)
         if res.get("status") == "ok" and res.get("stdout"):
             for line in res["stdout"].splitlines():
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
@@ -162,118 +236,138 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                     return int(m.group(1))
     return 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
-async def detect_surfaceflinger_displays(serial: Optional[str] = None) -> Dict[str, str]:
+async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_refresh: bool = False) -> Dict[str, str]:
+    global _display_map_cache, _display_map_cache_ts
+    now = time.time()
+    if not force_refresh and (now - _display_map_cache_ts < 10.0) and _display_map_cache:
+        return _display_map_cache
+
     ser = await get_active_adb_serial(serial)
-    res = await asyncio.to_thread(_exec_adb_sync, (["-s", ser] if ser else []) + ["shell", "dumpsys SurfaceFlinger --display-id"], 5.0)
     displays = {}
-    if res.returncode == 0 and res.stdout:
-        for line in res.stdout.splitlines():
-            m = re.search(r'Display\s+(\d+)', line)
-            if m:
-                did = m.group(1)
-                if "port=0" in line: displays["phone"] = did
-                elif ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line: displays["desktop"] = did
-        all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
-        if "phone" not in displays and len(all_ids) > 0: displays["phone"] = all_ids[0]
-        if "desktop" not in displays and len(all_ids) > 1: displays["desktop"] = all_ids[1]
+    if ser:
+        res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 3.0)
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.splitlines():
+                m = re.search(r'Display\s+(\d+)', line)
+                if m:
+                    did = m.group(1)
+                    if "port=0" in line: displays["phone"] = did
+                    elif ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line or "HDMI" in line:
+                        displays["desktop"] = did
+            all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
+            if "phone" not in displays and len(all_ids) > 0: displays["phone"] = all_ids[0]
+            if "desktop" not in displays and len(all_ids) > 1: displays["desktop"] = all_ids[1]
+
+        # Augment with dumpsys display if desktop not found via SurfaceFlinger
+        if "desktop" not in displays:
+            ext_id = await detect_external_display_id(ser)
+            if ext_id and ext_id > 0:
+                displays["desktop"] = str(ext_id)
+        if "phone" not in displays:
+            displays["phone"] = "0"
+
+    _display_map_cache = displays
+    _display_map_cache_ts = now
     return displays
 
 async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
     return (await detect_surfaceflinger_displays(serial)).get("desktop")
 
-from services.capture_card_service import capture_card_mgr
-
 async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
-    # 1. Try Hardware Video Capture Card (USB3 Video / DirectShow) first
-    try:
-        jpg, meta = capture_card_mgr.grab_frame(quality=90, max_dim=1920)
-        if jpg:
-            return jpg
-    except Exception as ce:
-        print(f"[capture_external_screenshot] Capture card read note: {ce}")
-
-    # 2. Multi-strategy ADB screencap
     ser = await get_active_adb_serial(serial)
     if not ser:
         return None
 
-    ext_id = str(await detect_external_display_id(ser))
-    sf_id = await detect_surfaceflinger_display_id(ser)
-    ids_to_try = [i for i in [ext_id, sf_id] if i]
-    if not ids_to_try:
-        ids_to_try = ["13", "4", "2", "1"]
-
-    for did in ids_to_try:
-        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
-        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 5.0)
+    disp_map = await detect_surfaceflinger_displays(ser)
+    known_id = disp_map.get("desktop")
+    if known_id:
+        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
+        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
         if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
             return png_bytes
 
-    # Fallback without -d
-    cmd_default = ["-s", ser, "exec-out", "screencap", "-p"]
-    cap_def = await asyncio.to_thread(_exec_adb_sync_bin, cmd_default, 5.0)
-    if cap_def.returncode == 0 and (png_bytes := _extract_png_bytes(cap_def.stdout)):
-        return png_bytes
+    # Fallback to dynamic detection
+    ext_id = str(await detect_external_display_id(ser))
+    ids_to_try = [ext_id] if (ext_id and ext_id != "0") else []
+    model_default = "9" if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else "4"
+    for did in [model_default, "14", "13", "4", "9"]:
+        if did not in ids_to_try: ids_to_try.append(did)
 
-    # Fallback to file pull
-    dev_path = "/sdcard/mc_calib_temp.png"
-    await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", f"screencap -p {dev_path}"], 5.0)
-    pull = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", f"cat {dev_path} && rm -f {dev_path}"], 5.0)
-    return _extract_png_bytes(pull.stdout) if pull.returncode == 0 else None
+    for did in ids_to_try:
+        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
+        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.0)
+        if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+            disp_map["desktop"] = str(did)
+            return png_bytes
+
+    return None
 
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
-    # Priority 1: Hardware Capture Card for desktop mode
-    if mode == "desktop":
-        try:
-            jpg, meta = capture_card_mgr.grab_frame(quality=quality, max_dim=max_dim)
-            if jpg:
-                return jpg
-        except Exception:
-            pass
+    now = time.time()
+    # Fast-path cache check: return fresh frame if captured within last 250ms
+    cached = _frame_cache.get(mode)
+    if cached and cached.get("bytes") and (now - cached.get("ts", 0.0) < 0.25):
+        return cached["bytes"]
 
-    # Priority 2: ADB Screencap
     ser = await get_active_adb_serial(serial)
-    if ser:
+    if not ser:
+        if cached and cached.get("bytes"):
+            return cached["bytes"]
+        return _get_or_create_standby_frame(mode)
+
+    acquired = False
+    try:
+        # Non-blocking lock acquisition with 0.8s timeout
+        await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.8)
+        acquired = True
+    except asyncio.TimeoutError:
+        # If lock is held by other stream, return cached frame immediately
+        if cached and cached.get("bytes"):
+            return cached["bytes"]
+        return _get_or_create_standby_frame(mode)
+
+    try:
+        # Re-check cache inside lock
+        cached = _frame_cache.get(mode)
+        if cached and cached.get("bytes") and (time.time() - cached.get("ts", 0.0) < 0.25):
+            return cached["bytes"]
+
         if mode == "desktop":
             raw_bytes = await capture_external_screenshot(ser)
             if raw_bytes:
-                return _png_to_jpeg(raw_bytes, quality, max_dim)
-        else:
-            cmd = ["-s", ser, "exec-out", "screencap", "-p"]
-            res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
-            if res.returncode == 0 and (jpg := _png_to_jpeg(_extract_png_bytes(res.stdout), quality, max_dim)):
-                return jpg
+                jpg = _png_to_jpeg(raw_bytes, quality, max_dim)
+                if jpg:
+                    _frame_cache["desktop"] = {"bytes": jpg, "raw_png": raw_bytes, "ts": time.time()}
+                    return jpg
+        else: # mode == "phone"
+            disp_map = await detect_surfaceflinger_displays(ser)
+            phone_id = disp_map.get("phone", "0")
+            cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if phone_id and phone_id != "0" else ["-s", ser, "exec-out", "screencap", "-p"]
+            res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
+            if res.returncode != 0 or not res.stdout:
+                res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 2.5)
+            if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
+                jpg = _png_to_jpeg(png_bytes, quality, max_dim)
+                if jpg:
+                    _frame_cache["phone"] = {"bytes": jpg, "raw_png": png_bytes, "ts": time.time()}
+                    return jpg
+    finally:
+        if acquired:
+            _screencap_lock.release()
 
-    # Priority 3: Branded HUD Standby frame rather than 503 error
-    if mode == "desktop":
-        sources = capture_card_mgr.list_video_sources()
-        if sources.get("has_capture_card"):
-            return capture_card_mgr.create_hud_standby_frame(
-                title="DESKTOP CAPTURE CARD IN USE",
-                subtitle="USB3 Video is open in Windows Camera App",
-                hint="Close Windows Camera app to stream directly in Matrix Capture Studio."
-            )
-        else:
-            return capture_card_mgr.create_hud_standby_frame(
-                title="LIVE DESKTOP STANDBY",
-                subtitle="Awaiting ADB or HDMI Capture Card connection",
-                hint="Connect via Wireless ADB (.\\scripts\\pixel_device_helper.ps1 connect) or plug in HDMI Capture Card."
-            )
-    return None
+    # If capture failed on this frame, return previous cached frame or standby frame
+    if cached and cached.get("bytes"):
+        return cached["bytes"]
+    return _get_or_create_standby_frame(mode)
 
 async def configure_display_awake_policies(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
     if not ser: return
     try:
-        # Stay awake on AC, USB, Wireless power (1 | 2 | 4 = 7)
         await run_adb_shell("settings put global stay_on_while_plugged_in 7", ser)
-        # Maximum screen off timeout (~24.8 days)
         await run_adb_shell("settings put system screen_off_timeout 2147483647", ser)
-        # Disable sleep timeout
         await run_adb_shell("settings put global sleep_timeout -1", ser)
-        # Force power stay on
         await run_adb_shell("svc power stayon true", ser)
-        # Disable doze/ambient sleep
         await run_adb_shell("settings put secure doze_enabled 0", ser)
     except Exception:
         pass
@@ -282,13 +376,10 @@ async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
     if not ser: return
     try:
-        # Send keyevent 224 (KEYCODE_WAKEUP) to reset sleep counter
         await run_adb_shell("input keyevent 224", ser)
-        # In Android Desktop Mode, external displays time out due to inactivity unless input events occur on them
         ext_id = await detect_external_display_id(ser)
         if ext_id and ext_id > 0:
             await run_adb_shell(f"input -d {ext_id} keyevent 224", ser)
-            # Simulated micro-motion to reset external display inactivity timer
             await run_adb_shell(f"input -d {ext_id} motionevent MOVE 500 500", ser)
     except Exception:
         pass
@@ -306,11 +397,14 @@ async def awake_keepalive_loop():
 
 async def mjpeg_stream_generator(mode: str = "desktop", serial: Optional[str] = None, fps: float = 2.0, quality: int = 75, max_dim: int = 960):
     interval = 1.0 / max(0.5, min(fps, 4.0))
-    while True:
-        jpg = await capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
-        if jpg:
-            yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
-        await asyncio.sleep(interval)
+    try:
+        while True:
+            jpg = await capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
+            if jpg:
+                yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(jpg)).encode() + b"\r\n\r\n" + jpg + b"\r\n"
+            await asyncio.sleep(interval)
+    except (asyncio.CancelledError, GeneratorExit):
+        pass
 
 async def is_ime_visible(serial: Optional[str] = None) -> bool:
     try:
@@ -401,7 +495,13 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
     active_serial = await get_active_adb_serial(serial)
     if not active_serial: return state.latest_alignment_status
     try:
-        snap_bytes = await capture_external_screenshot(active_serial)
+        cached_d = _frame_cache.get("desktop", {})
+        snap_bytes = None
+        if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < 2.0):
+            snap_bytes = cached_d["raw_png"]
+        else:
+            snap_bytes = await capture_external_screenshot(active_serial)
+
         if snap_bytes:
             res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes)
             res["timestamp"] = datetime.now().isoformat()
