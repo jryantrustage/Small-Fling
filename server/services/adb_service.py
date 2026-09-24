@@ -50,15 +50,19 @@ def init_device_model_from_cache() -> str:
 current_device_model = init_device_model_from_cache()
 target_adb_serial: Optional[str] = None
 
-def _exec_adb_sync(args: List[str], timeout: float = 4.0) -> subprocess.CompletedProcess:
+def _exec_adb_sync(args: List[str], timeout: float = 4.0, text: bool = True) -> subprocess.CompletedProcess:
     adb_bin = getattr(config, "ADB_PATH", None) or "adb"
     cmd = [adb_bin] + args
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(cmd, capture_output=True, text=text, timeout=timeout)
 
 def _exec_adb_sync_bin(args: List[str], timeout: float = 6.0) -> subprocess.CompletedProcess:
-    adb_bin = getattr(config, "ADB_PATH", None) or "adb"
-    cmd = [adb_bin] + args
-    return subprocess.run(cmd, capture_output=True, timeout=timeout)
+    return _exec_adb_sync(args, timeout=timeout, text=False)
+
+def _extract_png_bytes(data: Optional[bytes]) -> Optional[bytes]:
+    if not data:
+        return None
+    idx = data.find(b"\x89PNG\r\n\x1a\n")
+    return data[idx:] if idx >= 0 else None
 
 async def run_adb_shell(cmd_str: str, serial: Optional[str] = None, timeout: float = 5.0) -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
@@ -223,19 +227,15 @@ async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[
         cmd.extend(["-d", sf_id])
     cmd.append("-p")
     cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 8.0)
-    if cap.returncode == 0 and cap.stdout:
-        idx = cap.stdout.find(b"\x89PNG\r\n\x1a\n")
-        if idx >= 0:
-            return cap.stdout[idx:]
+    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+        return png_bytes
 
     dev_path = "/sdcard/mc_calib_temp.png"
     sc_cmd = f"screencap {'-d ' + sf_id if sf_id else ''} -p {dev_path}"
     await asyncio.to_thread(_exec_adb_sync, (["-s", ser] if ser else []) + ["shell", sc_cmd], 6.0)
     pull_res = await asyncio.to_thread(_exec_adb_sync_bin, (["-s", ser] if ser else []) + ["exec-out", f"cat {dev_path} && rm -f {dev_path}"], 6.0)
-    if pull_res.returncode == 0 and pull_res.stdout:
-        idx = pull_res.stdout.find(b"\x89PNG\r\n\x1a\n")
-        if idx >= 0:
-            return pull_res.stdout[idx:]
+    if pull_res.returncode == 0 and (png_bytes := _extract_png_bytes(pull_res.stdout)):
+        return png_bytes
     return None
 
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
@@ -251,19 +251,16 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
     cmd.append("-p")
 
     res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 6.0)
-    if res.returncode == 0 and res.stdout:
-        png_idx = res.stdout.find(b"\x89PNG\r\n\x1a\n")
-        if png_idx >= 0:
-            png_data = res.stdout[png_idx:]
-            img = cv2.imdecode(np.frombuffer(png_data, np.uint8), cv2.IMREAD_COLOR)
-            if img is not None and img.size > 0:
-                h, w = img.shape[:2]
-                if max(h, w) > max_dim:
-                    scale = max_dim / float(max(h, w))
-                    nw, nh = int(w * scale), int(h * scale)
-                    img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
-                _, jpg_data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                return jpg_data.tobytes()
+    if res.returncode == 0 and (png_data := _extract_png_bytes(res.stdout)):
+        img = cv2.imdecode(np.frombuffer(png_data, np.uint8), cv2.IMREAD_COLOR)
+        if img is not None and img.size > 0:
+            h, w = img.shape[:2]
+            if max(h, w) > max_dim:
+                scale = max_dim / float(max(h, w))
+                nw, nh = int(w * scale), int(h * scale)
+                img = cv2.resize(img, (nw, nh), interpolation=cv2.INTER_AREA)
+            _, jpg_data = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            return jpg_data.tobytes()
 
     if mode == "desktop":
         raw_png = await capture_external_screenshot(ser)

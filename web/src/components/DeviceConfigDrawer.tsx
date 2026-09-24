@@ -45,7 +45,6 @@ export const DeviceConfigDrawer: React.FC<DeviceConfigDrawerProps> = ({
 
   const fetchKioskStatus = useCallback(async () => {
     try {
-      setLoading(true);
       const res = await fetch(`${apiBase}/api/device/kiosk/status${activeSerial ? `?serial=${encodeURIComponent(activeSerial)}` : ''}`);
       if (res.ok) {
         const data: KioskTelemetry = await res.json();

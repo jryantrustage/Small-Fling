@@ -61,3 +61,7 @@ def set_api_key(new_key: str) -> None:
 
 def get_candidate_models() -> List[str]:
     return [GEMINI_PRIMARY_MODEL] + [fb for fb in GEMINI_FALLBACK_MODELS if fb != GEMINI_PRIMARY_MODEL]
+
+def get_api_key_preview(key: str = None) -> str:
+    k = GEMINI_API_KEY if key is None else key
+    return f"{k[:6]}...{k[-4:]}" if len(k) > 10 else ("Set" if k else "Missing")

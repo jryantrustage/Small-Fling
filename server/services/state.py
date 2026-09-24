@@ -288,6 +288,22 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
         for k in sorted(document_lines.keys())
     ]
 
+def get_document_metrics() -> Dict[str, Any]:
+    sl = get_serialized_lines()
+    return {
+        "document_lines": len(document_lines),
+        "total_lines": len(document_lines),
+        "min_line": min(document_lines.keys()) if document_lines else 0,
+        "max_line": max(document_lines.keys()) if document_lines else 0,
+        "total_frames": len(captured_frames),
+        "captured_frames": len(captured_frames),
+        "pending_recaptures": len(recapture_queue),
+        "verified_overlaps": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
+        "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
+        "issues_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"]),
+        "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
+    }
+
 def get_fresh_telemetry() -> Dict[str, Any]:
     t = dict(latest_telemetry)
     hb = t.get("last_heartbeat")

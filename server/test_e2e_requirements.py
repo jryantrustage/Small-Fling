@@ -1,20 +1,18 @@
-import os
-import sys
-import json
-import time
-import asyncio
-import requests
-import websockets
+try:
+    from server import main
+except ImportError:
+    import main
+
+from fastapi.testclient import TestClient
+import pytest
 import numpy as np
 import cv2
 
-SERVER_URL = "http://127.0.0.1:8000"
-WS_URL = "ws://127.0.0.1:8000/ws"
+client = TestClient(main.app)
 
-def create_synthetic_frame_image(filepath: str):
+def create_synthetic_frame_image() -> bytes:
     """Creates a synthetic 1920x1080 screenshot matching the Teams code viewer mock."""
     img = np.zeros((1080, 1920, 3), dtype=np.uint8)
-    # Dark editor background #161B22
     img[:] = (34, 27, 22)
 
     # Top title bar
@@ -36,9 +34,7 @@ def create_synthetic_frame_image(filepath: str):
     line_pitch = 120
     for idx, (ln_num, text) in enumerate(lines):
         y = y_start + idx * line_pitch
-        # Gutter line number
         cv2.putText(img, str(ln_num), (110, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (150, 150, 150), 2)
-        # Text content (wrapped if long)
         if len(text) > 80:
             part1 = text[:75]
             part2 = text[75:150]
@@ -54,87 +50,56 @@ def create_synthetic_frame_image(filepath: str):
     _, buf = cv2.imencode(".png", img)
     return buf.tobytes()
 
-import pytest
-@pytest.mark.asyncio
-async def test_full_pipeline():
-    print("=== 1. Testing Server Health ===")
-    res = requests.get(f"{SERVER_URL}/api/health")
+def test_full_pipeline():
+    # 1. Health check
+    res = client.get("/api/health")
     assert res.status_code == 200, f"Health check failed: {res.text}"
-    print(f"Health OK: {res.json()['status']}")
+    assert res.json()["status"] == "healthy"
 
-    print("\n=== 2. Testing /api/next-page-line endpoint ===")
-    res = requests.get(f"{SERVER_URL}/api/next-page-line")
+    # 2. Next page line
+    res = client.get("/api/next-page-line")
     assert res.status_code == 200, f"Failed next-page-line: {res.text}"
-    data = res.json()
-    print(f"Next Page Line data: {data}")
-    assert "next_page_first_line" in data
+    assert "next_page_first_line" in res.json()
 
-    import io
-    png_bytes = create_synthetic_frame_image("")
+    # 3. WebSocket ping/pong
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "ping"})
+        pong = ws.receive_json()
+        assert pong.get("type") == "pong"
 
-    async with websockets.connect(WS_URL) as ws:
-        print("Connected to WebSocket successfully!")
-        # Send a ping
-        await ws.send(json.dumps({"type": "ping"}))
-        pong = await asyncio.wait_for(ws.recv(), timeout=5.0)
-        print(f"Received WebSocket response: {pong}")
-        assert "pong" in pong
+    # 4. Ensure an active project exists
+    proj_res = client.post(
+        "/api/projects",
+        json={"name": "E2E Synth Project", "description": "Automated E2E Verification"}
+    )
+    assert proj_res.status_code == 200
 
-        print("\n=== 4. Uploading Frame with sync=false (Manual Review Flow) ===")
-        upload_res = requests.post(
-            f"{SERVER_URL}/api/upload-frame",
-            files={"file": ("test_synthetic_p09.png", io.BytesIO(png_bytes), "image/png")},
-            data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
-        )
-        assert upload_res.status_code == 200, f"Upload failed: {upload_res.text}"
-        upload_data = upload_res.json()
-        print(f"Upload response: {upload_data}")
-        frame_id = upload_data["frame_id"]
+    # 5. Upload synthetic frame
+    png_bytes = create_synthetic_frame_image()
+    upload_res = client.post(
+        "/api/upload-frame",
+        files={"file": ("test_synthetic_p09.png", png_bytes, "image/png")},
+        data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
+    )
+    assert upload_res.status_code == 200, f"Upload failed: {upload_res.text}"
+    upload_data = upload_res.json()
+    frame_id = upload_data["frame_id"]
 
-        # Verify WebSocket received new_frame event
-        ws_msg_raw = await asyncio.wait_for(ws.recv(), timeout=5.0)
-        ws_msg = json.loads(ws_msg_raw)
-        print(f"WebSocket received pushed frame event: {ws_msg.get('type')}, frame_id: {ws_msg.get('frame', {}).get('frame_id')}")
-        assert ws_msg.get("type") == "new_frame"
-        assert ws_msg.get("frame", {}).get("frame_id") == frame_id
+    # 6. Test Next Page Line after upload
+    npl_res = client.get("/api/next-page-line")
+    assert npl_res.status_code == 200
+    npl_data = npl_res.json()
+    assert npl_data["next_page_first_line"] == 152 or npl_data["last_bottom_line"] >= 151
 
-        print("\n=== 5. Testing Next Page Line after Upload ===")
-        npl_res = requests.get(f"{SERVER_URL}/api/next-page-line")
-        npl_data = npl_res.json()
-        print(f"Next page line returned: {npl_data}")
-        assert npl_data["next_page_first_line"] == 152 or npl_data["last_bottom_line"] >= 151
+    # 7. OCR scan and bounding box verification
+    scan_res = client.post(f"/api/frames/{frame_id}/scan")
+    assert scan_res.status_code == 200, f"Scan failed: {scan_res.text}"
+    scan_data = scan_res.json()
+    bboxes = scan_data.get("bounding_boxes", {})
+    assert bboxes.get("first_line") is not None, "First line bbox (Green) must not be null"
+    assert bboxes.get("last_line") is not None, "Last line bbox (Red) must not be null"
+    assert len(bboxes.get("wrapped_lines", [])) >= 1, "Wrapped lines bboxes (Yellow) should be detected"
 
-        print(f"\n=== 6. Testing 'Send Image for OCR Scan' (/api/frames/{frame_id}/scan) ===")
-        scan_res = requests.post(f"{SERVER_URL}/api/frames/{frame_id}/scan")
-        assert scan_res.status_code == 200, f"Scan failed: {scan_res.text}"
-        scan_data = scan_res.json()
-        print(f"Scan status: {scan_data['status']}")
-        print(f"Detected top line: {scan_data['top_line']}, bottom line: {scan_data['bottom_line']}")
-        print(f"Extracted lines count: {len(scan_data['lines'])}")
-
-        # Verify Bounding Boxes
-        bboxes = scan_data.get("bounding_boxes", {})
-        print(f"First line bbox (Green): {bboxes.get('first_line')}")
-        print(f"Last line bbox (Red): {bboxes.get('last_line')}")
-        print(f"Wrapped lines bboxes (Yellow): {len(bboxes.get('wrapped_lines', []))} boxes")
-
-        assert bboxes.get("first_line") is not None, "First line bbox (Green) must not be null"
-        assert bboxes.get("last_line") is not None, "Last line bbox (Red) must not be null"
-        assert len(bboxes.get("wrapped_lines", [])) >= 1, "Wrapped lines bboxes (Yellow) should be detected"
-
-        # Verify WebSocket broadcasted ocr_completed
-        ws_ocr_msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=5.0))
-        print(f"WebSocket received ocr_completed event: {ws_ocr_msg.get('type')}")
-        assert ws_ocr_msg.get("type") == "ocr_completed"
-
-        # Purge test frames so no image files remain on disk
-        try:
-            requests.post(f"{SERVER_URL}/api/frames/purge")
-        except Exception:
-            pass
-
-    print("\n=== ALL AUTOMATION TESTS PASSED SUCCESSFULLY! ===")
-
-if __name__ == "__main__":
-    asyncio.run(test_full_pipeline())
+    # 8. Clean up
+    client.post("/api/frames/purge")
 

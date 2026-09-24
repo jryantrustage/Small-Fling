@@ -2,7 +2,7 @@
 Classifiers package exposing base types and the global classifier_registry.
 """
 
-from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
+from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult, create_classifier_context
 from .registry import ClassifierRegistry, classifier_registry
 from .editor_classifiers import (
     LightModeClassifier,
@@ -15,9 +15,11 @@ __all__ = [
     "ClassifierContext",
     "ClassificationResult",
     "FixResult",
+    "create_classifier_context",
     "ClassifierRegistry",
     "classifier_registry",
     "LightModeClassifier",
     "ViewModeClassifier",
     "KeyboardOpenClassifier",
 ]
+
