@@ -51,8 +51,8 @@ def create_synthetic_frame_image(filepath: str):
         else:
             cv2.putText(img, text, (220, y), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (230, 230, 230), 1)
 
-    cv2.imwrite(filepath, img)
-    return filepath
+    _, buf = cv2.imencode(".png", img)
+    return buf.tobytes()
 
 import pytest
 @pytest.mark.asyncio
@@ -69,11 +69,8 @@ async def test_full_pipeline():
     print(f"Next Page Line data: {data}")
     assert "next_page_first_line" in data
 
-    from pathlib import Path
-    frames_dir = Path(__file__).parent / "storage" / "frames"
-    frames_dir.mkdir(parents=True, exist_ok=True)
-    test_img_path = str(frames_dir / "test_synthetic_p09.png")
-    create_synthetic_frame_image(test_img_path)
+    import io
+    png_bytes = create_synthetic_frame_image("")
 
     async with websockets.connect(WS_URL) as ws:
         print("Connected to WebSocket successfully!")
@@ -84,12 +81,11 @@ async def test_full_pipeline():
         assert "pong" in pong
 
         print("\n=== 4. Uploading Frame with sync=false (Manual Review Flow) ===")
-        with open(test_img_path, "rb") as f:
-            upload_res = requests.post(
-                f"{SERVER_URL}/api/upload-frame",
-                files={"file": ("test_synthetic_p09.png", f, "image/png")},
-                data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
-            )
+        upload_res = requests.post(
+            f"{SERVER_URL}/api/upload-frame",
+            files={"file": ("test_synthetic_p09.png", io.BytesIO(png_bytes), "image/png")},
+            data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
+        )
         assert upload_res.status_code == 200, f"Upload failed: {upload_res.text}"
         upload_data = upload_res.json()
         print(f"Upload response: {upload_data}")
@@ -131,7 +127,14 @@ async def test_full_pipeline():
         print(f"WebSocket received ocr_completed event: {ws_ocr_msg.get('type')}")
         assert ws_ocr_msg.get("type") == "ocr_completed"
 
+        # Purge test frames so no image files remain on disk
+        try:
+            requests.post(f"{SERVER_URL}/api/frames/purge")
+        except Exception:
+            pass
+
     print("\n=== ALL AUTOMATION TESTS PASSED SUCCESSFULLY! ===")
 
 if __name__ == "__main__":
     asyncio.run(test_full_pipeline())
+

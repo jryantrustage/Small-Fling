@@ -16,7 +16,7 @@ norm = cv2.normalize(gray, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
 inv = 255 - norm
 # Scale 2x
 inv_2x = cv2.resize(inv, (inv.shape[1]*2, inv.shape[0]*2), interpolation=cv2.INTER_CUBIC)
-cv2.imwrite('debug_inv_f.png', inv_2x)
+# cv2.imwrite('debug_inv_f.png', inv_2x)
 
 res, _ = ocr(inv_2x)
 print("Inverted + Normalized OCR:", res)

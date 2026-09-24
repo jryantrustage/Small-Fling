@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Check,
-  Coins, Layers, RotateCw, AlertCircle, FolderKanban, Plus, Trash2,
+  Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, Loader2,
-  Monitor, ChevronDown, Keyboard
+  Monitor, ChevronDown, Keyboard, Info, Eye, EyeOff
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -22,6 +22,8 @@ import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
 import { LiveMonitorDrawer } from './components/LiveMonitorDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
+import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
+import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -252,7 +254,25 @@ function AppContent() {
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
-  const [inspectorMode, setInspectorMode] = useState<'single' | 'spliced'>('single');
+  const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
+  const [streamKey, setStreamKey] = useState<number>(Date.now());
+  const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
+  const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
+  const [inspectorLastRefreshedAt, setInspectorLastRefreshedAt] = useState<Date>(new Date());
+  const [inspectorAgoSec, setInspectorAgoSec] = useState(0);
+
+  useEffect(() => {
+    setInspectorLastRefreshedAt(new Date());
+    setInspectorAgoSec(0);
+  }, [streamKey]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setInspectorAgoSec(Math.floor((Date.now() - inspectorLastRefreshedAt.getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [inspectorLastRefreshedAt]);
+
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
   const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>(() => {
@@ -265,8 +285,6 @@ function AppContent() {
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
   const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
   const [showLiveMonitor, setShowLiveMonitor] = useState(false);
-  const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
-  const [streamKey, setStreamKey] = useState<number>(Date.now());
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
 
   // Live Monitor Drawer Resizing & Device Switching State
@@ -1380,6 +1398,7 @@ function AppContent() {
           <button
             onClick={() => {
               setShowLiveMonitor(prev => !prev);
+              setLiveMode('desktop');
               setStreamKey(Date.now());
             }}
             title="Toggle Realtime Device Live Screen Monitor"
@@ -1674,11 +1693,49 @@ function AppContent() {
         <main className="frame-inspector-panel" style={{ flex: `${inspectorPercent} 1 0`, minWidth: '220px' }}>
           <div className="panel-header">
             <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
+              <button
+                className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`}
+                onClick={() => {
+                  setInspectorMode('live');
+                  setLiveMode('desktop');
+                  setStreamKey(Date.now());
+                }}
+                style={{ fontSize: '11px', padding: '3px 8px' }}
+                title="Live Desktop Screen View (External Display / Display 4)"
+              >
+                <Monitor size={11} style={{ marginRight: '4px' }} />
+                <span>Live Desktop</span>
+              </button>
               <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
               <button className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('spliced')} style={{ fontSize: '11px', padding: '3px 8px' }}>Spliced Document ({frames.length})</button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {inspectorMode === 'live' && (
+                <>
+                  <div className="live-refreshed-badge" title={`Refreshed at ${inspectorLastRefreshedAt.toLocaleTimeString()}`}>
+                    <span className="dot" />
+                    <span>{inspectorAgoSec <= 1 ? 'LIVE' : `${inspectorAgoSec}s ago`}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`live-info-btn ${showInspectorMetaPopover ? 'active' : ''}`}
+                    onClick={() => setShowInspectorMetaPopover(prev => !prev)}
+                    title="Inspect Live View Metadata, Process Attributes & Real-time Gutter Stats"
+                  >
+                    <Info size={11} />
+                    <span>INFO</span>
+                  </button>
+                  <button
+                    className="btn btn-sm btn-outline"
+                    onClick={() => setStreamKey(Date.now())}
+                    style={{ padding: '2px 8px', fontSize: '10px' }}
+                    title="Refresh Desktop Live Screen"
+                  >
+                    <RefreshCw size={11} />
+                  </button>
+                </>
+              )}
               {inspectorMode === 'single' && activeFrame && (
                 <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}>
                   <Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'Send Image for OCR'}</span>
@@ -1689,7 +1746,62 @@ function AppContent() {
           </div>
 
           <div className="inspector-view-container">
-            {inspectorMode === 'spliced' ? (
+            {inspectorMode === 'live' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Monitor size={14} color="#00ff9d" />
+                    <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>
+                      LIVE DESKTOP MODE · MARKDOWN VIEW
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#8b949e', fontFamily: 'monospace' }}>
+                      (External Display 4 / HDMI Output)
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <button
+                      type="button"
+                      className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
+                      onClick={() => setShowBoundingBoxes(prev => !prev)}
+                      title="Toggle AI Alignment Bounding Boxes"
+                      style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}
+                    >
+                      {showBoundingBoxes ? <Eye size={10} /> : <EyeOff size={10} />}
+                      <span>AI BOXES</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="gutter-line-callout top">
+                  <span className="gutter-callout-icon">▲</span>
+                  <span className="gutter-callout-label">START LINE NUMBER (TOP GUTTER):</span>
+                  <span className="gutter-callout-value">
+                    {alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}
+                  </span>
+                </div>
+
+                <div className="source-image-wrapper fit" style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img
+                    key={`main-desktop-stream-${streamKey}`}
+                    src={`${API_BASE}/api/device/stream?mode=desktop&t=${streamKey}`}
+                    alt="Live Desktop Mode Markdown Screen"
+                    style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 240px)', objectFit: 'contain' }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=desktop&t=${Date.now()}`;
+                    }}
+                  />
+                  {showBoundingBoxes && renderBoundingBoxesOverlay(alignmentData)}
+                </div>
+
+                <div className="gutter-line-callout bottom">
+                  <span className="gutter-callout-icon">▼</span>
+                  <span className="gutter-callout-label">END LINE NUMBER (BOTTOM GUTTER):</span>
+                  <span className="gutter-callout-value">
+                    {alignmentData.last_line_number || telemetry.current_bottom_line ? `Line #${alignmentData.last_line_number || telemetry.current_bottom_line}` : 'Detecting...'}
+                  </span>
+                </div>
+              </div>
+            ) : inspectorMode === 'spliced' ? (
               <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
                 <div style={{ display: 'center', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={14} color="#00ff9d" /><span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>CONTINUOUS SPLICED CANVAS · {frames.length} FRAMES</span></div>
@@ -1738,7 +1850,22 @@ function AppContent() {
                     </div>
                   </div>
                 ) : (
-                  <div className="empty-inspector-state"><Scan size={36} color="#30363d" /><p>Select a frame from the feed or capture a screen on mobile to inspect line alignment.</p></div>
+                  <div className="empty-inspector-state">
+                    <Scan size={36} color="#30363d" />
+                    <p>No captured frame selected. View the live document screen directly.</p>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      style={{ marginTop: '10px' }}
+                      onClick={() => {
+                        setInspectorMode('live');
+                        setLiveMode('desktop');
+                        setStreamKey(Date.now());
+                      }}
+                    >
+                      <Monitor size={12} />
+                      <span>Switch to Live Desktop View</span>
+                    </button>
+                  </div>
                 )}
               </>
             )}
@@ -2056,6 +2183,19 @@ function AppContent() {
         dismissedItems={dismissedItems}
         onDismissItem={handleDismissItem}
       />
+
+      {/* Live Desktop Metadata Popover for Frame Inspector */}
+      {showInspectorMetaPopover && (
+        <LiveMetaInfoPopover
+          isOpen={showInspectorMetaPopover}
+          onClose={() => setShowInspectorMetaPopover(false)}
+          apiBase={API_BASE}
+          streamKey={streamKey}
+          onRefresh={() => setStreamKey(Date.now())}
+          alignmentData={alignmentData}
+          liveMode="desktop"
+        />
+      )}
 
       {/* Real-time Telemetry Monitor Toaster */}
       <TelemetryToaster
