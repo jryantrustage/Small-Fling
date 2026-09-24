@@ -1486,7 +1486,13 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   right: 48px;
   width: auto !important;
   height: auto !important;
-  z-index: 99;
+  z-index: 105;
+}
+
+.live-monitor-drawer.maximized .live-monitor-header {
+  position: relative;
+  z-index: 110;
+  background: rgba(13, 17, 23, 0.98);
 }
 
 .live-monitor-drawer.resizing {
@@ -1857,6 +1863,182 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 
 .btn-alignment-stream:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* Drag handle & header controls for banner */
+.alignment-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  cursor: grab;
+  color: rgba(255, 255, 255, 0.6);
+  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.alignment-drag-handle:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+
+.alignment-drag-handle:active {
+  cursor: grabbing;
+}
+
+.btn-banner-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-main);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s ease;
+}
+
+.btn-banner-icon:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.btn-banner-icon.danger:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+}
+
+.alignment-alert-banner.minimized {
+  padding: 6px 14px;
+  border-bottom: 2px solid #ef4444;
+  background: rgba(20, 24, 30, 0.96);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+
+.alignment-alert-banner.dock-bottom {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 120;
+  border-top: 2px solid #ef4444;
+  border-bottom: none;
+  background: rgba(20, 24, 30, 0.96);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.65);
+}
+
+/* Badge Dismiss / Restore Action Buttons */
+.badge-dismiss-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  background: rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(239, 68, 68, 0.6);
+  color: #fecaca;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: all 0.15s ease;
+}
+
+.badge-dismiss-action-btn:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.badge-restore-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  background: rgba(148, 163, 184, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: #cbd5e1;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: all 0.15s ease;
+}
+
+.badge-restore-action-btn:hover {
+  background: rgba(148, 163, 184, 0.4);
+  color: #fff;
+}
+
+.alignment-check-badge.dismissed {
+  opacity: 0.65;
+  border-style: dashed !important;
+  border-color: #64748b !important;
+  background: rgba(100, 116, 139, 0.15) !important;
+}
+
+.alignment-check-status-pill.dismissed {
+  background: rgba(100, 116, 139, 0.35);
+  color: #cbd5e1;
+}
+
+/* Telemetry Toaster Return Overlay actions */
+.telemetry-toaster-alert-pill {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(239, 68, 68, 0.25);
+  border: 1px solid #ef4444;
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.25);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  color: #fca5a5;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.telemetry-toaster-alert-pill:hover {
+  background: #ef4444;
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.toaster-event-return-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.toaster-event-return-btn:hover {
+  background: #ef4444;
+  color: #fff;
 }
 
 .alignment-header-pill {

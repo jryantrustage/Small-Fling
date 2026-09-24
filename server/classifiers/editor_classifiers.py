@@ -59,8 +59,35 @@ class LightModeClassifier(BaseClassifier):
                 details="No image available for luminance evaluation"
             )
 
+        # If alignment_data already evaluated dark_mode
+        if context.alignment_data and "boxes" in context.alignment_data:
+            dm = context.alignment_data["boxes"].get("dark_mode", {})
+            if dm.get("dismissed"):
+                return ClassificationResult(
+                    classifier_id=self.id,
+                    issue_detected=False,
+                    issue_name=self.issue_description,
+                    fix_name=self.fix_description,
+                    details="Dark mode check dismissed by user (false positive ignored)"
+                )
+            if dm.get("passed") is True or dm.get("icon") == "moon":
+                target_coords = None
+                if dm.get("box_px"):
+                    b = dm["box_px"]
+                    target_coords = (int(b[0] + b[2] / 2), int(b[1] + b[3] / 2))
+                return ClassificationResult(
+                    classifier_id=self.id,
+                    issue_detected=False,
+                    issue_name=self.issue_description,
+                    fix_name=self.fix_description,
+                    severity=self.severity,
+                    details="Dark mode is active (moon icon verified)",
+                    target_coordinates=target_coords
+                )
+
         h, w = img.shape[:2]
-        body_sample = img[int(h * 0.25):int(h * 0.75), int(w * 0.20):int(w * 0.80)]
+        # Sample upper editor text area (18%..42%) to avoid soft keyboard on lower half
+        body_sample = img[int(h * 0.18):int(h * 0.42), int(w * 0.15):int(w * 0.75)]
         mean_lum = float(np.mean(cv2.cvtColor(body_sample, cv2.COLOR_BGR2GRAY))) if body_sample.size > 0 else 100.0
 
         is_light = (mean_lum >= 55.0)
@@ -281,22 +308,30 @@ class KeyboardOpenClassifier(BaseClassifier):
         serial = await get_active_adb_serial(context.serial)
         actions = []
 
-        actions.append("Dispatched ensure_adb_keyboard_closed (Escape key 111 & hardware keyboard config)")
+        actions.append("Dispatched ensure_adb_keyboard_closed & ACTION_CLOSE_KEYBOARD")
         await ensure_adb_keyboard_closed(serial)
-        await asyncio.sleep(0.2)
+        await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", serial)
+        
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent 4", serial)
+        await run_adb_shell("input -d 0 keyevent 4", serial)
+        await run_adb_shell("input keyevent 4", serial)
+        actions.append("Sent KEYCODE_BACK (4) to dismiss IME")
+        await asyncio.sleep(0.25)
 
         still_open = await is_ime_visible(serial)
         if still_open:
-            disp_id = context.display_id or await detect_external_display_id(serial)
             if disp_id > 0:
                 await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
             await run_adb_shell("input keyevent 111", serial)
-            actions.append("Sent secondary KEYCODE_ESCAPE (111)")
-            await asyncio.sleep(0.15)
+            await run_adb_shell("input keyevent 4", serial)
+            actions.append("Sent secondary KEYCODE_ESCAPE (111) and KEYCODE_BACK (4)")
+            await asyncio.sleep(0.2)
             still_open = await is_ime_visible(serial)
 
         success = not still_open
-        msg = "Keyboard closed successfully" if success else "Sent keyboard dismiss commands"
+        msg = "Keyboard closed successfully ✔" if success else "Dispatched keyboard dismiss commands"
         return FixResult(
             classifier_id=self.id,
             success=success,

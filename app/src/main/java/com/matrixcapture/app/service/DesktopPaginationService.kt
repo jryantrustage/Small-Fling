@@ -49,12 +49,29 @@ class DesktopPaginationService : AccessibilityService() {
 
     private fun releaseWakeLock() = runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
 
+    private val keyboardReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            if (intent?.action == "com.matrixcapture.app.ACTION_CLOSE_KEYBOARD") {
+                setSoftKeyboardHidden(true)
+                runCatching { performGlobalAction(GLOBAL_ACTION_BACK) }
+            }
+        }
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
         _isServiceActive.value = true
         runCatching {
             softKeyboardController.addOnShowModeChangedListener { _, mode -> _isSoftKeyboardSuppressed.value = (mode == SHOW_MODE_HIDDEN) }
+        }
+        runCatching {
+            val filter = android.content.IntentFilter("com.matrixcapture.app.ACTION_CLOSE_KEYBOARD")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(keyboardReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(keyboardReceiver, filter)
+            }
         }
     }
 
@@ -70,6 +87,7 @@ class DesktopPaginationService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        runCatching { unregisterReceiver(keyboardReceiver) }
         stopPagination()
         releaseWakeLock()
         setSoftKeyboardHidden(false)

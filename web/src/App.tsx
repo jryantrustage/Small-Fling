@@ -72,6 +72,60 @@ function AppContent() {
   const [showBoundingBoxes, setShowBoundingBoxes] = useState<boolean>(true);
   const [isCheckingAlignment, setIsCheckingAlignment] = useState<boolean>(false);
   const [showAlignmentModal, setShowAlignmentModal] = useState<boolean>(false);
+  const [isBannerDismissed, setIsBannerDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mc_banner_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isBannerMinimized, setIsBannerMinimized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('mc_banner_minimized') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [dismissedItems, setDismissedItems] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('mc_dismissed_alignment_items');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const handleDismissItem = async (itemId: string, dismissed: boolean) => {
+    setDismissedItems(prev => {
+      const next = dismissed ? Array.from(new Set([...prev, itemId])) : prev.filter(id => id !== itemId);
+      try {
+        localStorage.setItem('mc_dismissed_alignment_items', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      const res = await api('/api/alignment/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: itemId, dismissed })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.alignment) {
+          setAlignmentData(d.alignment);
+        }
+        addTelemetryEvent(
+          'SYSTEM',
+          dismissed
+            ? `Dismissed verification area "${itemId}" as false positive`
+            : `Restored verification area "${itemId}"`
+        );
+      }
+    } catch (e) {
+      console.error('Failed to update dismissed item:', e);
+    }
+  };
 
   const handleTriggerAlignmentCheck = async () => {
     setIsCheckingAlignment(true);
@@ -103,7 +157,9 @@ function AppContent() {
       const res = await api(`/api/classifiers/fix/${classifierId}`, { method: 'POST' });
       if (res.ok) {
         const d = await res.json();
-        if (d.current_report) {
+        if (d.alignment) {
+          setAlignmentData(d.alignment);
+        } else if (d.current_report) {
           setAlignmentData(prev => ({
             ...prev,
             classifiers: d.current_report,
@@ -128,7 +184,9 @@ function AppContent() {
       const res = await api('/api/classifiers/fix-all', { method: 'POST' });
       if (res.ok) {
         const d = await res.json();
-        if (d.current_report) {
+        if (d.alignment) {
+          setAlignmentData(d.alignment);
+        } else if (d.current_report) {
           setAlignmentData(prev => ({
             ...prev,
             classifiers: d.current_report,
@@ -1242,8 +1300,22 @@ function AppContent() {
           {/* Teams Markdown Alignment Indicator Pill */}
           <div
             className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`}
-            onClick={handleTriggerAlignmentCheck}
-            title={alignmentData.is_aligned ? `Teams Markdown Aligned: Ln ${alignmentData.first_line_number || '?'} → ${alignmentData.last_line_number || '?'}` : `Teams Markdown NOT Aligned: ${alignmentData.reason || 'Missing bounding boxes'}`}
+            onClick={() => {
+              if (!alignmentData.is_aligned) {
+                setIsBannerDismissed(prev => !prev);
+                setIsBannerMinimized(false);
+                try {
+                  localStorage.setItem('mc_banner_dismissed', String(!isBannerDismissed));
+                } catch {}
+              } else {
+                handleTriggerAlignmentCheck();
+              }
+            }}
+            title={
+              alignmentData.is_aligned
+                ? `Teams Markdown Aligned: Ln ${alignmentData.first_line_number || '?'} → ${alignmentData.last_line_number || '?'}`
+                : `Teams Markdown NOT Aligned: ${alignmentData.reason || 'Missing areas'}. Click to toggle/restore alert overlay banner.`
+            }
           >
             <div className={`dot ${alignmentData.is_aligned ? 'pulse-green' : ''}`} style={{ width: '7px', height: '7px', borderRadius: '50%', background: alignmentData.is_aligned ? '#22c55e' : '#ef4444' }} />
             <span style={{ fontWeight: 700 }}>
@@ -1290,6 +1362,21 @@ function AppContent() {
         onFixAllClassifiers={handleFixAllClassifiers}
         fixingClassifierId={fixingClassifierId}
         isFixingAll={isFixingAll}
+        isDismissed={isBannerDismissed}
+        onDismissBanner={() => {
+          setIsBannerDismissed(true);
+          try { localStorage.setItem('mc_banner_dismissed', 'true'); } catch {}
+        }}
+        isMinimized={isBannerMinimized}
+        onToggleMinimizeBanner={() => {
+          setIsBannerMinimized(p => {
+            const next = !p;
+            try { localStorage.setItem('mc_banner_minimized', String(next)); } catch {}
+            return next;
+          });
+        }}
+        dismissedItems={dismissedItems}
+        onDismissItem={handleDismissItem}
       />
 
       {/* Action Bar */}
@@ -1853,6 +1940,8 @@ function AppContent() {
         onFixAllClassifiers={handleFixAllClassifiers}
         fixingClassifierId={fixingClassifierId}
         isFixingAll={isFixingAll}
+        dismissedItems={dismissedItems}
+        onDismissItem={handleDismissItem}
       />
 
       {/* Real-time Telemetry Monitor Toaster */}
@@ -1875,6 +1964,17 @@ function AppContent() {
         eventsLog={eventsLog}
         onClearEvents={() => setEventsLog([])}
         onExpandedChange={setIsTelemetryExpanded}
+        isAlignmentDismissed={isBannerDismissed}
+        isAligned={alignmentData.is_aligned}
+        onReturnAlignmentOverlay={() => {
+          setIsBannerDismissed(false);
+          setIsBannerMinimized(false);
+          try {
+            localStorage.setItem('mc_banner_dismissed', 'false');
+            localStorage.setItem('mc_banner_minimized', 'false');
+          } catch {}
+          addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned to screen');
+        }}
       />
     </div>
   );
