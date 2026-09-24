@@ -285,9 +285,18 @@ function AppContent() {
     } catch { return 360; }
   });
   const [isResizingDrawer, setIsResizingDrawer] = useState(false);
-  const [connectIpInput, setConnectIpInput] = useState('');
+  const [connectIpInput, setConnectIpInput] = useState(() => {
+    try {
+      return localStorage.getItem('mc_last_adb_target') || '';
+    } catch { return ''; }
+  });
   const [isConnectingIp, setIsConnectingIp] = useState(false);
   const [connectStatusMsg, setConnectStatusMsg] = useState('');
+  const [connectTab, setConnectTab] = useState<'connect' | 'pair'>('connect');
+  const [pairIpInput, setPairIpInput] = useState('');
+  const [pairCodeInput, setPairCodeInput] = useState('');
+  const [isPairing, setIsPairing] = useState(false);
+  const [pairStatusMsg, setPairStatusMsg] = useState('');
 
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
   const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
@@ -508,8 +517,10 @@ function AppContent() {
       if (res.ok && (d.status === 'ok' || (d.output && d.output.includes('connected')))) {
         setConnectStatusMsg(`Connected: ${target} ✔`);
         addTelemetryEvent('SYSTEM', `ADB Connected: ${target}`);
+        try {
+          localStorage.setItem('mc_last_adb_target', target);
+        } catch {}
         await handleSelectSerial(target);
-        setConnectIpInput('');
         setShowDeviceDropdown(false);
       } else {
         setConnectStatusMsg(d.output || d.message || 'Connection failed');
@@ -519,6 +530,40 @@ function AppContent() {
     } finally {
       setIsConnectingIp(false);
       setTimeout(() => setConnectStatusMsg(''), 4000);
+    }
+  };
+
+  const handlePairAdb = async (ipToPair?: string, codeToPair?: string) => {
+    const targetAddr = (ipToPair || pairIpInput).trim();
+    const code = (codeToPair || pairCodeInput).trim();
+    if (!targetAddr || !code) return;
+    setIsPairing(true);
+    setPairStatusMsg(`Pairing with ${targetAddr}...`);
+    try {
+      const res = await api('/api/adb/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: targetAddr, code })
+      });
+      const d = await res.json();
+      if (res.ok && (d.status === 'ok' || (d.output && d.output.toLowerCase().includes('success')))) {
+        setPairStatusMsg(`Paired successfully ✔`);
+        addTelemetryEvent('SYSTEM', `ADB Paired: ${targetAddr}`);
+        const ipOnly = targetAddr.split(':')[0];
+        if (ipOnly) {
+          setConnectIpInput(`${ipOnly}:`);
+        }
+        setTimeout(() => {
+          setConnectTab('connect');
+        }, 1200);
+      } else {
+        setPairStatusMsg(d.output || d.message || 'Pairing failed');
+      }
+    } catch (err: any) {
+      setPairStatusMsg(`Error: ${err.message || 'Pairing failed'}`);
+    } finally {
+      setIsPairing(false);
+      setTimeout(() => setPairStatusMsg(''), 5000);
     }
   };
 
@@ -1162,29 +1207,94 @@ function AppContent() {
                   )}
                 </div>
 
-                <div className="dropdown-section-title" style={{ marginTop: '8px' }}>CONNECT ADB TARGET (IP:PORT)</div>
-                <div className="connect-ip-row">
-                  <input
-                    type="text"
-                    className="connect-ip-input"
-                    placeholder="192.168.86.xx:5555"
-                    value={connectIpInput}
-                    onChange={e => setConnectIpInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                    onClick={() => handleConnectAdbIp()}
-                    disabled={isConnectingIp || !connectIpInput.trim()}
-                  >
-                    {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                  </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '10px' }}>
+                  <div className="dropdown-section-title" style={{ padding: 0 }}>WIRELESS ADB</div>
+                  <div className="adb-mode-tabs">
+                    <button
+                      type="button"
+                      className={`adb-tab-btn ${connectTab === 'connect' ? 'active' : ''}`}
+                      onClick={() => setConnectTab('connect')}
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      className={`adb-tab-btn pair-tab ${connectTab === 'pair' ? 'active' : ''}`}
+                      onClick={() => setConnectTab('pair')}
+                    >
+                      Pair New
+                    </button>
+                  </div>
                 </div>
-                {connectStatusMsg && (
-                  <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>
-                    {connectStatusMsg}
+
+                {connectTab === 'connect' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div className="connect-ip-row">
+                      <input
+                        type="text"
+                        className="connect-ip-input"
+                        placeholder="192.168.86.xx:5555"
+                        value={connectIpInput}
+                        onChange={e => setConnectIpInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handleConnectAdbIp(); }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                        onClick={() => handleConnectAdbIp()}
+                        disabled={isConnectingIp || !connectIpInput.trim()}
+                      >
+                        {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
+                      </button>
+                    </div>
+                    {connectStatusMsg && (
+                      <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>
+                        {connectStatusMsg}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.3', padding: '0 2px' }}>
+                      💡 Tip: Pairing persists across toggles. If you just toggled debugging, only update the port.
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <div className="connect-ip-row">
+                      <input
+                        type="text"
+                        className="connect-ip-input"
+                        placeholder="Pair IP:Port (e.g. 192.168.86.81:37123)"
+                        value={pairIpInput}
+                        onChange={e => setPairIpInput(e.target.value)}
+                      />
+                    </div>
+                    <div className="connect-ip-row">
+                      <input
+                        type="text"
+                        className="connect-ip-input"
+                        placeholder="6-digit Pairing Code"
+                        value={pairCodeInput}
+                        onChange={e => setPairCodeInput(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') handlePairAdb(); }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
+                        onClick={() => handlePairAdb()}
+                        disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
+                      >
+                        {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
+                      </button>
+                    </div>
+                    {pairStatusMsg && (
+                      <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px', paddingLeft: '4px' }}>
+                        {pairStatusMsg}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '9.5px', color: 'var(--text-muted)', lineHeight: '1.3', padding: '0 2px' }}>
+                      Tap "Pair device with pairing code" on phone to view the pairing port & 6-digit code.
+                    </div>
                   </div>
                 )}
 
@@ -1917,6 +2027,9 @@ function AppContent() {
         onConnectAdbIp={handleConnectAdbIp}
         isConnectingIp={isConnectingIp}
         connectStatusMsg={connectStatusMsg}
+        onPairAdb={handlePairAdb}
+        isPairing={isPairing}
+        pairStatusMsg={pairStatusMsg}
         apiBase={API_BASE}
         streamKey={streamKey}
         onRefreshStream={() => setStreamKey(Date.now())}

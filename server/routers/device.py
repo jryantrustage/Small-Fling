@@ -111,17 +111,27 @@ async def get_keyboard_status(serial: Optional[str] = None):
 
 @router.post("/api/adb/connect")
 async def adb_connect(req: AdbConnectRequest):
-    res = await adb.run_adb_shell(f"echo test", None)
-    adb_bin = "adb"
     import asyncio, subprocess
-    p = await asyncio.to_thread(subprocess.run, [adb_bin, "connect", req.address], capture_output=True, text=True, timeout=5.0)
-    return {"status": "ok" if p.returncode == 0 else "error", "output": p.stdout}
+    addr = req.address.strip()
+    p = await asyncio.to_thread(subprocess.run, ["adb", "connect", addr], capture_output=True, text=True, timeout=8.0)
+    out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
+    is_success = (p.returncode == 0) and ("connected to" in out.lower() or "already connected" in out.lower())
+    if is_success:
+        adb.target_adb_serial = addr
+        active = await adb.get_active_adb_serial(addr)
+        if active:
+            adb.target_adb_serial = active
+    return {"status": "ok" if is_success else "error", "output": out}
 
 @router.post("/api/adb/pair")
 async def adb_pair(req: AdbPairRequest):
     import asyncio, subprocess
-    p = await asyncio.to_thread(subprocess.run, ["adb", "pair", req.address, req.code], capture_output=True, text=True, timeout=5.0)
-    return {"status": "ok" if p.returncode == 0 else "error", "output": p.stdout}
+    addr = req.address.strip()
+    code = req.code.strip()
+    p = await asyncio.to_thread(subprocess.run, ["adb", "pair", addr, code], capture_output=True, text=True, timeout=10.0)
+    out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
+    is_success = (p.returncode == 0) and ("successfully paired" in out.lower() or ("paired" in out.lower() and "fail" not in out.lower()))
+    return {"status": "ok" if is_success else "error", "output": out}
 
 @router.post("/api/adb/command")
 async def adb_command(req: AdbCommandRequest):
