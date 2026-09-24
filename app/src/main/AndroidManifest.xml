@@ -105,6 +105,7 @@
                 <action android:name="com.matrixcapture.app.action.LOCK_EXTERNAL_DISPLAY" />
                 <action android:name="com.matrixcapture.app.action.RELEASE_LOCK" />
                 <action android:name="com.matrixcapture.app.action.QUERY_STATUS" />
+                <action android:name="com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY" />
             </intent-filter>
         </receiver>
 

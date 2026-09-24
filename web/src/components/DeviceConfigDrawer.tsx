@@ -28,6 +28,7 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
   const [isProvisioning, setIsProvisioning] = useState(false);
   const [provisionMessage, setProvisionMessage] = useState<string | null>(null);
   const [lastActionLatencyMs, setLastActionLatencyMs] = useState<number | null>(null);
+  const [isRefreshingViewport, setIsRefreshingViewport] = useState(false);
 
   const fetchKioskStatus = useCallback(async () => {
     try {
@@ -116,6 +117,28 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
     finally { setIsProvisioning(false); fetchKioskStatus(); }
   };
 
+  const handleAutoRefreshViewport = async () => {
+    setIsRefreshingViewport(true);
+    try {
+      const res = await fetch(`${apiBase}/api/device/kiosk/auto-refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_id: selectedDisplayId, serial: activeSerial || null })
+      });
+      if (res.ok) {
+        onShowToast?.('success', `Display #${selectedDisplayId} viewport auto-refreshed successfully ✔`);
+      } else {
+        const err = await res.json();
+        onShowToast?.('error', `Failed to refresh viewport: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      onShowToast?.('error', `Error refreshing display viewport: ${e.message}`);
+    } finally {
+      setIsRefreshingViewport(false);
+      fetchKioskStatus();
+    }
+  };
+
   if (!isOpen) return null;
 
   const isLocked = telemetry?.lock_status === 'PINNED' || telemetry?.lock_status === 'LOCKED_TASK_EXTERNAL';
@@ -159,7 +182,31 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
           <div className="kiosk-section-card">
             <div className="kiosk-section-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Monitor size={15} color="#58a6ff" /><h4>CONNECTED DISPLAYS ({displays.length})</h4></div>
-              <span className="kiosk-section-tag">MULTI-DISPLAY PIPELINE</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  style={{
+                    background: 'rgba(88, 166, 255, 0.15)',
+                    color: '#58a6ff',
+                    border: '1px solid rgba(88, 166, 255, 0.3)',
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    borderRadius: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    cursor: 'pointer',
+                    fontWeight: 600
+                  }}
+                  onClick={handleAutoRefreshViewport}
+                  disabled={isRefreshingViewport}
+                  title="Fix shrunk WebView viewport on external desktop display"
+                >
+                  <RefreshCw size={11} className={isRefreshingViewport ? 'spin' : ''} />
+                  <span>AUTO-FIX VIEWPORT</span>
+                </button>
+                <span className="kiosk-section-tag">MULTI-DISPLAY PIPELINE</span>
+              </div>
             </div>
             <div className="kiosk-displays-list">
               {displays.length > 0 ? displays.map((disp) => {

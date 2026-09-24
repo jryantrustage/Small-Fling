@@ -111,6 +111,18 @@ class DesktopPaginationService : AccessibilityService() {
         delay(150)
     }
 
+    suspend fun autoRefreshDisplayViewport(targetDisplayId: Int = 0): Boolean = withContext(Dispatchers.Default) {
+        val resolved = resolveTargetDisplayId(targetDisplayId)
+        Log.i(TAG, "autoRefreshDisplayViewport triggering reflow for display $resolved")
+        ensureKeyboardClosed(resolved)
+
+        val cmd = "for tid in \$(dumpsys window | grep -E 'mDisplayId=$resolved taskId=' | awk '{print \$2}' | cut -d'=' -f2 | sort -u); do cmd activity task resize \$tid 0 0 1920 1080; done"
+        val ok = executeShellCommand(cmd)
+        delay(200)
+        ensureKeyboardClosed(resolved)
+        ok
+    }
+
     suspend fun captureScreenshot(targetDisplayId: Int? = null): Bitmap? {
         ensureKeyboardClosed(targetDisplayId)
         return suspendCancellableCoroutine { cont ->

@@ -9,9 +9,13 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Display
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.matrixcapture.app.service.DesktopPaginationService
 
 enum class KioskLockStatus {
     UNLOCKED,
@@ -58,6 +62,7 @@ object KioskManager {
     private val _telemetryState = MutableStateFlow(KioskTelemetryState())
     val telemetryState: StateFlow<KioskTelemetryState> = _telemetryState.asStateFlow()
 
+    private var appContext: Context? = null
     private var displayManager: DisplayManager? = null
     private var isListenerRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -71,14 +76,15 @@ object KioskManager {
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {
             Log.i(TAG, "External display added: displayId=$displayId")
-            val ctx = displayManager ?: return
+            if (displayId == Display.DEFAULT_DISPLAY) return
             refreshConnectedDisplays()
 
             // If we were locked and the target monitor reconnected, re-route
             val state = _telemetryState.value
             if (state.lockStatus != KioskLockStatus.UNLOCKED && (state.targetDisplayId == displayId || state.targetDisplayId == -1)) {
                 Log.i(TAG, "Re-binding kiosk to reconnected display $displayId")
-                currentKioskActivity?.let { act ->
+                val ctx = currentKioskActivity ?: appContext
+                ctx?.let { act ->
                     lockExternalDisplay(
                         context = act,
                         targetDisplayId = displayId,
@@ -86,6 +92,9 @@ object KioskManager {
                         mode = state.kioskMode
                     )
                 }
+            } else {
+                Log.i(TAG, "Triggering automatic viewport auto-refresh for reconnected display $displayId")
+                triggerAutoRefreshOnReconnect(displayId)
             }
         }
 
@@ -104,7 +113,45 @@ object KioskManager {
         }
     }
 
+    /**
+     * Option 1 Auto-Refresh Step:
+     * When an external display reconnects, Chromium WebView frequently caches narrow phone metrics.
+     * This auto-refresh invalidates the viewport, triggers task resize reflow, and
+     * brings the target app forward on the external display with native desktop bounds.
+     */
+    fun triggerAutoRefreshOnReconnect(displayId: Int) {
+        mainHandler.postDelayed({
+            try {
+                Log.i(TAG, "Executing Auto-Refresh step for external display #$displayId")
+                val ctx = currentKioskActivity ?: appContext
+
+                // 1. Invoke AccessibilityService reflow if active
+                DesktopPaginationService.instance?.let { paginationService ->
+                    CoroutineScope(Dispatchers.Main).launch {
+                        paginationService.autoRefreshDisplayViewport(displayId)
+                    }
+                }
+
+                // 2. Bring target package forward with explicit launchDisplayId
+                val targetPkg = _telemetryState.value.lockedPackage.ifEmpty { "com.microsoft.teams" }
+                if (ctx != null) {
+                    val launchIntent = ctx.packageManager.getLaunchIntentForPackage(targetPkg)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        val options = ActivityOptions.makeBasic().apply {
+                            launchDisplayId = displayId
+                        }
+                        ctx.startActivity(launchIntent, options.toBundle())
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error executing auto-refresh on display $displayId", e)
+            }
+        }, 850L)
+    }
+
     fun initialize(context: Context) {
+        appContext = context.applicationContext
         val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager ?: return
         displayManager = dm
 

@@ -10,6 +10,7 @@ class MatrixCaptureApp : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        com.matrixcapture.app.kiosk.KioskManager.initialize(this)
     }
 
     private fun createNotificationChannels() {
