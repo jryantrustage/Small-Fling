@@ -138,8 +138,11 @@ latest_alignment_status: Dict[str, Any] = {
         "first_line": {"name": "First Line Number", "color": "green", "hex": "#22c55e", "passed": True, "line_number": 1, "box_px": [10, 85, 35, 22], "box_norm": [0.008, 0.118, 0.027, 0.030]},
         "last_line": {"name": "Last Line Number", "color": "red", "hex": "#ef4444", "passed": True, "line_number": 47, "box_px": [10, 655, 35, 22], "box_norm": [0.008, 0.910, 0.027, 0.030]}
     },
-    "timestamp": None
+    "timestamp": None,
+    "dismissed": []
 }
+
+dismissed_alignment_items: set = set()
 
 orchestration_state: Dict[str, Any] = {
     "status": "IDLE", "last_command": "NONE", "source": "system", "invoked_by": "System ⚙️", "active_step": "START_READY",

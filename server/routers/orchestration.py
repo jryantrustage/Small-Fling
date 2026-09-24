@@ -23,6 +23,10 @@ from services.ocr_service import (
 
 router = APIRouter(tags=["Orchestration & Telemetry"])
 
+class DismissItemPayload(BaseModel):
+    item_id: str
+    dismissed: bool = True
+
 @router.get("/api/alignment/status")
 async def get_alignment_status_api():
     return state.latest_alignment_status
@@ -31,6 +35,27 @@ async def get_alignment_status_api():
 async def trigger_alignment_check_api():
     res = await check_and_update_alignment()
     return res
+
+@router.post("/api/alignment/dismiss")
+async def dismiss_alignment_item_api(payload: DismissItemPayload):
+    if payload.dismissed:
+        state.dismissed_alignment_items.add(payload.item_id)
+    else:
+        state.dismissed_alignment_items.discard(payload.item_id)
+    res = await check_and_update_alignment()
+    return {
+        "status": "success",
+        "item_id": payload.item_id,
+        "dismissed": payload.dismissed,
+        "dismissed_items": list(state.dismissed_alignment_items),
+        "alignment": res
+    }
+
+@router.get("/api/alignment/dismissed")
+async def get_dismissed_alignment_items_api():
+    return {
+        "dismissed_items": list(state.dismissed_alignment_items)
+    }
 
 @router.get("/api/telemetry")
 async def get_telemetry():

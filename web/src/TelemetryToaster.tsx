@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Activity, ChevronDown, ChevronUp, Radio, Coins,
-  Terminal, Copy, Check
+  Terminal, Copy, Check, AlertTriangle, Eye
 } from 'lucide-react';
 
 export interface TelemetryEvent {
@@ -66,6 +66,9 @@ export interface TelemetryToasterProps {
   eventsLog: TelemetryEvent[];
   onClearEvents?: () => void;
   onExpandedChange?: (expanded: boolean) => void;
+  isAlignmentDismissed?: boolean;
+  isAligned?: boolean;
+  onReturnAlignmentOverlay?: () => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
@@ -78,7 +81,10 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   deviceModel,
   eventsLog,
   onClearEvents,
-  onExpandedChange
+  onExpandedChange,
+  isAlignmentDismissed = false,
+  isAligned = true,
+  onReturnAlignmentOverlay
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     try {
@@ -180,30 +186,46 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     >
       {/* Collapsed Strip */}
       {!isExpanded ? (
-        <button
-          className="telemetry-toaster-pill"
-          onClick={toggleExpanded}
-          title="Click to expand full Telemetry Monitor"
-          aria-label="Expand Telemetry Monitor"
-        >
-          <div className="pill-pulse-wrapper">
-            <span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} />
-          </div>
-          <span className="pill-title">TELEMETRY</span>
-          <span className="pill-divider">|</span>
-          <span className="pill-stat" style={{ color: phaseStyle.text }}>
-            {telemetry.phase || 'IDLE'}
-          </span>
-          <span className="pill-divider">|</span>
-          <span className="pill-stat" title="API RTT Latency">
-            ⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}
-          </span>
-          <span className="pill-divider">|</span>
-          <span className="pill-stat" title="Total Tokens">
-            🪙 {totalTokens.toLocaleString()}
-          </span>
-          <ChevronUp size={14} className="pill-expand-icon" />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'auto' }}>
+          {isAlignmentDismissed && !isAligned && onReturnAlignmentOverlay && (
+            <button
+              type="button"
+              className="telemetry-toaster-alert-pill"
+              onClick={(e) => {
+                e.stopPropagation();
+                onReturnAlignmentOverlay();
+              }}
+              title="Markdown is not aligned and alert overlay is dismissed. Click to return overlay."
+            >
+              <AlertTriangle size={13} color="#fca5a5" />
+              <span>NOT ALIGNED (Show Overlay ↗)</span>
+            </button>
+          )}
+          <button
+            className="telemetry-toaster-pill"
+            onClick={toggleExpanded}
+            title="Click to expand full Telemetry Monitor"
+            aria-label="Expand Telemetry Monitor"
+          >
+            <div className="pill-pulse-wrapper">
+              <span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} />
+            </div>
+            <span className="pill-title">TELEMETRY</span>
+            <span className="pill-divider">|</span>
+            <span className="pill-stat" style={{ color: phaseStyle.text }}>
+              {telemetry.phase || 'IDLE'}
+            </span>
+            <span className="pill-divider">|</span>
+            <span className="pill-stat" title="API RTT Latency">
+              ⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}
+            </span>
+            <span className="pill-divider">|</span>
+            <span className="pill-stat" title="Total Tokens">
+              🪙 {totalTokens.toLocaleString()}
+            </span>
+            <ChevronUp size={14} className="pill-expand-icon" />
+          </button>
+        </div>
       ) : (
         /* Expanded Card */
         <div className="telemetry-toaster-card">
@@ -450,15 +472,38 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   {eventsLog.length === 0 ? (
                     <div className="events-empty">No telemetry events recorded yet.</div>
                   ) : (
-                    eventsLog.map((ev) => (
-                      <div key={ev.id} className="event-log-entry">
-                        <span className="event-time">{ev.timestamp}</span>
-                        <span className={`event-cat-tag ${ev.category.toLowerCase()}`}>
-                          {ev.category}
-                        </span>
-                        <span className="event-msg">{ev.message}</span>
-                      </div>
-                    ))
+                    eventsLog.map((ev) => {
+                      const isAlignmentEv =
+                        ev.message.toLowerCase().includes('not aligned') ||
+                        ev.message.toLowerCase().includes('alignment');
+                      return (
+                        <div
+                          key={ev.id}
+                          className="event-log-entry"
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                        >
+                          <span className="event-time">{ev.timestamp}</span>
+                          <span className={`event-cat-tag ${ev.category.toLowerCase()}`}>
+                            {ev.category}
+                          </span>
+                          <span className="event-msg" style={{ flex: 1 }}>{ev.message}</span>
+                          {isAlignmentEv && onReturnAlignmentOverlay && (
+                            <button
+                              type="button"
+                              className="toaster-event-return-btn"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onReturnAlignmentOverlay();
+                              }}
+                              title="Click to return and highlight Alignment Alert Overlay"
+                            >
+                              <Eye size={11} />
+                              <span>Show Overlay</span>
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                   <div ref={logEndRef} />
                 </div>

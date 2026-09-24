@@ -170,20 +170,25 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 4. WHITE BOX 2: Dark Mode ("Moon Icon" & Dark Luminance)
     # ---------------------------------------------------------
-    body_sample = img[int(h * 0.25):int(h * 0.75), int(w * 0.20):int(w * 0.80)]
+    # Sample upper editor text area above any soft keyboard (y: 18%..42%, x: 15%..75%)
+    body_sample = img[int(h * 0.18):int(h * 0.42), int(w * 0.15):int(w * 0.75)]
     mean_lum = float(np.mean(cv2.cvtColor(body_sample, cv2.COLOR_BGR2GRAY))) if body_sample.size > 0 else 100.0
-    dark_mode_active = (mean_lum < 55.0)
 
+    moon_found = False
     dark_box = [int(w * 0.850), y1_tb, int(w * 0.080), y2_tb - y1_tb]
     if crop_tb.size > 0:
         gray_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2GRAY)
-        moon_mask = (gray_tb > 75) & (gray_tb < 160)
-        tb_mid = gray_tb.shape[1] // 2
-        moon_right_pts = np.argwhere(moon_mask[:, tb_mid:])
-        if len(moon_right_pts) >= 10:
-            min_y, min_x = moon_right_pts.min(axis=0)
-            max_y, max_x = moon_right_pts.max(axis=0)
-            dark_box = [x1_tb + tb_mid + min_x - 4, y1_tb + min_y - 4, (max_x - min_x) + 12, (max_y - min_y) + 10]
+        tb_mid = int(gray_tb.shape[1] * 0.45)
+        moon_mask = (gray_tb[:, tb_mid:] > 110)
+        moon_pts = np.argwhere(moon_mask)
+        if len(moon_pts) >= 6:
+            min_y, min_x = moon_pts.min(axis=0)
+            max_y, max_x = moon_pts.max(axis=0)
+            if (max_x - min_x) < int(gray_tb.shape[1] * 0.5):
+                dark_box = [x1_tb + tb_mid + min_x - 4, y1_tb + min_y - 4, (max_x - min_x) + 12, (max_y - min_y) + 10]
+                moon_found = True
+
+    dark_mode_active = (mean_lum < 55.0) or moon_found
 
     # ---------------------------------------------------------
     # 5. GREEN BOX: First Line Number (Current Page Top)
@@ -351,13 +356,32 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         }
     }
 
+    # Incorporate user-dismissed false-positive items
+    try:
+        from services.state import dismissed_alignment_items
+        dismissed_set = set(dismissed_alignment_items)
+    except Exception:
+        dismissed_set = set()
+
+    for k, b in boxes.items():
+        b["dismissed"] = (k in dismissed_set)
+        if k in dismissed_set:
+            b["status"] = "PASSED (DISMISSED)"
+            b["details"] = (b.get("details") or "") + " [Ignored by user as false positive]"
+
     missing_reasons = []
-    if not teams_detected: missing_reasons.append("Teams logo not detected in header")
-    if not file_detected: missing_reasons.append("Markdown filename tab not detected")
-    if not edit_mode_active: missing_reasons.append("Editor not in edit mode (pencil icon inactive)")
-    if not dark_mode_active: missing_reasons.append("Editor in Light Mode (sun icon displayed) - click to toggle Dark Mode (moon icon)")
-    if not first_line_detected: missing_reasons.append("First line number not visible in gutter")
-    if not last_line_detected: missing_reasons.append("Last line number not visible in gutter")
+    if not teams_detected and "teams_logo" not in dismissed_set:
+        missing_reasons.append("Teams logo not detected in header")
+    if not file_detected and "file_name" not in dismissed_set:
+        missing_reasons.append("Markdown filename tab not detected")
+    if not edit_mode_active and "edit_mode" not in dismissed_set:
+        missing_reasons.append("Editor not in edit mode (pencil icon inactive)")
+    if not dark_mode_active and "dark_mode" not in dismissed_set:
+        missing_reasons.append("Editor in Light Mode (sun icon displayed) - click to toggle Dark Mode (moon icon)")
+    if not first_line_detected and "first_line" not in dismissed_set:
+        missing_reasons.append("First line number not visible in gutter")
+    if not last_line_detected and "last_line" not in dismissed_set:
+        missing_reasons.append("Last line number not visible in gutter")
 
     is_aligned = (len(missing_reasons) == 0)
     status_str = "teams markdown aligned" if is_aligned else "teams markdown not aligned"
@@ -372,6 +396,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         "last_line_number": last_line_num,
         "file_name": file_name,
         "boxes": boxes,
-        "resolution": {"width": w, "height": h}
+        "resolution": {"width": w, "height": h},
+        "dismissed": list(dismissed_set)
     }
 

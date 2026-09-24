@@ -54,10 +54,30 @@ class ClassifierRegistry:
 
     async def evaluate_all(self, context: ClassifierContext) -> List[ClassificationResult]:
         """Run all registered classifiers and return results."""
+        try:
+            from services.state import dismissed_alignment_items
+            dismissed_set = set(dismissed_alignment_items)
+        except Exception:
+            dismissed_set = set()
+
         results: List[ClassificationResult] = []
         for c in self._classifiers.values():
+            if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
+                results.append(
+                    ClassificationResult(
+                        classifier_id=c.id,
+                        issue_detected=False,
+                        issue_name=c.issue_description,
+                        fix_name=c.fix_description,
+                        details="Classifier issue dismissed by user as false positive",
+                    )
+                )
+                continue
+
             try:
                 res = await c.detect(context)
+                if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
+                    res.issue_detected = False
                 results.append(res)
             except Exception as e:
                 results.append(
@@ -104,7 +124,18 @@ class ClassifierRegistry:
         for res in sorted_detected:
             fix_res = await self.fix_classifier(res.classifier_id, context)
             fix_results.append(fix_res)
-            await asyncio.sleep(0.2)
+            # Allow display and input server to settle
+            await asyncio.sleep(0.35)
+            # If keyboard was closed, refresh external screenshot for subsequent fixes
+            if res.classifier_id == "keyboard_open":
+                try:
+                    from services.adb_service import capture_external_screenshot
+                    new_snap = await capture_external_screenshot(context.serial)
+                    if new_snap:
+                        context.image_bytes = new_snap
+                        context.image_cv = None
+                except Exception:
+                    pass
 
         return fix_results
 

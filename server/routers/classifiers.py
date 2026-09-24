@@ -112,7 +112,8 @@ async def fix_single_classifier(classifier_id: str, serial: Optional[str] = None
     return {
         "status": "success" if res.success else "warning",
         "fix_result": res.to_dict(),
-        "current_report": report
+        "current_report": report,
+        "alignment": state.latest_alignment_status
     }
 
 
@@ -154,7 +155,8 @@ async def fix_all_classifiers(serial: Optional[str] = None):
     return {
         "status": "success",
         "fix_results": [f.to_dict() for f in fix_results],
-        "current_report": report
+        "current_report": report,
+        "alignment": state.latest_alignment_status
     }
 
 

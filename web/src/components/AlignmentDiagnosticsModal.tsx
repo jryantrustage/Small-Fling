@@ -14,6 +14,8 @@ interface AlignmentDiagnosticsModalProps {
   onFixAllClassifiers?: () => void;
   fixingClassifierId?: string | null;
   isFixingAll?: boolean;
+  dismissedItems?: string[];
+  onDismissItem?: (itemId: string, dismissed: boolean) => void;
 }
 
 export const AlignmentDiagnosticsModal: React.FC<AlignmentDiagnosticsModalProps> = ({
@@ -27,9 +29,14 @@ export const AlignmentDiagnosticsModal: React.FC<AlignmentDiagnosticsModalProps>
   onFixAllClassifiers,
   fixingClassifierId,
   isFixingAll,
+  dismissedItems = [],
+  onDismissItem,
 }) => {
   if (!isOpen) return null;
-  const classifierIssues = alignmentData.classifier_issues || alignmentData.classifiers?.issues || [];
+  const rawClassifierIssues = alignmentData.classifier_issues || alignmentData.classifiers?.issues || [];
+  const classifierIssues = rawClassifierIssues.filter(
+    (issue) => !dismissedItems.includes(issue.classifier_id) && !dismissedItems.includes(`classifier_${issue.classifier_id}`)
+  );
 
   return (
     <Modal
@@ -177,28 +184,70 @@ export const AlignmentDiagnosticsModal: React.FC<AlignmentDiagnosticsModalProps>
       <div className="alignment-modal-grid">
         {alignmentData.boxes &&
           Object.entries(alignmentData.boxes).map(([key, b]) => {
-            const isPassed = b.passed !== false;
+            const isItemDismissed = b.dismissed || dismissedItems.includes(key);
+            const isPassed = b.passed !== false || isItemDismissed;
             return (
-              <div key={key} className={`alignment-modal-card ${isPassed ? 'passed' : 'failed'}`}>
+              <div
+                key={key}
+                className={`alignment-modal-card ${
+                  isItemDismissed ? 'dismissed' : isPassed ? 'passed' : 'failed'
+                }`}
+                style={{
+                  opacity: isItemDismissed ? 0.75 : 1,
+                  borderColor: isItemDismissed ? '#475569' : undefined,
+                }}
+              >
                 <div className="alignment-card-header">
                   <div className="alignment-card-title">
-                    <span style={{ color: b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
+                    <span style={{ color: isItemDismissed ? '#94a3b8' : b.hex || (isPassed ? '#22c55e' : '#ef4444') }}>●</span>
                     <span>{b.name}</span>
                   </div>
-                  <span
-                    className="alignment-check-status-pill"
-                    style={{
-                      background: isPassed ? 'rgba(34, 197, 94, 0.25)' : '#ef4444',
-                      color: isPassed ? '#4ade80' : '#ffffff',
-                    }}
-                  >
-                    {isPassed ? 'PASSED' : 'FAILED'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span
+                      className="alignment-check-status-pill"
+                      style={{
+                        background: isItemDismissed
+                          ? 'rgba(100, 116, 139, 0.3)'
+                          : isPassed
+                          ? 'rgba(34, 197, 94, 0.25)'
+                          : '#ef4444',
+                        color: isItemDismissed
+                          ? '#cbd5e1'
+                          : isPassed
+                          ? '#4ade80'
+                          : '#ffffff',
+                      }}
+                    >
+                      {isItemDismissed ? 'IGNORED' : isPassed ? 'PASSED' : 'FAILED'}
+                    </span>
+                    {!isItemDismissed && !isPassed && (
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '2px 6px', fontSize: '10px', height: '20px', borderColor: '#fca5a5', color: '#fca5a5' }}
+                        onClick={() => onDismissItem?.(key, true)}
+                        title="Ignore check as false positive"
+                      >
+                        Dismiss
+                      </button>
+                    )}
+                    {isItemDismissed && (
+                      <button
+                        type="button"
+                        className="btn btn-outline"
+                        style={{ padding: '2px 6px', fontSize: '10px', height: '20px', borderColor: '#94a3b8', color: '#cbd5e1' }}
+                        onClick={() => onDismissItem?.(key, false)}
+                        title="Restore check"
+                      >
+                        Restore
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="alignment-card-field">
                   <span className="alignment-card-field-label">Detected:</span>
-                  <span className={`alignment-card-field-val ${isPassed ? 'success' : 'error'}`}>
+                  <span className={`alignment-card-field-val ${isItemDismissed ? '' : isPassed ? 'success' : 'error'}`}>
                     {b.detected_value || b.text || 'None detected'}
                   </span>
                 </div>

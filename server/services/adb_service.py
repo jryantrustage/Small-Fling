@@ -336,13 +336,21 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
         disp_id = await detect_external_display_id(ser)
 
         if await is_ime_visible(ser):
+            # 1. Broadcast to MatrixCapture Accessibility Service to suppress IME
+            await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", ser)
+            # 2. KEYCODE_BACK (4) directly instructs Android IME to collapse
             if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
-            await run_adb_shell("input keyevent 111", ser)
-            await asyncio.sleep(0.12)
+                await run_adb_shell(f"input -d {disp_id} keyevent 4", ser)
+            await run_adb_shell("input -d 0 keyevent 4", ser)
+            await run_adb_shell("input keyevent 4", ser)
+            await asyncio.sleep(0.15)
+
             if await is_ime_visible(ser):
                 if disp_id > 0:
                     await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
+                await run_adb_shell("input keyevent 111", ser)
+                await run_adb_shell("input keyevent 4", ser)
+                await asyncio.sleep(0.12)
             return True
         return False
     except Exception:

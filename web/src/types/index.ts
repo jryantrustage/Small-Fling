@@ -86,7 +86,8 @@ export interface AlignmentBox {
   color: string;
   hex: string;
   passed: boolean;
-  status?: 'PASSED' | 'FAILED';
+  dismissed?: boolean;
+  status?: 'PASSED' | 'FAILED' | 'PASSED (DISMISSED)';
   detected_value?: string;
   expected?: string;
   details?: string;
@@ -106,6 +107,7 @@ export interface ClassifierIssue {
   severity: string;
   confidence: number;
   details?: string;
+  dismissed?: boolean;
   target_coordinates?: [number, number];
   metadata?: Record<string, any>;
 }
@@ -136,6 +138,7 @@ export interface AlignmentData {
   timestamp?: string | null;
   classifiers?: ClassifierReport;
   classifier_issues?: ClassifierIssue[];
+  dismissed?: string[];
 }
 
 export interface DeviceItem {
