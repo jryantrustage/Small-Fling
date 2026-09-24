@@ -431,3 +431,138 @@ async def alignment_monitor_loop():
                 await check_and_update_alignment(serial)
         except Exception:
             await asyncio.sleep(4.0)
+
+async def get_live_view_metadata(serial: Optional[str] = None, mode: str = "desktop") -> Dict[str, Any]:
+    from services import state
+    active_ser = await get_active_adb_serial(serial)
+    
+    # 1. Device info
+    matched = None
+    devs_res = await list_adb_devices()
+    devs = devs_res.get("devices", [])
+    if active_ser:
+        matched = next((d for d in devs if d["serial"] == active_ser), None)
+    model_name = matched.get("model", current_device_model) if matched else current_device_model
+
+    # 2. Display info
+    disp_id = None
+    disp_name = "External Display (HDMI)" if mode == "desktop" else "Built-in Screen"
+    resolution = "1920x1080" if mode == "desktop" else "1080x2400"
+    fps = 60.0
+    state_str = "ON"
+    if active_ser:
+        try:
+            disp_map = await detect_surfaceflinger_displays(active_ser)
+            disp_id = disp_map.get(mode) or disp_map.get("desktop")
+            res_d = await run_adb_shell("dumpsys display | grep -E 'DisplayDeviceInfo.*HDMI|DisplayDeviceInfo.*Display 4|DisplayDeviceInfo.*MB16'", active_ser)
+            if res_d.get("status") == "ok" and res_d.get("stdout"):
+                out = res_d["stdout"]
+                m_res = re.search(r'(\d+)\s*x\s*(\d+)', out)
+                if m_res:
+                    resolution = f"{m_res.group(1)}x{m_res.group(2)}"
+                m_fps = re.search(r'renderFrameRate\s+([\d\.]+)|fps=([\d\.]+)', out)
+                if m_fps:
+                    fps = float(m_fps.group(1) or m_fps.group(2))
+                m_name = re.search(r'name=([^,]+)|displayName="([^"]+)"', out)
+                if m_name:
+                    disp_name = m_name.group(1) or m_name.group(2)
+        except Exception:
+            pass
+
+    # 3. Process attributes
+    running_processes = []
+    focused_app = ""
+    focused_window = ""
+    ime_vis = False
+    hard_suppressed = True
+    if active_ser:
+        try:
+            res_w = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", active_ser)
+            if res_w.get("status") == "ok" and res_w.get("stdout"):
+                for line in res_w["stdout"].splitlines():
+                    if "mFocusedApp" in line and not focused_app:
+                        focused_app = line.strip()
+                    elif "mCurrentFocus" in line and not focused_window:
+                        focused_window = line.strip()
+
+            res_p = await run_adb_shell("ps -A -o USER,PID,PPID,VSZ,RSS,NAME", active_ser)
+            if res_p.get("status") == "ok" and res_p.get("stdout"):
+                for line in res_p["stdout"].splitlines():
+                    if any(k in line for k in ["com.microsoft.teams", "com.matrixcapture.app"]):
+                        parts = line.split()
+                        if len(parts) >= 6:
+                            p_name = parts[5]
+                            p_rss = int(parts[4]) if parts[4].isdigit() else 0
+                            is_foc = p_name in focused_app or p_name in focused_window
+                            lbl = "Microsoft Teams (Markdown Viewer)" if "teams" in p_name else "MatrixCapture Engine"
+                            act = ""
+                            if "teams" in p_name and "com.microsoft.teams/" in focused_app:
+                                m_act = re.search(r'com\.microsoft\.teams/([^\s}]+)', focused_app)
+                                if m_act: act = m_act.group(1).split(".")[-1]
+                            running_processes.append({
+                                "name": p_name,
+                                "label": lbl,
+                                "pid": parts[1],
+                                "ppid": parts[2],
+                                "user": parts[0],
+                                "rss_kb": p_rss,
+                                "rss_mb": round(p_rss / 1024.0, 1),
+                                "activity": act or ("FilePreviewActivity" if "teams" in p_name else "DesktopPaginationService"),
+                                "is_focused": is_foc
+                            })
+
+            ime_vis = await is_ime_visible(active_ser)
+            chk_supp = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", active_ser)
+            hard_suppressed = (chk_supp.get("stdout", "").strip() == "0")
+        except Exception as pe:
+            print(f"Error fetching process attributes: {pe}")
+
+    # 4. Real-time Gutter stats
+    align = state.latest_alignment_status or {}
+    first_ln = align.get("first_line_number", 0) or state.latest_telemetry.get("current_top_line", 0)
+    last_ln = align.get("last_line_number", 0) or state.latest_telemetry.get("current_bottom_line", 0)
+    vis_count = (last_ln - first_ln + 1) if (last_ln > 0 and first_ln > 0 and last_ln >= first_ln) else 0
+
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "live_mode": mode,
+        "device": {
+            "serial": active_ser,
+            "model": model_name.replace("_", " "),
+            "target_serial": target_adb_serial,
+            "connected": bool(active_ser)
+        },
+        "display": {
+            "name": disp_name,
+            "display_id": str(disp_id) if disp_id else "4",
+            "mode": mode,
+            "resolution": resolution,
+            "fps": fps,
+            "state": state_str
+        },
+        "processes": {
+            "focused_app": focused_app,
+            "focused_window": focused_window,
+            "running_processes": running_processes,
+            "keyboard_status": {
+                "ime_visible": ime_vis,
+                "hard_keyboard_suppressed": hard_suppressed
+            }
+        },
+        "gutter_stats": {
+            "first_line_number": first_ln,
+            "last_line_number": last_ln,
+            "visible_lines": vis_count,
+            "alignment_status": align.get("status", "teams markdown aligned" if align.get("is_aligned") else "pending"),
+            "is_aligned": align.get("is_aligned", False),
+            "file_name": align.get("file_name", "Matrix_main_26-09-17-8-19am.md"),
+            "dark_mode": align.get("boxes", {}).get("dark_mode", {}).get("passed", True),
+            "edit_mode": align.get("boxes", {}).get("edit_mode", {}).get("passed", True),
+            "line_range": f"{first_ln} - {last_ln}" if (first_ln > 0 and last_ln > 0) else "Gutter detecting...",
+            "boxes": {
+                "first_line": align.get("boxes", {}).get("first_line"),
+                "last_line": align.get("boxes", {}).get("last_line")
+            }
+        }
+    }
+

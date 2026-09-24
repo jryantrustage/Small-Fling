@@ -289,6 +289,47 @@ async def delete_frame(frame_id: str):
 async def delete_frame_post(frame_id: str):
     return await delete_frame(frame_id)
 
+@router.post("/api/frames/purge")
+async def purge_all_frames():
+    purged_files = 0
+    try:
+        for f in state.FRAMES_DIR.glob("*"):
+            if f.is_file() and f.name != ".gitkeep":
+                try:
+                    f.unlink(missing_ok=True)
+                    purged_files += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"Error purging frame files: {e}")
+
+    pid = state.get_current_project_id()
+    if pid:
+        db.clear_project_data(pid)
+    state.captured_frames.clear()
+    state.document_lines.clear()
+    state.save_persisted_state()
+
+    await state.ws_manager.broadcast({
+        "type": "frames_purged",
+        "purged_count": purged_files,
+        "frames": []
+    })
+    await state.ws_manager.broadcast({
+        "type": "document_updated",
+        "data": {
+            "total_lines": 0,
+            "min_line": 0,
+            "max_line": 0,
+            "total_frames": 0,
+            "issue_count": 0,
+            "token_stats": state.token_stats,
+            "lines": []
+        }
+    })
+    return {"status": "success", "purged_count": purged_files, "message": f"Successfully purged {purged_files} frame images."}
+
+
 @router.get("/api/frames")
 async def get_frames():
     return db.get_frames(state.get_current_project_id())

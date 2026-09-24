@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Smartphone, ChevronDown, Check, Loader2, Monitor, RefreshCw,
-  Maximize2, Minimize2, X, Eye, EyeOff
+  Maximize2, Minimize2, X, Eye, EyeOff, Info
 } from 'lucide-react';
 import type { DeviceInfoData, AlignmentData } from '../types';
+import { LiveMetaInfoPopover } from './LiveMetaInfoPopover';
 
 interface LiveMonitorDrawerProps {
   isOpen: boolean;
@@ -81,6 +82,21 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
   const [pairIpInput, setPairIpInput] = useState('');
   const [pairCodeInput, setPairCodeInput] = useState('');
   const drawerDeviceDropdownRef = useRef<HTMLDivElement>(null);
+  const [showInfoPopover, setShowInfoPopover] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date>(new Date());
+  const [agoSec, setAgoSec] = useState(0);
+
+  useEffect(() => {
+    setLastRefreshedAt(new Date());
+    setAgoSec(0);
+  }, [streamKey]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setAgoSec(Math.floor((Date.now() - lastRefreshedAt.getTime()) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lastRefreshedAt]);
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
@@ -426,6 +442,23 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
           </button>
         )}
 
+        {/* Real-time Last Refreshed Meta info pill */}
+        <div className="live-refreshed-badge" title={`Stream key: ${streamKey}`}>
+          <span className="dot" />
+          <span>{agoSec <= 1 ? 'LIVE' : `${agoSec}s ago`}</span>
+        </div>
+
+        {/* Info Icon Button for Process Attributes & Real-time Gutter Stats */}
+        <button
+          type="button"
+          className={`live-info-btn ${showInfoPopover ? 'active' : ''}`}
+          onClick={() => setShowInfoPopover(prev => !prev)}
+          title="Inspect Live View Metadata, Process Attributes & Real-time Gutter Stats"
+        >
+          <Info size={11} />
+          <span>INFO</span>
+        </button>
+
         {/* Action buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
           <button
@@ -567,6 +600,19 @@ export const LiveMonitorDrawer: React.FC<LiveMonitorDrawerProps> = ({
           {deviceInfo?.active_serial || 'ADB'}
         </div>
       </div>
+
+      {/* Live Desktop Metadata & Process Attributes Popover Modal */}
+      {showInfoPopover && (
+        <LiveMetaInfoPopover
+          isOpen={showInfoPopover}
+          onClose={() => setShowInfoPopover(false)}
+          apiBase={apiBase}
+          streamKey={streamKey}
+          onRefresh={onRefreshStream}
+          alignmentData={alignmentData}
+          liveMode={liveMode}
+        />
+      )}
     </div>
   );
 };

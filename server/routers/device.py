@@ -89,6 +89,11 @@ async def device_stream_endpoint(mode: str = "desktop", serial: Optional[str] = 
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
 
+@router.get("/api/device/live-meta")
+async def get_device_live_meta_endpoint(mode: str = "desktop", serial: Optional[str] = None):
+    return await adb.get_live_view_metadata(serial=serial, mode=mode)
+
+
 @router.post("/api/device/close-keyboard")
 async def close_keyboard_endpoint(serial: Optional[str] = None):
     closed = await adb.ensure_adb_keyboard_closed(serial)

@@ -5,8 +5,7 @@ im = cv2.imread('pixel_10_target48_verified.jpg')
 h, w, _ = im.shape
 
 # Top right toolbar area: y: 60..120, x: 1150..1280
-toolbar = im[60:120, 1150:1280]
-cv2.imwrite('debug_toolbar.png', toolbar)
+toolbar = im[60:120, 1150:1280] if im is not None else np.zeros((60, 130, 3), dtype=np.uint8)
 
 # In debug_toolbar, let's look for the pencil button (often blue background or icon)
 # and the moon/settings button

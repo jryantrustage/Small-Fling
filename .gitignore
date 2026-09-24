@@ -54,6 +54,16 @@ server/storage/frames/*
 server/storage/data/*
 !server/storage/data/.gitkeep
 
+# Media & Image Files (Avoid Mock Images & False Positives)
+# No PNG/JPG/JPEG stored in project code; all functionality from live view
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.gif
+!server/storage/frames/.gitkeep
+
 # General Databases & SQLite
 *.db
 *.sqlite

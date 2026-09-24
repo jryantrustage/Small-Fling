@@ -182,3 +182,60 @@ export interface DocumentSummary {
   issue_count: number;
   verified_overlap_lines: number;
 }
+
+export interface ProcessAttributeItem {
+  name: string;
+  label?: string;
+  pid: string | number;
+  ppid?: string | number;
+  user: string;
+  rss_kb?: number;
+  rss_mb?: string | number;
+  activity?: string;
+  is_focused: boolean;
+}
+
+export interface LiveViewMeta {
+  timestamp: string;
+  live_mode: 'desktop' | 'phone';
+  device: {
+    serial: string | null;
+    model: string;
+    target_serial?: string | null;
+    connected: boolean;
+  };
+  display: {
+    name: string;
+    display_id?: string;
+    mode: string;
+    resolution: string;
+    fps?: number;
+    rotation?: number;
+    state?: string;
+  };
+  processes: {
+    focused_app?: string;
+    focused_window?: string;
+    running_processes: ProcessAttributeItem[];
+    keyboard_status?: {
+      ime_visible: boolean;
+      hard_keyboard_suppressed: boolean;
+    };
+  };
+  gutter_stats: {
+    first_line_number: number;
+    last_line_number: number;
+    visible_lines: number;
+    alignment_status: string;
+    is_aligned: boolean;
+    file_name?: string;
+    dark_mode?: boolean;
+    edit_mode?: boolean;
+    line_range?: string;
+    boxes?: {
+      first_line?: AlignmentBox;
+      last_line?: AlignmentBox;
+    };
+  };
+}
+

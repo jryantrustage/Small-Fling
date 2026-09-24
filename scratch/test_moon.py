@@ -3,7 +3,7 @@ import numpy as np
 
 img = cv2.imread('pixel_10_target48_verified.jpg')
 moon_crop = img[60:110, 1230:1275]
-cv2.imwrite('debug_moon.png', moon_crop)
+# cv2.imwrite('debug_moon.png', moon_crop)
 
 # Let's inspect the moon icon
 gray = cv2.cvtColor(moon_crop, cv2.COLOR_BGR2GRAY)
