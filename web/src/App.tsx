@@ -687,7 +687,7 @@ function AppContent() {
 
       <div className="orchestration-bar">
         <div className="orchestration-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button className="btn btn-orch btn-capture-desktop" disabled style={{ opacity: 0.5, cursor: 'not-allowed' }}><Camera size={14} /><span>desktop capture (disabled)</span></button>
+          <button className="btn btn-orch btn-capture-desktop" onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} title="Switch to Live Desktop & Refresh Capture Stream"><Camera size={14} /><span>Live Desktop Stream</span></button>
           <button className={`btn btn-sm ${showDag ? 'btn-primary' : 'btn-outline'}`} onClick={() => setShowDag(!showDag)} style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}><Layers size={14} /><span>{showDag ? 'Hide Flow DAG' : 'Show Flow DAG'}</span></button>
           <button className="btn btn-sm btn-outline" onClick={() => setShowGotoModal(true)} style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}><Compass size={14} /><span>Go To Line (Ctrl+G)</span></button>
         </div>
@@ -822,7 +822,11 @@ function AppContent() {
                 {inspectorMode === 'live' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Monitor size={14} color="#00ff9d" /><span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>LIVE DESKTOP · MARKDOWN VIEW</span></div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Monitor size={14} color="#00ff9d" />
+                        <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>LIVE DESKTOP · MARKDOWN VIEW</span>
+                        <span style={{ fontSize: '9px', fontFamily: 'monospace', background: 'rgba(0, 255, 157, 0.12)', color: '#00ff9d', padding: '1px 6px', borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.25)' }}>USB3 Video / DirectShow</span>
+                      </div>
                       <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={() => setShowBoundingBoxes(p => !p)} style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}>
                         {showBoundingBoxes ? <Eye size={10} /> : <EyeOff size={10} />}<span>AI BOXES</span>
                       </button>

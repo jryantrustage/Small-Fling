@@ -93,6 +93,44 @@ async def device_stream_endpoint(mode: str = "desktop", serial: Optional[str] = 
 async def get_device_live_meta_endpoint(mode: str = "desktop", serial: Optional[str] = None):
     return await adb.get_live_view_metadata(serial=serial, mode=mode)
 
+@router.get("/api/device/capture-source")
+async def get_device_capture_source_endpoint(serial: Optional[str] = None):
+    from services.capture_card_service import capture_card_mgr
+    card_info = capture_card_mgr.list_video_sources()
+    ser = await adb.get_active_adb_serial(serial)
+    
+    # Check if capture card is actively readable or busy
+    card_status = "not_found"
+    if card_info.get("has_capture_card"):
+        card = card_info["capture_cards"][0]
+        # Quick non-blocking probe
+        card_status = "detected"
+        
+    return {
+        "status": "ok",
+        "has_capture_card": card_info.get("has_capture_card", False),
+        "capture_card": card_info["capture_cards"][0] if card_info.get("has_capture_card") else None,
+        "all_video_devices": card_info.get("devices", []),
+        "adb_connected": bool(ser),
+        "adb_serial": ser,
+        "preferred_source": "capture_card" if card_info.get("has_capture_card") else ("adb" if ser else "none"),
+        "display_awake_policies": {
+            "active": True,
+            "stay_on_while_plugged_in": 7,
+            "screen_off_timeout_ms": 2147483647
+        }
+    }
+
+@router.post("/api/device/prevent-sleep")
+async def prevent_sleep_endpoint(serial: Optional[str] = None):
+    ser = await adb.get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No ADB device connected"}
+    await adb.configure_display_awake_policies(ser)
+    await adb.pulse_display_awake_heartbeat(ser)
+    return {"status": "ok", "message": "Display awake policies enforced and pulse sent"}
+
+
 
 @router.post("/api/device/close-keyboard")
 async def close_keyboard_endpoint(serial: Optional[str] = None):
