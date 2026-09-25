@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from fastapi import WebSocket
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 import config
 import db
@@ -36,7 +36,8 @@ class WebSocketManager:
                 self.disconnect(ws)
 
 ws_manager = WebSocketManager()
-ocr_executor = ProcessPoolExecutor(max_workers=2)
+ocr_executor = ThreadPoolExecutor(max_workers=2)
+
 
 async def detect_last_line_in_process(image_path: Path) -> int:
     loop = asyncio.get_running_loop()

@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
 
+import hashlib
 import config, db
 from models import TelemetryUpdateRequest, OrchestrationRequest, PipelineModeRequest, OcrSelectionRequest
 from services import state
@@ -15,8 +16,21 @@ import services.ocr_service as ocr_svc
 
 router = APIRouter(tags=["Orchestration & Telemetry"])
 
-try: from server.classifiers import classifier_registry, create_classifier_context
-except ImportError: from classifiers import classifier_registry, create_classifier_context
+try:
+    from server.classifiers import (
+        classifier_registry,
+        create_classifier_context,
+        Line1StuckClassifier,
+        ClassifierContext,
+    )
+except ImportError:
+    from classifiers import (
+        classifier_registry,
+        create_classifier_context,
+        Line1StuckClassifier,
+        ClassifierContext,
+    )
+
 
 async def evaluate_node_5_decision(serial: Optional[str] = None):
     try:
@@ -239,11 +253,60 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             await asyncio.sleep(float(cfg.get("settle_delay_ms", 800)) / 1000.0)
             snap = await capture_external_screenshot(active_serial)
             total_lines = 0
+            top_line = 0
             if snap:
                 calib = state.FRAMES_DIR / "dag_node1_end.png"
                 with open(calib, "wb") as f: f.write(snap)
                 total_lines = await state.detect_last_line_in_process(calib)
-                if total_lines <= 0: total_lines = (await state.scan_image_in_process(calib)).get("bottom_line", 0)
+                top_line = await state.detect_top_line_in_process(calib)
+                if total_lines <= 0 or top_line <= 0:
+                    scan_res = await state.scan_image_in_process(calib)
+                    if total_lines <= 0: total_lines = scan_res.get("bottom_line", 0)
+                    if top_line <= 0: top_line = scan_res.get("top_line", 0)
+
+            # Evaluate Line1StuckClassifier to determine if editor is still displaying line 1
+            is_stuck_on_line_1 = False
+            try:
+                disp_id = await detect_external_display_id(active_serial)
+                l1_clf = Line1StuckClassifier()
+                clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap)
+                clf_res = await l1_clf.detect(clf_ctx)
+                if clf_res.issue_detected:
+                    is_stuck_on_line_1 = True
+            except Exception as ce:
+                print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
+
+            # Additional check: if top_line is <= 2, it is definitely still on line 1
+            if 0 < top_line <= 2:
+                is_stuck_on_line_1 = True
+
+            if is_stuck_on_line_1:
+                # HARD FAILURE: Ctrl+End did not navigate away from page 1!
+                error_msg = f"EOF Navigation Failed: Editor still displays Line {top_line or 1} at top (bottom line: {total_lines}). Ctrl+End did not navigate to the end of the file."
+                node.update({
+                    "status": "error",
+                    "total_lines": 0,
+                    "top_line": top_line,
+                    "error": error_msg
+                })
+                state.latest_telemetry["status_message"] = f"DAG Node 1 Failed: Page still on Line {top_line or 1} (EOF jump failed)"
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "init_end",
+                    "status": "error",
+                    "total_lines": 0,
+                    "top_line": top_line,
+                    "error": error_msg,
+                    "telemetry": state.latest_telemetry
+                })
+                return {
+                    "status": "error",
+                    "node_id": "init_end",
+                    "total_lines": 0,
+                    "top_line": top_line,
+                    "message": error_msg
+                }
 
             if total_lines <= 0 and cfg.get("manual_total_lines", 0) > 0:
                 total_lines = int(cfg["manual_total_lines"])
@@ -253,7 +316,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
 
             node_status = "completed" if total_lines > 0 else "error"
-            node.update({"status": node_status, "total_lines": total_lines})
+            node.update({"status": node_status, "total_lines": total_lines, "top_line": top_line, "error": None if node_status == "completed" else "Could not detect EOF lines"})
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end", "total_lines": total_lines, "telemetry": state.latest_telemetry})
             return {
                 "status": "success" if total_lines > 0 else "warning",
@@ -261,6 +324,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "total_lines": total_lines,
                 "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔" if total_lines > 0 else "Ctrl+End sent, but could not detect EOF last line in gutter. Please verify document or connect device."
             }
+
 
         elif target_key == "reset_home":
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
@@ -281,16 +345,157 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             return {"status": "success" if is_verified else "warning", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'detection returned Ln {detected_first}'} via Ctrl+Home"}
 
         elif target_key == "frame_acquire":
+            if cfg.get("guard_keyboard", True):
+                await ensure_adb_keyboard_closed(active_serial)
+
             snap = await capture_external_screenshot(active_serial)
-            if not snap: raise HTTPException(status_code=500, detail="Failed to capture screen")
-            frame_path = state.FRAMES_DIR / f"frame_test_{int(datetime.now().timestamp())}.png"
-            with open(frame_path, "wb") as f: f.write(snap)
-            scan_res = await state.scan_image_in_process(frame_path)
-            top_ln, bot_ln = scan_res.get("top_line", 1), scan_res.get("bottom_line", 47)
-            node.update({"status": "completed", "top_line": top_ln, "bottom_line": bot_ln})
-            state.latest_telemetry.update({"current_top_line": top_ln, "current_bottom_line": bot_ln})
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "frame_acquire", "top_line": top_ln, "bottom_line": bot_ln, "telemetry": state.latest_telemetry})
-            return {"status": "success", "node_id": "frame_acquire", "top_line": top_ln, "bottom_line": bot_ln, "scan": scan_res, "message": f"Acquired frame: Ln {top_ln} → {bot_ln} ✔"}
+            if not snap or len(snap) < 2000 or not snap.startswith(b"\x89PNG\r\n\x1a\n"):
+                node.update({
+                    "status": "error",
+                    "error": "Screen capture failed: no valid image received from device display",
+                    "top_line": 0,
+                    "bottom_line": 0
+                })
+                state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture failed - no image from display"
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "frame_acquire",
+                    "error": "Screen capture failed",
+                    "telemetry": state.latest_telemetry
+                })
+                return {
+                    "status": "error",
+                    "node_id": "frame_acquire",
+                    "message": "Screen capture failed: no valid image received from external display. Please verify device connection and display stream."
+                }
+
+            temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+            with open(temp_calib, "wb") as f:
+                f.write(snap)
+
+            scan_res = await state.scan_image_in_process(temp_calib)
+            raw_top = scan_res.get("top_line", 0) or 0
+            raw_bot = scan_res.get("bottom_line", 0) or 0
+            lines_detected = scan_res.get("lines", [])
+
+            if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
+                node.update({
+                    "status": "error",
+                    "error": "Screen capture failed: no editor lines or gutter numbers detected",
+                    "top_line": 0,
+                    "bottom_line": 0
+                })
+                state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture rejected - no editor content detected"
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "frame_acquire",
+                    "error": "No lines detected",
+                    "telemetry": state.latest_telemetry
+                })
+                return {
+                    "status": "error",
+                    "node_id": "frame_acquire",
+                    "message": "Screen capture failed: no editor lines or gutter numbers detected in captured image. Please ensure Markdown editor is focused."
+                }
+
+            if raw_top > 0 and raw_bot > 0:
+                top_ln, bot_ln = raw_top, raw_bot
+            elif lines_detected:
+                top_ln = min(l.get("line_number", 1) for l in lines_detected)
+                bot_ln = max(l.get("line_number", top_ln) for l in lines_detected)
+            else:
+                top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
+                bot_ln = top_ln + 47
+
+            pid = state.get_current_project_id()
+            if not pid:
+                proj = db.get_active_project()
+                if not proj:
+                    projects = db.get_projects()
+                    proj = projects[0] if projects else db.create_project("Matrix Markdown")
+                    db.set_active_project(proj["id"])
+                pid = proj["id"]
+
+            pidx = len(state.captured_frames) + 1
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+            fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
+            fn = f"{fid}.png"
+            frame_path = state.FRAMES_DIR / fn
+            with open(frame_path, "wb") as f:
+                f.write(snap)
+
+            content_hash = hashlib.sha256(snap).hexdigest()
+            frame_info = {
+                "frame_id": fid,
+                "filename": fn,
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "page_index": pidx,
+                "file_size": len(snap),
+                "content_hash": content_hash,
+                "status": "processed",
+                "created_at": datetime.now().isoformat(),
+                "extracted_line_count": len(lines_detected),
+                "bounding_boxes": scan_res.get("bounding_boxes", {}),
+                "model_used": "local:rapidocr",
+                "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
+            }
+            state.captured_frames[fid] = frame_info
+
+            for item in lines_detected:
+                ln = item.get("line_number")
+                if ln:
+                    state.document_lines[ln] = state.MasterLine(
+                        item.get("text", ""),
+                        line_number=ln,
+                        frame_id=fid,
+                        status=item.get("status", "verified"),
+                        confidence=item.get("confidence", 0.95),
+                        is_wrapped=item.get("is_wrapped", False),
+                    )
+
+            state.save_persisted_state()
+            state.update_dag_after_frame(fid, top_ln, bot_ln)
+
+            await state.ws_manager.broadcast({"type": "new_frame", "frame": frame_info, "data": frame_info})
+            await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
+
+            node.update({
+                "status": "completed",
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "page": pidx,
+                "frame_id": fid,
+                "error": None
+            })
+            state.latest_telemetry.update({
+                "current_top_line": top_ln,
+                "current_bottom_line": bot_ln,
+                "current_page": pidx,
+                "status_message": f"DAG Node 3: Acquired frame {fid} (Page {pidx}: Ln {top_ln} → {bot_ln})"
+            })
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "frame_acquire",
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "page": pidx,
+                "frame_id": fid,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "frame_acquire",
+                "frame_id": fid,
+                "page": pidx,
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "scan": scan_res,
+                "message": f"Acquired frame {fid}: Ln {top_ln} → {bot_ln} ✔"
+            }
 
         elif target_key == "arrow_down":
             step_count, key_delay = int(cfg.get("step_count", 47)), float(cfg.get("key_delay_ms", 8)) / 1000.0

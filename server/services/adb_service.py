@@ -228,13 +228,30 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
     global current_device_model
     ser = await get_active_adb_serial(serial)
     if ser:
-        res = await run_adb_shell("dumpsys display | grep -E 'mDisplayId=[1-9]|displayId=[1-9]' | head -n 5", ser, timeout=2.5)
+        res = await run_adb_shell("dumpsys display", ser, timeout=2.5)
         if res.get("status") == "ok" and res.get("stdout"):
-            for line in res["stdout"].splitlines():
+            out = res["stdout"]
+            # 1. First priority: look for DisplayViewport with type=EXTERNAL
+            m = re.search(r'DisplayViewport\{type=EXTERNAL.*?displayId=(\d+)', out)
+            if m and int(m.group(1)) != 0:
+                return int(m.group(1))
+            # 2. Look for DisplayInfo with displayId X ... type EXTERNAL
+            m = re.search(r'displayId\s+(\d+).*?type\s+EXTERNAL', out, re.DOTALL)
+            if m and int(m.group(1)) != 0:
+                return int(m.group(1))
+            # 3. Check for any non-zero displayId associated with EXTERNAL
+            for line in out.splitlines():
+                if "EXTERNAL" in line:
+                    m = re.search(r'(?:mDisplayId|displayId)[= ]+(\d+)', line)
+                    if m and int(m.group(1)) != 0:
+                        return int(m.group(1))
+            # 4. Fallback search for any non-zero display id in dumpsys
+            for line in out.splitlines():
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
                 if m and int(m.group(1)) != 0:
                     return int(m.group(1))
     return 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+
 
 async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_refresh: bool = False) -> Dict[str, str]:
     global _display_map_cache, _display_map_cache_ts
@@ -474,21 +491,29 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         disp_id = await detect_external_display_id(ser)
         model_disp = 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
-        # Dispatch to detected display
+        # 1. Tap editor content area to ensure desktop window has input focus
+        if disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} tap 500 500", ser)
+            await asyncio.sleep(0.12)
+
+        # 2. Dispatch to detected external display
         if disp_id > 0:
             await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", ser)
-        # Dispatch to model-specific display (e.g. 9 on Pixel 10, 4 on Pixel 8)
-        if model_disp != disp_id:
+        # Dispatch to model-specific display if different
+        if model_disp != disp_id and model_disp > 0:
             await run_adb_shell(f"input -d {model_disp} keycombination {key1} {key2}", ser)
 
-        # Dispatch to global focused window (vital for desktop freeform windows)
+        # 3. Dispatch to global focused window (vital for desktop freeform windows)
         await asyncio.sleep(0.04)
         await run_adb_shell(f"input keycombination {key1} {key2}", ser)
 
         # For EOF / Line 1 jump, also send KEYCODE_MOVE_END (123) / KEYCODE_MOVE_HOME (122)
         if key2 in [122, 123]:
             await asyncio.sleep(0.02)
+            if disp_id > 0:
+                await run_adb_shell(f"input -d {disp_id} keyevent {key2}", ser)
             await run_adb_shell(f"input keyevent {key2}", ser)
+
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
     from services import state

@@ -249,16 +249,17 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   // Accurate node metrics & statuses
   const isNode1Running = runningNodeId === 'init_end' || node1.status === 'active';
-  const isNode1Calibrated = node1.status === 'completed' && ((node1.total_lines || 0) > 0 || (effectiveTotal > 0 && dagStatus.active_node !== 'init_end'));
-  const isNode1Error = node1.status === 'error';
-  const node1TotalLines = node1.total_lines || (isNode1Calibrated ? effectiveTotal : 0);
+  const isNode1Error = node1.status === 'error' || Boolean(node1.error);
+  const isNode1Calibrated = !isNode1Error && node1.status === 'completed' && (node1.total_lines || 0) > 0;
+  const node1TotalLines = isNode1Calibrated ? (node1.total_lines || 0) : 0;
 
   const isNode2Running = runningNodeId === 'reset_home' || node2.status === 'active';
   const isNode2Verified = node2.status === 'completed' && Boolean(node2.verified);
   const isNode2Error = node2.status === 'error' || (node2.status === 'completed' && !node2.verified);
 
   const isNode3Running = runningNodeId === 'frame_acquire' || node3.status === 'active' || isOrchestrating;
-  const isNode3Done = node3.status === 'completed';
+  const isNode3Error = node3.status === 'error' || Boolean(node3.error);
+  const isNode3Done = !isNode3Error && node3.status === 'completed';
 
   const isNode4Running = runningNodeId === 'arrow_down' || node4.status === 'active';
   const isNode4Done = node4.status === 'completed';
@@ -291,18 +292,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       <div style={{ position: 'relative', padding: '6px 4px 16px 4px', overflowX: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '8px', minWidth: '850px' }}>
           {/* Node 1 */}
-          <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode1Calibrated ? '#238636' : (isNode1Error ? '#f8514966' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode1Calibrated ? '#238636' : (isNode1Error ? '#f85149' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>1. DETERMINE TOTAL LINES</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode1Running ? '#58a6ff22' : (isNode1Calibrated ? '#23863633' : (isNode1Error ? '#f8514922' : '#30363d')), color: isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
+              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode1Running ? '#58a6ff22' : (isNode1Calibrated ? '#23863633' : (isNode1Error ? 'rgba(248, 81, 73, 0.25)' : '#30363d')), color: isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
                 {isNode1Running ? 'CALIBRATING...' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN'))}
               </span>
             </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#58a6ff' }}>HID Ctrl + End & Last Line OCR</div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: isNode1Error ? '#ff7b72' : '#58a6ff' }}>HID Ctrl + End & Last Line OCR</div>
             <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Sends HID Ctrl+End keys, verifies gutter at EOF, then displays total lines by OCR of last line.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode1Calibrated ? '#00ff9d' : '#8b949e', fontWeight: 700 }}>
-              {isNode1Calibrated && node1TotalLines > 0 ? `Total: ${node1TotalLines.toLocaleString()} Lines` : 'Target: Auto-detect (Ctrl+End)'}
+            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e'), fontWeight: 700, wordBreak: 'break-word' }}>
+              {isNode1Calibrated && node1TotalLines > 0
+                ? `Total: ${node1TotalLines.toLocaleString()} Lines`
+                : isNode1Error
+                    ? (node1.error || 'Failed: Editor remained on Line 1 (EOF not reached)')
+                    : 'Target: Auto-detect (Ctrl+End)'}
             </div>
+
             <button type="button" onClick={() => handleRunNode('init_end')} disabled={runningNodeId !== null} title="Run Ctrl+End and detect EOF last line" style={runBtnStyle('#58a6ff', runningNodeId !== null)}>
               {isNode1Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
               <span>{isNode1Running ? 'Calibrating...' : 'Run Node 1'}</span>
@@ -333,21 +339,21 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           {renderArrow('#00ff9d')}
 
           {/* Node 3 */}
-          <div style={{ flex: 1.1, background: '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Done ? '#238636' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
+          <div style={{ flex: 1.1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3. SCREEN CAPTURE</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : '#30363d', color: isNode3Running ? '#00ff9d' : (isNode3Done ? '#00ff9d' : '#8b949e'), fontWeight: 700 }}>
-                {isNode3Running ? 'ACQUIRING' : (isNode3Done ? 'ACQUIRED' : 'READY')}
+              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
+                {isNode3Running ? 'ACQUIRING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'ACQUIRED' : 'READY'))}
               </span>
             </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#00ff9d' }}>Capture & Offload OCR Worker</div>
+            <div style={{ fontSize: '13px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Capture & Offload OCR Worker</div>
             <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Screen capture: offloads OCR processing to dedicated worker with keyboard guarded closed.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: '#e6edf3', fontWeight: 700 }}>
-              {isNode3Done ? `Page ${node3.page || currentPage}: Ln ${node3.top_line || effectiveTop} → ${node3.bottom_line || effectiveBottom}` : 'Awaiting Screen Capture'}
+            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode3Error ? '#ff7b72' : '#e6edf3', fontWeight: 700 }}>
+              {isNode3Error ? (node3.error || 'Capture failed: no valid frame') : (isNode3Done ? `Page ${node3.page || currentPage}: Ln ${node3.top_line || effectiveTop} → ${node3.bottom_line || effectiveBottom}` : 'Awaiting Screen Capture')}
             </div>
-            <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture external screen and offload to OCR worker" style={runBtnStyle('#00ff9d', runningNodeId !== null)}>
+            <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture external screen and offload to OCR worker" style={runBtnStyle(isNode3Error ? '#f85149' : '#00ff9d', runningNodeId !== null)}>
               {runningNodeId === 'frame_acquire' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : 'Run Node 3'}</span>
+              <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : (isNode3Error ? 'Retry Node 3' : 'Run Node 3')}</span>
             </button>
           </div>
 
