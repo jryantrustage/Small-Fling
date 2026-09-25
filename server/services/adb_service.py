@@ -76,6 +76,16 @@ async def list_adb_devices() -> Dict[str, Any]:
     try:
         res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
         devs = []
+        cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        cdata = {}
+        if cf.exists():
+            try: cdata = json.loads(cf.read_text())
+            except Exception: pass
+        p8_addr = cdata.get("pixel_8_address", "")
+        p10_addr = cdata.get("pixel_10_address", "")
+        p8_ip = p8_addr.split(":")[0] if ":" in p8_addr else p8_addr
+        p10_ip = p10_addr.split(":")[0] if ":" in p10_addr else p10_addr
+
         for line in res.stdout.splitlines()[1:]:
             line = line.strip()
             if not line or line.startswith("*"): continue
@@ -84,7 +94,18 @@ async def list_adb_devices() -> Dict[str, Any]:
                 model = "unknown"
                 for p in parts[2:]:
                     if p.startswith("model:"): model = p.split(":", 1)[1]
-                devs.append({"serial": parts[0], "status": parts[1], "model": model, "displayName": model.replace("_", " "), "raw": line})
+                ser = parts[0]
+                lower_line = line.lower()
+                if (p8_addr and ser == p8_addr) or (p8_ip and ser.startswith(p8_ip)) or any(k in lower_line for k in ["pixel_8", "husky", "shiba", "pixel 8"]):
+                    model = "Pixel_8"
+                    display_name = "Pixel 8"
+                elif (p10_addr and ser == p10_addr) or (p10_ip and ser.startswith(p10_ip)) or any(k in lower_line for k in ["pixel_10", "mustang", "frankel", "pixel 10"]):
+                    model = "Pixel_10"
+                    display_name = "Pixel 10"
+                else:
+                    display_name = model.replace("_", " ") if model != "unknown" else ser
+
+                devs.append({"serial": ser, "status": parts[1], "model": model, "displayName": display_name, "raw": line})
         return {"status": "ok", "devices": devs}
     except Exception as e:
         return {"status": "error", "error": str(e), "devices": []}
@@ -498,12 +519,28 @@ async def get_device_info() -> Dict[str, Any]:
         if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]): current_device_model = "pixel_8"
         elif any(k in m for k in ["pixel_10", "mustang", "frankel", "10"]): current_device_model = "pixel_10"
     disp_map = await detect_surfaceflinger_displays(ser) if ser else {}
+
+    cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+    cdata = {}
+    if cf.exists():
+        try: cdata = json.loads(cf.read_text())
+        except Exception: pass
+    p8_addr = cdata.get("pixel_8_address", "")
+    p10_addr = cdata.get("pixel_10_address", "")
+    p8_available = any(d.get("status") == "device" and (d.get("displayName") == "Pixel 8" or "8" in d.get("model", "").lower() or (p8_addr and p8_addr in d.get("serial", ""))) for d in devs)
+    p10_available = any(d.get("status") == "device" and (d.get("displayName") == "Pixel 10" or "10" in d.get("model", "").lower() or (p10_addr and p10_addr in d.get("serial", ""))) for d in devs)
+
     return {
         "status": "success", "connected": bool(ser), "active_serial": ser,
         "active_model": active_model.replace("_", " "), "device_model": current_device_model,
         "profile": DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"]),
         "available_profiles": list(DEVICE_PROFILES.values()), "target_serial": target_adb_serial,
-        "devices": devs, "displays": {"desktop": bool(disp_map.get("desktop")), "phone": bool(disp_map.get("phone"))}
+        "devices": devs, "displays": {"desktop": bool(disp_map.get("desktop")), "phone": bool(disp_map.get("phone"))},
+        "pixel_8_address": p8_addr,
+        "pixel_10_address": p10_addr,
+        "pixel_8_available": p8_available,
+        "pixel_10_available": p10_available,
+        "cached_addresses": cdata
     }
 
 async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None):
@@ -565,17 +602,17 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
     from services import state
     active_serial = await get_active_adb_serial(serial)
     if not active_serial:
-        if state.latest_alignment_status.get("is_aligned"):
-            state.latest_alignment_status.update({
-                "status": "teams markdown not aligned",
-                "is_aligned": False,
-                "reason": "No active Android device connected via ADB",
-                "timestamp": datetime.now().isoformat()
-            })
-            await state.ws_manager.broadcast({
-                "type": "alignment_status", "alignment": state.latest_alignment_status,
-                "data": state.latest_alignment_status
-            })
+        state.latest_alignment_status.update({
+            "status": "device disconnected",
+            "device_connected": False,
+            "is_aligned": False,
+            "reason": "No active Android device connected via ADB",
+            "timestamp": datetime.now().isoformat()
+        })
+        await state.ws_manager.broadcast({
+            "type": "alignment_status", "alignment": state.latest_alignment_status,
+            "data": state.latest_alignment_status
+        })
         return state.latest_alignment_status
     try:
         cached_d = _frame_cache.get("desktop", {})
@@ -592,6 +629,7 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 _frame_cache["desktop"] = {"bytes": jpg, "raw_png": snap_bytes, "ts": time.time()}
 
             res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes)
+            res["device_connected"] = True
             res["timestamp"] = datetime.now().isoformat()
             try:
                 from classifiers.registry import classifier_registry

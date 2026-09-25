@@ -128,6 +128,7 @@ export interface ClassifierReport {
 export interface AlignmentData {
   status: string;
   is_aligned: boolean;
+  device_connected?: boolean;
   reason?: string | null;
   missing?: string[];
   first_line_number?: number;
@@ -168,6 +169,15 @@ export interface DeviceInfoData {
   available_profiles: DeviceProfile[];
   target_serial: string | null;
   devices: DeviceItem[];
+  pixel_8_address?: string;
+  pixel_10_address?: string;
+  pixel_8_available?: boolean;
+  pixel_10_available?: boolean;
+  cached_addresses?: {
+    pixel_8?: string;
+    pixel_10?: string;
+    last?: string;
+  };
   displays: {
     desktop: boolean;
     phone: boolean;

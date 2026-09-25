@@ -149,8 +149,30 @@ async def adb_connect(req: Request):
     import asyncio, subprocess
     data = await req.json()
     addr = (data.get("address") or data.get("ip") or "").strip()
+    dev_model = (data.get("device_model") or data.get("model") or "").lower()
     if not addr:
         raise HTTPException(status_code=400, detail="Missing IP address/port")
+
+    # Associate given IP/port with device in cache
+    try:
+        cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        cdata = {}
+        if cache_file.exists():
+            try: cdata = json.loads(cache_file.read_text())
+            except Exception: pass
+        cdata["last_address"] = addr
+        if "8" in dev_model:
+            cdata["pixel_8_address"] = addr
+            adb.current_device_model = "pixel_8"
+        elif "10" in dev_model:
+            cdata["pixel_10_address"] = addr
+            adb.current_device_model = "pixel_10"
+        else:
+            if adb.current_device_model == "pixel_8": cdata["pixel_8_address"] = addr
+            elif adb.current_device_model == "pixel_10": cdata["pixel_10_address"] = addr
+        cache_file.write_text(json.dumps(cdata, indent=2))
+    except Exception: pass
+
     p = await asyncio.to_thread(subprocess.run, ["adb", "connect", addr], capture_output=True, text=True, timeout=8.0)
     out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
     is_success = (p.returncode == 0) and ("connected to" in out.lower() or "already connected" in out.lower())
@@ -168,12 +190,46 @@ async def adb_pair(req: Request):
     data = await req.json()
     addr = (data.get("address") or data.get("ip") or "").strip()
     code = (data.get("code") or "").strip()
+    dev_model = (data.get("device_model") or data.get("model") or "").lower()
     if not addr or not code:
         raise HTTPException(status_code=400, detail="Missing IP address or pairing code")
+
+    # Cache pairing address for target device
+    try:
+        cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        cdata = {}
+        if cache_file.exists():
+            try: cdata = json.loads(cache_file.read_text())
+            except Exception: pass
+        if "8" in dev_model: cdata["pixel_8_address"] = addr
+        elif "10" in dev_model: cdata["pixel_10_address"] = addr
+        cache_file.write_text(json.dumps(cdata, indent=2))
+    except Exception: pass
+
     p = await asyncio.to_thread(subprocess.run, ["adb", "pair", addr, code], capture_output=True, text=True, timeout=10.0)
     out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
     is_success = (p.returncode == 0) and ("successfully paired" in out.lower() or ("paired" in out.lower() and "fail" not in out.lower()))
     return {"status": "ok" if is_success else "error", "output": out}
+
+@router.post("/api/device/save-address")
+async def save_device_address(req: Request):
+    data = await req.json()
+    model = (data.get("model") or data.get("device_model") or "").lower()
+    addr = (data.get("address") or data.get("ip") or "").strip()
+    cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+    cdata = {}
+    if cache_file.exists():
+        try: cdata = json.loads(cache_file.read_text())
+        except Exception: pass
+    if "8" in model:
+        cdata["pixel_8_address"] = addr
+    elif "10" in model:
+        cdata["pixel_10_address"] = addr
+    if addr:
+        cdata["last_address"] = addr
+    cache_file.write_text(json.dumps(cdata, indent=2))
+    info = await adb.get_device_info()
+    return {"status": "ok", "cached_addresses": cdata, "device_info": info}
 
 @router.post("/api/adb/command")
 async def adb_command(req: AdbCommandRequest):

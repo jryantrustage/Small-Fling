@@ -46,13 +46,57 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .device-selector-trigger:hover { border-color: var(--color-primary); background: rgba(0, 255, 157, 0.06); box-shadow: 0 0 12px rgba(0, 255, 157, 0.15); }
 .device-selector-btn.open,
 .device-selector-trigger.open { border-color: var(--color-primary); box-shadow: 0 0 16px rgba(0, 255, 157, 0.25); background: rgba(0, 255, 157, 0.08); }
+.device-selector-btn.unavailable {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border: 1px solid #ef4444 !important;
+  color: #ef4444 !important;
+}
+.device-selector-btn.unavailable:hover {
+  background: rgba(239, 68, 68, 0.28) !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+}
 .device-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .device-status-dot.online { background: #00ff9d; box-shadow: 0 0 8px #00ff9d; animation: pulse-dot 2s infinite ease-in-out; }
-.device-status-dot.offline { background: #ff7b72; box-shadow: 0 0 4px rgba(255, 123, 114, 0.5); }
+.device-status-dot.offline { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.5); }
 .device-spec { color: var(--text-muted); font-size: 10px; font-family: var(--font-mono); }
 .device-dropdown,
-.device-dropdown-menu { position: absolute; top: calc(100% + 8px); left: 0; min-width: 340px; background: rgba(13, 17, 23, 0.96); border: 1px solid var(--border-highlight); border-radius: 12px; padding: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(0, 255, 157, 0.08); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); z-index: 300; display: flex; flex-direction: column; gap: 8px; animation: dropdown-appear 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+.device-dropdown-menu { position: absolute; top: calc(100% + 8px); left: 0; min-width: 360px; background: rgba(13, 17, 23, 0.98); border: 1px solid var(--border-highlight); border-radius: 12px; padding: 12px; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(0, 255, 157, 0.08); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); z-index: 300; display: flex; flex-direction: column; gap: 8px; animation: dropdown-appear 0.18s cubic-bezier(0.16, 1, 0.3, 1); }
 .dropdown-section-title { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.6px; padding: 2px 2px; text-transform: uppercase; font-family: var(--font-mono); }
+
+/* Simplified Device Selection Cards */
+.device-cards-grid { display: flex; flex-direction: column; gap: 8px; }
+.device-card { border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border-color); background: rgba(0, 0, 0, 0.35); }
+.device-card:hover { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.04); }
+.device-card.selected { box-shadow: 0 0 12px rgba(56, 139, 253, 0.35); }
+.device-card.selected.available { box-shadow: 0 0 14px rgba(34, 197, 94, 0.3); }
+.device-card.selected.unavailable { box-shadow: 0 0 14px rgba(239, 68, 68, 0.3); }
+
+/* Red border & color matching NOT ALIGNED when unavailable */
+.device-card.unavailable {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border: 1px solid #ef4444 !important;
+  color: #ef4444 !important;
+}
+.device-card.unavailable:hover {
+  background: rgba(239, 68, 68, 0.25) !important;
+}
+.device-card.available {
+  background: rgba(34, 197, 94, 0.12) !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  color: #22c55e !important;
+}
+.device-card.available:hover {
+  background: rgba(34, 197, 94, 0.2) !important;
+}
+
+.device-card-header { display: flex; align-items: center; justify-content: space-between; }
+.device-status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 12px; font-size: 9px; font-weight: 700; font-family: var(--font-mono); letter-spacing: 0.4px; }
+.device-status-badge.unavailable { background: rgba(239, 68, 68, 0.25); border: 1px solid #ef4444; color: #fca5a5; }
+.device-status-badge.available { background: rgba(34, 197, 94, 0.25); border: 1px solid rgba(34, 197, 94, 0.6); color: #86efac; }
+.status-dot-mini { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.device-card-actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.device-configure-inline { margin-top: 6px; padding: 8px; background: rgba(0, 0, 0, 0.5); border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.1); display: flex; flex-direction: column; gap: 6px; }
+
 .device-list-item { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 8px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.02); cursor: pointer; transition: all 0.15s ease; }
 .device-list-item:hover { background: rgba(56, 139, 253, 0.12); border-color: rgba(56, 139, 253, 0.3); }
 .device-list-item.active { background: rgba(0, 255, 157, 0.08); border-color: rgba(0, 255, 157, 0.4); }
@@ -74,6 +118,16 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .profile-pills-row { display: flex; gap: 6px; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .profile-pill-btn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0, 0, 0, 0.3); color: var(--text-muted); font-size: 11px; font-weight: 600; font-family: var(--font-mono); cursor: pointer; transition: all 0.15s ease; }
 .profile-pill-btn:hover { border-color: var(--border-highlight); color: #fff; }
+.profile-pill-btn.unavailable {
+  background: rgba(239, 68, 68, 0.18) !important;
+  border: 1px solid #ef4444 !important;
+  color: #ef4444 !important;
+}
+.profile-pill-btn.available {
+  background: rgba(34, 197, 94, 0.12) !important;
+  border: 1px solid rgba(34, 197, 94, 0.4) !important;
+  color: #22c55e !important;
+}
 .profile-pill-btn.active.pixel-8 { background: linear-gradient(135deg, rgba(137, 87, 229, 0.3), rgba(163, 113, 247, 0.15)); border-color: #8957e5; color: #d2a8ff; box-shadow: 0 0 10px rgba(137, 87, 229, 0.3); }
 .profile-pill-btn.active.pixel-10 { background: linear-gradient(135deg, rgba(31, 111, 235, 0.3), rgba(56, 139, 253, 0.15)); border-color: #1f6feb; color: #79c0ff; box-shadow: 0 0 10px rgba(31, 111, 235, 0.3); }
 .ime-control-card { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-family: var(--font-mono); background: rgba(0, 255, 157, 0.05); border: 1px solid rgba(0, 255, 157, 0.25); color: #00ff9d; }
