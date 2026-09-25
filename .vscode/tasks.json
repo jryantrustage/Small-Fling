@@ -2,6 +2,12 @@
     "version": "2.0.0",
     "tasks": [
         {
+            "label": "ports: clean",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File scripts/free_ports.ps1 -Ports 8000",
+            "problemMatcher": []
+        },
+        {
             "label": "adb: connect wifi",
             "type": "shell",
             "command": "adb connect 192.168.86.81:43677",

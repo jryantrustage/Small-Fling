@@ -25,6 +25,7 @@
             "program": "${workspaceFolder}/server/main.py",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}/server",
+            "preLaunchTask": "ports: clean",
             "env": {
                 "PYTHONUNBUFFERED": "1"
             }
