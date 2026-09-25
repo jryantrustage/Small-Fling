@@ -147,11 +147,12 @@ async def create_project(req: ProjectCreateRequest):
     state.dag_state["groups"]["capture_entire_markdown"] = {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "idle"
+        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
     }
     state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
+    state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "extracted_line_count": 0})
     state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
     state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
     state.dag_state["current_active_group"] = "initialize"

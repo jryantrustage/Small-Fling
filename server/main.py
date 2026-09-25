@@ -176,6 +176,7 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
         state.dag_state["nodes"]["init_end"].update({"status": "idle", "total_lines": tlines})
         state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
         state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
+        state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "extracted_line_count": 0})
         state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
         state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
     state.dag_state["current_active_node"] = "init_end"

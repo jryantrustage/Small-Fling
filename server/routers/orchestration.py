@@ -201,9 +201,10 @@ async def get_dag_status():
 NODE_ALIAS_MAP = {
     "node_1": "init_end", "node_1_end": "init_end", "init_end": "init_end",
     "node_2": "reset_home", "node_2_home": "reset_home", "reset_home": "reset_home",
-    "node_3": "frame_acquire", "frame_acquire": "frame_acquire",
-    "node_4": "arrow_down", "arrow_down": "arrow_down",
-    "node_5": "verification_trigger", "verification_trigger": "verification_trigger"
+    "node_3": "frame_acquire", "frame_acquire": "frame_acquire", "frame_capture": "frame_acquire", "capture": "frame_acquire",
+    "node_4": "frame_ocr", "frame_ocr": "frame_ocr", "ocr": "frame_ocr", "frame_ocr_extract": "frame_ocr",
+    "node_5": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
+    "node_6": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger"
 }
 
 @router.get("/api/dag/nodes/{node_id}/config")
@@ -219,6 +220,12 @@ async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
     node = state.dag_state["nodes"].get(target_key)
     if not node: raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
     cfg = node.setdefault("config", {})
+
+    # Backward compatibility redirect if a client calls node_5 with trigger qualifiers
+    if target_key == "arrow_down" and ("prevent_trigger_on_issue" in payload or "qualifiers" in payload):
+        target_key = "verification_trigger"
+        node = state.dag_state["nodes"].get(target_key)
+        cfg = node.setdefault("config", {})
 
     if target_key == "verification_trigger":
         if "prevent_trigger_on_issue" in payload and payload["prevent_trigger_on_issue"] is not None:
@@ -416,13 +423,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if cfg.get("guard_keyboard", True):
                 await ensure_adb_keyboard_closed(active_serial)
 
+            settle_ms = float(cfg.get("settle_delay_ms", 300)) / 1000.0
+            if settle_ms > 0:
+                await asyncio.sleep(settle_ms)
+
             snap = await capture_external_screenshot(active_serial)
             if not snap or len(snap) < 2000 or not snap.startswith(b"\x89PNG\r\n\x1a\n"):
                 node.update({
                     "status": "error",
-                    "error": "Screen capture failed: no valid image received from device display",
-                    "top_line": 0,
-                    "bottom_line": 0
+                    "error": "Screen capture failed: no valid image received from device display"
                 })
                 state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture failed - no image from display"
                 await state.ws_manager.broadcast({
@@ -442,6 +451,74 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             with open(temp_calib, "wb") as f:
                 f.write(snap)
 
+            pidx = len(state.captured_frames) + 1
+            now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
+            raw_fn = f"raw_capture_p{pidx:03d}_{now_str}.png"
+            raw_path = state.FRAMES_DIR / raw_fn
+            with open(raw_path, "wb") as f:
+                f.write(snap)
+
+            node.update({
+                "status": "completed",
+                "page": pidx,
+                "raw_image_path": str(temp_calib),
+                "raw_filename": raw_fn,
+                "file_size": len(snap),
+                "error": None
+            })
+            if "frame_ocr" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["frame_ocr"]["status"] = "active"
+                state.dag_state["current_active_node"] = "frame_ocr"
+
+            state.latest_telemetry["status_message"] = f"DAG Node 3: Acquired frame ({len(snap):,} bytes) ✔ Ready for OCR"
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "frame_acquire",
+                "page": pidx,
+                "file_size": len(snap),
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "frame_acquire",
+                "page": pidx,
+                "file_size": len(snap),
+                "message": f"Screen capture complete ({len(snap):,} bytes) ✔ Ready for OCR extraction."
+            }
+
+        elif target_key == "frame_ocr":
+            temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+            if not temp_calib.exists() or temp_calib.stat().st_size < 2000:
+                candidates = sorted(
+                    [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                if candidates:
+                    temp_calib = candidates[0]
+                else:
+                    node.update({
+                        "status": "error",
+                        "error": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
+                    })
+                    state.latest_telemetry["status_message"] = "DAG Node 4: OCR failed - no captured frame available"
+                    await state.ws_manager.broadcast({
+                        "type": "dag_updated",
+                        "dag": state.dag_state,
+                        "node_id": "frame_ocr",
+                        "error": "No captured frame available",
+                        "telemetry": state.latest_telemetry
+                    })
+                    return {
+                        "status": "error",
+                        "node_id": "frame_ocr",
+                        "message": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
+                    }
+
+            with open(temp_calib, "rb") as f:
+                snap = f.read()
+
             scan_res = await state.scan_image_in_process(temp_calib)
             raw_top = scan_res.get("top_line", 0) or 0
             raw_bot = scan_res.get("bottom_line", 0) or 0
@@ -450,22 +527,22 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
                 node.update({
                     "status": "error",
-                    "error": "Screen capture failed: no editor lines or gutter numbers detected",
+                    "error": "OCR extraction failed: no editor lines or gutter numbers detected",
                     "top_line": 0,
                     "bottom_line": 0
                 })
-                state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture rejected - no editor content detected"
+                state.latest_telemetry["status_message"] = "DAG Node 4: OCR rejected - no editor content detected"
                 await state.ws_manager.broadcast({
                     "type": "dag_updated",
                     "dag": state.dag_state,
-                    "node_id": "frame_acquire",
+                    "node_id": "frame_ocr",
                     "error": "No lines detected",
                     "telemetry": state.latest_telemetry
                 })
                 return {
                     "status": "error",
-                    "node_id": "frame_acquire",
-                    "message": "Screen capture failed: no editor lines or gutter numbers detected in captured image. Please ensure Markdown editor is focused."
+                    "node_id": "frame_ocr",
+                    "message": "OCR extraction failed: no editor lines or gutter numbers detected in captured image. Please verify editor focus."
                 }
 
             if raw_top > 0 and raw_bot > 0:
@@ -507,7 +584,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "created_at": datetime.now().isoformat(),
                 "extracted_line_count": len(lines_detected),
                 "bounding_boxes": scan_res.get("bounding_boxes", {}),
-                "model_used": "local:rapidocr",
+                "model_used": cfg.get("engine", "local:rapidocr"),
                 "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
             }
             state.captured_frames[fid] = frame_info
@@ -534,35 +611,40 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "status": "completed",
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
-                "page": pidx,
+                "extracted_line_count": len(lines_detected),
                 "frame_id": fid,
                 "error": None
             })
+            if "arrow_down" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["arrow_down"]["status"] = "active"
+                state.dag_state["current_active_node"] = "arrow_down"
+
             state.latest_telemetry.update({
                 "current_top_line": top_ln,
                 "current_bottom_line": bot_ln,
                 "current_page": pidx,
-                "status_message": f"DAG Node 3: Acquired frame {fid} (Page {pidx}: Ln {top_ln} → {bot_ln})"
+                "status_message": f"DAG Node 4: OCR Extracted {len(lines_detected)} lines (Page {pidx}: Ln {top_ln} → {bot_ln}) ✔"
             })
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
                 "dag": state.dag_state,
-                "node_id": "frame_acquire",
+                "node_id": "frame_ocr",
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
-                "page": pidx,
+                "extracted_line_count": len(lines_detected),
                 "frame_id": fid,
                 "telemetry": state.latest_telemetry
             })
             return {
                 "status": "success",
-                "node_id": "frame_acquire",
+                "node_id": "frame_ocr",
                 "frame_id": fid,
                 "page": pidx,
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
                 "scan": scan_res,
-                "message": f"Acquired frame {fid}: Ln {top_ln} → {bot_ln} ✔"
+                "lines_extracted": len(lines_detected),
+                "message": f"OCR extracted {len(lines_detected)} lines (Ln {top_ln} → {bot_ln}) ✔"
             }
 
         elif target_key == "arrow_down":
@@ -596,6 +678,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/dag/nodes/node_5/evaluate")
+@router.post("/api/dag/nodes/node_6/evaluate")
+@router.post("/api/dag/nodes/verification_trigger/evaluate")
 async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
     decision = await evaluate_node_5_decision(serial)
     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "verification_trigger", "trigger_decision": decision})
@@ -619,7 +703,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "idle"
+        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
     })
 
     init_group["status"] = "active"
@@ -750,7 +834,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "active"
+        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
     })
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
@@ -760,15 +844,21 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
 
-    n4_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
-    n5_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
+    n4_res = await run_single_dag_node("frame_ocr", {"serial": active_serial})
+    if n4_res.get("status") == "error":
+        capture_group["status"] = "error"
+        return {"status": "error", "node_id": "frame_ocr", "result": n4_res}
+
+    n5_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
+    n6_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
 
     return {
         "status": "success",
         "group": "capture_entire_markdown",
         "node3": n3_res,
         "node4": n4_res,
-        "node5": n5_res
+        "node5": n5_res,
+        "node6": n6_res
     }
 
 @router.post("/api/dag/groups/{group_id}/run")
