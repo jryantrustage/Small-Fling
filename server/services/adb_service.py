@@ -256,30 +256,45 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
 async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_refresh: bool = False) -> Dict[str, str]:
     global _display_map_cache, _display_map_cache_ts
     now = time.time()
-    if not force_refresh and (now - _display_map_cache_ts < 10.0) and _display_map_cache:
+    if not force_refresh and (now - _display_map_cache_ts < 5.0) and _display_map_cache:
         return _display_map_cache
 
     ser = await get_active_adb_serial(serial)
     displays = {}
     if ser:
+        # 1. SurfaceFlinger display id enumeration
         res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 3.0)
         if res.returncode == 0 and res.stdout:
             for line in res.stdout.splitlines():
                 m = re.search(r'Display\s+(\d+)', line)
                 if m:
                     did = m.group(1)
-                    if "port=0" in line: displays["phone"] = did
-                    elif ("port=" in line and "port=0" not in line) or "MB16AMTR" in line or "display 256" in line or "HDMI" in line:
+                    if "port=0" in line:
+                        displays["phone"] = did
+                    elif ("port=" in line and "port=0" not in line) or any(k in line.lower() for k in ["hdmi", "usb", "mb16amtr", "external", "display 256"]):
                         displays["desktop"] = did
             all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
-            if "phone" not in displays and len(all_ids) > 0: displays["phone"] = all_ids[0]
-            if "desktop" not in displays and len(all_ids) > 1: displays["desktop"] = all_ids[1]
+            if "phone" not in displays and len(all_ids) > 0:
+                displays["phone"] = all_ids[0]
+            if "desktop" not in displays and len(all_ids) > 1:
+                for d in all_ids:
+                    if d != displays.get("phone"):
+                        displays["desktop"] = d
+                        break
 
-        # Augment with dumpsys display if desktop not found via SurfaceFlinger
+        # 2. Check dumpsys display for external DisplayViewport uniqueId (64-bit SurfaceFlinger id)
         if "desktop" not in displays:
-            ext_id = await detect_external_display_id(ser)
-            if ext_id and ext_id > 0:
-                displays["desktop"] = str(ext_id)
+            res_disp = await run_adb_shell("dumpsys display", ser, timeout=2.5)
+            if res_disp.get("status") == "ok" and res_disp.get("stdout"):
+                out = res_disp["stdout"]
+                m_vp = re.search(r'DisplayViewport\{type=EXTERNAL.*?uniqueId=\'local:(\d+)\'', out)
+                if m_vp:
+                    displays["desktop"] = m_vp.group(1)
+                else:
+                    m_sp = re.search(r'StablePhysical\{id=(\d+),\s*port=([1-9]\d*)\}', out)
+                    if m_sp:
+                        displays["desktop"] = m_sp.group(1)
+
         if "phone" not in displays:
             displays["phone"] = "0"
 
@@ -297,45 +312,52 @@ async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[
 
     disp_map = await detect_surfaceflinger_displays(ser)
     known_id = disp_map.get("desktop")
-    if known_id:
+
+    # 1. Try detected external display via 64-bit SurfaceFlinger ID
+    if known_id and len(str(known_id)) > 4:
         cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
-        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
+        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
         if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
             return png_bytes
 
-    # Fallback to dynamic detection
-    ext_id = str(await detect_external_display_id(ser))
-    ids_to_try = [ext_id] if (ext_id and ext_id != "0") else []
-    model_default = "9" if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else "4"
-    for did in [model_default, "14", "13", "4", "9"]:
-        if did not in ids_to_try: ids_to_try.append(did)
+    # 2. Check other active SurfaceFlinger displays
+    res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 2.5)
+    if res.returncode == 0 and res.stdout:
+        all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
+        phone_id = disp_map.get("phone")
+        for did in all_ids:
+            if did != phone_id and did != known_id and len(did) > 4:
+                cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
+                cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
+                if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                    disp_map["desktop"] = str(did)
+                    return png_bytes
 
-    for did in ids_to_try:
-        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
-        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.0)
-        if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
-            disp_map["desktop"] = str(did)
-            return png_bytes
+    # 3. Fallback: default active screencap (works on Pixel 8 and Pixel 10 regardless of display topology)
+    cmd = ["-s", ser, "exec-out", "screencap", "-p"]
+    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
+    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+        return png_bytes
 
     return None
 
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
     now = time.time()
-    # Fast-path cache check: return fresh frame if captured within last 250ms
+    # Fast-path cache check: return fresh frame if captured within last 600ms
     cached = _frame_cache.get(mode)
-    if cached and cached.get("bytes") and (now - cached.get("ts", 0.0) < 0.25):
+    if cached and cached.get("bytes") and (now - cached.get("ts", 0.0) < 0.6):
         return cached["bytes"]
 
     ser = await get_active_adb_serial(serial)
     if not ser:
-        if cached and cached.get("bytes"):
+        if cached and cached.get("bytes") and (now - cached.get("ts", 0.0) < 10.0):
             return cached["bytes"]
         return _get_or_create_standby_frame(mode)
 
     acquired = False
     try:
-        # Non-blocking lock acquisition with 0.8s timeout
-        await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.8)
+        # Non-blocking lock acquisition with 1.8s timeout for slow wireless ADB
+        await asyncio.wait_for(_screencap_lock.acquire(), timeout=1.8)
         acquired = True
     except asyncio.TimeoutError:
         # If lock is held by other stream, return cached frame immediately
@@ -346,7 +368,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
     try:
         # Re-check cache inside lock
         cached = _frame_cache.get(mode)
-        if cached and cached.get("bytes") and (time.time() - cached.get("ts", 0.0) < 0.25):
+        if cached and cached.get("bytes") and (time.time() - cached.get("ts", 0.0) < 0.6):
             return cached["bytes"]
 
         if mode == "desktop":
@@ -359,7 +381,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
         else: # mode == "phone"
             disp_map = await detect_surfaceflinger_displays(ser)
             phone_id = disp_map.get("phone", "0")
-            cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if phone_id and phone_id != "0" else ["-s", ser, "exec-out", "screencap", "-p"]
+            cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if (phone_id and len(str(phone_id)) > 4) else ["-s", ser, "exec-out", "screencap", "-p"]
             res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
             if res.returncode != 0 or not res.stdout:
                 res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 2.5)
@@ -518,16 +540,33 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
     from services import state
     active_serial = await get_active_adb_serial(serial)
-    if not active_serial: return state.latest_alignment_status
+    if not active_serial:
+        if state.latest_alignment_status.get("is_aligned"):
+            state.latest_alignment_status.update({
+                "status": "teams markdown not aligned",
+                "is_aligned": False,
+                "reason": "No active Android device connected via ADB",
+                "timestamp": datetime.now().isoformat()
+            })
+            await state.ws_manager.broadcast({
+                "type": "alignment_status", "alignment": state.latest_alignment_status,
+                "data": state.latest_alignment_status
+            })
+        return state.latest_alignment_status
     try:
         cached_d = _frame_cache.get("desktop", {})
         snap_bytes = None
-        if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < 2.0):
+        if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < 1.5):
             snap_bytes = cached_d["raw_png"]
         else:
             snap_bytes = await capture_external_screenshot(active_serial)
 
         if snap_bytes:
+            # Sync to frame cache so stream generator shares this fresh frame
+            jpg = _png_to_jpeg(snap_bytes, quality=75, max_dim=960)
+            if jpg:
+                _frame_cache["desktop"] = {"bytes": jpg, "raw_png": snap_bytes, "ts": time.time()}
+
             res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes)
             res["timestamp"] = datetime.now().isoformat()
             try:
@@ -551,6 +590,19 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 "data": state.latest_alignment_status, "classifiers": res.get("classifiers", {}),
                 "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry
             })
+        else:
+            # Screenshot failed or stream unavailable: update alignment status to avoid false positive aligned state
+            if state.latest_alignment_status.get("is_aligned"):
+                state.latest_alignment_status.update({
+                    "status": "teams markdown not aligned",
+                    "is_aligned": False,
+                    "reason": "External display capture failed / stream unavailable",
+                    "timestamp": datetime.now().isoformat()
+                })
+                await state.ws_manager.broadcast({
+                    "type": "alignment_status", "alignment": state.latest_alignment_status,
+                    "data": state.latest_alignment_status
+                })
     except Exception as e: print(f"[check_and_update_alignment] Error: {e}")
     return state.latest_alignment_status
 

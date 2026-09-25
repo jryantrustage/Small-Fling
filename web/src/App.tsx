@@ -64,7 +64,7 @@ function AppContent() {
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
   const [isNavigating, setIsNavigating] = useState(false);
   const [navStatus, setNavStatus] = useState('');
-  const [alignmentData, setAlignmentData] = useState<AlignmentData>({ is_aligned: true, status: 'aligned', reason: '', file_name: '', boxes: {}, classifiers: { issues: [], has_issues: false, issue_count: 0 }, first_line_number: 0, last_line_number: 0 });
+  const [alignmentData, setAlignmentData] = useState<AlignmentData>({ is_aligned: false, status: 'checking', reason: 'Connecting to device stream...', file_name: '', boxes: {}, classifiers: { issues: [], has_issues: false, issue_count: 0 }, first_line_number: 0, last_line_number: 0 });
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
   const [isCheckingAlignment, setIsCheckingAlignment] = useState(false);
   const [showAlignmentModal, setShowAlignmentModal] = useState(false);

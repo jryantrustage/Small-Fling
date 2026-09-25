@@ -124,21 +124,14 @@ latest_telemetry: Dict[str, Any] = {
 }
 
 latest_alignment_status: Dict[str, Any] = {
-    "status": "teams markdown aligned",
-    "is_aligned": True,
-    "reason": None,
-    "missing": [],
-    "first_line_number": 1,
-    "last_line_number": 47,
+    "status": "teams markdown not aligned",
+    "is_aligned": False,
+    "reason": "Awaiting display stream and initial alignment check",
+    "missing": ["teams_logo", "file_name", "first_line", "last_line"],
+    "first_line_number": None,
+    "last_line_number": None,
     "file_name": "",
-    "boxes": {
-        "teams_logo": {"name": "Teams Logo / Header", "color": "blue", "hex": "#3b82f6", "passed": True, "text": "Teams", "box_px": [20, 15, 80, 25], "box_norm": [0.015, 0.02, 0.06, 0.035]},
-        "file_name": {"name": "Markdown Filename", "color": "yellow", "hex": "#eab308", "passed": True, "text": "Matrix_main.md", "box_px": [35, 38, 250, 25], "box_norm": [0.027, 0.052, 0.195, 0.035]},
-        "edit_mode": {"name": "Edit Mode (Pencil Icon)", "color": "white", "hex": "#f8fafc", "passed": True, "icon": "pencil", "box_px": [1188, 68, 26, 26], "box_norm": [0.928, 0.094, 0.020, 0.036]},
-        "dark_mode": {"name": "Dark Mode (Moon Icon)", "color": "white", "hex": "#f8fafc", "passed": True, "icon": "moon", "box_px": [1238, 68, 32, 26], "box_norm": [0.967, 0.094, 0.025, 0.036]},
-        "first_line": {"name": "First Line Number", "color": "green", "hex": "#22c55e", "passed": True, "line_number": 1, "box_px": [10, 85, 35, 22], "box_norm": [0.008, 0.118, 0.027, 0.030]},
-        "last_line": {"name": "Last Line Number", "color": "red", "hex": "#ef4444", "passed": True, "line_number": 47, "box_px": [10, 655, 35, 22], "box_norm": [0.008, 0.910, 0.027, 0.030]}
-    },
+    "boxes": {},
     "timestamp": None,
     "dismissed": []
 }
