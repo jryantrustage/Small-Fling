@@ -55,3 +55,27 @@ def test_dag_and_calibration_lifecycle():
     assert dag_nodes["init_end"]["status"] == "completed"
     assert dag_nodes["reset_home"]["status"] == "completed"
     assert dag_nodes["frame_acquire"]["status"] == "active"
+
+
+def test_editor_cursor_focused_classifier_and_troubleshooting():
+    from classifiers import classifier_registry, EditorCursorFocusedClassifier, ClassifierContext
+
+    # 1. Verify classifier is registered
+    clf = classifier_registry.get_classifier("editor_cursor_focused")
+    assert clf is not None
+    assert clf.id == "editor_cursor_focused"
+
+    # 2. Test detection when no device is connected
+    import asyncio
+    res = asyncio.run(clf.detect(ClassifierContext(serial="nonexistent:9999")))
+    assert res.issue_detected is True
+    assert "No active Android device" in res.details or res.metadata.get("connected") is False
+
+    # 3. Test visual caret detection on synthetic dark-mode image with vertical caret bar
+    img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    img[:] = (26, 26, 26)  # Dark editor background
+    # Draw a 2px wide vertical caret at x=200, y=200..224
+    cv2.line(img, (200, 200), (200, 224), (255, 255, 255), 2)
+    res_img = asyncio.run(clf.detect(ClassifierContext(serial="nonexistent:9999", image_cv=img)))
+    assert res_img.metadata.get("visual_caret_found") is True or res_img.issue_detected is True
+

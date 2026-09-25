@@ -524,3 +524,161 @@ class Line1StuckClassifier(BaseClassifier):
             metadata={"recheck": re_detect.to_dict() if re_detect else None}
         )
 
+
+class EditorCursorFocusedClassifier(BaseClassifier):
+    id = "editor_cursor_focused"
+    issue_description = "cursor is not present or focus is lost on Teams markdown editor"
+    fix_description = "focus Teams markdown editor and place active blinking cursor"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return ClassificationResult(
+                classifier_id=self.id, issue_detected=True, issue_name=self.issue_description,
+                fix_name=self.fix_description, severity=self.severity,
+                details="No active Android device connected via ADB",
+                metadata={"connected": False}
+            )
+
+        img = _get_cv_img(context)
+        disp_id = context.display_id or await detect_external_display_id(serial)
+
+        # 1. INTRINSIC CHECKS:
+        # A) Check window focus via dumpsys window
+        is_window_focused = False
+        try:
+            win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", serial, timeout=2.0)
+            win_out = win_chk.get("stdout", "") if win_chk.get("status") == "ok" else ""
+            is_window_focused = "com.microsoft.teams" in win_out
+        except Exception:
+            pass
+
+        # B) Check active input connection via dumpsys input_method
+        has_input_connection = False
+        is_preview_served = False
+        try:
+            ime_chk = await run_adb_shell("dumpsys input_method | grep -E 'mServedView|mInputConnection|mServedInputConnection'", serial, timeout=2.0)
+            ime_out = ime_chk.get("stdout", "") if ime_chk.get("status") == "ok" else ""
+            if "preview_host_view" in ime_out or "MAMWebView" in ime_out or ("com.microsoft.teams" in ime_out and "mInputConnection=" in ime_out):
+                is_preview_served = True
+            if "mInputConnection=" in ime_out and "idHash=" in ime_out and "mDeactivateRequested=false" in ime_out:
+                has_input_connection = True
+        except Exception:
+            pass
+
+        is_intrinsic_focused = is_window_focused and (is_preview_served or has_input_connection)
+
+        # 2. VISUAL CHECKS (Caret / Blinking cursor detection in editor body):
+        is_visual_caret_found = False
+        caret_location = None
+        if img is not None:
+            h, w = img.shape[:2]
+            # Focus on editor document text area: below toolbar (y > 100), right of line gutter (x > 80 to x < 600)
+            doc_roi = img[int(h * 0.12):int(h * 0.50), int(w * 0.05):int(w * 0.45)]
+            if doc_roi.size > 0:
+                gray = cv2.cvtColor(doc_roi, cv2.COLOR_BGR2GRAY)
+                # Sobel horizontal gradient finds vertical lines (caret candidate)
+                grad_x = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
+                abs_grad_x = cv2.convertScaleAbs(grad_x)
+                _, thresh = cv2.threshold(abs_grad_x, 80, 255, cv2.THRESH_BINARY)
+                contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                for cnt in contours:
+                    x, y, cw, ch = cv2.boundingRect(cnt)
+                    # Vertical caret aspect ratio
+                    if 1 <= cw <= 4 and 12 <= ch <= 35:
+                        is_visual_caret_found = True
+                        caret_location = (int(w * 0.05) + x, int(h * 0.12) + y)
+                        break
+
+        # A cursor is confirmed if intrinsic focus is established or visual caret is verified
+        is_focused_and_cursor_present = is_intrinsic_focused or (is_window_focused and is_visual_caret_found)
+        h_t = img.shape[0] if img is not None else 1080
+        w_t = img.shape[1] if img is not None else 1920
+        target_coords = caret_location or (int(w_t * 0.25), int(h_t * 0.25))
+
+        if is_focused_and_cursor_present:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                details=f"Cursor is present and focus is on Teams markdown editor (intrinsic: window={is_window_focused}, input={is_preview_served or has_input_connection}, visual caret={is_visual_caret_found})",
+                target_coordinates=target_coords,
+                metadata={
+                    "window_focused": is_window_focused,
+                    "preview_served": is_preview_served,
+                    "input_connection": has_input_connection,
+                    "visual_caret_found": is_visual_caret_found,
+                    "caret_location": caret_location,
+                    "display_id": disp_id
+                }
+            )
+
+        details = "Editor cursor is missing or focus is lost: "
+        if not is_window_focused:
+            details += "Teams window does not have active window focus; "
+        if not (is_preview_served or has_input_connection):
+            details += "MAMWebView preview_host_view input connection is not bound; "
+        if not is_visual_caret_found:
+            details += "No visual blinking vertical caret detected in document body."
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=True,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=details.strip(),
+            target_coordinates=target_coords,
+            metadata={
+                "window_focused": is_window_focused,
+                "preview_served": is_preview_served,
+                "input_connection": has_input_connection,
+                "visual_caret_found": is_visual_caret_found,
+                "display_id": disp_id
+            }
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return FixResult(classifier_id=self.id, success=False, message="No Android device connected via ADB", actions_taken=[])
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        actions = []
+
+        # 1. Bring Teams FilePreviewActivity task to front
+        try:
+            tasks_res = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", serial, timeout=2.0)
+            if tasks_res.get("status") == "ok" and tasks_res.get("stdout"):
+                m_t = re.search(r'#(\d+)\s+type=', tasks_res["stdout"])
+                if m_t:
+                    await run_adb_shell(f"cmd activity task to-front {m_t.group(1)}", serial)
+                    actions.append(f"Brought Teams task #{m_t.group(1)} to front")
+        except Exception:
+            pass
+
+        # 2. Suppress soft keyboard so key combinations are not swallowed
+        await ensure_adb_keyboard_closed(serial)
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", serial)
+        actions.append("Suppressed soft keyboard (show_ime_with_hard_keyboard=0)")
+
+        # 3. Tap editor document body to place cursor and request input focus
+        coords = context.target_coordinates or (450, 320)
+        await _tap_coords(serial, disp_id, coords, delay=0.3)
+        actions.append(f"Tapped Teams editor content area at {coords} on display {disp_id}")
+
+        # 4. Re-verify focus
+        re_detect = await _recheck_classifier(self, serial, disp_id)
+        success = not (re_detect and re_detect.issue_detected)
+        msg = "Successfully focused Teams editor and placed active blinking cursor" if success else "Tapped editor; waiting for input connection to settle"
+        return FixResult(
+            classifier_id=self.id,
+            success=success,
+            message=msg,
+            actions_taken=actions,
+            metadata={"recheck": re_detect.to_dict() if re_detect else None}
+        )
+
+

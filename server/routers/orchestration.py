@@ -21,6 +21,7 @@ try:
         classifier_registry,
         create_classifier_context,
         Line1StuckClassifier,
+        EditorCursorFocusedClassifier,
         ClassifierContext,
     )
 except ImportError:
@@ -28,6 +29,7 @@ except ImportError:
         classifier_registry,
         create_classifier_context,
         Line1StuckClassifier,
+        EditorCursorFocusedClassifier,
         ClassifierContext,
     )
 
@@ -249,6 +251,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
     try:
         if target_key == "init_end":
+            disp_id = await detect_external_display_id(active_serial)
+            cursor_clf = EditorCursorFocusedClassifier()
+            c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
+            try:
+                c_res = await cursor_clf.detect(c_ctx)
+                if c_res.issue_detected:
+                    await cursor_clf.fix(c_ctx)
+                    await asyncio.sleep(0.2)
+            except Exception as ce:
+                print(f"[init_end] Cursor classifier check note: {ce}")
+
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
             await asyncio.sleep(float(cfg.get("settle_delay_ms", 800)) / 1000.0)
             snap = await capture_external_screenshot(active_serial)
@@ -267,7 +280,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Evaluate Line1StuckClassifier to determine if editor is still displaying line 1
             is_stuck_on_line_1 = False
             try:
-                disp_id = await detect_external_display_id(active_serial)
                 l1_clf = Line1StuckClassifier()
                 clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap)
                 clf_res = await l1_clf.detect(clf_ctx)
@@ -280,6 +292,58 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if 0 < top_line <= 2:
                 is_stuck_on_line_1 = True
 
+            # If initial attempt left page on Line 1, attempt an immediate re-focus & retry
+            if is_stuck_on_line_1:
+                try:
+                    await cursor_clf.fix(c_ctx)
+                    await asyncio.sleep(0.2)
+                    await send_hid_keycombination(113, 123, active_serial)
+                    await asyncio.sleep(0.8)
+                    snap_retry = await capture_external_screenshot(active_serial)
+                    if snap_retry:
+                        calib = state.FRAMES_DIR / "dag_node1_end.png"
+                        with open(calib, "wb") as f: f.write(snap_retry)
+                        r_total = await state.detect_last_line_in_process(calib)
+                        r_top = await state.detect_top_line_in_process(calib)
+                        if r_total > 0: total_lines = r_total
+                        if r_top > 0: top_line = r_top
+                        if top_line > 2 or total_lines > 2:
+                            is_stuck_on_line_1 = False
+                            snap = snap_retry
+                except Exception as re_err:
+                    print(f"[init_end] Auto-retry error: {re_err}")
+
+            troubleshooting_steps = [
+                {
+                    "step": 1,
+                    "title": "Verify Editor Focus & Blinking Cursor",
+                    "description": "Click or tap directly inside the document text body on the external desktop screen (Pixel 8 / Pixel 10). Confirm that a blinking vertical line (|) appears next to the markdown text.",
+                    "action": "focus_editor",
+                    "action_label": "Focus Editor"
+                },
+                {
+                    "step": 2,
+                    "title": "Ensure Virtual Keyboard is Closed",
+                    "description": "Check if an on-screen soft keyboard popped up. If visible, close it so hardware key combinations reach the Teams WebView directly instead of being intercepted.",
+                    "action": "close_ime",
+                    "action_label": "Hide Keyboard"
+                },
+                {
+                    "step": 3,
+                    "title": "Confirm Desktop Window & Display Focus",
+                    "description": "Ensure the Teams editor window is active on the external desktop display (Display 8 on Pixel 10, Display 4/External on Pixel 8) and not minimized or behind another window.",
+                    "action": "check_display",
+                    "action_label": "Verify Display"
+                },
+                {
+                    "step": 4,
+                    "title": "Manual Navigation / Fallback",
+                    "description": "Press Ctrl + End on an attached hardware keyboard, scroll down to the bottom in the preview, or enter the known total lines in the DAG Node 1 configuration.",
+                    "action": "manual_override",
+                    "action_label": "Manual Override"
+                }
+            ]
+
             if is_stuck_on_line_1:
                 # HARD FAILURE: Ctrl+End did not navigate away from page 1!
                 error_msg = f"EOF Navigation Failed: Editor still displays Line {top_line or 1} at top (bottom line: {total_lines}). Ctrl+End did not navigate to the end of the file."
@@ -287,7 +351,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "status": "error",
                     "total_lines": 0,
                     "top_line": top_line,
-                    "error": error_msg
+                    "error": error_msg,
+                    "troubleshooting_steps": troubleshooting_steps
                 })
                 state.latest_telemetry["status_message"] = f"DAG Node 1 Failed: Page still on Line {top_line or 1} (EOF jump failed)"
                 await state.ws_manager.broadcast({
@@ -298,6 +363,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "total_lines": 0,
                     "top_line": top_line,
                     "error": error_msg,
+                    "troubleshooting_steps": troubleshooting_steps,
                     "telemetry": state.latest_telemetry
                 })
                 return {
@@ -305,7 +371,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "node_id": "init_end",
                     "total_lines": 0,
                     "top_line": top_line,
-                    "message": error_msg
+                    "message": error_msg,
+                    "troubleshooting_steps": troubleshooting_steps
                 }
 
             if total_lines <= 0 and cfg.get("manual_total_lines", 0) > 0:

@@ -9,6 +9,8 @@ from .editor_classifiers import (
     ViewModeClassifier,
     KeyboardOpenClassifier,
     Line1StuckClassifier,
+    TeamsMarkdownVisibleClassifier,
+    EditorCursorFocusedClassifier,
 )
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "ViewModeClassifier",
     "KeyboardOpenClassifier",
     "Line1StuckClassifier",
+    "TeamsMarkdownVisibleClassifier",
+    "EditorCursorFocusedClassifier",
 ]
 
 
