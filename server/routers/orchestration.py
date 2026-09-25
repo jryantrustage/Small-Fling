@@ -600,6 +600,187 @@ async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "verification_trigger", "trigger_decision": decision})
     return {"status": "success", "node_id": "verification_trigger", "trigger_decision": decision, "allowed": decision.get("allowed", False), "prevented": decision.get("prevented", True), "message": "Trigger allowed ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"}
 
+async def execute_dag_group_initialize(serial: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Executes DAG Group 1 ('initialize'):
+      1. Pre-flight check: ensure Teams editor focus on external display, close IME soft keyboard.
+      2. Step 1 (init_end): Send HID Ctrl+End -> capture screenshot -> gutter OCR to calibrate total lines.
+      3. Step 2 (reset_home): Send HID Ctrl+Home -> capture screenshot -> verify Line 1 at top gutter.
+      4. Transition: Mark 'initialize' group as 'completed' and activate 'capture_entire_markdown' group (Node 3: frame_acquire ready).
+    Streams progress percentage and telemetry over WebSocket.
+    """
+    active_serial = await get_active_adb_serial(serial)
+    state.dag_state.setdefault("groups", {})
+    init_group = state.dag_state["groups"].setdefault("initialize", {
+        "id": "initialize", "title": "Initialize", "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
+        "nodes": ["init_end", "reset_home"], "status": "idle"
+    })
+    capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
+        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
+        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
+        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "idle"
+    })
+
+    init_group["status"] = "active"
+    init_group["progress"] = {"percent": 10, "stage": "Checking editor cursor focus and display...", "status": "running"}
+    state.dag_state["current_active_group"] = "initialize"
+    state.dag_state["current_active_node"] = "init_end"
+    state.latest_telemetry["status_message"] = "Initializing: checking editor cursor and display..."
+
+    await state.ws_manager.broadcast({
+        "type": "project_init_progress",
+        "stage": "Checking editor cursor focus and display...",
+        "percent": 10,
+        "status": "running",
+        "dag": state.dag_state
+    })
+
+    try:
+        # Pre-check cursor focus and external display
+        disp_id = await detect_external_display_id(active_serial)
+        cursor_clf = EditorCursorFocusedClassifier()
+        c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
+        try:
+            c_res = await cursor_clf.detect(c_ctx)
+            if c_res.issue_detected:
+                await cursor_clf.fix(c_ctx)
+                await asyncio.sleep(0.2)
+        except Exception as ce:
+            print(f"[execute_dag_group_initialize] Caret focus check note: {ce}")
+
+        await ensure_adb_keyboard_closed(active_serial)
+
+        # Step 1: Run Node 1 (init_end)
+        init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": "Sending Ctrl+End to determine EOF total lines...",
+            "percent": 25,
+            "status": "running",
+            "dag": state.dag_state
+        })
+
+        node1_res = await run_single_dag_node("init_end", {"serial": active_serial})
+        total_lines = node1_res.get("total_lines", 0)
+
+        if node1_res.get("status") == "error" or total_lines <= 0:
+            err_msg = node1_res.get("message") or "EOF Navigation Failed: could not determine total lines."
+            init_group["status"] = "error"
+            init_group["progress"] = {"percent": 50, "stage": err_msg, "status": "error", "error": err_msg}
+            await state.ws_manager.broadcast({
+                "type": "project_init_progress",
+                "stage": err_msg,
+                "percent": 50,
+                "status": "error",
+                "error": err_msg,
+                "dag": state.dag_state
+            })
+            return {"status": "error", "group": "initialize", "error": err_msg, "node1": node1_res}
+
+        # Step 2: Run Node 2 (reset_home)
+        init_group["progress"] = {"percent": 65, "stage": f"Calibrated {total_lines:,} total lines at EOF ✔. Returning to Line 1...", "status": "running", "total_lines": total_lines}
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": f"Calibrated {total_lines:,} total lines at EOF ✔. Returning to Line 1...",
+            "percent": 65,
+            "status": "running",
+            "total_lines": total_lines,
+            "dag": state.dag_state
+        })
+
+        node2_res = await run_single_dag_node("reset_home", {"serial": active_serial})
+        is_verified = node2_res.get("verified", False)
+        first_line = node2_res.get("first_line", 1)
+
+        # Mark initialize completed!
+        init_group["status"] = "completed"
+        init_group["progress"] = {
+            "percent": 100,
+            "stage": f"Project Initialized Successfully! {total_lines:,} total lines calibrated and Line 1 verified ✔",
+            "status": "completed",
+            "total_lines": total_lines,
+            "verified": is_verified
+        }
+        capture_group["status"] = "idle"
+        state.dag_state["current_active_group"] = "capture_entire_markdown"
+        state.dag_state["current_active_node"] = "frame_acquire"
+        state.dag_state["nodes"]["frame_acquire"]["status"] = "idle"
+        state.latest_telemetry["current_top_line"] = 1
+        state.latest_telemetry["current_page"] = 1
+        state.latest_telemetry["target_total_lines"] = total_lines
+        state.latest_telemetry["status_message"] = f"DAG Group 'Initialize' complete: {total_lines:,} total lines ready for capture ✔"
+
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": f"Project Initialized Successfully! {total_lines:,} total lines calibrated and Line 1 verified ✔",
+            "percent": 100,
+            "status": "completed",
+            "total_lines": total_lines,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+
+        return {
+            "status": "success",
+            "group": "initialize",
+            "total_lines": total_lines,
+            "first_line": first_line,
+            "verified": is_verified,
+            "node1": node1_res,
+            "node2": node2_res
+        }
+    except Exception as e:
+        init_group["status"] = "error"
+        err = str(e)
+        init_group["progress"] = {"percent": 50, "stage": f"Initialization failed: {err}", "status": "error", "error": err}
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": f"Initialization failed: {err}",
+            "percent": 50,
+            "status": "error",
+            "error": err,
+            "dag": state.dag_state
+        })
+        return {"status": "error", "group": "initialize", "error": err}
+
+async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Dict[str, Any]:
+    active_serial = await get_active_adb_serial(serial)
+    capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
+        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
+        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
+        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "active"
+    })
+    capture_group["status"] = "active"
+    state.dag_state["current_active_group"] = "capture_entire_markdown"
+
+    n3_res = await run_single_dag_node("frame_acquire", {"serial": active_serial})
+    if n3_res.get("status") == "error":
+        capture_group["status"] = "error"
+        return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
+
+    n4_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
+    n5_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
+
+    return {
+        "status": "success",
+        "group": "capture_entire_markdown",
+        "node3": n3_res,
+        "node4": n4_res,
+        "node5": n5_res
+    }
+
+@router.post("/api/dag/groups/{group_id}/run")
+async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
+    payload = payload or {}
+    serial = payload.get("serial")
+    if group_id in {"initialize", "init"}:
+        return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"))
+    elif group_id in {"capture_entire_markdown", "capture"}:
+        return await execute_dag_group_capture_markdown(serial=serial)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
+
+
 @router.get("/api/pipeline/mode")
 async def get_pipeline_mode():
     return {

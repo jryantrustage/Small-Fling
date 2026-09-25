@@ -153,9 +153,28 @@ orchestration_state: Dict[str, Any] = {
 }
 
 dag_state: Dict[str, Any] = {
+    "groups": {
+        "initialize": {
+            "id": "initialize",
+            "title": "Initialize",
+            "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
+            "nodes": ["init_end", "reset_home"],
+            "status": "idle",
+            "progress": None
+        },
+        "capture_entire_markdown": {
+            "id": "capture_entire_markdown",
+            "title": "Capture Entire Markdown",
+            "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
+            "nodes": ["frame_acquire", "arrow_down", "verification_trigger"],
+            "status": "idle",
+            "progress": None
+        }
+    },
     "nodes": {
         "init_end": {
             "id": "init_end",
+            "group": "initialize",
             "title": "1. Determine Total Lines (Ctrl+End)",
             "description": "Send HID Ctrl+End, verify gutter position at EOF, display total lines by OCR of last line of EOF.",
             "status": "idle",
@@ -169,6 +188,7 @@ dag_state: Dict[str, Any] = {
         },
         "reset_home": {
             "id": "reset_home",
+            "group": "initialize",
             "title": "2. Return to Line 1 (Ctrl+Home)",
             "description": "Send HID Ctrl+Home to return to line 1, verify line 1 is in the top position in gutter.",
             "status": "idle",
@@ -182,6 +202,7 @@ dag_state: Dict[str, Any] = {
         },
         "frame_acquire": {
             "id": "frame_acquire",
+            "group": "capture_entire_markdown",
             "title": "3. Screen Capture & Acquisition",
             "description": "Screen capture and acquisition: offload to dedicated OCR worker process.",
             "status": "idle",
@@ -194,6 +215,7 @@ dag_state: Dict[str, Any] = {
         },
         "arrow_down": {
             "id": "arrow_down",
+            "group": "capture_entire_markdown",
             "title": "4. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
@@ -206,6 +228,7 @@ dag_state: Dict[str, Any] = {
         },
         "verification_trigger": {
             "id": "verification_trigger",
+            "group": "capture_entire_markdown",
             "title": "5. Verify Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",

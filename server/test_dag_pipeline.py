@@ -79,3 +79,20 @@ def test_editor_cursor_focused_classifier_and_troubleshooting():
     res_img = asyncio.run(clf.detect(ClassifierContext(serial="nonexistent:9999", image_cv=img)))
     assert res_img.metadata.get("visual_caret_found") is True or res_img.issue_detected is True
 
+
+def test_dag_group_segmentation_and_runner():
+    # 1. Create project
+    proj_res = client.post("/api/projects", json={"name": "DAG Group Test", "description": "Group Test", "target_total_lines": 0})
+    assert proj_res.status_code == 200
+
+    # 2. Check DAG status includes groups 'initialize' and 'capture_entire_markdown'
+    res = client.get("/api/dag/status")
+    assert res.status_code == 200
+    dag_data = res.json()["dag"]
+    assert "groups" in dag_data
+    assert "initialize" in dag_data["groups"]
+    assert "capture_entire_markdown" in dag_data["groups"]
+    assert dag_data["groups"]["initialize"]["nodes"] == ["init_end", "reset_home"]
+    assert dag_data["groups"]["capture_entire_markdown"]["nodes"] == ["frame_acquire", "arrow_down", "verification_trigger"]
+
+
