@@ -72,100 +72,102 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
       <div className="live-monitor-resize-left" onMouseDown={(e) => onResizeMouseDown(e, 'left')} title="Resize width" />
 
       <div className="live-monitor-header">
-        <div className="drawer-device-selector-wrapper" ref={menuRef}>
-          <button type="button" className="drawer-device-btn" onClick={() => setShowMenu(p => !p)} title="Switch connected target device">
-            <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
-            <Smartphone size={12} color="var(--color-primary)" />
-            <span>{deviceInfo?.active_model?.toUpperCase() || (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
-            <ChevronDown size={11} style={{ transform: showMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-          </button>
+        <div className="live-monitor-controls-scroll">
+          <div className="drawer-device-selector-wrapper" ref={menuRef}>
+            <button type="button" className="drawer-device-btn" onClick={() => setShowMenu(p => !p)} title="Switch connected target device">
+              <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
+              <Smartphone size={12} color="var(--color-primary)" />
+              <span>{deviceInfo?.active_model?.toUpperCase() || (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
+              <ChevronDown size={11} style={{ transform: showMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+            </button>
 
-          {showMenu && (
-            <div className="drawer-device-dropdown">
-              <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                {deviceInfo?.devices?.length ? deviceInfo.devices.map((dev) => {
-                  const active = deviceInfo.active_serial === dev.serial || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
-                  return (
-                    <div key={dev.serial} className={`device-list-item ${active ? 'active' : ''}`} onClick={() => { onSelectSerial(dev.serial); setShowMenu(false); }} style={{ padding: '6px 8px' }}>
-                      <div className="device-item-left">
-                        <Smartphone size={13} color={active ? '#00ff9d' : '#8b949e'} />
-                        <div><div className="device-item-title" style={{ fontSize: '11px', color: active ? '#00ff9d' : 'var(--text-main)' }}>{dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}</div><div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div></div>
+            {showMenu && (
+              <div className="drawer-device-dropdown">
+                <div className="dropdown-section-title">SWITCH TARGET DEVICE</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {deviceInfo?.devices?.length ? deviceInfo.devices.map((dev) => {
+                    const active = deviceInfo.active_serial === dev.serial || (!deviceInfo.active_serial && dev.model.toLowerCase().includes('pixel_8'));
+                    return (
+                      <div key={dev.serial} className={`device-list-item ${active ? 'active' : ''}`} onClick={() => { onSelectSerial(dev.serial); setShowMenu(false); }} style={{ padding: '6px 8px' }}>
+                        <div className="device-item-left">
+                          <Smartphone size={13} color={active ? '#00ff9d' : '#8b949e'} />
+                          <div><div className="device-item-title" style={{ fontSize: '11px', color: active ? '#00ff9d' : 'var(--text-main)' }}>{dev.displayName || dev.model.replace(/_/g, ' ') || 'Android Device'}</div><div className="device-item-sub" style={{ fontSize: '9px' }}>{dev.serial}</div></div>
+                        </div>
+                        {active && <Check size={12} color="#00ff9d" />}
                       </div>
-                      {active && <Check size={12} color="#00ff9d" />}
+                    );
+                  }) : <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px' }}>
+                  <div className="dropdown-section-title" style={{ padding: 0 }}>WIRELESS ADB</div>
+                  <div className="adb-mode-tabs">
+                    <button type="button" className={`adb-tab-btn ${tab === 'connect' ? 'active' : ''}`} onClick={() => setTab('connect')}>Connect</button>
+                    <button type="button" className={`adb-tab-btn pair-tab ${tab === 'pair' ? 'active' : ''}`} onClick={() => setTab('pair')}>Pair New</button>
+                  </div>
+                </div>
+
+                {tab === 'connect' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div className="connect-ip-row">
+                      <input type="text" className="connect-ip-input" placeholder="192.168.86.xx:5555" value={ipInput} onChange={(e) => setIpInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onConnectAdbIp(ipInput); }} />
+                      <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }} onClick={() => onConnectAdbIp(ipInput)} disabled={isConnectingIp || !ipInput.trim()}>
+                        {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
+                      </button>
                     </div>
-                  );
-                }) : <div style={{ padding: '6px', fontSize: '10px', color: 'var(--text-muted)' }}>No ADB devices connected</div>}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px' }}>
-                <div className="dropdown-section-title" style={{ padding: 0 }}>WIRELESS ADB</div>
-                <div className="adb-mode-tabs">
-                  <button type="button" className={`adb-tab-btn ${tab === 'connect' ? 'active' : ''}`} onClick={() => setTab('connect')}>Connect</button>
-                  <button type="button" className={`adb-tab-btn pair-tab ${tab === 'pair' ? 'active' : ''}`} onClick={() => setTab('pair')}>Pair New</button>
-                </div>
-              </div>
-
-              {tab === 'connect' ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div className="connect-ip-row">
-                    <input type="text" className="connect-ip-input" placeholder="192.168.86.xx:5555" value={ipInput} onChange={(e) => setIpInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onConnectAdbIp(ipInput); }} />
-                    <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }} onClick={() => onConnectAdbIp(ipInput)} disabled={isConnectingIp || !ipInput.trim()}>
-                      {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                    </button>
+                    {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>{connectStatusMsg}</div>}
                   </div>
-                  {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>{connectStatusMsg}</div>}
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <div className="connect-ip-row"><input type="text" className="connect-ip-input" placeholder="Pair IP:Port" value={pairIp} onChange={(e) => setPairIp(e.target.value)} /></div>
-                  <div className="connect-ip-row">
-                    <input type="text" className="connect-ip-input" placeholder="6-digit Code" value={pairCode} onChange={(e) => setPairCode(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && onPairAdb) onPairAdb(pairIp, pairCode); }} />
-                    <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }} onClick={() => onPairAdb?.(pairIp, pairCode)} disabled={isPairing || !pairIp.trim() || !pairCode.trim()}>
-                      {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair'}
-                    </button>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div className="connect-ip-row"><input type="text" className="connect-ip-input" placeholder="Pair IP:Port" value={pairIp} onChange={(e) => setPairIp(e.target.value)} /></div>
+                    <div className="connect-ip-row">
+                      <input type="text" className="connect-ip-input" placeholder="6-digit Code" value={pairCode} onChange={(e) => setPairCode(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && onPairAdb) onPairAdb(pairIp, pairCode); }} />
+                      <button type="button" className="btn btn-primary" style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }} onClick={() => onPairAdb?.(pairIp, pairCode)} disabled={isPairing || !pairIp.trim() || !pairCode.trim()}>
+                        {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair'}
+                      </button>
+                    </div>
+                    {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>{pairStatusMsg}</div>}
                   </div>
-                  {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72', marginTop: '2px' }}>{pairStatusMsg}</div>}
-                </div>
-              )}
+                )}
 
-              <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
-              <div className="profile-pills-row">
-                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (31L)</span></button>
-                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (47L)</span></button>
+                <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
+                <div className="profile-pills-row">
+                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (31L)</span></button>
+                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (47L)</span></button>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+
+          <div className="live-monitor-tabs">
+            <button className={`live-tab-btn ${liveMode === 'desktop' ? 'active' : ''}`} onClick={() => onSwitchLiveMode('desktop')}><Monitor size={11} /><span>DESKTOP</span></button>
+            <button className={`live-tab-btn ${liveMode === 'phone' ? 'active' : ''}`} onClick={() => onSwitchLiveMode('phone')}><Smartphone size={11} /><span>PHONE</span></button>
+          </div>
+
+          <div className="live-size-pill-group">
+            {(['sm', 'md', 'lg'] as const).map(s => (
+              <button key={s} type="button" className={`live-size-btn ${monitorSize === s && !isDrawerMaximized ? 'active' : ''}`} onClick={() => onSetPresetSize(s)}>{s.toUpperCase()}</button>
+            ))}
+          </div>
+
+          {liveMode === 'desktop' && (
+            <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={onToggleBoundingBoxes} title="Toggle AI Bounding Boxes">
+              {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>AI BOXES</span>
+            </button>
+          )}
+
+          <div className="live-refreshed-badge"><span className="dot" /><span>{agoSec <= 1 ? 'LIVE' : `${agoSec}s ago`}</span></div>
+
+          <button type="button" className={`live-info-btn ${showInfo ? 'active' : ''}`} onClick={() => setShowInfo(p => !p)} title="Inspect Live Metadata"><Info size={11} /><span>INFO</span></button>
+          {onOpenDeviceConfig && (
+            <button type="button" className="live-info-btn" onClick={onOpenDeviceConfig} title="External Desktop Kiosk Lockdown"><Shield size={11} color="#00ff9d" /><span>KIOSK</span></button>
           )}
         </div>
 
-        <div className="live-monitor-tabs">
-          <button className={`live-tab-btn ${liveMode === 'desktop' ? 'active' : ''}`} onClick={() => onSwitchLiveMode('desktop')}><Monitor size={11} /><span>DESKTOP</span></button>
-          <button className={`live-tab-btn ${liveMode === 'phone' ? 'active' : ''}`} onClick={() => onSwitchLiveMode('phone')}><Smartphone size={11} /><span>PHONE</span></button>
-        </div>
-
-        <div className="live-size-pill-group">
-          {(['sm', 'md', 'lg'] as const).map(s => (
-            <button key={s} type="button" className={`live-size-btn ${monitorSize === s && !isDrawerMaximized ? 'active' : ''}`} onClick={() => onSetPresetSize(s)}>{s.toUpperCase()}</button>
-          ))}
-        </div>
-
-        {liveMode === 'desktop' && (
-          <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={onToggleBoundingBoxes} title="Toggle AI Bounding Boxes">
-            {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>AI BOXES</span>
-          </button>
-        )}
-
-        <div className="live-refreshed-badge"><span className="dot" /><span>{agoSec <= 1 ? 'LIVE' : `${agoSec}s ago`}</span></div>
-
-        <button type="button" className={`live-info-btn ${showInfo ? 'active' : ''}`} onClick={() => setShowInfo(p => !p)} title="Inspect Live Metadata"><Info size={11} /><span>INFO</span></button>
-        {onOpenDeviceConfig && (
-          <button type="button" className="live-info-btn" onClick={onOpenDeviceConfig} title="External Desktop Kiosk Lockdown"><Shield size={11} color="#00ff9d" /><span>KIOSK</span></button>
-        )}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <button onClick={onRefreshStream} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }} title="Refresh Stream"><RefreshCw size={13} /></button>
-          <button onClick={onToggleMaximize} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }} title={isDrawerMaximized ? 'Restore' : 'Maximize'}>{isDrawerMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }} title="Close"><X size={15} /></button>
+        <div className="live-monitor-window-actions">
+          <button type="button" className="btn-live-action" onClick={onRefreshStream} title="Refresh Stream"><RefreshCw size={13} /></button>
+          <button type="button" className="btn-live-action" onClick={onToggleMaximize} title={isDrawerMaximized ? 'Restore' : 'Maximize'}>{isDrawerMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>
+          <button type="button" className="btn-live-action btn-live-close" onClick={onClose} title="Close Live View"><X size={15} /></button>
         </div>
       </div>
 
