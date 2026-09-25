@@ -39,13 +39,21 @@ db.init_db()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    tasks = []
     try:
-        asyncio.create_task(ensure_adb_keyboard_closed())
-        asyncio.create_task(alignment_monitor_loop())
-        asyncio.create_task(awake_keepalive_loop())
+        tasks.append(asyncio.create_task(ensure_adb_keyboard_closed()))
+        tasks.append(asyncio.create_task(alignment_monitor_loop()))
+        tasks.append(asyncio.create_task(awake_keepalive_loop()))
     except Exception:
         pass
     yield
+    # Clean shutdown: immediately cancel background loops and close all WebSockets
+    for t in tasks:
+        t.cancel()
+    try:
+        await state.ws_manager.close_all()
+    except Exception:
+        pass
 
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0", lifespan=lifespan)
 app.add_middleware(
@@ -189,7 +197,8 @@ app.include_router(kiosk.router)
 if __name__ == "__main__":
     import uvicorn
     try:
-        uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True)
+        # timeout_graceful_shutdown=1 ensures instant restart without hanging on WebSockets
+        uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True, timeout_graceful_shutdown=1)
     except OSError as e:
         if getattr(e, 'winerror', None) in (10048, 10013) or getattr(e, 'errno', None) in (10048, 10013):
             print(f"[ERROR] Port {config.SERVER_PORT} is in use or blocked by access permissions.")

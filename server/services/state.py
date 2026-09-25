@@ -35,6 +35,14 @@ class WebSocketManager:
             except Exception:
                 self.disconnect(ws)
 
+    async def close_all(self):
+        for ws in list(self.active):
+            try:
+                await ws.close(code=1001, reason="Server shutting down or reloading")
+            except Exception:
+                pass
+        self.active.clear()
+
 ws_manager = WebSocketManager()
 ocr_executor = ThreadPoolExecutor(max_workers=2)
 
