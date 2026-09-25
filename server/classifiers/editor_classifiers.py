@@ -23,7 +23,8 @@ async def _tap_coords(serial: str, disp_id: int, coords: Tuple[int, int], delay:
     x, y = coords
     if disp_id > 0:
         await run_adb_shell(f"input -d {disp_id} tap {x} {y}", serial)
-    await run_adb_shell(f"input tap {x} {y}", serial)
+    else:
+        await run_adb_shell(f"input tap {x} {y}", serial)
     if delay:
         await asyncio.sleep(delay)
 
@@ -648,14 +649,11 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         disp_id = context.display_id or await detect_external_display_id(serial)
         actions = []
 
-        # 1. Bring Teams FilePreviewActivity task to front
+        # 1. Bring Teams FilePreviewActivity to front on external display
         try:
-            tasks_res = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", serial, timeout=2.0)
-            if tasks_res.get("status") == "ok" and tasks_res.get("stdout"):
-                m_t = re.search(r'#(\d+)\s+type=', tasks_res["stdout"])
-                if m_t:
-                    await run_adb_shell(f"cmd activity task to-front {m_t.group(1)}", serial)
-                    actions.append(f"Brought Teams task #{m_t.group(1)} to front")
+            if disp_id > 0:
+                await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", serial)
+                actions.append(f"Ensured Teams FilePreviewActivity is active on display {disp_id}")
         except Exception:
             pass
 
@@ -665,7 +663,7 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         actions.append("Suppressed soft keyboard (show_ime_with_hard_keyboard=0)")
 
         # 3. Tap editor document body to place cursor and request input focus
-        coords = context.target_coordinates or (450, 320)
+        coords = getattr(context, "target_coordinates", None) or (500, 500)
         await _tap_coords(serial, disp_id, coords, delay=0.3)
         actions.append(f"Tapped Teams editor content area at {coords} on display {disp_id}")
 

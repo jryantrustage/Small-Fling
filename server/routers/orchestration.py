@@ -262,8 +262,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             except Exception as ce:
                 print(f"[init_end] Cursor classifier check note: {ce}")
 
+            # Ensure editor window on external display has input focus
+            if disp_id > 0:
+                await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
+                await asyncio.sleep(0.15)
+
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
-            await asyncio.sleep(float(cfg.get("settle_delay_ms", 800)) / 1000.0)
+            await asyncio.sleep(float(cfg.get("settle_delay_ms", 1200)) / 1000.0)
             snap = await capture_external_screenshot(active_serial)
             total_lines = 0
             top_line = 0
@@ -298,7 +303,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     await cursor_clf.fix(c_ctx)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
-                    await asyncio.sleep(0.8)
+                    await asyncio.sleep(1.2)
                     snap_retry = await capture_external_screenshot(active_serial)
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"

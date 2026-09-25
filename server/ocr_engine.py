@@ -97,7 +97,9 @@ def worker_verify_first_line(image_path: str) -> Tuple[bool, int]:
     gutter = find_gutter_numbers_cluster(img)
     if not gutter: return False, 0
     first_ln = gutter[0][1]
-    return (first_ln == 1), first_ln
+    has_line_1 = any(ln == 1 for _, ln in gutter[:4])
+    is_at_home = has_line_1 or (first_ln <= 5 and gutter[0][0] < 300)
+    return is_at_home, (1 if is_at_home else first_ln)
 
 def worker_detect_top_line(image_path: str) -> int:
     """Worker function to detect the line number displayed at the top of the left side gutter."""

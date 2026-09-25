@@ -262,7 +262,7 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
                 if m and int(m.group(1)) != 0:
                     return int(m.group(1))
-    return 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+    return 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
 
 async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_refresh: bool = False) -> Dict[str, str]:
@@ -523,31 +523,26 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
 
         disp_id = await detect_external_display_id(ser)
-        model_disp = 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+        target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
         # 1. Tap editor content area if not focused to ensure desktop window has input focus & blinking cursor
         try:
             ime_chk = await run_adb_shell("dumpsys input_method | grep -E 'mServedView|mInputConnection'", ser, timeout=1.5)
             ime_out = ime_chk.get("stdout", "") if ime_chk.get("status") == "ok" else ""
             if "preview_host_view" not in ime_out and "MAMWebView" not in ime_out:
-                target_d = disp_id if disp_id > 0 else model_disp
                 if target_d > 0:
-                    await run_adb_shell(f"input -d {target_d} tap 450 320", ser)
-                await run_adb_shell("input tap 450 320", ser)
+                    await run_adb_shell(f"input -d {target_d} tap 500 500", ser)
+                else:
+                    await run_adb_shell("input tap 500 500", ser)
                 await asyncio.sleep(0.15)
         except Exception:
             pass
 
-        # 2. Dispatch HID keycombination with duration flag (-t 150ms) to hold Ctrl while End/Home is pressed
-        if disp_id > 0:
-            await run_adb_shell(f"input -d {disp_id} keycombination -t 150 {key1} {key2}", ser)
-        # Dispatch to model-specific display if different
-        if model_disp != disp_id and model_disp > 0:
-            await run_adb_shell(f"input -d {model_disp} keycombination -t 150 {key1} {key2}", ser)
-
-        # 3. Dispatch to global focused window (vital for desktop freeform windows)
-        await asyncio.sleep(0.04)
-        await run_adb_shell(f"input keycombination -t 150 {key1} {key2}", ser)
+        # 2. Dispatch HID keycombination to external display
+        if target_d > 0:
+            await run_adb_shell(f"input -d {target_d} keycombination {key1} {key2}", ser)
+        else:
+            await run_adb_shell(f"input keycombination {key1} {key2}", ser)
 
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
