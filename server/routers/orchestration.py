@@ -262,10 +262,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             except Exception as ce:
                 print(f"[init_end] Cursor classifier check note: {ce}")
 
-            # Ensure editor window on external display has input focus
-            if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
-                await asyncio.sleep(0.15)
 
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
             await asyncio.sleep(float(cfg.get("settle_delay_ms", 1200)) / 1000.0)
@@ -275,27 +271,25 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if snap:
                 calib = state.FRAMES_DIR / "dag_node1_end.png"
                 with open(calib, "wb") as f: f.write(snap)
-                total_lines = await state.detect_last_line_in_process(calib)
-                top_line = await state.detect_top_line_in_process(calib)
+                top_line, total_lines = await state.detect_gutter_bounds_in_process(calib)
                 if total_lines <= 0 or top_line <= 0:
                     scan_res = await state.scan_image_in_process(calib)
                     if total_lines <= 0: total_lines = scan_res.get("bottom_line", 0)
                     if top_line <= 0: top_line = scan_res.get("top_line", 0)
 
-            # Evaluate Line1StuckClassifier to determine if editor is still displaying line 1
+            # Evaluate whether editor is still displaying line 1
             is_stuck_on_line_1 = False
-            try:
-                l1_clf = Line1StuckClassifier()
-                clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap)
-                clf_res = await l1_clf.detect(clf_ctx)
-                if clf_res.issue_detected:
-                    is_stuck_on_line_1 = True
-            except Exception as ce:
-                print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
-
-            # Additional check: if top_line is <= 5, it is definitely still on line 1
             if 0 < top_line <= 5:
                 is_stuck_on_line_1 = True
+            elif top_line == 0:
+                try:
+                    l1_clf = Line1StuckClassifier()
+                    clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap)
+                    clf_res = await l1_clf.detect(clf_ctx)
+                    if clf_res.issue_detected:
+                        is_stuck_on_line_1 = True
+                except Exception as ce:
+                    print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
 
             # If initial attempt left page on Line 1, attempt an immediate re-focus & retry
             if is_stuck_on_line_1:
@@ -308,13 +302,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
                         with open(calib, "wb") as f: f.write(snap_retry)
-                        r_total = await state.detect_last_line_in_process(calib)
-                        r_top = await state.detect_top_line_in_process(calib)
+                        r_top, r_total = await state.detect_gutter_bounds_in_process(calib)
                         if r_total > 0: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
-                        retry_clf_res = await l1_clf.detect(ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_retry))
-                        if not retry_clf_res.issue_detected and top_line > 5:
+                        if top_line > 5:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
                         else:
