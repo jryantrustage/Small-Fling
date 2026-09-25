@@ -1,13 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AlertTriangle, Eye, RefreshCw, Monitor, Loader2, Wrench, Zap, X, Minus, Maximize2, GripHorizontal, ArrowDownToLine, ArrowUpToLine, Undo2 } from 'lucide-react';
-import type { AlignmentData } from '../types';
+import { AlertTriangle, Eye, RefreshCw, Monitor, Loader2, Wrench, Zap, X, Minus, Maximize2, GripHorizontal, ArrowDownToLine, ArrowUpToLine, Undo2, Smartphone } from 'lucide-react';
+import type { AlignmentData, DeviceInfoData } from '../types';
 
 interface Props {
   alignmentData: AlignmentData;
+  deviceInfo?: DeviceInfoData | null;
+  deviceModel?: 'pixel_8' | 'pixel_10';
   isCheckingAlignment: boolean;
   onTriggerCheck: () => void;
   onOpenModal: () => void;
   onOpenLiveScreen: () => void;
+  onOpenDeviceDrawer?: () => void;
+  onConnectDevice?: (targetIp?: string, model?: 'pixel_8' | 'pixel_10') => void;
+  isConnectingDevice?: boolean;
   onFixClassifier?: (classifierId: string) => void;
   onFixAllClassifiers?: () => void;
   fixingClassifierId?: string | null;
@@ -21,7 +26,8 @@ interface Props {
 }
 
 export const AlignmentAlertBanner: React.FC<Props> = ({
-  alignmentData, isCheckingAlignment, onTriggerCheck, onOpenModal, onOpenLiveScreen,
+  alignmentData, deviceInfo, deviceModel = 'pixel_10', isCheckingAlignment, onTriggerCheck, onOpenModal, onOpenLiveScreen,
+  onOpenDeviceDrawer, onConnectDevice, isConnectingDevice = false,
   onFixClassifier, onFixAllClassifiers, fixingClassifierId, isFixingAll,
   isDismissed = false, onDismissBanner, isMinimized = false, onToggleMinimizeBanner,
   dismissedItems = [], onDismissItem,
@@ -57,19 +63,96 @@ export const AlignmentAlertBanner: React.FC<Props> = ({
     dragRef.current = { mouseX: e.clientX, mouseY: e.clientY, startX: pos.x, startY: pos.y };
   };
 
-  if (alignmentData.is_aligned || isDismissed) return null;
+  if (isDismissed) return null;
 
-  const rawIssues = alignmentData.classifier_issues || alignmentData.classifiers?.issues || [];
-  const classifierIssues = rawIssues.filter(i => !dismissedItems.includes(i.classifier_id) && !dismissedItems.includes(`classifier_${i.classifier_id}`));
-  const boxes = alignmentData.boxes || {};
-  const activeFails = Object.entries(boxes).filter(([k, b]) => !b.passed && !b.dismissed && !dismissedItems.includes(k));
-  const dismissedCount = Object.keys(boxes).filter(k => dismissedItems.includes(k)).length;
+  // Device connectivity supersedes Teams Markdown alignment readiness
+  const isDeviceConnected = deviceInfo !== undefined && deviceInfo !== null
+    ? deviceInfo.connected
+    : (alignmentData.device_connected !== false && alignmentData.reason !== 'No active Android device connected via ADB');
+
+  // If device is connected and Teams Markdown is aligned, no banner needed
+  if (isDeviceConnected && alignmentData.is_aligned) return null;
 
   const stylePos: React.CSSProperties = dock === 'float'
     ? { position: 'fixed', left: `${pos.x}px`, top: `${pos.y}px`, width: 'calc(100vw - 40px)', maxWidth: '1200px', zIndex: 120, borderRadius: '10px', boxShadow: '0 12px 32px rgba(0,0,0,0.85), 0 0 16px rgba(239, 68, 68, 0.4)' }
     : dock === 'bottom'
     ? { position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 120, borderTop: '2px solid #ef4444', borderBottom: 'none', boxShadow: '0 -8px 24px rgba(0,0,0,0.6)' }
     : {};
+
+  const activeDevName = deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
+  const knownIp = (deviceModel === 'pixel_8' ? deviceInfo?.pixel_8_address : deviceInfo?.pixel_10_address) ||
+    deviceInfo?.cached_addresses?.last || '';
+
+  // Case 1: Device is NOT connected -> Device connectivity banner takes precedence
+  if (!isDeviceConnected) {
+    if (isMinimized) {
+      return (
+        <div ref={bannerRef} className={`alignment-alert-banner minimized ${dock}`} style={stylePos}>
+          <div className="alignment-drag-handle" onMouseDown={startDrag} title="Drag to move alert bar"><GripHorizontal size={14} /></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+            <AlertTriangle size={15} color="#ff7b72" />
+            <span style={{ fontWeight: 800, fontSize: '12px', color: '#fca5a5' }}>
+              ⚠️ NO DEVICE CONNECTED ({activeDevName} Offline)
+            </span>
+            <span style={{ fontSize: '11px', color: '#fecaca', maxWidth: '360px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Device connectivity required before Teams Markdown alignment check
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn-banner-icon" onClick={onToggleMinimizeBanner} title="Expand"><Maximize2 size={13} /><span style={{ fontSize: '11px' }}>Expand</span></button>
+            <button type="button" className="btn-banner-icon danger" onClick={onDismissBanner} title="Dismiss"><X size={14} /></button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div ref={bannerRef} className={`alignment-alert-banner ${dock}`} style={stylePos}>
+        <div className="alignment-drag-handle" onMouseDown={startDrag} title="Click and drag overlay"><GripHorizontal size={16} /></div>
+        <div className="alignment-alert-content" style={{ flex: 1 }}>
+          <div className="alignment-alert-icon"><AlertTriangle size={22} color="#ff7b72" /></div>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span className="alignment-alert-title">⚠️ NO ANDROID DEVICE CONNECTED</span>
+              <span style={{ fontSize: '11px', color: '#fca5a5' }}>
+                Device connection supersedes alignment check. Connect {activeDevName} via ADB or Wi-Fi to capture screens and verify Teams Markdown alignment.
+              </span>
+            </div>
+            {knownIp && (
+              <div style={{ fontSize: '11px', color: '#e2e8f0', marginTop: '6px', fontFamily: 'var(--font-mono)' }}>
+                Target: <strong style={{ color: '#fff' }}>{activeDevName}</strong> &bull; Known Address: <strong style={{ color: '#58a6ff' }}>{knownIp}</strong>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="alignment-alert-actions">
+          {knownIp && (
+            <button className="btn-alignment-recheck" style={{ background: '#238636', borderColor: '#2ea043', color: '#fff' }} onClick={() => onConnectDevice?.(knownIp, deviceModel)} disabled={isConnectingDevice}>
+              {isConnectingDevice ? <Loader2 size={12} className="spin" /> : <Zap size={12} />}
+              <span>Connect {activeDevName}</span>
+            </button>
+          )}
+          <button className="btn-alignment-stream" onClick={onOpenDeviceDrawer} style={{ background: 'rgba(239, 68, 68, 0.25)', borderColor: '#ef4444' }}>
+            <Smartphone size={12} /><span>Select / Pair Device</span>
+          </button>
+          <button className="btn-alignment-recheck" onClick={onTriggerCheck} disabled={isCheckingAlignment}>
+            {isCheckingAlignment ? <Loader2 size={12} className="spin" /> : <RefreshCw size={12} />}<span>Retry ADB Scan</span>
+          </button>
+          <button type="button" className="btn-banner-icon" onClick={() => setDock(d => d === 'top' ? 'bottom' : 'top')}>{dock === 'top' ? <ArrowDownToLine size={13} /> : <ArrowUpToLine size={13} />}</button>
+          <button type="button" className="btn-banner-icon" onClick={onToggleMinimizeBanner}><Minus size={13} /></button>
+          <button type="button" className="btn-banner-icon danger" onClick={onDismissBanner}><X size={14} /></button>
+        </div>
+      </div>
+    );
+  }
+
+  // Case 2: Device IS connected, but Teams Markdown is NOT aligned
+  const rawIssues = alignmentData.classifier_issues || alignmentData.classifiers?.issues || [];
+  const classifierIssues = rawIssues.filter(i => !dismissedItems.includes(i.classifier_id) && !dismissedItems.includes(`classifier_${i.classifier_id}`));
+  const boxes = alignmentData.boxes || {};
+  const activeFails = Object.entries(boxes).filter(([k, b]) => !b.passed && !b.dismissed && !dismissedItems.includes(k));
+  const dismissedCount = Object.keys(boxes).filter(k => dismissedItems.includes(k)).length;
 
   if (isMinimized) {
     return (
