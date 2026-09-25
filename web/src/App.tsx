@@ -291,7 +291,17 @@ function AppContent() {
     setDeviceModel(dev);
     try {
       localStorage.setItem('mc_target_device_model', dev);
-      await api('/api/device/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ device_model: dev }) });
+      const matchedDevice = deviceInfo?.devices?.find(d =>
+        dev === 'pixel_8'
+          ? (d.displayName === 'Pixel 8' || d.model.toLowerCase().includes('pixel_8') || (pixel8Ip && d.serial === pixel8Ip))
+          : (d.displayName === 'Pixel 10' || d.model.toLowerCase().includes('pixel_10') || (pixel10Ip && d.serial === pixel10Ip))
+      );
+      const targetSerial = (dev === 'pixel_8' ? pixel8Ip : pixel10Ip) || matchedDevice?.serial;
+      await api('/api/device/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_model: dev, serial: targetSerial || undefined })
+      });
       const info = await apiJson<DeviceInfoData>('/api/device/info');
       if (info) setDeviceInfo(info);
     } catch {}
@@ -678,6 +688,7 @@ function AppContent() {
   );
 
   const devDisplayName = deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10';
+  const devLines = deviceModel === 'pixel_8' ? 31 : 47;
 
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">
@@ -704,8 +715,8 @@ function AppContent() {
             >
               <div className={`device-status-dot ${isCurrentDeviceConnected ? 'online' : 'offline'}`} />
               <Smartphone size={13} color={isCurrentDeviceConnected ? 'var(--color-primary)' : '#ef4444'} />
-              <span>{devDisplayName}</span>
-              <span className="device-spec">({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)</span>
+              <span style={{ fontWeight: 700 }}>{devDisplayName}</span>
+              <span className="device-spec">({devLines}L)</span>
               <ChevronDown size={11} style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
 
@@ -735,12 +746,17 @@ function AppContent() {
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`}>
                           <span className="status-dot-mini" />
                           {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
                         </span>
-                        {deviceModel === 'pixel_8' && <Check size={14} color={isP8Available ? '#22c55e' : '#ef4444'} />}
+                        <div
+                          className={`device-select-checkbox ${deviceModel === 'pixel_8' ? 'checked' : ''}`}
+                          title={deviceModel === 'pixel_8' ? 'Selected / Active Device' : 'Click to select Pixel 8'}
+                        >
+                          {deviceModel === 'pixel_8' && <Check size={12} strokeWidth={3} />}
+                        </div>
                       </div>
                     </div>
 
@@ -859,12 +875,17 @@ function AppContent() {
                           </div>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <span className={`device-status-badge ${isP10Available ? 'available' : 'unavailable'}`}>
                           <span className="status-dot-mini" />
                           {isP10Available ? 'ONLINE' : 'NOT AVAILABLE'}
                         </span>
-                        {deviceModel === 'pixel_10' && <Check size={14} color={isP10Available ? '#22c55e' : '#ef4444'} />}
+                        <div
+                          className={`device-select-checkbox ${deviceModel === 'pixel_10' ? 'checked' : ''}`}
+                          title={deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10'}
+                        >
+                          {deviceModel === 'pixel_10' && <Check size={12} strokeWidth={3} />}
+                        </div>
                       </div>
                     </div>
 
@@ -966,36 +987,7 @@ function AppContent() {
                   </div>
                 </div>
 
-                {/* Additional connected ADB serials if any */}
-                {deviceInfo?.devices && deviceInfo.devices.length > 0 && (
-                  <div style={{ marginTop: '4px' }}>
-                    <div className="dropdown-section-title">ACTIVE ADB TARGET</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {deviceInfo.devices.map(dev => {
-                        const isDevActive = deviceInfo.active_serial === dev.serial;
-                        const resolvedName = dev.displayName || (dev.serial === pixel8Ip ? 'Pixel 8' : dev.serial === pixel10Ip ? 'Pixel 10' : dev.model.replace(/_/g, ' '));
-                        return (
-                          <div
-                            key={dev.serial}
-                            className={`device-list-item ${isDevActive ? 'active' : ''}`}
-                            onClick={() => { handleSelectSerial(dev.serial); setShowDeviceDropdown(false); }}
-                          >
-                            <div className="device-item-left">
-                              <Smartphone size={14} color={isDevActive ? '#00ff9d' : '#8b949e'} />
-                              <div>
-                                <div className="device-item-title" style={{ color: isDevActive ? '#00ff9d' : 'var(--text-main)' }}>
-                                  {resolvedName}
-                                </div>
-                                <div className="device-item-sub">{dev.serial}</div>
-                              </div>
-                            </div>
-                            {isDevActive && <Check size={14} color="#00ff9d" />}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+
 
                 <div className="dropdown-section-title" style={{ marginTop: '4px' }}>DISPLAY HARDWARE CAPABILITIES</div>
                 <div style={{ display: 'flex', gap: '6px' }}>

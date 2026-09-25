@@ -77,7 +77,7 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
             <button type="button" className="drawer-device-btn" onClick={() => setShowMenu(p => !p)} title="Switch connected target device">
               <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
               <Smartphone size={12} color="var(--color-primary)" />
-              <span>{deviceInfo?.active_model?.toUpperCase() || (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
+              <span>{deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10'}</span>
               <ChevronDown size={11} style={{ transform: showMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
 
