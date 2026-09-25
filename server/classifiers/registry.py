@@ -14,6 +14,8 @@ from .editor_classifiers import (
     MatrixAppOverlayClassifier,
     OcrDegradedClassifier,
     Line1StuckClassifier,
+    TeamsMarkdownVisibleClassifier,
+    EditorCursorFocusedClassifier,
 )
 
 
@@ -31,6 +33,8 @@ class ClassifierRegistry:
         self.register(MatrixAppOverlayClassifier())
         self.register(OcrDegradedClassifier())
         self.register(Line1StuckClassifier())
+        self.register(TeamsMarkdownVisibleClassifier())
+        self.register(EditorCursorFocusedClassifier())
 
     def register(self, classifier: BaseClassifier) -> None:
         """Register a new classifier."""

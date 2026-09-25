@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert, Sliders, ToggleLeft, ToggleRight, Check, X, Play } from 'lucide-react';
+import { Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert, Sliders, ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle, Wrench } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
 export interface DagNodeState {
@@ -84,6 +84,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [configFeedback, setConfigFeedback] = useState<string | null>(null);
+  const [showNode1Troubleshooting, setShowNode1Troubleshooting] = useState(true);
+  const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
+  const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
 
   const [node5Config, setNode5Config] = useState<Node5ConfigState>({
     prevent_trigger_on_issue: true,
@@ -309,9 +312,89 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     : 'Target: Auto-detect (Ctrl+End)'}
             </div>
 
+            {isNode1Error && (
+              <div style={{ marginTop: '8px', background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.35)', borderRadius: '8px', padding: '9px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <AlertTriangle size={13} /> Troubleshooting (Page did not move)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
+                    style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '10px', cursor: 'pointer', padding: '0 2px', fontWeight: 600 }}
+                  >
+                    {showNode1Troubleshooting ? 'Collapse' : 'Expand'}
+                  </button>
+                </div>
+
+                {showNode1Troubleshooting && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '10px', color: '#c9d1d9', marginTop: '2px' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>1</span>
+                      <div><strong>Editor Focus & Cursor:</strong> Tap inside the markdown document so the blinking cursor (|) appears.</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>2</span>
+                      <div><strong>Suppress Soft Keyboard:</strong> Ensure on-screen IME keyboard is closed so hardware keys pass through.</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>3</span>
+                      <div><strong>Desktop Display:</strong> Verify Teams is visible on the external desktop screen (Pixel 8 / Pixel 10).</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>4</span>
+                      <div><strong>Manual Override:</strong> Press Ctrl+End on external keyboard or set total lines in Node 1 config.</div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(248, 81, 73, 0.2)' }}>
+                  <button
+                    type="button"
+                    disabled={isFixingNode1Focus}
+                    onClick={async () => {
+                      setIsFixingNode1Focus(true);
+                      try {
+                        await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
+                        onRefresh?.();
+                      } catch (e) {
+                        console.error('Focus fix error:', e);
+                      } finally {
+                        setIsFixingNode1Focus(false);
+                      }
+                    }}
+                    style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+                    title="Tap text area on external desktop to establish editor cursor focus"
+                  >
+                    <Wrench size={10} />
+                    <span>{isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isHidingKeyboard}
+                    onClick={async () => {
+                      setIsHidingKeyboard(true);
+                      try {
+                        await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
+                        onRefresh?.();
+                      } catch (e) {
+                        console.error('Hide KB error:', e);
+                      } finally {
+                        setIsHidingKeyboard(false);
+                      }
+                    }}
+                    style={{ background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Suppress soft keyboard via ADB"
+                  >
+                    <span>{isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <button type="button" onClick={() => handleRunNode('init_end')} disabled={runningNodeId !== null} title="Run Ctrl+End and detect EOF last line" style={runBtnStyle('#58a6ff', runningNodeId !== null)}>
               {isNode1Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{isNode1Running ? 'Calibrating...' : 'Run Node 1'}</span>
+              <span>{isNode1Running ? 'Calibrating...' : (isNode1Error ? 'Retry Node 1 (Ctrl+End)' : 'Run Node 1')}</span>
             </button>
           </div>
 

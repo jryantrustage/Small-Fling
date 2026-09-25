@@ -163,19 +163,18 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
         if requested_serial:
             for dev in active:
                 if dev["serial"] == requested_serial or requested_serial in dev["serial"]:
-                    found_serial = dev["serial"]
-                    break
+                    return dev["serial"]
+            return None
 
-        if not found_serial:
-            pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
-            p8_keys, p10_keys = ["pixel_8", "husky", "shiba", "pixel 8"], ["pixel_10", "mustang", "frankel", "pixel 10"]
-            keys = p8_keys if pref == "pixel_8" else p10_keys
+        pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
+        p8_keys, p10_keys = ["pixel_8", "husky", "shiba", "pixel 8"], ["pixel_10", "mustang", "frankel", "pixel 10"]
+        keys = p8_keys if pref == "pixel_8" else p10_keys
 
-            for dev in active:
-                m = (dev["model"] + " " + dev["raw"]).lower()
-                if any(k in m for k in keys):
-                    found_serial = dev["serial"]
-                    break
+        for dev in active:
+            m = (dev["model"] + " " + dev["raw"]).lower()
+            if any(k in m for k in keys):
+                found_serial = dev["serial"]
+                break
 
         if not found_serial and target_adb_serial:
             for dev in active:
@@ -245,7 +244,20 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                     m = re.search(r'(?:mDisplayId|displayId)[= ]+(\d+)', line)
                     if m and int(m.group(1)) != 0:
                         return int(m.group(1))
-            # 4. Fallback search for any non-zero display id in dumpsys
+            # 4. Check which display is actively hosting Teams
+            try:
+                res_win = await run_adb_shell("dumpsys window windows | grep -E 'Display #[0-9]+|com.microsoft.teams'", ser, timeout=2.0)
+                if res_win.get("status") == "ok" and res_win.get("stdout"):
+                    cur_disp = None
+                    for line in res_win["stdout"].splitlines():
+                        m_d = re.search(r'Display #(\d+)', line)
+                        if m_d:
+                            cur_disp = int(m_d.group(1))
+                        if cur_disp and cur_disp > 0 and "com.microsoft.teams" in line:
+                            return cur_disp
+            except Exception:
+                pass
+            # 5. Fallback search for any non-zero display id in dumpsys
             for line in out.splitlines():
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
                 if m and int(m.group(1)) != 0:
@@ -513,28 +525,29 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         disp_id = await detect_external_display_id(ser)
         model_disp = 9 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
-        # 1. Tap editor content area to ensure desktop window has input focus
-        if disp_id > 0:
-            await run_adb_shell(f"input -d {disp_id} tap 500 500", ser)
-            await asyncio.sleep(0.12)
+        # 1. Tap editor content area if not focused to ensure desktop window has input focus & blinking cursor
+        try:
+            ime_chk = await run_adb_shell("dumpsys input_method | grep -E 'mServedView|mInputConnection'", ser, timeout=1.5)
+            ime_out = ime_chk.get("stdout", "") if ime_chk.get("status") == "ok" else ""
+            if "preview_host_view" not in ime_out and "MAMWebView" not in ime_out:
+                target_d = disp_id if disp_id > 0 else model_disp
+                if target_d > 0:
+                    await run_adb_shell(f"input -d {target_d} tap 450 320", ser)
+                await run_adb_shell("input tap 450 320", ser)
+                await asyncio.sleep(0.15)
+        except Exception:
+            pass
 
-        # 2. Dispatch to detected external display
+        # 2. Dispatch HID keycombination with duration flag (-t 150ms) to hold Ctrl while End/Home is pressed
         if disp_id > 0:
-            await run_adb_shell(f"input -d {disp_id} keycombination {key1} {key2}", ser)
+            await run_adb_shell(f"input -d {disp_id} keycombination -t 150 {key1} {key2}", ser)
         # Dispatch to model-specific display if different
         if model_disp != disp_id and model_disp > 0:
-            await run_adb_shell(f"input -d {model_disp} keycombination {key1} {key2}", ser)
+            await run_adb_shell(f"input -d {model_disp} keycombination -t 150 {key1} {key2}", ser)
 
         # 3. Dispatch to global focused window (vital for desktop freeform windows)
         await asyncio.sleep(0.04)
-        await run_adb_shell(f"input keycombination {key1} {key2}", ser)
-
-        # For EOF / Line 1 jump, also send KEYCODE_MOVE_END (123) / KEYCODE_MOVE_HOME (122)
-        if key2 in [122, 123]:
-            await asyncio.sleep(0.02)
-            if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} keyevent {key2}", ser)
-            await run_adb_shell(f"input keyevent {key2}", ser)
+        await run_adb_shell(f"input keycombination -t 150 {key1} {key2}", ser)
 
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
