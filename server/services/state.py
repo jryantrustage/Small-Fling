@@ -182,7 +182,7 @@ dag_state: Dict[str, Any] = {
             "config": {
                 "key1": 113,
                 "key2": 123,
-                "settle_delay_ms": 800,
+                "settle_delay_ms": 1200,
                 "manual_total_lines": 0
             }
         },
@@ -196,7 +196,7 @@ dag_state: Dict[str, Any] = {
             "config": {
                 "key1": 113,
                 "key2": 122,
-                "settle_delay_ms": 800,
+                "settle_delay_ms": 1000,
                 "expected_line": 1
             }
         },

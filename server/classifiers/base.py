@@ -15,6 +15,7 @@ class ClassifierContext:
     image_bytes: Optional[bytes] = None
     image_cv: Optional[np.ndarray] = None
     alignment_data: Optional[Dict[str, Any]] = None
+    target_coordinates: Optional[Tuple[int, int]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
