@@ -13,6 +13,11 @@ from services.adb_service import (
     capture_external_screenshot,
 )
 
+try:
+    from server.routers.orchestration import execute_dag_group_initialize
+except ImportError:
+    from routers.orchestration import execute_dag_group_initialize
+
 router = APIRouter(tags=["Projects"])
 
 @router.get("/api/projects")
@@ -131,19 +136,31 @@ async def create_project(req: ProjectCreateRequest):
     state.document_lines.clear()
     state.load_persisted_state()
 
-    # Initialize DAG state for new project in clean, uncalibrated IDLE state
+    # Initialize DAG state for new project with initialize group active
     target_lines = req.target_total_lines or 0
-    state.dag_state["nodes"]["init_end"].update({"status": "idle", "total_lines": target_lines})
+    state.dag_state.setdefault("groups", {})
+    state.dag_state["groups"]["initialize"] = {
+        "id": "initialize", "title": "Initialize", "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
+        "nodes": ["init_end", "reset_home"], "status": "active",
+        "progress": {"percent": 5, "stage": "Starting project initialization...", "status": "running"}
+    }
+    state.dag_state["groups"]["capture_entire_markdown"] = {
+        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
+        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
+        "nodes": ["frame_acquire", "arrow_down", "verification_trigger"], "status": "idle"
+    }
+    state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
     state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
     state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
+    state.dag_state["current_active_group"] = "initialize"
     state.dag_state["current_active_node"] = "init_end"
     state.latest_telemetry["target_total_lines"] = target_lines
     state.latest_telemetry["current_top_line"] = 0
     state.latest_telemetry["current_bottom_line"] = 0
-    state.latest_telemetry["phase"] = "IDLE"
-    state.latest_telemetry["status_message"] = "Project ready. DAG waiting for invocation."
+    state.latest_telemetry["phase"] = "INITIALIZING"
+    state.latest_telemetry["status_message"] = "Project created. Running DAG Group: Initialize..."
 
     await state.ws_manager.broadcast({
         "type": "project_switched",
@@ -151,6 +168,10 @@ async def create_project(req: ProjectCreateRequest):
         "dag": state.dag_state,
         "telemetry": state.latest_telemetry
     })
+
+    # Automatically run the initialize DAG group asynchronously
+    asyncio.create_task(execute_dag_group_initialize(project_id=new_proj["id"]))
+
     return new_proj
 
 async def extract_request_image(request: Request) -> Optional[bytes]:

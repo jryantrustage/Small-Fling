@@ -14,6 +14,8 @@ export interface DagNodeState {
 export interface DagStatusData {
   dag?: {
     current_active_node?: string;
+    current_active_group?: string;
+    groups?: Record<string, any>;
     nodes?: Record<string, any>;
     edges?: Array<{ from: string; to: string; is_loopback?: boolean }>;
   };
@@ -77,6 +79,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   });
 
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
+  const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
   const [nodeFeedback, setNodeFeedback] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
   const [isRunningCalibration, setIsRunningCalibration] = useState(false);
   const [calibrationMsg, setCalibrationMsg] = useState('');
@@ -165,6 +168,40 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  const handleRunGroup = async (groupId: string) => {
+    setRunningGroupId(groupId);
+    setNodeFeedback(null);
+    try {
+      const res = await fetch(`${apiBase}/api/dag/groups/${groupId}/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: activeDeviceSerial, project_id: activeProjectId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || data.message || `Failed to run DAG group ${groupId}`);
+      setNodeFeedback({
+        id: groupId,
+        message: data.status === 'success'
+          ? `DAG Group '${groupId === 'initialize' ? 'Initialize' : 'Capture Entire Markdown'}' executed successfully ✔`
+          : (data.error || `DAG Group execution note`),
+        isError: data.status === 'error'
+      });
+      const statusRes = await fetch(`${apiBase}/api/dag/status`);
+      if (statusRes.ok) {
+        const d = await statusRes.json();
+        setDagStatus(prev => ({ ...prev, ...d }));
+        if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
+      }
+      onRefresh?.();
+      setTimeout(() => setNodeFeedback(null), 5000);
+    } catch (err: any) {
+      setNodeFeedback({ id: groupId, message: `Group run error: ${err.message}`, isError: true });
+      setTimeout(() => setNodeFeedback(null), 6000);
+    } finally {
+      setRunningGroupId(null);
+    }
+  };
+
   const handleTriggerCalibration = async () => {
     if (!activeProjectId) { setCalibrationMsg('No active project selected'); return; }
     setIsRunningCalibration(true);
@@ -250,6 +287,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     marginTop: 'auto'
   });
 
+  // Group metrics & statuses
+  const initGroup = dagStatus.dag?.groups?.initialize || {};
+  const captureGroup = dagStatus.dag?.groups?.capture_entire_markdown || {};
+
   // Accurate node metrics & statuses
   const isNode1Running = runningNodeId === 'init_end' || node1.status === 'active';
   const isNode1Error = node1.status === 'error' || Boolean(node1.error);
@@ -260,6 +301,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isNode2Verified = node2.status === 'completed' && Boolean(node2.verified);
   const isNode2Error = node2.status === 'error' || (node2.status === 'completed' && !node2.verified);
 
+  const isInitGroupRunning = runningGroupId === 'initialize' || initGroup.status === 'active' || isNode1Running || isNode2Running;
+  const isInitGroupCompleted = !isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified));
+  const isInitGroupError = !isInitGroupRunning && (initGroup.status === 'error' || isNode1Error);
+
   const isNode3Running = runningNodeId === 'frame_acquire' || node3.status === 'active' || isOrchestrating;
   const isNode3Error = node3.status === 'error' || Boolean(node3.error);
   const isNode3Done = !isNode3Error && node3.status === 'completed';
@@ -268,6 +313,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isNode4Done = node4.status === 'completed';
 
   const isNode5Running = runningNodeId === 'verification_trigger' || isEvaluating || node5.status === 'active';
+
+  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode4Running || isNode5Running || isOrchestrating;
 
   return (
     <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '16px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
@@ -293,212 +340,269 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       )}
 
       <div style={{ position: 'relative', padding: '6px 4px 16px 4px', overflowX: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '8px', minWidth: '850px' }}>
-          {/* Node 1 */}
-          <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode1Calibrated ? '#238636' : (isNode1Error ? '#f85149' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>1. DETERMINE TOTAL LINES</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode1Running ? '#58a6ff22' : (isNode1Calibrated ? '#23863633' : (isNode1Error ? 'rgba(248, 81, 73, 0.25)' : '#30363d')), color: isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
-                {isNode1Running ? 'CALIBRATING...' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN'))}
-              </span>
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: isNode1Error ? '#ff7b72' : '#58a6ff' }}>HID Ctrl + End & Last Line OCR</div>
-            <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Sends HID Ctrl+End keys, verifies gutter at EOF, then displays total lines by OCR of last line.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e'), fontWeight: 700, wordBreak: 'break-word' }}>
-              {isNode1Calibrated && node1TotalLines > 0
-                ? `Total: ${node1TotalLines.toLocaleString()} Lines`
-                : isNode1Error
-                    ? (node1.error || 'Failed: Editor remained on Line 1 (EOF not reached)')
-                    : 'Target: Auto-detect (Ctrl+End)'}
+        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '12px', minWidth: '980px' }}>
+          
+          {/* DAG GROUP 1: INITIALIZE */}
+          <div style={{ flex: '1.9 1 0', background: 'rgba(31, 111, 235, 0.04)', border: `1px solid ${isInitGroupCompleted ? '#23863666' : (isInitGroupError ? '#f8514966' : '#1f6feb44')}`, borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#58a6ff', letterSpacing: '0.5px' }}>DAG GROUP 1: INITIALIZE</span>
+                <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: isInitGroupRunning ? '#a371f733' : (isInitGroupCompleted ? '#23863633' : (isInitGroupError ? '#f8514922' : '#30363d')), color: isInitGroupRunning ? '#a371f7' : (isInitGroupCompleted ? '#00ff9d' : (isInitGroupError ? '#ff7b72' : '#8b949e')), fontWeight: 800 }}>
+                  {isInitGroupRunning ? 'INITIALIZING...' : (isInitGroupCompleted ? 'COMPLETED ✔' : (isInitGroupError ? 'ISSUE DETECTED' : 'IDLE'))}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleRunGroup('initialize')}
+                disabled={runningGroupId !== null || runningNodeId !== null}
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', background: isInitGroupRunning ? '#21262d' : '#1f6feb22', color: isInitGroupRunning ? '#8b949e' : '#58a6ff', border: '1px solid #1f6feb66', borderRadius: '5px', fontSize: '10px', fontWeight: 700, cursor: isInitGroupRunning ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+                title="Run complete initialization routine (Ctrl+End calibrate total lines + Ctrl+Home verify line 1)"
+              >
+                {isInitGroupRunning ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                <span>{isInitGroupRunning ? 'Initializing...' : 'Run Initialize Group'}</span>
+              </button>
             </div>
 
-            {isNode1Error && (
-              <div style={{ marginTop: '8px', background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.35)', borderRadius: '8px', padding: '9px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <AlertTriangle size={13} /> Troubleshooting (Page did not move)
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
+              {/* Node 1 */}
+              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode1Calibrated ? '#238636' : (isNode1Error ? '#f85149' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>1. DETERMINE TOTAL LINES</span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode1Running ? '#58a6ff22' : (isNode1Calibrated ? '#23863633' : (isNode1Error ? 'rgba(248, 81, 73, 0.25)' : '#30363d')), color: isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
+                    {isNode1Running ? 'CALIBRATING...' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN'))}
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
-                    style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '10px', cursor: 'pointer', padding: '0 2px', fontWeight: 600 }}
-                  >
-                    {showNode1Troubleshooting ? 'Collapse' : 'Expand'}
-                  </button>
+                </div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: isNode1Error ? '#ff7b72' : '#58a6ff' }}>HID Ctrl + End & Last Line OCR</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Sends HID Ctrl+End keys, verifies gutter at EOF, then displays total lines by OCR of last line.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e'), fontWeight: 700, wordBreak: 'break-word' }}>
+                  {isNode1Calibrated && node1TotalLines > 0
+                    ? `Total: ${node1TotalLines.toLocaleString()} Lines`
+                    : isNode1Error
+                        ? (node1.error || 'Failed: Editor remained on Line 1 (EOF not reached)')
+                        : 'Target: Auto-detect (Ctrl+End)'}
                 </div>
 
-                {showNode1Troubleshooting && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '10px', color: '#c9d1d9', marginTop: '2px' }}>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>1</span>
-                      <div><strong>Editor Focus & Cursor:</strong> Tap inside the markdown document so the blinking cursor (|) appears.</div>
+                {isNode1Error && (
+                  <div style={{ marginTop: '8px', background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.35)', borderRadius: '8px', padding: '9px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <AlertTriangle size={13} /> Troubleshooting (Page did not move)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
+                        style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '10px', cursor: 'pointer', padding: '0 2px', fontWeight: 600 }}
+                      >
+                        {showNode1Troubleshooting ? 'Collapse' : 'Expand'}
+                      </button>
                     </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>2</span>
-                      <div><strong>Suppress Soft Keyboard:</strong> Ensure on-screen IME keyboard is closed so hardware keys pass through.</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>3</span>
-                      <div><strong>Desktop Display:</strong> Verify Teams is visible on the external desktop screen (Pixel 8 / Pixel 10).</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
-                      <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>4</span>
-                      <div><strong>Manual Override:</strong> Press Ctrl+End on external keyboard or set total lines in Node 1 config.</div>
+
+                    {showNode1Troubleshooting && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '10px', color: '#c9d1d9', marginTop: '2px' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                          <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>1</span>
+                          <div><strong>Editor Focus & Cursor:</strong> Tap inside the markdown document so the blinking cursor (|) appears.</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                          <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>2</span>
+                          <div><strong>Suppress Soft Keyboard:</strong> Ensure on-screen IME keyboard is closed so hardware keys pass through.</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                          <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>3</span>
+                          <div><strong>Desktop Display:</strong> Verify Teams is visible on the external desktop screen (Pixel 8 / Pixel 10).</div>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+                          <span style={{ background: '#f8514933', color: '#ff7b72', fontWeight: 800, padding: '0 4px', borderRadius: '3px', fontSize: '9px', minWidth: '14px', textAlign: 'center' }}>4</span>
+                          <div><strong>Manual Override:</strong> Press Ctrl+End on external keyboard or set total lines in Node 1 config.</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(248, 81, 73, 0.2)' }}>
+                      <button
+                        type="button"
+                        disabled={isFixingNode1Focus}
+                        onClick={async () => {
+                          setIsFixingNode1Focus(true);
+                          try {
+                            await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
+                            onRefresh?.();
+                          } catch (e) {
+                            console.error('Focus fix error:', e);
+                          } finally {
+                            setIsFixingNode1Focus(false);
+                          }
+                        }}
+                        style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
+                        title="Tap text area on external desktop to establish editor cursor focus"
+                      >
+                        <Wrench size={10} />
+                        <span>{isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isHidingKeyboard}
+                        onClick={async () => {
+                          setIsHidingKeyboard(true);
+                          try {
+                            await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
+                            onRefresh?.();
+                          } catch (e) {
+                            console.error('Hide KB error:', e);
+                          } finally {
+                            setIsHidingKeyboard(false);
+                          }
+                        }}
+                        style={{ background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer' }}
+                        title="Suppress soft keyboard via ADB"
+                      >
+                        <span>{isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}</span>
+                      </button>
                     </div>
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '4px', paddingTop: '4px', borderTop: '1px solid rgba(248, 81, 73, 0.2)' }}>
-                  <button
-                    type="button"
-                    disabled={isFixingNode1Focus}
-                    onClick={async () => {
-                      setIsFixingNode1Focus(true);
-                      try {
-                        await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
-                        onRefresh?.();
-                      } catch (e) {
-                        console.error('Focus fix error:', e);
-                      } finally {
-                        setIsFixingNode1Focus(false);
-                      }
-                    }}
-                    style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px' }}
-                    title="Tap text area on external desktop to establish editor cursor focus"
-                  >
-                    <Wrench size={10} />
-                    <span>{isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isHidingKeyboard}
-                    onClick={async () => {
-                      setIsHidingKeyboard(true);
-                      try {
-                        await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
-                        onRefresh?.();
-                      } catch (e) {
-                        console.error('Hide KB error:', e);
-                      } finally {
-                        setIsHidingKeyboard(false);
-                      }
-                    }}
-                    style={{ background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', fontSize: '9px', fontWeight: 700, padding: '3px 7px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Suppress soft keyboard via ADB"
-                  >
-                    <span>{isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}</span>
+                <button type="button" onClick={() => handleRunNode('init_end')} disabled={runningNodeId !== null} title="Run Ctrl+End and detect EOF last line" style={runBtnStyle('#58a6ff', runningNodeId !== null)}>
+                  {isNode1Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{isNode1Running ? 'Calibrating...' : (isNode1Error ? 'Retry Node 1 (Ctrl+End)' : 'Run Node 1')}</span>
+                </button>
+              </div>
+
+              {renderArrow('#58a6ff')}
+
+              {/* Node 2 */}
+              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode2Verified ? '#238636' : (isNode2Error ? '#f8514966' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>2. RETURN TO LINE 1</span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode2Running ? '#a371f722' : (isNode2Verified ? '#23863633' : (isNode2Error ? '#f8514922' : '#30363d')), color: isNode2Running ? '#a371f7' : (isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
+                    {isNode2Running ? 'VERIFYING...' : (isNode2Verified ? 'VERIFIED LN 1' : (isNode2Error ? 'UNVERIFIED' : 'NOT RUN'))}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#a371f7' }}>HID Ctrl + Home & Verify Line 1</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Sends HID Ctrl+Home to return to line 1, then verifies line 1 is on top in gutter.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode2Verified ? '#00ff9d' : '#a371f7', fontWeight: 700 }}>
+                  {isNode2Verified ? 'Verified: Line 1 at Top Gutter' : (isNode2Error ? `Ln 1 not detected (${node2.first_line ? `Ln ${node2.first_line}` : 'none'})` : 'Awaiting Ctrl+Home test')}
+                </div>
+                <button type="button" onClick={() => handleRunNode('reset_home')} disabled={runningNodeId !== null} title="Run Ctrl+Home and verify line 1 in gutter" style={runBtnStyle('#a371f7', runningNodeId !== null)}>
+                  {isNode2Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{isNode2Running ? 'Verifying...' : 'Run Node 2'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Group Transition Actuator */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 2px' }}>
+            <div style={{ fontSize: '9px', color: isInitGroupCompleted ? '#00ff9d' : '#8b949e', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>
+              {isInitGroupCompleted ? 'Ready' : 'Pending'}
+            </div>
+            {renderArrow(isInitGroupCompleted ? '#00ff9d' : '#30363d')}
+          </div>
+
+          {/* DAG GROUP 2: CAPTURE ENTIRE MARKDOWN */}
+          <div style={{ flex: '3.1 1 0', background: 'rgba(0, 255, 157, 0.02)', border: `1px solid ${isCaptureGroupRunning ? '#00ff9d55' : '#30363d'}`, borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#00ff9d', letterSpacing: '0.5px' }}>DAG GROUP 2: CAPTURE ENTIRE MARKDOWN</span>
+                <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: isCaptureGroupRunning ? '#00ff9d22' : (isTriggerFired ? '#23863633' : '#30363d'), color: isCaptureGroupRunning ? '#00ff9d' : (isTriggerFired ? '#00ff9d' : '#8b949e'), fontWeight: 800 }}>
+                  {isCaptureGroupRunning ? 'CAPTURING...' : (isTriggerFired ? 'ALL CAPTURED ✔' : 'IDLE')}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleRunGroup('capture_entire_markdown')}
+                disabled={runningGroupId !== null || runningNodeId !== null}
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', background: isCaptureGroupRunning ? '#21262d' : '#00ff9d22', color: isCaptureGroupRunning ? '#8b949e' : '#00ff9d', border: '1px solid #00ff9d66', borderRadius: '5px', fontSize: '10px', fontWeight: 700, cursor: isCaptureGroupRunning ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+                title="Execute capture step cycle (Capture -> Down Arrow -> Qualifier Trigger)"
+              >
+                {isCaptureGroupRunning ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                <span>{isCaptureGroupRunning ? 'Capturing...' : 'Run Capture Group'}</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
+              {/* Node 3 */}
+              <div style={{ flex: 1.1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3. SCREEN CAPTURE</span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
+                    {isNode3Running ? 'ACQUIRING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'ACQUIRED' : 'READY'))}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Capture & Offload OCR Worker</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Screen capture: offloads OCR processing to dedicated worker with keyboard guarded closed.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode3Error ? '#ff7b72' : '#e6edf3', fontWeight: 700 }}>
+                  {isNode3Error ? (node3.error || 'Capture failed: no valid frame') : (isNode3Done ? `Page ${node3.page || currentPage}: Ln ${node3.top_line || effectiveTop} → ${node3.bottom_line || effectiveBottom}` : 'Awaiting Screen Capture')}
+                </div>
+                <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture external screen and offload to OCR worker" style={runBtnStyle(isNode3Error ? '#f85149' : '#00ff9d', runningNodeId !== null)}>
+                  {runningNodeId === 'frame_acquire' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : (isNode3Error ? 'Retry Node 3' : 'Run Node 3')}</span>
+                </button>
+              </div>
+
+              {renderArrow('#00ff9d')}
+
+              {/* Node 4 */}
+              <div style={{ flex: 1.1, background: '#161b22', border: `1px solid ${isNode4Done ? '#ffa65766' : '#30363d'}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>4. NAVIGATION</span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode4Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
+                    {isNode4Running ? 'STEPPING...' : (isNode4Done ? 'STEPPED' : 'PREV BOTTOM + 1')}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#ffa657' }}>Down Arrow (Next Top Ln)</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Uses down arrow keys to position (prev bottom + 1) onto top gutter.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: '#ffa657', fontWeight: 700 }}>
+                  {isNode4Done && node4.new_top_line ? `Next Target Top: Ln ${node4.new_top_line}` : `Step: ${dagStatus.arrow_step_count || 47} Down Arrows`}
+                </div>
+                <button type="button" onClick={() => handleRunNode('arrow_down')} disabled={runningNodeId !== null} title="Step down arrow keys" style={runBtnStyle('#ffa657', runningNodeId !== null)}>
+                  {isNode4Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{isNode4Running ? 'Stepping...' : 'Run Node 4'}</span>
+                </button>
+              </div>
+
+              {renderArrow(triggerDecision.prevented ? '#f85149' : '#00ff9d')}
+
+              {/* Node 5 */}
+              <div style={{ flex: 1.3, background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'), border: `1.5px solid ${isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none') }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. VERIFY TRIGGER</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', background: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f8514933' : '#388bfd22'), color: isTriggerFired ? '#000' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'), fontWeight: 800 }}>
+                      {isTriggerFired ? 'TRIGGER FIRED ✔' : (triggerDecision.prevented ? 'PREVENTED ⛔' : 'TRIGGER ARMED')}
+                    </span>
+                    <button onClick={(e) => { e.stopPropagation(); setIsConfigModalOpen(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: triggerDecision.prevented ? '#f8514922' : '#1f6feb22', color: triggerDecision.prevented ? '#ff7b72' : '#58a6ff', border: `1px solid ${triggerDecision.prevented ? '#f8514966' : '#1f6feb66'}`, borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Settings size={11} /><span>Config</span></button>
+                  </div>
+                </div>
+                <div style={{ fontSize: '12.5px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Verify Last Ln + 1 on Top</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Verifies last line + 1 positioned to top, then triggers DAG flow ({effectiveTop} / {effectiveTotal || '?'}).</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {triggerDecision.prevented ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#ff7b72', fontWeight: 700 }}><ShieldAlert size={12} /><span>Blocked: {triggerDecision.reasons[0] || 'Quality issue'}</span></div>
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#00ff9d', fontWeight: 700 }}><ShieldCheck size={12} /><span>OCR Qualifiers Clean</span></div>
+                  )}
+                  <div style={{ fontSize: '10px', color: isTriggerFired ? '#00ff9d' : '#8b949e', fontWeight: 600 }}>{isTriggerFired ? '100% Captured - Complete!' : 'Else: Loopback to Step 3'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: 'auto' }}>
+                  <button type="button" onClick={() => handleRunNode('verification_trigger')} disabled={runningNodeId !== null} title="Evaluate classifiers and verify trigger condition" style={{ ...runBtnStyle('#58a6ff', runningNodeId !== null), flex: 1, marginTop: 0 }}>
+                    {isNode5Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                    <span>{isNode5Running ? 'Evaluating...' : 'Run Node 5'}</span>
                   </button>
                 </div>
               </div>
-            )}
-
-            <button type="button" onClick={() => handleRunNode('init_end')} disabled={runningNodeId !== null} title="Run Ctrl+End and detect EOF last line" style={runBtnStyle('#58a6ff', runningNodeId !== null)}>
-              {isNode1Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{isNode1Running ? 'Calibrating...' : (isNode1Error ? 'Retry Node 1 (Ctrl+End)' : 'Run Node 1')}</span>
-            </button>
-          </div>
-
-          {renderArrow('#58a6ff')}
-
-          {/* Node 2 */}
-          <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode2Verified ? '#238636' : (isNode2Error ? '#f8514966' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>2. RETURN TO LINE 1</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode2Running ? '#a371f722' : (isNode2Verified ? '#23863633' : (isNode2Error ? '#f8514922' : '#30363d')), color: isNode2Running ? '#a371f7' : (isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
-                {isNode2Running ? 'VERIFYING...' : (isNode2Verified ? 'VERIFIED LN 1' : (isNode2Error ? 'UNVERIFIED' : 'NOT RUN'))}
-              </span>
             </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#a371f7' }}>HID Ctrl + Home & Verify Line 1</div>
-            <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Sends HID Ctrl+Home to return to line 1, then verifies line 1 is on top in gutter.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode2Verified ? '#00ff9d' : '#a371f7', fontWeight: 700 }}>
-              {isNode2Verified ? 'Verified: Line 1 at Top Gutter' : (isNode2Error ? `Ln 1 not detected (${node2.first_line ? `Ln ${node2.first_line}` : 'none'})` : 'Awaiting Ctrl+Home test')}
-            </div>
-            <button type="button" onClick={() => handleRunNode('reset_home')} disabled={runningNodeId !== null} title="Run Ctrl+Home and verify line 1 in gutter" style={runBtnStyle('#a371f7', runningNodeId !== null)}>
-              {isNode2Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{isNode2Running ? 'Verifying...' : 'Run Node 2'}</span>
-            </button>
-          </div>
 
-          {renderArrow('#00ff9d')}
-
-          {/* Node 3 */}
-          <div style={{ flex: 1.1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3. SCREEN CAPTURE</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
-                {isNode3Running ? 'ACQUIRING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'ACQUIRED' : 'READY'))}
-              </span>
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Capture & Offload OCR Worker</div>
-            <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Screen capture: offloads OCR processing to dedicated worker with keyboard guarded closed.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode3Error ? '#ff7b72' : '#e6edf3', fontWeight: 700 }}>
-              {isNode3Error ? (node3.error || 'Capture failed: no valid frame') : (isNode3Done ? `Page ${node3.page || currentPage}: Ln ${node3.top_line || effectiveTop} → ${node3.bottom_line || effectiveBottom}` : 'Awaiting Screen Capture')}
-            </div>
-            <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture external screen and offload to OCR worker" style={runBtnStyle(isNode3Error ? '#f85149' : '#00ff9d', runningNodeId !== null)}>
-              {runningNodeId === 'frame_acquire' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : (isNode3Error ? 'Retry Node 3' : 'Run Node 3')}</span>
-            </button>
-          </div>
-
-          {renderArrow('#00ff9d')}
-
-          {/* Node 4 */}
-          <div style={{ flex: 1.1, background: '#161b22', border: `1px solid ${isNode4Done ? '#ffa65766' : '#30363d'}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>4. NAVIGATION</span>
-              <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode4Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
-                {isNode4Running ? 'STEPPING...' : (isNode4Done ? 'STEPPED' : 'PREV BOTTOM + 1')}
-              </span>
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: '#ffa657' }}>Down Arrow (Next Top Ln)</div>
-            <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Uses down arrow keys to position (prev bottom + 1) onto top gutter.</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: '#ffa657', fontWeight: 700 }}>
-              {isNode4Done && node4.new_top_line ? `Next Target Top: Ln ${node4.new_top_line}` : `Step: ${dagStatus.arrow_step_count || 47} Down Arrows`}
-            </div>
-            <button type="button" onClick={() => handleRunNode('arrow_down')} disabled={runningNodeId !== null} title="Step down arrow keys" style={runBtnStyle('#ffa657', runningNodeId !== null)}>
-              {isNode4Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-              <span>{isNode4Running ? 'Stepping...' : 'Run Node 4'}</span>
-            </button>
-          </div>
-
-          {renderArrow(triggerDecision.prevented ? '#f85149' : '#00ff9d')}
-
-          {/* Node 5 */}
-          <div style={{ flex: 1.3, background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'), border: `1.5px solid ${isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none') }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. VERIFY TRIGGER</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', background: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f8514933' : '#388bfd22'), color: isTriggerFired ? '#000' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'), fontWeight: 800 }}>
-                  {isTriggerFired ? 'TRIGGER FIRED ✔' : (triggerDecision.prevented ? 'PREVENTED ⛔' : 'TRIGGER ARMED')}
-                </span>
-                <button onClick={(e) => { e.stopPropagation(); setIsConfigModalOpen(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: triggerDecision.prevented ? '#f8514922' : '#1f6feb22', color: triggerDecision.prevented ? '#ff7b72' : '#58a6ff', border: `1px solid ${triggerDecision.prevented ? '#f8514966' : '#1f6feb66'}`, borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Settings size={11} /><span>Config</span></button>
-              </div>
-            </div>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Verify Last Ln + 1 on Top</div>
-            <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Verifies last line + 1 positioned to top, then triggers DAG flow ({effectiveTop} / {effectiveTotal || '?'}).</div>
-            <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {triggerDecision.prevented ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#ff7b72', fontWeight: 700 }}><ShieldAlert size={12} /><span>Blocked: {triggerDecision.reasons[0] || 'Quality issue'}</span></div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#00ff9d', fontWeight: 700 }}><ShieldCheck size={12} /><span>OCR Qualifiers Clean</span></div>
-              )}
-              <div style={{ fontSize: '10px', color: isTriggerFired ? '#00ff9d' : '#8b949e', fontWeight: 600 }}>{isTriggerFired ? '100% Captured - Complete!' : 'Else: Loopback to Step 3'}</div>
-            </div>
-            <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: 'auto' }}>
-              <button type="button" onClick={() => handleRunNode('verification_trigger')} disabled={runningNodeId !== null} title="Evaluate classifiers and verify trigger condition" style={{ ...runBtnStyle('#58a6ff', runningNodeId !== null), flex: 1, marginTop: 0 }}>
-                {isNode5Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-                <span>{isNode5Running ? 'Evaluating...' : 'Run Node 5'}</span>
-              </button>
+            {/* Loopback SVG with numeric coordinates */}
+            <div style={{ marginTop: '8px', padding: '0 4px' }}>
+              <svg width="100%" height="28" viewBox="0 0 1000 28" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+                <defs><marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="6 1, 1 4, 6 7" fill="#58a6ff" /></marker></defs>
+                <path d="M 880 4 C 880 22, 120 22, 120 4" fill="none" stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'} strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#loop-arrow)" />
+                <text x="500" y="24" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ While Ln < Total: Loop Next Page by Arrow Down Keys'}</text>
+              </svg>
             </div>
           </div>
-        </div>
 
-        <div style={{ marginTop: '12px', padding: '0 8px' }}>
-          <svg width="100%" height="28" style={{ overflow: 'visible' }}>
-            <defs><marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="6 1, 1 4, 6 7" fill="#58a6ff" /></marker></defs>
-            <path d="M 88% 4 C 88% 22, 45% 22, 45% 4" fill="none" stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'} strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#loop-arrow)" />
-            <text x="66%" y="26" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ While Ln < Total: Loop Next Page by Arrow Down Keys'}</text>
-          </svg>
         </div>
       </div>
 

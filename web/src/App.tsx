@@ -29,7 +29,15 @@ const API_BASE = (() => {
 })();
 const POLL_INTERVAL_MS = Number(env.VITE_POLL_INTERVAL_MS) || 1200;
 const api = async (p: string, o?: RequestInit) => fetch(`${API_BASE}${p}`, o);
-const apiJson = async <T,>(p: string, o?: RequestInit): Promise<T> => (await api(p, o)).json();
+const apiJson = async <T,>(p: string, o?: RequestInit): Promise<T | null> => {
+  try {
+    const res = await api(p, o);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+};
 
 function startDrag(onMove: (e: MouseEvent) => void, onUp?: () => void) {
   const handleMove = (e: MouseEvent) => onMove(e);
@@ -49,6 +57,15 @@ function AppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0 });
+  const [projectInitProgress, setProjectInitProgress] = useState<{
+    active: boolean;
+    percent: number;
+    stage: string;
+    status: 'running' | 'completed' | 'error';
+    totalLines?: number;
+    error?: string;
+    projectName?: string;
+  } | null>(null);
   const [documentData, setDocumentData] = useState<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[] }>({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
@@ -321,27 +338,39 @@ function AppContent() {
       setLatencyMs(Math.round(performance.now() - t0));
       setBackendConnected(true);
       if (projRes.ok) {
-        const pList = await projRes.json();
-        setProjects(pList);
-        const act = pList.find((p: any) => p.is_active) || pList[0] || null;
-        setActiveProject(act);
+        try {
+          const pList = await projRes.json();
+          if (Array.isArray(pList)) {
+            setProjects(pList);
+            const act = pList.find((p: any) => p.is_active) || pList[0] || null;
+            setActiveProject(act);
+          }
+        } catch {}
       }
       if (docRes.ok) {
-        const d = await docRes.json();
-        setDocumentData(d);
-        if (d.token_stats) setTokenStats(d.token_stats);
+        try {
+          const d = await docRes.json();
+          if (d && Array.isArray(d.lines)) {
+            setDocumentData(d);
+            if (d.token_stats) setTokenStats(d.token_stats);
+          }
+        } catch {}
       }
       if (framesRes.ok) {
-        const fList: FrameData[] = await framesRes.json();
-        setFrames(fList);
-        setSelectedFrameId(curr => (curr && fList.some(f => f.frame_id === curr)) ? curr : (fList[fList.length - 1]?.frame_id ?? null));
+        try {
+          const fList: FrameData[] = await framesRes.json();
+          if (Array.isArray(fList)) {
+            setFrames(fList);
+            setSelectedFrameId(curr => (curr && fList.some(f => f.frame_id === curr)) ? curr : (fList[fList.length - 1]?.frame_id ?? null));
+          }
+        } catch {}
       }
-      if (queueRes.ok) setRecaptureQueue(await queueRes.json());
-      if (cfgRes.ok) { const c = await cfgRes.json(); setApiKeyConfigured(c.gemini_api_key_configured); }
-      if (modeRes.ok) { const m = await modeRes.json(); setPipelineMode(m.pipeline_mode); }
-      if (telRes.ok) setTelemetry(await telRes.json());
-      if (devRes.ok) setDeviceInfo(await devRes.json());
-      if (alignRes.ok) setAlignmentData(await alignRes.json());
+      if (queueRes.ok) { try { setRecaptureQueue(await queueRes.json()); } catch {} }
+      if (cfgRes.ok) { try { const c = await cfgRes.json(); setApiKeyConfigured(c.gemini_api_key_configured); } catch {} }
+      if (modeRes.ok) { try { const m = await modeRes.json(); setPipelineMode(m.pipeline_mode); } catch {} }
+      if (telRes.ok) { try { setTelemetry(await telRes.json()); } catch {} }
+      if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
+      if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
     } catch { setBackendConnected(false); }
   }, []);
 
@@ -351,21 +380,67 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // Telemetry-directed polling while project initialization is running
+  useEffect(() => {
+    if (!projectInitProgress?.active || projectInitProgress.status !== 'running') return;
+    const t = setInterval(async () => {
+      try {
+        const d = await apiJson<any>('/api/dag/status');
+        const p = d?.dag?.groups?.initialize?.progress;
+        if (p) {
+          setProjectInitProgress(curr => {
+            if (!curr || curr.status === 'completed') return curr;
+            return {
+              ...curr,
+              percent: Math.max(curr.percent, p.percent || curr.percent),
+              stage: p.stage || curr.stage,
+              status: p.status || curr.status,
+              totalLines: p.total_lines ?? curr.totalLines,
+              error: p.error
+            };
+          });
+          if (p.status === 'completed' || p.percent === 100) {
+            fetchData();
+          }
+        }
+      } catch {}
+    }, 800);
+    return () => clearInterval(t);
+  }, [projectInitProgress?.active, projectInitProgress?.status, fetchData]);
+
   const handleSwitchProject = async (id: string) => {
     await api(`/api/projects/${id}/activate`, { method: 'POST' });
     await fetchData();
   };
 
   const handleCreateProject = async () => {
-    if (!newProject.name.trim()) return;
-    const res = await api('/api/projects', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newProject.name, description: newProject.desc, target_total_lines: newProject.target })
+    const projName = newProject.name.trim();
+    if (!projName) return;
+
+    setProjectInitProgress({
+      active: true,
+      percent: 10,
+      stage: 'Creating project and launching DAG Group: Initialize...',
+      status: 'running',
+      projectName: projName
     });
-    if (res.ok) {
-      setNewProject({ name: '', desc: '', target: 0 });
-      setShowNewProjectModal(false);
-      await fetchData();
+    setShowNewProjectModal(false);
+
+    try {
+      const res = await api('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: projName, description: newProject.desc, target_total_lines: newProject.target })
+      });
+      if (res.ok) {
+        setNewProject({ name: '', desc: '', target: 0 });
+        await fetchData();
+      } else {
+        const errData = await res.json().catch(() => ({ detail: 'Failed to create project' }));
+        setProjectInitProgress(prev => prev ? ({ ...prev, status: 'error', error: errData.detail || 'Failed to create project', stage: 'Project creation failed' }) : null);
+      }
+    } catch (e: any) {
+      setProjectInitProgress(prev => prev ? ({ ...prev, status: 'error', error: e.message, stage: 'Network error creating project' }) : null);
     }
   };
 
@@ -481,6 +556,19 @@ function AppContent() {
             setFrames(p => p.map(f => f.frame_id === msg.data.frame_id ? { ...f, ...msg.data } : f));
           } else if (msg.type === 'frame_bounding_boxes' && msg.data?.frame_id) {
             setFrameBoundingBoxes(p => ({ ...p, [msg.data.frame_id]: msg.data.boxes }));
+          } else if (msg.type === 'project_init_progress') {
+            setProjectInitProgress(prev => ({
+              active: true,
+              percent: msg.percent ?? prev?.percent ?? 50,
+              stage: msg.stage || prev?.stage || 'Initializing project...',
+              status: msg.status || (msg.percent === 100 ? 'completed' : 'running'),
+              totalLines: msg.total_lines ?? prev?.totalLines,
+              error: msg.error,
+              projectName: prev?.projectName
+            }));
+            if (msg.status === 'completed' || msg.percent === 100) {
+              fetchData();
+            }
           } else if (msg.type === 'alignment_status') {
             const d = msg.alignment || msg.data;
             if (d) setAlignmentData(d);
@@ -490,7 +578,7 @@ function AppContent() {
     };
     connect();
     return () => { ws?.close(); clearTimeout(timer); };
-  }, [addTelemetryEvent]);
+  }, [addTelemetryEvent, fetchData]);
 
   const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
     setIsSwitchingPipeline(true);
@@ -531,11 +619,11 @@ function AppContent() {
 
   const sortedFrames = [...frames].sort((a, b) => a.top_line - b.top_line || a.page_index - b.page_index);
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId) || frames[0] || null;
-  const filteredLines = documentData.lines.filter(l => {
+  const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'unaligned') return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      return l.text.toLowerCase().includes(q) || String(l.line_number).includes(q) || String(l.gutter_number || '').includes(q);
+      return (l.text || '').toLowerCase().includes(q) || String(l.line_number).includes(q) || String(l.gutter_number || '').includes(q);
     }
     return true;
   });
@@ -961,6 +1049,132 @@ function AppContent() {
         </Modal>
       )}
 
+      {projectInitProgress && projectInitProgress.active && (
+        <Modal
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Cpu size={16} color={projectInitProgress.status === 'error' ? '#ff7b72' : '#00ff9d'} />
+              <span>INITIALIZING PROJECT WORKSPACE</span>
+            </div>
+          }
+          onClose={() => setProjectInitProgress(null)}
+          maxWidth="560px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: '#f0f6fc' }}>
+                  {projectInitProgress.projectName ? `Project: "${projectInitProgress.projectName}"` : 'New Markdown Workspace'}
+                </div>
+                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '3px' }}>
+                  Auto-executing DAG Group 1 (Ctrl+End total lines calibration & Line 1 verification)
+                </div>
+              </div>
+              <span style={{ fontSize: '18px', fontWeight: 900, color: projectInitProgress.status === 'completed' ? '#00ff9d' : (projectInitProgress.status === 'error' ? '#ff7b72' : '#58a6ff') }}>
+                {projectInitProgress.percent}%
+              </span>
+            </div>
+
+            {/* Glowing progress bar */}
+            <div style={{ width: '100%', height: '10px', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${projectInitProgress.percent}%`,
+                  background: projectInitProgress.status === 'completed' ? 'linear-gradient(90deg, #238636, #00ff9d)' : (projectInitProgress.status === 'error' ? '#f85149' : 'linear-gradient(90deg, #1f6feb, #a371f7, #00ff9d)'),
+                  boxShadow: projectInitProgress.status === 'completed' ? '0 0 10px rgba(0, 255, 157, 0.4)' : '0 0 8px rgba(88, 166, 255, 0.3)',
+                  transition: 'width 0.4s ease-out'
+                }}
+              />
+            </div>
+
+            {/* Stage description & indicator */}
+            <div style={{ background: '#161b22', border: `1px solid ${projectInitProgress.status === 'error' ? '#f8514966' : '#30363d'}`, borderRadius: '8px', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {projectInitProgress.status === 'running' && <RefreshCw size={16} className="spin" color="#58a6ff" />}
+              {projectInitProgress.status === 'completed' && <Check size={18} color="#00ff9d" />}
+              {projectInitProgress.status === 'error' && <AlertCircle size={18} color="#ff7b72" />}
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: projectInitProgress.status === 'error' ? '#ff7b72' : (projectInitProgress.status === 'completed' ? '#00ff9d' : '#f0f6fc') }}>
+                  {projectInitProgress.stage}
+                </div>
+                {projectInitProgress.totalLines !== undefined && projectInitProgress.totalLines > 0 && (
+                  <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '2px' }}>
+                    Document EOF confirmed: {projectInitProgress.totalLines.toLocaleString()} total lines detected
+                  </div>
+                )}
+                {projectInitProgress.error && (
+                  <div style={{ fontSize: '11px', color: '#ff7b72', marginTop: '4px' }}>
+                    {projectInitProgress.error}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Step list progression */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#8b949e' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 10 ? '#00ff9d' : '#8b949e' }}>
+                <span>{projectInitProgress.percent >= 10 ? '✔' : '○'}</span>
+                <span>1. Database entry & active workspace configured</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 25 ? '#00ff9d' : '#8b949e' }}>
+                <span>{projectInitProgress.percent >= 25 ? '✔' : '○'}</span>
+                <span>2. External display verified & editor cursor focused</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 65 ? '#00ff9d' : '#8b949e' }}>
+                <span>{projectInitProgress.percent >= 65 ? '✔' : '○'}</span>
+                <span>3. Dispatched HID Ctrl+End & calibrated total lines</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 100 ? '#00ff9d' : '#8b949e' }}>
+                <span>{projectInitProgress.percent >= 100 ? '✔' : '○'}</span>
+                <span>4. Dispatched HID Ctrl+Home & verified Line 1 in gutter</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', paddingTop: '10px', borderTop: '1px solid #21262d' }}>
+              {projectInitProgress.status === 'completed' && (
+                <button
+                  type="button"
+                  onClick={() => setProjectInitProgress(null)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', background: '#238636', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                >
+                  <Check size={14} />
+                  <span>Start Capturing Markdown</span>
+                </button>
+              )}
+              {projectInitProgress.status === 'error' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setProjectInitProgress(null)}
+                    style={{ padding: '6px 12px', background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    Dismiss & View DAG
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
+                      try {
+                        await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id }) });
+                      } catch {}
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#1f6feb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
+                  >
+                    <RefreshCw size={13} />
+                    <span>Retry Initialize</span>
+                  </button>
+                </>
+              )}
+              {projectInitProgress.status === 'running' && (
+                <div style={{ fontSize: '10.5px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>Communicating with Android HID and OCR engine...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <GotoLineModal
         isOpen={showGotoModal} onClose={() => { setShowGotoModal(false); setNavStatus(''); }}
         deviceInfo={deviceInfo} deviceModel={deviceModel} alignmentData={alignmentData} showBoundingBoxes={showBoundingBoxes}
@@ -1007,7 +1221,7 @@ function AppContent() {
 
       <TelemetryToaster
         telemetry={telemetry} tokenStats={tokenStats}
-        documentSummary={{ total_lines: documentData.total_lines, min_line: documentData.min_line, max_line: documentData.max_line, total_frames: frames.length, issue_count: documentData.issue_count, verified_overlap_lines: documentData.lines.filter(l => l.status === 'verified_overlap').length }}
+        documentSummary={{ total_lines: documentData?.total_lines || 0, min_line: documentData?.min_line || 0, max_line: documentData?.max_line || 0, total_frames: frames.length, issue_count: documentData?.issue_count || 0, verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length }}
         wsConnected={wsConnected} backendConnected={backendConnected} latencyMs={latencyMs} pipelineMode={pipelineMode}
         deviceModel={deviceModel} eventsLog={eventsLog} onClearEvents={() => setEventsLog([])} onExpandedChange={setIsTelemetryExpanded}
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
