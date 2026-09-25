@@ -91,6 +91,20 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
 
+  const [isNode3ConfigOpen, setIsNode3ConfigOpen] = useState(false);
+  const [node3Config, setNode3Config] = useState({
+    settle_delay_ms: 300,
+    guard_keyboard: true,
+    mode: 'desktop'
+  });
+
+  const [isNode4ConfigOpen, setIsNode4ConfigOpen] = useState(false);
+  const [node4Config, setNode4Config] = useState({
+    engine: 'local:rapidocr',
+    ocr_worker_timeout_s: 15,
+    min_confidence: 0.8
+  });
+
   const [node5Config, setNode5Config] = useState<Node5ConfigState>({
     prevent_trigger_on_issue: true,
     qualifiers: {
@@ -120,6 +134,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             current_page: d.current_page || currentPage
           }));
           if (d.node_5_config?.qualifiers) setNode5Config(prev => ({ ...prev, ...d.node_5_config, qualifiers: { ...prev.qualifiers, ...d.node_5_config.qualifiers } }));
+          if (d.dag?.nodes?.frame_acquire?.config) setNode3Config(prev => ({ ...prev, ...d.dag.nodes.frame_acquire.config }));
+          if (d.dag?.nodes?.frame_ocr?.config) setNode4Config(prev => ({ ...prev, ...d.dag.nodes.frame_ocr.config }));
           if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
         }
       } catch {}
@@ -137,8 +153,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const node1 = dagStatus.dag?.nodes?.init_end || {};
   const node2 = dagStatus.dag?.nodes?.reset_home || {};
   const node3 = dagStatus.dag?.nodes?.frame_acquire || {};
-  const node4 = dagStatus.dag?.nodes?.arrow_down || {};
-  const node5 = dagStatus.dag?.nodes?.verification_trigger || {};
+  const node4 = dagStatus.dag?.nodes?.frame_ocr || {};
+  const node5 = dagStatus.dag?.nodes?.arrow_down || {};
+  const node6 = dagStatus.dag?.nodes?.verification_trigger || {};
 
   const handleRunNode = async (nodeId: string) => {
     setRunningNodeId(nodeId);
@@ -225,11 +242,39 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     finally { setIsRunningCalibration(false); }
   };
 
+  const handleSaveNode3Config = async () => {
+    setIsSavingConfig(true);
+    try {
+      const res = await fetch(`${apiBase}/api/dag/nodes/frame_acquire/config`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node3Config)
+      });
+      if (!res.ok) throw new Error('Failed to save Node 3 config');
+      setNodeFeedback({ id: 'frame_acquire', message: '✔ Node 3 (Screen Capture) configuration saved!' });
+      setIsNode3ConfigOpen(false);
+      onRefresh?.();
+    } catch (err: any) { setNodeFeedback({ id: 'frame_acquire', message: err.message, isError: true }); }
+    finally { setIsSavingConfig(false); }
+  };
+
+  const handleSaveNode4Config = async () => {
+    setIsSavingConfig(true);
+    try {
+      const res = await fetch(`${apiBase}/api/dag/nodes/frame_ocr/config`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node4Config)
+      });
+      if (!res.ok) throw new Error('Failed to save Node 4 config');
+      setNodeFeedback({ id: 'frame_ocr', message: '✔ Node 4 (OCR Extraction) configuration saved!' });
+      setIsNode4ConfigOpen(false);
+      onRefresh?.();
+    } catch (err: any) { setNodeFeedback({ id: 'frame_ocr', message: err.message, isError: true }); }
+    finally { setIsSavingConfig(false); }
+  };
+
   const handleSaveNode5Config = async () => {
     setIsSavingConfig(true);
     setConfigFeedback(null);
     try {
-      const res = await fetch(`${apiBase}/api/dag/nodes/node_5/config`, {
+      const res = await fetch(`${apiBase}/api/dag/nodes/verification_trigger/config`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node5Config)
       });
       const data = await res.json();
@@ -248,7 +293,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     setIsEvaluating(true);
     setConfigFeedback(null);
     try {
-      const res = await fetch(`${apiBase}/api/dag/nodes/node_5/evaluate`, { method: 'POST' });
+      const res = await fetch(`${apiBase}/api/dag/nodes/verification_trigger/evaluate`, { method: 'POST' });
       const data = await res.json();
       if (data.trigger_decision) {
         setTriggerDecision(data.trigger_decision);
@@ -309,12 +354,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isNode3Error = node3.status === 'error' || Boolean(node3.error);
   const isNode3Done = !isNode3Error && node3.status === 'completed';
 
-  const isNode4Running = runningNodeId === 'arrow_down' || node4.status === 'active';
-  const isNode4Done = node4.status === 'completed';
+  const isNode4Running = runningNodeId === 'frame_ocr' || node4.status === 'active';
+  const isNode4Error = node4.status === 'error' || Boolean(node4.error);
+  const isNode4Done = !isNode4Error && node4.status === 'completed';
 
-  const isNode5Running = runningNodeId === 'verification_trigger' || isEvaluating || node5.status === 'active';
+  const isNode5Running = runningNodeId === 'arrow_down' || node5.status === 'active';
+  const isNode5Done = node5.status === 'completed';
 
-  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode4Running || isNode5Running || isOrchestrating;
+  const isNode6Running = runningNodeId === 'verification_trigger' || isEvaluating || node6.status === 'active';
+
+  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode4Running || isNode5Running || isNode6Running || isOrchestrating;
 
   return (
     <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '16px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
@@ -521,52 +570,79 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </div>
 
             <div style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
-              {/* Node 3 */}
-              <div style={{ flex: 1.1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
+              {/* Node 3: Screen Capture */}
+              <div style={{ flex: 1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3. SCREEN CAPTURE</span>
-                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
-                    {isNode3Running ? 'ACQUIRING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'ACQUIRED' : 'READY'))}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
+                      {isNode3Running ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY'))}
+                    </span>
+                    <button type="button" onClick={() => setIsNode3ConfigOpen(true)} title="Configure Screen Capture" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
+                  </div>
                 </div>
-                <div style={{ fontSize: '12.5px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Capture & Offload OCR Worker</div>
-                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Screen capture: offloads OCR processing to dedicated worker with keyboard guarded closed.</div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Grab Screen Frame</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Captures external display screenshot and saves image.</div>
                 <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode3Error ? '#ff7b72' : '#e6edf3', fontWeight: 700 }}>
-                  {isNode3Error ? (node3.error || 'Capture failed: no valid frame') : (isNode3Done ? `Page ${node3.page || currentPage}: Ln ${node3.top_line || effectiveTop} → ${node3.bottom_line || effectiveBottom}` : 'Awaiting Screen Capture')}
+                  {isNode3Error ? (node3.error || 'Capture failed') : (isNode3Done ? `Page ${node3.page || currentPage}: ${node3.file_size ? `${(node3.file_size / 1024).toFixed(1)} KB` : 'Saved'}` : 'Awaiting Frame Grab')}
                 </div>
-                <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture external screen and offload to OCR worker" style={runBtnStyle(isNode3Error ? '#f85149' : '#00ff9d', runningNodeId !== null)}>
+                <button type="button" onClick={() => handleRunNode('frame_acquire')} disabled={runningNodeId !== null} title="Capture screen frame" style={runBtnStyle(isNode3Error ? '#f85149' : '#00ff9d', runningNodeId !== null)}>
                   {runningNodeId === 'frame_acquire' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-                  <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : (isNode3Error ? 'Retry Node 3' : 'Run Node 3')}</span>
+                  <span>{runningNodeId === 'frame_acquire' ? 'Capturing...' : (isNode3Error ? 'Retry Node 3' : 'Run Node 3 (Capture)')}</span>
                 </button>
               </div>
 
               {renderArrow('#00ff9d')}
 
-              {/* Node 4 */}
-              <div style={{ flex: 1.1, background: '#161b22', border: `1px solid ${isNode4Done ? '#ffa65766' : '#30363d'}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {/* Node 4: OCR Extraction */}
+              <div style={{ flex: 1, background: isNode4Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode4Running ? '#a371f7' : (isNode4Error ? '#f85149' : (isNode4Done ? '#238636' : '#8957e5'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode4Running ? '0 0 10px rgba(163, 113, 247, 0.2)' : 'none' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>4. NAVIGATION</span>
-                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode4Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
-                    {isNode4Running ? 'STEPPING...' : (isNode4Done ? 'STEPPED' : 'PREV BOTTOM + 1')}
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>4. OCR EXTRACTION</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode4Running ? '#a371f722' : (isNode4Error ? '#f8514933' : (isNode4Done ? '#23863633' : '#30363d')), color: isNode4Running ? '#a371f7' : (isNode4Error ? '#ff7b72' : (isNode4Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
+                      {isNode4Running ? 'READING' : (isNode4Error ? 'FAILED' : (isNode4Done ? 'PARSED' : 'READY'))}
+                    </span>
+                    <button type="button" onClick={() => setIsNode4ConfigOpen(true)} title="Configure OCR Extraction" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
+                  </div>
+                </div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: isNode4Error ? '#ff7b72' : '#a371f7' }}>Gutter & Line Reader</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Extracts gutter lines and text from captured frame.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: isNode4Error ? '#ff7b72' : '#e6edf3', fontWeight: 700 }}>
+                  {isNode4Error ? (node4.error || 'OCR failed') : (isNode4Done ? `Ln ${node4.top_line || effectiveTop} → ${node4.bottom_line || effectiveBottom} (${node4.extracted_line_count || 0} lines)` : 'Awaiting OCR Run')}
+                </div>
+                <button type="button" onClick={() => handleRunNode('frame_ocr')} disabled={runningNodeId !== null} title="Extract lines from captured frame" style={runBtnStyle(isNode4Error ? '#f85149' : '#a371f7', runningNodeId !== null)}>
+                  {runningNodeId === 'frame_ocr' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{runningNodeId === 'frame_ocr' ? 'Extracting...' : (isNode4Error ? 'Retry Node 4' : 'Run Node 4 (OCR)')}</span>
+                </button>
+              </div>
+
+              {renderArrow('#ffa657')}
+
+              {/* Node 5: Down Arrow Navigation */}
+              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode5Done ? '#ffa65766' : '#30363d'}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. NAVIGATION</span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode5Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
+                    {isNode5Running ? 'STEPPING...' : (isNode5Done ? 'STEPPED' : 'PREV BOTTOM + 1')}
                   </span>
                 </div>
-                <div style={{ fontSize: '12.5px', fontWeight: 800, color: '#ffa657' }}>Down Arrow (Next Top Ln)</div>
-                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Uses down arrow keys to position (prev bottom + 1) onto top gutter.</div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffa657' }}>Down Arrow (Next Top)</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Positions (prev bottom + 1) onto top gutter.</div>
                 <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: '#ffa657', fontWeight: 700 }}>
-                  {isNode4Done && node4.new_top_line ? `Next Target Top: Ln ${node4.new_top_line}` : `Step: ${dagStatus.arrow_step_count || 47} Down Arrows`}
+                  {isNode5Done && node5.new_top_line ? `Target Top: Ln ${node5.new_top_line}` : `Step: ${dagStatus.arrow_step_count || 47} Arrows`}
                 </div>
                 <button type="button" onClick={() => handleRunNode('arrow_down')} disabled={runningNodeId !== null} title="Step down arrow keys" style={runBtnStyle('#ffa657', runningNodeId !== null)}>
-                  {isNode4Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-                  <span>{isNode4Running ? 'Stepping...' : 'Run Node 4'}</span>
+                  {isNode5Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{isNode5Running ? 'Stepping...' : 'Run Node 5'}</span>
                 </button>
               </div>
 
               {renderArrow(triggerDecision.prevented ? '#f85149' : '#00ff9d')}
 
-              {/* Node 5 */}
-              <div style={{ flex: 1.3, background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'), border: `1.5px solid ${isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none') }}>
+              {/* Node 6: Verify Trigger */}
+              <div style={{ flex: 1.2, background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'), border: `1.5px solid ${isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none') }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. VERIFY TRIGGER</span>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>6. VERIFY TRIGGER</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', background: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f8514933' : '#388bfd22'), color: isTriggerFired ? '#000' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'), fontWeight: 800 }}>
                       {isTriggerFired ? 'TRIGGER FIRED ✔' : (triggerDecision.prevented ? 'PREVENTED ⛔' : 'TRIGGER ARMED')}
@@ -574,8 +650,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     <button onClick={(e) => { e.stopPropagation(); setIsConfigModalOpen(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: triggerDecision.prevented ? '#f8514922' : '#1f6feb22', color: triggerDecision.prevented ? '#ff7b72' : '#58a6ff', border: `1px solid ${triggerDecision.prevented ? '#f8514966' : '#1f6feb66'}`, borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Settings size={11} /><span>Config</span></button>
                   </div>
                 </div>
-                <div style={{ fontSize: '12.5px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Verify Last Ln + 1 on Top</div>
-                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.4 }}>Verifies last line + 1 positioned to top, then triggers DAG flow ({effectiveTop} / {effectiveTotal || '?'}).</div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Verify Last Ln + 1 on Top</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Verifies last line + 1 on top, triggers loopback flow ({effectiveTop} / {effectiveTotal || '?'}).</div>
                 <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {triggerDecision.prevented ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#ff7b72', fontWeight: 700 }}><ShieldAlert size={12} /><span>Blocked: {triggerDecision.reasons[0] || 'Quality issue'}</span></div>
@@ -586,8 +662,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </div>
                 <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: 'auto' }}>
                   <button type="button" onClick={() => handleRunNode('verification_trigger')} disabled={runningNodeId !== null} title="Evaluate classifiers and verify trigger condition" style={{ ...runBtnStyle('#58a6ff', runningNodeId !== null), flex: 1, marginTop: 0 }}>
-                    {isNode5Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-                    <span>{isNode5Running ? 'Evaluating...' : 'Run Node 5'}</span>
+                    {isNode6Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                    <span>{isNode6Running ? 'Evaluating...' : 'Run Node 6'}</span>
                   </button>
                 </div>
               </div>
@@ -597,8 +673,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             <div style={{ marginTop: '8px', padding: '0 4px' }}>
               <svg width="100%" height="28" viewBox="0 0 1000 28" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
                 <defs><marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="6 1, 1 4, 6 7" fill="#58a6ff" /></marker></defs>
-                <path d="M 880 4 C 880 22, 120 22, 120 4" fill="none" stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'} strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#loop-arrow)" />
-                <text x="500" y="24" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ While Ln < Total: Loop Next Page by Arrow Down Keys'}</text>
+                <path d="M 920 4 C 920 22, 80 22, 80 4" fill="none" stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'} strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#loop-arrow)" />
+                <text x="500" y="24" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ Loopback to Step 3: Capture Next Page via Arrow Down Keys'}</text>
               </svg>
             </div>
           </div>
@@ -615,20 +691,66 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           {calibrationMsg && <span style={{ color: '#58a6ff', marginLeft: '8px' }}>{calibrationMsg}</span>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button onClick={() => setIsConfigModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#21262d', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Sliders size={13} /><span>Configure Trigger (Node 5)</span></button>
+          <button onClick={() => setIsConfigModalOpen(true)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', background: '#21262d', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Sliders size={13} /><span>Configure Trigger (Node 6)</span></button>
           <button onClick={handleTriggerCalibration} disabled={isRunningCalibration} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: isRunningCalibration ? '#21262d' : '#1f6feb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: isRunningCalibration ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
             <RefreshCw size={12} className={isRunningCalibration ? 'spin' : ''} /><span>{isRunningCalibration ? 'Calibrating...' : 'Run Ctrl+End / Ctrl+Home Calibrate'}</span>
           </button>
         </div>
       </div>
 
+      {/* Node 3 Config Modal */}
+      {isNode3ConfigOpen && (
+        <Modal isOpen={isNode3ConfigOpen} onClose={() => setIsNode3ConfigOpen(false)} title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={18} color="#00ff9d" /><span>DAG Node 3: Screen Capture Configuration</span></div>} subtitle="Configure external display screen capture timing and keyboard guards" confirmText={isSavingConfig ? 'Saving...' : 'Save Configuration'} cancelText="Close" onConfirm={handleSaveNode3Config} disabled={isSavingConfig} maxWidth="540px">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', color: '#e6edf3' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#8b949e' }}>SETTLE DELAY BEFORE CAPTURE (MS)</label>
+              <input type="number" value={node3Config.settle_delay_ms} onChange={(e) => setNode3Config(p => ({ ...p, settle_delay_ms: parseInt(e.target.value) || 0 }))} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 10px', color: '#f0f6fc', fontSize: '12px', fontFamily: 'inherit' }} />
+              <span style={{ fontSize: '10px', color: '#8b949e' }}>Dwell time allowed for the editor UI to settle before grabbing display pixels.</span>
+            </div>
+            <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Guard Keyboard Closed</div>
+                <div style={{ fontSize: '10px', color: '#8b949e' }}>Silently checks and suppresses on-screen soft keyboard before capture.</div>
+              </div>
+              <button type="button" onClick={() => setNode3Config(p => ({ ...p, guard_keyboard: !p.guard_keyboard }))} style={{ background: node3Config.guard_keyboard ? '#238636' : '#21262d', color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                {node3Config.guard_keyboard ? 'ACTIVE' : 'OFF'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Node 4 Config Modal */}
+      {isNode4ConfigOpen && (
+        <Modal isOpen={isNode4ConfigOpen} onClose={() => setIsNode4ConfigOpen(false)} title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={18} color="#a371f7" /><span>DAG Node 4: OCR Extraction Configuration</span></div>} subtitle="Configure OCR worker parameters and confidence thresholds" confirmText={isSavingConfig ? 'Saving...' : 'Save Configuration'} cancelText="Close" onConfirm={handleSaveNode4Config} disabled={isSavingConfig} maxWidth="540px">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', color: '#e6edf3' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#8b949e' }}>OCR ENGINE</label>
+              <select value={node4Config.engine} onChange={(e) => setNode4Config(p => ({ ...p, engine: e.target.value }))} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 10px', color: '#f0f6fc', fontSize: '12px', fontFamily: 'inherit' }}>
+                <option value="local:rapidocr">Local RapidOCR (Fast, Gutter Optimized)</option>
+                <option value="cloud:gemini">Cloud Gemini Vision</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#8b949e' }}>WORKER TIMEOUT (SECONDS)</label>
+              <input type="number" value={node4Config.ocr_worker_timeout_s} onChange={(e) => setNode4Config(p => ({ ...p, ocr_worker_timeout_s: parseInt(e.target.value) || 15 }))} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 10px', color: '#f0f6fc', fontSize: '12px', fontFamily: 'inherit' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 700, color: '#8b949e' }}>MINIMUM CONFIDENCE THRESHOLD</label>
+              <input type="number" step="0.05" min="0" max="1" value={node4Config.min_confidence} onChange={(e) => setNode4Config(p => ({ ...p, min_confidence: parseFloat(e.target.value) || 0.8 }))} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px 10px', color: '#f0f6fc', fontSize: '12px', fontFamily: 'inherit' }} />
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Node 6 Config Modal */}
       {isConfigModalOpen && (
-        <Modal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={18} color="#58a6ff" /><span>DAG Node 5: Trigger Verification & Qualifiers</span></div>} subtitle="Configure deterministic general-purpose qualifiers for trigger decision" confirmText={isSavingConfig ? 'Saving...' : 'Save Configuration'} cancelText="Close" onConfirm={handleSaveNode5Config} disabled={isSavingConfig} maxWidth="720px">
+        <Modal isOpen={isConfigModalOpen} onClose={() => setIsConfigModalOpen(false)} title={<div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Settings size={18} color="#58a6ff" /><span>DAG Node 6: Trigger Verification & Qualifiers</span></div>} subtitle="Configure deterministic general-purpose qualifiers for trigger decision" confirmText={isSavingConfig ? 'Saving...' : 'Save Configuration'} cancelText="Close" onConfirm={handleSaveNode5Config} disabled={isSavingConfig} maxWidth="720px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#e6edf3' }}>
             <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 800, color: '#f0f6fc', display: 'flex', alignItems: 'center', gap: '6px' }}><ShieldCheck size={16} color="#00ff9d" /><span>Enforce Qualifier-Based Trigger Prevention</span></div>
-                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '3px' }}>When active, enabled qualifiers detecting issues halt the DAG trigger at Node 5.</div>
+                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '3px' }}>When active, enabled qualifiers detecting issues halt the DAG trigger at Node 6.</div>
               </div>
               <button type="button" onClick={() => setNode5Config(p => ({ ...p, prevent_trigger_on_issue: !p.prevent_trigger_on_issue }))} style={{ background: node5Config.prevent_trigger_on_issue ? '#238636' : '#21262d', color: '#fff', border: `1px solid ${node5Config.prevent_trigger_on_issue ? '#2ea043' : '#30363d'}`, borderRadius: '20px', padding: '4px 12px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {node5Config.prevent_trigger_on_issue ? <><ToggleRight size={16} /><span>ENFORCED</span></> : <><ToggleLeft size={16} /><span>BYPASSED</span></>}

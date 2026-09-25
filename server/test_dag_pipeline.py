@@ -98,7 +98,19 @@ def test_dag_group_segmentation_and_runner():
         assert "initialize" in dag_data["groups"]
         assert "capture_entire_markdown" in dag_data["groups"]
         assert dag_data["groups"]["initialize"]["nodes"] == ["init_end", "reset_home"]
-        assert dag_data["groups"]["capture_entire_markdown"]["nodes"] == ["frame_acquire", "arrow_down", "verification_trigger"]
+        assert dag_data["groups"]["capture_entire_markdown"]["nodes"] == ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"]
+        assert len(dag_data["nodes"]) == 6
+        assert "frame_acquire" in dag_data["nodes"]
+        assert "frame_ocr" in dag_data["nodes"]
+
+        # 3. Test independent configuration of Node 3 and Node 4
+        cfg3_res = client.post("/api/dag/nodes/frame_acquire/config", json={"settle_delay_ms": 400})
+        assert cfg3_res.status_code == 200
+        assert cfg3_res.json()["config"]["settle_delay_ms"] == 400
+
+        cfg4_res = client.post("/api/dag/nodes/frame_ocr/config", json={"min_confidence": 0.85})
+        assert cfg4_res.status_code == 200
+        assert cfg4_res.json()["config"]["min_confidence"] == 0.85
     finally:
         client.delete(f"/api/projects/{proj_id}")
 

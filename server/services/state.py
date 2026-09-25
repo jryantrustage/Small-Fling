@@ -170,7 +170,7 @@ dag_state: Dict[str, Any] = {
             "id": "capture_entire_markdown",
             "title": "Capture Entire Markdown",
             "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-            "nodes": ["frame_acquire", "arrow_down", "verification_trigger"],
+            "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"],
             "status": "idle",
             "progress": None
         }
@@ -208,19 +208,35 @@ dag_state: Dict[str, Any] = {
             "id": "frame_acquire",
             "group": "capture_entire_markdown",
             "title": "3. Screen Capture & Acquisition",
-            "description": "Screen capture and acquisition: offload to dedicated OCR worker process.",
+            "description": "Capture high-resolution screenshot frame from external device display and save raw image.",
             "status": "idle",
             "page": 1,
             "config": {
                 "mode": "desktop",
-                "ocr_worker_timeout_s": 15,
+                "guard_keyboard": True,
+                "settle_delay_ms": 300,
                 "save_frame": True
+            }
+        },
+        "frame_ocr": {
+            "id": "frame_ocr",
+            "group": "capture_entire_markdown",
+            "title": "4. OCR & Gutter Extraction",
+            "description": "Run OCR worker on acquired screen frame: extract gutter line numbers, top/bottom bounds, and document text.",
+            "status": "idle",
+            "top_line": 0,
+            "bottom_line": 0,
+            "extracted_line_count": 0,
+            "config": {
+                "engine": "local:rapidocr",
+                "ocr_worker_timeout_s": 15,
+                "min_confidence": 0.8
             }
         },
         "arrow_down": {
             "id": "arrow_down",
             "group": "capture_entire_markdown",
-            "title": "4. Intelligent Navigation (Down Arrow)",
+            "title": "5. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
             "arrow_count": 47,
@@ -233,7 +249,7 @@ dag_state: Dict[str, Any] = {
         "verification_trigger": {
             "id": "verification_trigger",
             "group": "capture_entire_markdown",
-            "title": "5. Verify Trigger",
+            "title": "6. Recapture & Verification Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",
             "loop_count": 0,
@@ -291,7 +307,8 @@ dag_state: Dict[str, Any] = {
     "edges": [
         {"from": "init_end", "to": "reset_home"},
         {"from": "reset_home", "to": "frame_acquire"},
-        {"from": "frame_acquire", "to": "arrow_down"},
+        {"from": "frame_acquire", "to": "frame_ocr"},
+        {"from": "frame_ocr", "to": "arrow_down"},
         {"from": "arrow_down", "to": "verification_trigger"},
         {"from": "verification_trigger", "to": "frame_acquire", "is_loopback": True}
     ],
@@ -493,7 +510,8 @@ def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
 
     node_status = "completed" if is_complete else ("prevented" if decision["prevented"] else "looping")
 
-    dag_state["nodes"]["frame_acquire"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
+    dag_state["nodes"]["frame_acquire"].update({"status": "completed"})
+    dag_state["nodes"]["frame_ocr"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
     dag_state["nodes"]["verification_trigger"].update({
         "status": node_status,
         "verified_top_transition": is_verified,
