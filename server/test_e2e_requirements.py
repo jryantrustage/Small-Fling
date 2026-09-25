@@ -73,33 +73,37 @@ def test_full_pipeline():
         json={"name": "E2E Synth Project", "description": "Automated E2E Verification"}
     )
     assert proj_res.status_code == 200
+    proj_id = proj_res.json()["id"]
 
-    # 5. Upload synthetic frame
-    png_bytes = create_synthetic_frame_image()
-    upload_res = client.post(
-        "/api/upload-frame",
-        files={"file": ("test_synthetic_p09.png", png_bytes, "image/png")},
-        data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
-    )
-    assert upload_res.status_code == 200, f"Upload failed: {upload_res.text}"
-    upload_data = upload_res.json()
-    frame_id = upload_data["frame_id"]
+    try:
+        # 5. Upload synthetic frame
+        png_bytes = create_synthetic_frame_image()
+        upload_res = client.post(
+            "/api/upload-frame",
+            files={"file": ("test_synthetic_p09.png", png_bytes, "image/png")},
+            data={"top_line": "114", "bottom_line": "151", "page_index": "9", "sync": "false"}
+        )
+        assert upload_res.status_code == 200, f"Upload failed: {upload_res.text}"
+        upload_data = upload_res.json()
+        frame_id = upload_data["frame_id"]
 
-    # 6. Test Next Page Line after upload
-    npl_res = client.get("/api/next-page-line")
-    assert npl_res.status_code == 200
-    npl_data = npl_res.json()
-    assert npl_data["next_page_first_line"] == 152 or npl_data["last_bottom_line"] >= 151
+        # 6. Test Next Page Line after upload
+        npl_res = client.get("/api/next-page-line")
+        assert npl_res.status_code == 200
+        npl_data = npl_res.json()
+        assert npl_data["next_page_first_line"] == 152 or npl_data["last_bottom_line"] >= 151
 
-    # 7. OCR scan and bounding box verification
-    scan_res = client.post(f"/api/frames/{frame_id}/scan")
-    assert scan_res.status_code == 200, f"Scan failed: {scan_res.text}"
-    scan_data = scan_res.json()
-    bboxes = scan_data.get("bounding_boxes", {})
-    assert bboxes.get("first_line") is not None, "First line bbox (Green) must not be null"
-    assert bboxes.get("last_line") is not None, "Last line bbox (Red) must not be null"
-    assert len(bboxes.get("wrapped_lines", [])) >= 1, "Wrapped lines bboxes (Yellow) should be detected"
+        # 7. OCR scan and bounding box verification
+        scan_res = client.post(f"/api/frames/{frame_id}/scan")
+        assert scan_res.status_code == 200, f"Scan failed: {scan_res.text}"
+        scan_data = scan_res.json()
+        bboxes = scan_data.get("bounding_boxes", {})
+        assert bboxes.get("first_line") is not None, "First line bbox (Green) must not be null"
+        assert bboxes.get("last_line") is not None, "Last line bbox (Red) must not be null"
+        assert len(bboxes.get("wrapped_lines", [])) >= 1, "Wrapped lines bboxes (Yellow) should be detected"
+    finally:
+        # 8. Clean up
+        client.post("/api/frames/purge")
+        client.delete(f"/api/projects/{proj_id}")
 
-    # 8. Clean up
-    client.post("/api/frames/purge")
 
