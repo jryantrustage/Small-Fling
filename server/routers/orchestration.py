@@ -293,8 +293,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             except Exception as ce:
                 print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
 
-            # Additional check: if top_line is <= 2, it is definitely still on line 1
-            if 0 < top_line <= 2:
+            # Additional check: if top_line is <= 5, it is definitely still on line 1
+            if 0 < top_line <= 5:
                 is_stuck_on_line_1 = True
 
             # If initial attempt left page on Line 1, attempt an immediate re-focus & retry
@@ -312,9 +312,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         r_top = await state.detect_top_line_in_process(calib)
                         if r_total > 0: total_lines = r_total
                         if r_top > 0: top_line = r_top
-                        if top_line > 2 or total_lines > 2:
+
+                        retry_clf_res = await l1_clf.detect(ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_retry))
+                        if not retry_clf_res.issue_detected and top_line > 5:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
+                        else:
+                            is_stuck_on_line_1 = True
                 except Exception as re_err:
                     print(f"[init_end] Auto-retry error: {re_err}")
 
@@ -354,7 +358,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 error_msg = f"EOF Navigation Failed: Editor still displays Line {top_line or 1} at top (bottom line: {total_lines}). Ctrl+End did not navigate to the end of the file."
                 node.update({
                     "status": "error",
-                    "total_lines": 0,
+                    "total_lines": total_lines,
                     "top_line": top_line,
                     "error": error_msg,
                     "troubleshooting_steps": troubleshooting_steps
@@ -365,7 +369,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "dag": state.dag_state,
                     "node_id": "init_end",
                     "status": "error",
-                    "total_lines": 0,
+                    "total_lines": total_lines,
                     "top_line": top_line,
                     "error": error_msg,
                     "troubleshooting_steps": troubleshooting_steps,
@@ -374,7 +378,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 return {
                     "status": "error",
                     "node_id": "init_end",
-                    "total_lines": 0,
+                    "total_lines": total_lines,
                     "top_line": top_line,
                     "message": error_msg,
                     "troubleshooting_steps": troubleshooting_steps
@@ -671,13 +675,14 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         if node1_res.get("status") == "error" or total_lines <= 0:
             err_msg = node1_res.get("message") or "EOF Navigation Failed: could not determine total lines."
             init_group["status"] = "error"
-            init_group["progress"] = {"percent": 50, "stage": err_msg, "status": "error", "error": err_msg}
+            init_group["progress"] = {"percent": 50, "stage": err_msg, "status": "error", "error": err_msg, "total_lines": total_lines}
             await state.ws_manager.broadcast({
                 "type": "project_init_progress",
                 "stage": err_msg,
                 "percent": 50,
                 "status": "error",
                 "error": err_msg,
+                "total_lines": total_lines,
                 "dag": state.dag_state
             })
             return {"status": "error", "group": "initialize", "error": err_msg, "node1": node1_res}

@@ -1097,7 +1097,7 @@ function AppContent() {
                 <div style={{ fontSize: '12px', fontWeight: 700, color: projectInitProgress.status === 'error' ? '#ff7b72' : (projectInitProgress.status === 'completed' ? '#00ff9d' : '#f0f6fc') }}>
                   {projectInitProgress.stage}
                 </div>
-                {projectInitProgress.totalLines !== undefined && projectInitProgress.totalLines > 0 && (
+                {projectInitProgress.status === 'completed' && projectInitProgress.totalLines !== undefined && projectInitProgress.totalLines > 0 && (
                   <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '2px' }}>
                     Document EOF confirmed: {projectInitProgress.totalLines.toLocaleString()} total lines detected
                   </div>
