@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import config
 import db
-from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line, worker_detect_top_line
+from ocr_engine import LocalGutterOCREngine, worker_scan_image, worker_detect_last_line, worker_verify_first_line, worker_detect_top_line, worker_detect_gutter_bounds
 import asyncio
 from pathlib import Path
 from typing import Tuple
@@ -46,6 +46,10 @@ class WebSocketManager:
 ws_manager = WebSocketManager()
 ocr_executor = ThreadPoolExecutor(max_workers=2)
 
+
+async def detect_gutter_bounds_in_process(image_path: Path) -> Tuple[int, int]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(ocr_executor, worker_detect_gutter_bounds, str(image_path))
 
 async def detect_last_line_in_process(image_path: Path) -> int:
     loop = asyncio.get_running_loop()

@@ -431,7 +431,6 @@ async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
         ext_id = await detect_external_display_id(ser)
         if ext_id and ext_id > 0:
             await run_adb_shell(f"input -d {ext_id} keyevent 224", ser)
-            await run_adb_shell(f"input -d {ext_id} motionevent MOVE 500 500", ser)
     except Exception:
         pass
 
@@ -543,6 +542,23 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
             await run_adb_shell(f"input -d {target_d} keycombination {key1} {key2}", ser)
         else:
             await run_adb_shell(f"input keycombination {key1} {key2}", ser)
+
+        # 3. Teams editor WebView on external displays often ignores shell keycombinations for document scrolling.
+        # Complement with high-velocity swipe flings to guarantee instant, reliable EOF or Home navigation.
+        if key2 == 123:  # EOF (Ctrl+End)
+            swipe_cmd = (
+                f"for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input -d {target_d} swipe 500 950 500 100 20; done"
+                if target_d > 0 else
+                "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input swipe 500 950 500 100 20; done"
+            )
+            await run_adb_shell(swipe_cmd, ser, timeout=15.0)
+        elif key2 == 122:  # Home (Ctrl+Home)
+            swipe_cmd = (
+                f"for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input -d {target_d} swipe 500 150 500 950 20; done"
+                if target_d > 0 else
+                "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input swipe 500 150 500 950 20; done"
+            )
+            await run_adb_shell(swipe_cmd, ser, timeout=15.0)
 
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:

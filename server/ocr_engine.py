@@ -81,6 +81,15 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
         print(f"[find_gutter_numbers_cluster] Error: {e}")
         return []
 
+def worker_detect_gutter_bounds(image_path: str) -> Tuple[int, int]:
+    """Worker function to rapidly detect both top line and last line in a single OCR pass."""
+    img = cv2.imread(image_path)
+    if img is None: return 0, 0
+    gutter = find_gutter_numbers_cluster(img)
+    if gutter:
+        return gutter[0][1], gutter[-1][1]
+    return 0, 0
+
 def worker_detect_last_line(image_path: str) -> int:
     """Worker function to rapidly and accurately detect the last line number on screen (used after Ctrl+End)."""
     img = cv2.imread(image_path)
