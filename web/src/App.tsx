@@ -456,17 +456,21 @@ function AppContent() {
       ws.onmessage = (e) => {
         try {
           const msg = JSON.parse(e.data);
-          if (msg.type === 'new_frame' && msg.data?.frame_id) {
-            setFrames(p => [...p.filter(f => f.frame_id !== msg.data.frame_id), msg.data]);
-            setSelectedFrameId(msg.data.frame_id);
-            addTelemetryEvent('FRAME', `New frame: ${msg.data.frame_id.slice(0, 8)}`);
+          const newF = msg.data?.frame_id ? msg.data : (msg.frame?.frame_id ? msg.frame : null);
+          if (msg.type === 'new_frame' && newF) {
+            setFrames(p => [...p.filter(f => f.frame_id !== newF.frame_id), newF]);
+            setSelectedFrameId(newF.frame_id);
+            addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`);
             apiJson<any>('/api/document').then(d => { setDocumentData(d); if (d.token_stats) setTokenStats(d.token_stats); });
           } else if (msg.type === 'frame_deleted') {
             setFrames(p => p.filter(f => f.frame_id !== msg.frame_id));
             addTelemetryEvent('FRAME', `Frame ${msg.frame_id?.slice(0, 8)} deleted`);
           } else if (msg.type === 'document_updated') {
-            setDocumentData(msg.data);
-            if (msg.data.token_stats) setTokenStats(msg.data.token_stats);
+            const docObj = msg.data || msg.document;
+            if (docObj) {
+              setDocumentData(docObj);
+              if (docObj.token_stats) setTokenStats(docObj.token_stats);
+            }
           } else if (msg.type === 'device_selected') {
             apiJson<DeviceInfoData>('/api/device/info').then(info => { if (info) setDeviceInfo(info); });
           } else if (msg.type === 'telemetry_updated' && msg.data) {

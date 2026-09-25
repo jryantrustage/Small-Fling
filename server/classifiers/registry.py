@@ -13,6 +13,7 @@ from .editor_classifiers import (
     ModalOverlayClassifier,
     MatrixAppOverlayClassifier,
     OcrDegradedClassifier,
+    Line1StuckClassifier,
 )
 
 
@@ -29,6 +30,7 @@ class ClassifierRegistry:
         self.register(ModalOverlayClassifier())
         self.register(MatrixAppOverlayClassifier())
         self.register(OcrDegradedClassifier())
+        self.register(Line1StuckClassifier())
 
     def register(self, classifier: BaseClassifier) -> None:
         """Register a new classifier."""

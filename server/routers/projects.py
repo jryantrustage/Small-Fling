@@ -46,20 +46,37 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
             with open(calib_path, "wb") as f:
                 f.write(end_bytes)
             total_lines = await state.detect_last_line_in_process(calib_path)
-            if total_lines <= 0:
+            top_line = await state.detect_top_line_in_process(calib_path)
+            if total_lines <= 0 or top_line <= 0:
                 res_scan = await state.scan_image_in_process(calib_path)
-                total_lines = res_scan.get("bottom_line", 0)
+                if total_lines <= 0: total_lines = res_scan.get("bottom_line", 0)
+                if top_line <= 0: top_line = res_scan.get("top_line", 0)
+
+        is_stuck_on_line_1 = (0 < top_line <= 2)
+        if is_stuck_on_line_1:
+            err_msg = f"EOF Navigation Failed: Editor remained on Line {top_line or 1} at top (bottom: {total_lines})."
+            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0, "error": err_msg})
+            state.latest_telemetry["status_message"] = err_msg
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "calibration_event": "end_failed",
+                "total_lines": 0,
+                "error": err_msg
+            })
+            return (requested_target, False, 1)
 
         if total_lines > 0:
             db.update_project_target_lines(project_id, total_lines)
             state.latest_telemetry["target_total_lines"] = total_lines
             state.latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
-            state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines})
+            state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines, "error": None})
             state.dag_state["nodes"]["reset_home"].update({"status": "active"})
             state.dag_state["current_active_node"] = "reset_home"
         else:
-            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0})
+            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0, "error": "No lines detected at EOF"})
             state.latest_telemetry["status_message"] = "Calibration failed: No lines detected at EOF."
+
 
         await state.ws_manager.broadcast({
             "type": "dag_updated",

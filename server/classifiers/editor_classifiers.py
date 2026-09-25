@@ -295,3 +295,82 @@ class OcrDegradedClassifier(BaseClassifier):
             state.recapture_queue.append({"line_number": last_frame.get("top_line", 1), "page_index": last_frame.get("page_index", 1)})
         return FixResult(classifier_id=self.id, success=True, message="Queued previous frame for re-capture and re-OCR",
                          actions_taken=["Flagged frame for recapture with extended settle dwell"])
+
+
+class Line1StuckClassifier(BaseClassifier):
+    id = "line_1_stuck"
+    issue_description = "page still displays line 1 (EOF navigation did not move to end of file)"
+    fix_description = "focus editor window and re-attempt navigation"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        img = _get_cv_img(context)
+        if img is None:
+            return ClassificationResult(
+                classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
+                fix_name=self.fix_description, details="No image available for line 1 check"
+            )
+
+        top_line = 0
+        gutter = []
+        try:
+            from ocr_engine import find_gutter_numbers_cluster
+            gutter = find_gutter_numbers_cluster(img)
+            if gutter:
+                top_line = gutter[0][1]
+        except Exception as e:
+            top_line = 0
+
+        # Check if line 1 or top line <= 2 is visible in gutter
+        is_stuck = False
+        if gutter:
+            has_line_1 = any(ln <= 2 for _, ln in gutter[:3])
+            is_stuck = has_line_1 or (0 < top_line <= 2)
+        elif context.alignment_data:
+            # Fallback check against alignment data top line
+            at = context.alignment_data.get("top_line", 0)
+            if 0 < at <= 2:
+                is_stuck = True
+                top_line = at
+
+        h, w = img.shape[:2]
+        details = (
+            f"Page still displays Line {top_line or 1} at top of gutter (EOF navigation failed to advance)"
+            if is_stuck else
+            f"Page is navigated past Line 1 (current top line: Ln {top_line})"
+        )
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=is_stuck,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=details,
+            target_coordinates=(int(w * 0.5), int(h * 0.5)),
+            metadata={"top_line": top_line, "gutter_lines": [ln for _, ln in gutter[:5]] if gutter else []}
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        coords = context.target_coordinates or (500, 500)
+        # 1. Tap center of editor to focus
+        await _tap_coords(serial, disp_id, coords, delay=0.2)
+        # 2. Ensure keyboard closed
+        await ensure_adb_keyboard_closed(serial)
+        # 3. Send Ctrl+End keycombination
+        from services.adb_service import send_hid_keycombination
+        await send_hid_keycombination(113, 123, serial)
+        await asyncio.sleep(0.8)
+
+        re_detect = await _recheck_classifier(self, serial, disp_id)
+        success = not (re_detect and re_detect.issue_detected)
+        return FixResult(
+            classifier_id=self.id,
+            success=success,
+            message="Successfully navigated away from Line 1" if success else "Re-attempted EOF navigation; editor still displays Line 1",
+            actions_taken=[f"Focused editor at {coords} on display {disp_id} and re-sent Ctrl+End"],
+            metadata={"recheck": re_detect.to_dict() if re_detect else None}
+        )
+

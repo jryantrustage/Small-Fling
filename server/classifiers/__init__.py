@@ -8,6 +8,7 @@ from .editor_classifiers import (
     LightModeClassifier,
     ViewModeClassifier,
     KeyboardOpenClassifier,
+    Line1StuckClassifier,
 )
 
 __all__ = [
@@ -21,5 +22,7 @@ __all__ = [
     "LightModeClassifier",
     "ViewModeClassifier",
     "KeyboardOpenClassifier",
+    "Line1StuckClassifier",
 ]
+
 
