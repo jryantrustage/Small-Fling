@@ -1,5 +1,6 @@
 """Implementations of general-purpose classifiers for Teams Markdown editor and mobile setup."""
 import asyncio
+import re
 from typing import Optional, Tuple
 import cv2
 import numpy as np
@@ -29,6 +30,155 @@ async def _tap_coords(serial: str, disp_id: int, coords: Tuple[int, int], delay:
 async def _recheck_classifier(classifier: BaseClassifier, serial: str, disp_id: int) -> Optional[ClassificationResult]:
     snap = await capture_external_screenshot(serial)
     return await classifier.detect(ClassifierContext(serial=serial, display_id=disp_id, image_bytes=snap)) if snap else None
+
+
+class TeamsMarkdownVisibleClassifier(BaseClassifier):
+    id = "teams_markdown_visible"
+    issue_description = "Teams markdown editor is not visible on display"
+    fix_description = "Launch and display Teams markdown editor on external desktop screen"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="No active Android device connected via ADB (awaiting connection)",
+                metadata={"connected": False}
+            )
+
+        img = _get_cv_img(context)
+        align = context.alignment_data or {}
+        boxes = align.get("boxes", {})
+        teams_box = boxes.get("teams_logo", {})
+        file_box = boxes.get("file_name", {})
+        first_line_box = boxes.get("first_line", {})
+
+        has_header_or_gutter = bool(
+            (teams_box.get("passed") is True) or
+            (file_box.get("passed") is True) or
+            (first_line_box.get("passed") is True)
+        )
+
+        if img is None:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="Teams markdown editor is not visible (awaiting live display stream)",
+                metadata={"image_available": False}
+            )
+
+        h, w = img.shape[:2]
+        center_crop = img[int(h * 0.35):int(h * 0.65), int(w * 0.2):int(w * 0.8)]
+        mean_bgr = np.mean(center_crop, axis=(0, 1)) if center_crop.size > 0 else [0, 0, 0]
+        # Standby frame: B ~ 23, G ~ 17, R ~ 13
+        is_standby = (abs(mean_bgr[0] - 23) < 10 and abs(mean_bgr[1] - 17) < 10 and abs(mean_bgr[2] - 13) < 10)
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        is_teams_focused = False
+        try:
+            win_chk = await run_adb_shell("dumpsys window | grep -E 'mFocusedApp'", serial, timeout=2.0)
+            win_out = win_chk.get("stdout", "") if win_chk.get("status") == "ok" else ""
+            is_teams_focused = "com.microsoft.teams" in win_out
+        except Exception:
+            pass
+
+        if is_standby or not has_header_or_gutter or not is_teams_focused:
+            reason = "Standby canvas active; Teams markdown editor is not visible" if is_standby else "Teams header, document tab, and gutter not detected in display stream"
+            if not is_teams_focused and not is_standby:
+                reason += " (Teams is not the focused window on external display)"
+
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details=reason,
+                target_coordinates=(int(w * 0.5), int(h * 0.5)),
+                metadata={
+                    "is_standby": is_standby,
+                    "has_header_or_gutter": has_header_or_gutter,
+                    "is_teams_focused": is_teams_focused,
+                    "display_id": disp_id
+                }
+            )
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=False,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            details="Teams markdown editor is visible on external display (header and gutter verified)",
+            target_coordinates=_get_box_center(context, "teams_logo") or (int(w * 0.1), int(h * 0.05)),
+            metadata={"file_name": align.get("file_name", "")}
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            from services.adb_service import connect_device_for_model, current_device_model
+            serial = await connect_device_for_model(current_device_model)
+            if not serial:
+                return FixResult(
+                    classifier_id=self.id,
+                    success=False,
+                    message="Cannot display Teams: No Android device connected via ADB",
+                    actions_taken=["Attempted wireless ADB auto-connect"]
+                )
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        actions = []
+
+        # 1. Launch / bring Teams to front on the external display (Pixel 8 and Pixel 10)
+        if disp_id > 0:
+            await run_adb_shell(f"am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher --display {disp_id}", serial)
+            actions.append(f"Dispatched am start for Teams on display {disp_id}")
+        else:
+            await run_adb_shell("am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher", serial)
+            actions.append("Dispatched am start for Teams on primary display")
+
+        # 2. Check if a Teams task exists and bring to front
+        try:
+            res_tasks = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", serial, timeout=2.5)
+            out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
+            if out_tasks:
+                m_t = re.search(r'#(\d+)\s+type=', out_tasks)
+                if m_t:
+                    task_id = m_t.group(1)
+                    await run_adb_shell(f"cmd activity task to-front {task_id}", serial)
+                    actions.append(f"Brought Teams task #{task_id} to front")
+        except Exception:
+            pass
+
+        # 3. Tap center of external display to focus Teams window
+        tap_coords = (960, 540)
+        await _tap_coords(serial, disp_id, tap_coords, delay=0.4)
+        actions.append(f"Tapped external display at {tap_coords} to focus Teams window")
+
+        # 4. Ensure soft keyboard is closed
+        await ensure_adb_keyboard_closed(serial)
+        actions.append("Suppressed on-screen keyboard")
+
+        # 5. Allow settle and recheck
+        await asyncio.sleep(0.8)
+        re_detect = await _recheck_classifier(self, serial, disp_id)
+        success = bool(re_detect and not re_detect.issue_detected)
+
+        return FixResult(
+            classifier_id=self.id,
+            success=success,
+            message="Teams markdown editor is now visible and focused on external display ✔" if success else "Launched Teams on external display; verify editor is open",
+            actions_taken=actions,
+            metadata={"recheck": re_detect.to_dict() if re_detect else None}
+        )
 
 
 class LightModeClassifier(BaseClassifier):
