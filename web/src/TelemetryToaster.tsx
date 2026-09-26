@@ -66,12 +66,13 @@ export interface TelemetryToasterProps {
   isAlignmentDismissed?: boolean;
   isAligned?: boolean;
   onReturnAlignmentOverlay?: () => void;
+  onOpenStudio?: () => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
-  onReturnAlignmentOverlay,
+  onReturnAlignmentOverlay, onOpenStudio,
 }) => {
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     try { return localStorage.getItem('mc_telemetry_expanded') === 'true'; } catch { return false; }
@@ -136,7 +137,18 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               <AlertTriangle size={13} color="#fca5a5" /><span>NOT ALIGNED (Show Overlay ↗)</span>
             </button>
           )}
-          <button className="telemetry-toaster-pill" onClick={toggleExpanded} title="Expand Telemetry Monitor" aria-label="Expand Telemetry Monitor">
+          <button
+            className="telemetry-toaster-pill"
+            onClick={() => {
+              if (onOpenStudio) {
+                onOpenStudio();
+              } else {
+                toggleExpanded();
+              }
+            }}
+            title="Open Telemetry in Studio"
+            aria-label="Open Telemetry in Studio"
+          >
             <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
             <span className="pill-title">TELEMETRY</span><span className="pill-divider">|</span>
             <span className="pill-stat" style={{ color: phaseStyle.text }}>{telemetry.phase || 'IDLE'}</span><span className="pill-divider">|</span>
@@ -154,6 +166,17 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               <span className="toaster-phase-badge" style={{ background: phaseStyle.bg, color: phaseStyle.text, borderColor: phaseStyle.border }}>{telemetry.phase || 'STANDBY'}</span>
             </div>
             <div className="toaster-header-actions">
+              {onOpenStudio && (
+                <button
+                  type="button"
+                  className="toaster-btn-icon"
+                  onClick={() => { toggleExpanded(); onOpenStudio(); }}
+                  title="Open in Full Studio Drawer"
+                  style={{ color: '#00ff9d', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                >
+                  <span>STUDIO ↗</span>
+                </button>
+              )}
               <span className="toaster-latency-pill">{latencyMs > 0 ? `${latencyMs}ms RTT` : 'synced'}</span>
               <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">{copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}</button>
               <button className="toaster-btn-icon" onClick={toggleExpanded} title="Collapse Toaster"><ChevronDown size={15} /></button>

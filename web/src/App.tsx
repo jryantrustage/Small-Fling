@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Check, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass, Loader2,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Shield, Keyboard
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass,
+  Monitor, ChevronDown, Info, Eye, EyeOff, Shield
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -12,11 +12,9 @@ import type {
 } from './types';
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
-import { LiveMonitorDrawer } from './components/LiveMonitorDrawer';
-import { DeviceConfigDrawer } from './components/DeviceConfigDrawer';
+import { DeviceStudioDrawer } from './components/DeviceStudioDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
 import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
-import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 import { useAgoTimer } from './hooks/useAgoTimer';
 
 const env = import.meta.env;
@@ -124,22 +122,12 @@ function AppContent() {
     try { return (localStorage.getItem('mc_target_device_model') as any) || 'pixel_8'; } catch { return 'pixel_8'; }
   });
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
-  const [showDeviceDropdown, setShowDeviceDropdown] = useState(false);
-  const [showLiveMonitor, setShowLiveMonitor] = useState(false);
-  const [showDeviceConfigDrawer, setShowDeviceConfigDrawer] = useState(false);
-  const [monitorSize, setMonitorSize] = useState<'sm' | 'md' | 'lg' | 'custom'>('md');
-  const [isDrawerMaximized, setIsDrawerMaximized] = useState(false);
-  const [drawerWidth, setDrawerWidth] = useState(() => Number(localStorage.getItem('mc_live_drawer_width')) || 480);
-  const [drawerHeight, setDrawerHeight] = useState(() => Number(localStorage.getItem('mc_live_drawer_height')) || 320);
-  const [isResizingDrawer, setIsResizingDrawer] = useState(false);
-  const [connectIpInput, setConnectIpInput] = useState(() => localStorage.getItem('mc_last_adb_target') || '');
+  const [showStudioDrawer, setShowStudioDrawer] = useState(false);
+  const [studioInitialTab, setStudioInitialTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>('kiosk');
   const [pixel8Ip, setPixel8Ip] = useState(() => localStorage.getItem('mc_pixel_8_address') || '192.168.86.87:37547');
   const [pixel10Ip, setPixel10Ip] = useState(() => localStorage.getItem('mc_pixel_10_address') || '192.168.86.81:44587');
-  const [activeConfigureDevice, setActiveConfigureDevice] = useState<'pixel_8' | 'pixel_10' | null>(null);
-  const [deviceConfigTab, setDeviceConfigTab] = useState<'connect' | 'pair'>('connect');
   const [isConnectingIp, setIsConnectingIp] = useState(false);
   const [connectStatusMsg, setConnectStatusMsg] = useState('');
-  const [pairIpInput, setPairIpInput] = useState('');
   const [pairCodeInput, setPairCodeInput] = useState('');
   const [isPairing, setIsPairing] = useState(false);
   const [pairStatusMsg, setPairStatusMsg] = useState('');
@@ -218,14 +206,6 @@ function AppContent() {
   }, []);
 
   useEffect(() => {
-    const onOut = (e: MouseEvent) => {
-      if (deviceDropdownRef.current && !deviceDropdownRef.current.contains(e.target as Node)) setShowDeviceDropdown(false);
-    };
-    document.addEventListener('mousedown', onOut);
-    return () => document.removeEventListener('mousedown', onOut);
-  }, []);
-
-  useEffect(() => {
     const onVis = () => { isDocVisibleRef.current = !document.hidden; if (!document.hidden) setStreamKey(Date.now()); };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
@@ -251,19 +231,6 @@ function AppContent() {
     );
   };
 
-  const handleDrawerResize = (e: React.MouseEvent, dir: 'corner' | 'top' | 'left') => {
-    e.preventDefault();
-    setIsResizingDrawer(true);
-    const startX = e.clientX, startY = e.clientY, startW = drawerWidth, startH = drawerHeight;
-    startDrag(
-      m => {
-        if (dir === 'corner' || dir === 'left') setDrawerWidth(Math.max(300, Math.min(window.innerWidth - 40, startW - (m.clientX - startX))));
-        if (dir === 'corner' || dir === 'top') setDrawerHeight(Math.max(200, Math.min(window.innerHeight - 80, startH - (m.clientY - startY))));
-      },
-      () => { setIsResizingDrawer(false); localStorage.setItem('mc_live_drawer_width', String(drawerWidth)); localStorage.setItem('mc_live_drawer_height', String(drawerHeight)); }
-    );
-  };
-
   const handleSelectSerial = async (serial: string) => {
     try {
       const res = await api('/api/device/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serial }) });
@@ -274,7 +241,6 @@ function AppContent() {
           const m = d.device_info.active_model.toLowerCase();
           setDeviceModel(m.includes('pixel_8') ? 'pixel_8' : 'pixel_10');
         }
-        setShowDeviceDropdown(false);
       }
     } catch {}
   };
@@ -309,7 +275,7 @@ function AppContent() {
 
   const handleConnectAdbIp = async (ipTarget?: string, model?: 'pixel_8' | 'pixel_10') => {
     const targetModel = model || deviceModel;
-    const target = (ipTarget || (targetModel === 'pixel_8' ? pixel8Ip : pixel10Ip) || connectIpInput).trim();
+    const target = (ipTarget || (targetModel === 'pixel_8' ? pixel8Ip : pixel10Ip)).trim();
     if (!target) return;
     setIsConnectingIp(true);
     const devLabel = targetModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
@@ -341,7 +307,7 @@ function AppContent() {
 
   const handlePairAdb = async (ipToPair?: string, codeToPair?: string, model?: 'pixel_8' | 'pixel_10') => {
     const targetModel = model || deviceModel;
-    const target = (ipToPair || pairIpInput).trim();
+    const target = (ipToPair || (targetModel === 'pixel_8' ? pixel8Ip : pixel10Ip)).trim();
     const code = (codeToPair || pairCodeInput).trim();
     if (!target || !code) return;
     setIsPairing(true);
@@ -362,14 +328,6 @@ function AppContent() {
       } else { setPairStatusMsg(`Pairing failed: ${d.detail || d.output || 'Unknown error'}`); }
     } catch (e: any) { setPairStatusMsg(`Error: ${e.message}`); }
     finally { setIsPairing(false); }
-  };
-
-  const handleSetPresetSize = (preset: 'sm' | 'md' | 'lg') => {
-    setMonitorSize(preset);
-    setIsDrawerMaximized(false);
-    const presets = { sm: { w: 340, h: 230 }, md: { w: 480, h: 320 }, lg: { w: 680, h: 450 } }[preset];
-    setDrawerWidth(presets.w);
-    setDrawerHeight(presets.h);
   };
 
   const fetchData = useCallback(async () => {
@@ -709,317 +667,45 @@ function AppContent() {
         <div className="header-center">
           <div className="device-selector-wrapper" ref={deviceDropdownRef}>
             <button
-              className={`device-selector-btn ${showDeviceDropdown ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
-              onClick={() => setShowDeviceDropdown(p => !p)}
-              title="Select connected Android device & capture profile"
+              className={`device-selector-btn ${showStudioDrawer && studioInitialTab === 'device' ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
+              onClick={() => {
+                setStudioInitialTab('device');
+                setShowStudioDrawer(true);
+              }}
+              title="Select connected Android device & configure wireless ADB in Studio"
             >
               <div className={`device-status-dot ${isCurrentDeviceConnected ? 'online' : 'offline'}`} />
               <Smartphone size={13} color={isCurrentDeviceConnected ? 'var(--color-primary)' : '#ef4444'} />
               <span style={{ fontWeight: 700 }}>{devDisplayName}</span>
               <span className="device-spec">({devLines}L)</span>
-              <ChevronDown size={11} style={{ transform: showDeviceDropdown ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
             </button>
-
-            {showDeviceDropdown && (
-              <div className="device-dropdown">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
-                  <div className="dropdown-section-title" style={{ padding: 0 }}>TARGET DEVICE</div>
-                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Click to select & activate</span>
-                </div>
-
-                <div className="device-cards-grid">
-                  {/* Pixel 8 Selection Card */}
-                  <div
-                    className={`device-card ${deviceModel === 'pixel_8' ? 'selected' : ''} ${isP8Available ? 'available' : 'unavailable'}`}
-                    onClick={() => handleSelectDevice('pixel_8')}
-                  >
-                    <div className="device-card-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Smartphone size={15} color={isP8Available ? '#22c55e' : '#ef4444'} />
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>PIXEL 8</span>
-                            <span style={{ fontSize: '10px', opacity: 0.8 }}>(31L)</span>
-                          </div>
-                          <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
-                            {pixel8Ip || 'No IP configured'}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`}>
-                          <span className="status-dot-mini" />
-                          {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
-                        </span>
-                        <div
-                          className={`device-select-checkbox ${deviceModel === 'pixel_8' ? 'checked' : ''}`}
-                          title={deviceModel === 'pixel_8' ? 'Selected / Active Device' : 'Click to select Pixel 8'}
-                        >
-                          {deviceModel === 'pixel_8' && <Check size={12} strokeWidth={3} />}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="device-card-actions" onClick={e => e.stopPropagation()}>
-                      {!isP8Available && pixel8Ip && (
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          onClick={() => handleConnectAdbIp(pixel8Ip, 'pixel_8')}
-                          disabled={isConnectingIp}
-                        >
-                          {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
-                          <span>Connect</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline"
-                        style={{ padding: '2px 8px', fontSize: '10px' }}
-                        onClick={() => {
-                          setActiveConfigureDevice(p => p === 'pixel_8' ? null : 'pixel_8');
-                          setConnectIpInput(pixel8Ip);
-                          setPairIpInput(pixel8Ip);
-                        }}
-                      >
-                        {activeConfigureDevice === 'pixel_8' ? 'Close' : 'Configure IP'}
-                      </button>
-                    </div>
-
-                    {activeConfigureDevice === 'pixel_8' && (
-                      <div className="device-configure-inline" onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)' }}>PIXEL 8 WIRELESS ADB</span>
-                          <div className="adb-mode-tabs">
-                            <button type="button" className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`} onClick={() => setDeviceConfigTab('connect')}>Connect</button>
-                            <button type="button" className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`} onClick={() => setDeviceConfigTab('pair')}>Pair New</button>
-                          </div>
-                        </div>
-
-                        {deviceConfigTab === 'connect' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="192.168.86.87:37547"
-                                value={connectIpInput}
-                                onChange={e => { setConnectIpInput(e.target.value); setPixel8Ip(e.target.value); }}
-                                onKeyDown={e => e.key === 'Enter' && handleConnectAdbIp(connectIpInput, 'pixel_8')}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                                onClick={() => handleConnectAdbIp(connectIpInput, 'pixel_8')}
-                                disabled={isConnectingIp || !connectIpInput.trim()}
-                              >
-                                {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                              </button>
-                            </div>
-                            {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{connectStatusMsg}</div>}
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="Pair IP:Port (e.g. 192.168.86.87:37547)"
-                                value={pairIpInput}
-                                onChange={e => setPairIpInput(e.target.value)}
-                              />
-                            </div>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="6-digit Pairing Code"
-                                value={pairCodeInput}
-                                onChange={e => setPairCodeInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handlePairAdb(pairIpInput, pairCodeInput, 'pixel_8')}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
-                                onClick={() => handlePairAdb(pairIpInput, pairCodeInput, 'pixel_8')}
-                                disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
-                              >
-                                {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
-                              </button>
-                            </div>
-                            {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{pairStatusMsg}</div>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Pixel 10 Selection Card */}
-                  <div
-                    className={`device-card ${deviceModel === 'pixel_10' ? 'selected' : ''} ${isP10Available ? 'available' : 'unavailable'}`}
-                    onClick={() => handleSelectDevice('pixel_10')}
-                  >
-                    <div className="device-card-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Smartphone size={15} color={isP10Available ? '#22c55e' : '#ef4444'} />
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>PIXEL 10</span>
-                            <span style={{ fontSize: '10px', opacity: 0.8 }}>(47L)</span>
-                          </div>
-                          <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
-                            {pixel10Ip || 'No IP configured'}
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span className={`device-status-badge ${isP10Available ? 'available' : 'unavailable'}`}>
-                          <span className="status-dot-mini" />
-                          {isP10Available ? 'ONLINE' : 'NOT AVAILABLE'}
-                        </span>
-                        <div
-                          className={`device-select-checkbox ${deviceModel === 'pixel_10' ? 'checked' : ''}`}
-                          title={deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10'}
-                        >
-                          {deviceModel === 'pixel_10' && <Check size={12} strokeWidth={3} />}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="device-card-actions" onClick={e => e.stopPropagation()}>
-                      {!isP10Available && pixel10Ip && (
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          onClick={() => handleConnectAdbIp(pixel10Ip, 'pixel_10')}
-                          disabled={isConnectingIp}
-                        >
-                          {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
-                          <span>Connect</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline"
-                        style={{ padding: '2px 8px', fontSize: '10px' }}
-                        onClick={() => {
-                          setActiveConfigureDevice(p => p === 'pixel_10' ? null : 'pixel_10');
-                          setConnectIpInput(pixel10Ip);
-                          setPairIpInput(pixel10Ip);
-                        }}
-                      >
-                        {activeConfigureDevice === 'pixel_10' ? 'Close' : 'Configure IP'}
-                      </button>
-                    </div>
-
-                    {activeConfigureDevice === 'pixel_10' && (
-                      <div className="device-configure-inline" onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)' }}>PIXEL 10 WIRELESS ADB</span>
-                          <div className="adb-mode-tabs">
-                            <button type="button" className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`} onClick={() => setDeviceConfigTab('connect')}>Connect</button>
-                            <button type="button" className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`} onClick={() => setDeviceConfigTab('pair')}>Pair New</button>
-                          </div>
-                        </div>
-
-                        {deviceConfigTab === 'connect' ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="192.168.86.81:44587"
-                                value={connectIpInput}
-                                onChange={e => { setConnectIpInput(e.target.value); setPixel10Ip(e.target.value); }}
-                                onKeyDown={e => e.key === 'Enter' && handleConnectAdbIp(connectIpInput, 'pixel_10')}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                                onClick={() => handleConnectAdbIp(connectIpInput, 'pixel_10')}
-                                disabled={isConnectingIp || !connectIpInput.trim()}
-                              >
-                                {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                              </button>
-                            </div>
-                            {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{connectStatusMsg}</div>}
-                          </div>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="Pair IP:Port (e.g. 192.168.86.81:44587)"
-                                value={pairIpInput}
-                                onChange={e => setPairIpInput(e.target.value)}
-                              />
-                            </div>
-                            <div className="connect-ip-row">
-                              <input
-                                type="text"
-                                className="connect-ip-input"
-                                placeholder="6-digit Pairing Code"
-                                value={pairCodeInput}
-                                onChange={e => setPairCodeInput(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && handlePairAdb(pairIpInput, pairCodeInput, 'pixel_10')}
-                              />
-                              <button
-                                type="button"
-                                className="btn btn-primary"
-                                style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
-                                onClick={() => handlePairAdb(pairIpInput, pairCodeInput, 'pixel_10')}
-                                disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
-                              >
-                                {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
-                              </button>
-                            </div>
-                            {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{pairStatusMsg}</div>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-
-
-                <div className="dropdown-section-title" style={{ marginTop: '4px' }}>DISPLAY HARDWARE CAPABILITIES</div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <div className={`capability-card ${deviceInfo?.displays?.desktop ? 'ready' : 'na'}`}>
-                    <Monitor size={12} />
-                    <span>Desktop Mode: {deviceInfo?.displays?.desktop ? 'READY' : 'N/A'}</span>
-                  </div>
-                  <div className={`capability-card phone ${deviceInfo?.displays?.phone ? 'ready' : 'na'}`}>
-                    <Smartphone size={12} />
-                    <span>Phone Mode: {deviceInfo?.displays?.phone ? 'READY' : 'N/A'}</span>
-                  </div>
-                </div>
-
-                <div className="dropdown-section-title" style={{ marginTop: '4px' }}>INPUT METHOD & IME</div>
-                <div className="ime-control-card">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Keyboard size={13} />
-                    <span>HID Active (IME Suppressed)</span>
-                  </div>
-                  <button type="button" className="btn btn-sm btn-outline" style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }} onClick={handleCloseKeyboard} disabled={isClosingKeyboard} title="Force dismiss on-screen virtual keyboard">
-                    {isClosingKeyboard ? <Loader2 size={10} className="spin" /> : 'Close IME'}
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
 
-          <button onClick={() => { setShowLiveMonitor(p => !p); setLiveMode('desktop'); setStreamKey(Date.now()); }} className="kiosk-nav-btn" style={{ borderColor: showLiveMonitor ? '#1f6feb' : undefined }}>
-            <Monitor size={12} /><span>LIVE VIEW</span>
-            {showLiveMonitor && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff9d' }} />}
+          <button
+            onClick={() => {
+              setStudioInitialTab('kiosk');
+              setShowStudioDrawer(true);
+              setLiveMode('desktop');
+              setStreamKey(Date.now());
+            }}
+            className="kiosk-nav-btn"
+            style={{ borderColor: showStudioDrawer ? '#1f6feb' : undefined }}
+            title="Open Unified Device & Kiosk Studio (Live Viewport & Lockdown)"
+          >
+            <Monitor size={12} /><span>STUDIO VIEW</span>
+            {showStudioDrawer && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff9d' }} />}
           </button>
-          <button type="button" onClick={() => setShowDeviceConfigDrawer(p => !p)} className={`kiosk-nav-btn ${showDeviceConfigDrawer ? 'active' : ''}`}><Shield size={12} /><span>KIOSK LOCK</span></button>
+          <button
+            type="button"
+            onClick={() => {
+              setStudioInitialTab('kiosk');
+              setShowStudioDrawer(true);
+            }}
+            className={`kiosk-nav-btn ${showStudioDrawer && studioInitialTab === 'kiosk' ? 'active' : ''}`}
+            title="External Desktop Isolation & Kiosk Lockdown"
+          >
+            <Shield size={12} /><span>KIOSK LOCK</span>
+          </button>
 
           {isCurrentDeviceConnected ? (
             <div className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`} onClick={() => alignmentData.is_aligned ? handleTriggerAlignmentCheck() : setIsBannerDismissed(p => !p)}>
@@ -1052,8 +738,8 @@ function AppContent() {
         isCheckingAlignment={isCheckingAlignment}
         onTriggerCheck={handleTriggerAlignmentCheck}
         onOpenModal={() => setShowAlignmentModal(true)}
-        onOpenLiveScreen={() => { setShowLiveMonitor(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
-        onOpenDeviceDrawer={() => setShowDeviceDropdown(true)}
+        onOpenLiveScreen={() => { setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
+        onOpenDeviceDrawer={() => { setStudioInitialTab('device'); setShowStudioDrawer(true); }}
         onConnectDevice={(ip, model) => handleConnectAdbIp(ip, model)}
         isConnectingDevice={isConnectingIp}
         onFixClassifier={handleFixClassifier}
@@ -1477,38 +1163,62 @@ function AppContent() {
         apiBase={API_BASE} streamKey={streamKey}
       />
 
-      <LiveMonitorDrawer
-        isOpen={showLiveMonitor} onClose={() => setShowLiveMonitor(false)} deviceInfo={deviceInfo} deviceModel={deviceModel}
-        alignmentData={alignmentData} liveMode={liveMode} onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
-        monitorSize={monitorSize} onSetPresetSize={handleSetPresetSize} showBoundingBoxes={showBoundingBoxes}
-        onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)} isDrawerMaximized={isDrawerMaximized}
-        onToggleMaximize={() => setIsDrawerMaximized(p => !p)} drawerWidth={drawerWidth} drawerHeight={drawerHeight}
-        isResizingDrawer={isResizingDrawer} onResizeMouseDown={handleDrawerResize} onSelectSerial={handleSelectSerial}
-        onSelectDevice={handleSelectDevice} onConnectAdbIp={handleConnectAdbIp} isConnectingIp={isConnectingIp}
-        connectStatusMsg={connectStatusMsg} onPairAdb={handlePairAdb} isPairing={isPairing} pairStatusMsg={pairStatusMsg}
-        apiBase={API_BASE} streamKey={streamKey} onRefreshStream={() => setStreamKey(Date.now())}
-        onOpenAlignmentModal={() => setShowAlignmentModal(true)} onOpenDeviceConfig={() => setShowDeviceConfigDrawer(true)}
-      />
-
-      <DeviceConfigDrawer
-        isOpen={showDeviceConfigDrawer} onClose={() => setShowDeviceConfigDrawer(false)} apiBase={API_BASE}
-        activeSerial={deviceInfo?.active_serial} onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
+      <DeviceStudioDrawer
+        isOpen={showStudioDrawer}
+        onClose={() => setShowStudioDrawer(false)}
+        apiBase={API_BASE}
+        initialTab={studioInitialTab}
+        deviceInfo={deviceInfo}
+        deviceModel={deviceModel}
+        onSelectDevice={handleSelectDevice}
+        onSelectSerial={handleSelectSerial}
+        onConnectAdbIp={handleConnectAdbIp}
+        isConnectingIp={isConnectingIp}
+        connectStatusMsg={connectStatusMsg}
+        onPairAdb={handlePairAdb}
+        isPairing={isPairing}
+        pairStatusMsg={pairStatusMsg}
+        pixel8Ip={pixel8Ip}
+        setPixel8Ip={setPixel8Ip}
+        pixel10Ip={pixel10Ip}
+        setPixel10Ip={setPixel10Ip}
+        alignmentData={alignmentData}
+        onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
+        onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+        liveMode={liveMode}
+        onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
+        streamKey={streamKey}
+        onRefreshStream={() => setStreamKey(Date.now())}
+        showBoundingBoxes={showBoundingBoxes}
+        onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
+        onCloseKeyboard={handleCloseKeyboard}
+        isClosingKeyboard={isClosingKeyboard}
+        telemetry={telemetry}
+        tokenStats={tokenStats}
+        documentSummary={{
+          total_lines: documentData?.total_lines || 0,
+          min_line: documentData?.min_line || 0,
+          max_line: documentData?.max_line || 0,
+          total_frames: frames.length,
+          issue_count: documentData?.issue_count || 0,
+          verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
+        }}
+        wsConnected={wsConnected}
+        latencyMs={latencyMs}
+        eventsLog={eventsLog}
+        onClearEvents={() => setEventsLog([])}
+        onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
+        projectInitProgress={projectInitProgress}
+        onDismissInitProgress={() => setProjectInitProgress(null)}
       />
 
       <AlignmentDiagnosticsModal
         isOpen={showAlignmentModal} alignmentData={alignmentData} isCheckingAlignment={isCheckingAlignment}
         onClose={() => setShowAlignmentModal(false)} onTriggerCheck={handleTriggerAlignmentCheck}
-        onInspectLiveScreen={() => { setShowAlignmentModal(false); setShowLiveMonitor(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
+        onInspectLiveScreen={() => { setShowAlignmentModal(false); setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
         onFixClassifier={handleFixClassifier} onFixAllClassifiers={handleFixAllClassifiers} fixingClassifierId={fixingClassifierId}
         isFixingAll={isFixingAll} dismissedItems={dismissedItems} onDismissItem={handleDismissItem}
       />
-
-      {showInspectorMetaPopover && (
-        <LiveMetaInfoPopover
-          isOpen={showInspectorMetaPopover} onClose={() => setShowInspectorMetaPopover(false)} apiBase={API_BASE}
-          streamKey={streamKey} onRefresh={() => setStreamKey(Date.now())} alignmentData={alignmentData} liveMode="desktop"
-        />
-      )}
 
       <TelemetryToaster
         telemetry={telemetry} tokenStats={tokenStats}
@@ -1517,6 +1227,7 @@ function AppContent() {
         deviceModel={deviceModel} eventsLog={eventsLog} onClearEvents={() => setEventsLog([])} onExpandedChange={setIsTelemetryExpanded}
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
         onReturnAlignmentOverlay={() => { setIsBannerDismissed(false); setIsBannerMinimized(false); localStorage.setItem('mc_banner_dismissed', 'false'); localStorage.setItem('mc_banner_minimized', 'false'); addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned'); }}
+        onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); }}
       />
     </div>
   );
