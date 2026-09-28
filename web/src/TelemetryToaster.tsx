@@ -32,6 +32,46 @@ const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'ca
   return true;
 };
 
+const isEventForNode = (ev: TelemetryEvent, nodeId: string): boolean => {
+  const msg = (ev.message || '').toLowerCase();
+  const cat = (ev.category || '').toUpperCase();
+  switch (nodeId) {
+    case 'init_end':
+      return msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
+             msg.includes('end') || msg.includes('eof') || msg.includes('node 1') || msg.includes('total_lines');
+    case 'reset_home':
+      return msg.includes('home') || msg.includes('ctrl+home') || msg.includes('node 2') ||
+             msg.includes('line 1') || msg.includes('reset_home');
+    case 'frame_acquire':
+      return msg.includes('frame_acquire') || msg.includes('capture') || msg.includes('screenshot') ||
+             msg.includes('grab') || msg.includes('node 3') || cat === 'FRAME';
+    case 'local_ai_ocr':
+      return msg.includes('local_ai') || msg.includes('rapidocr') || msg.includes('onnx') ||
+             msg.includes('ai ocr') || msg.includes('node 3b') || msg.includes('verbatim');
+    case 'frame_ocr':
+      return msg.includes('frame_ocr') || msg.includes('gutter') || msg.includes('line reader') ||
+             msg.includes('node 4') || (cat === 'OCR' && !msg.includes('local_ai'));
+    case 'arrow_down':
+      return msg.includes('arrow_down') || msg.includes('down arrow') || msg.includes('arrow') ||
+             msg.includes('step') || msg.includes('pacer') || msg.includes('node 5') || cat === 'PACER';
+    case 'verification_trigger':
+      return msg.includes('verification_trigger') || msg.includes('qualifier') || msg.includes('trigger') ||
+             msg.includes('loopback') || msg.includes('decision') || msg.includes('node 6');
+    default:
+      return true;
+  }
+};
+
+const NODE_LABELS: Record<string, { step: string; name: string }> = {
+  init_end: { step: '1', name: 'Determine Lines' },
+  reset_home: { step: '2', name: 'Reset Line 1' },
+  frame_acquire: { step: '3', name: 'Capture Screen' },
+  local_ai_ocr: { step: '3b', name: 'Local AI OCR' },
+  frame_ocr: { step: '4', name: 'Gutter OCR' },
+  arrow_down: { step: '5', name: 'Navigation Step' },
+  verification_trigger: { step: '6', name: 'Verify Trigger' },
+};
+
 export interface TelemetryData {
   device_id?: string;
   is_pacing?: boolean;
@@ -92,19 +132,28 @@ export interface TelemetryToasterProps {
   onOpenStudio?: () => void;
   selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown';
   onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
+  selectedNodeId?: string | null;
+  onSelectNodeId?: (nodeId: string | null) => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
+  selectedNodeId, onSelectNodeId
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
   const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
+    setIsNodeTracingActive(false);
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);
   };
+
+  const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
+  useEffect(() => {
+    if (selectedNodeId) setIsNodeTracingActive(true);
+  }, [selectedNodeId]);
 
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     try { return localStorage.getItem('mc_telemetry_expanded') === 'true'; } catch { return false; }
@@ -114,7 +163,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   const [now, setNow] = useState<number>(() => Date.now());
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const filteredEventsLog = eventsLog.filter(ev => isEventForDag(ev, currentDag));
+  const filteredEventsLog = (selectedNodeId && isNodeTracingActive)
+    ? eventsLog.filter(ev => isEventForNode(ev, selectedNodeId))
+    : eventsLog.filter(ev => isEventForDag(ev, currentDag));
 
   const toggleExpanded = () => {
     const next = !isExpanded;
@@ -134,7 +185,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   }, [filteredEventsLog, isExpanded, activeTab]);
 
   const handleCopySnapshot = () => {
-    navigator.clipboard.writeText(JSON.stringify({ timestamp: new Date().toISOString(), selectedDag: currentDag, telemetry, tokenStats, documentSummary, latencyMs, wsConnected, pipelineMode, deviceModel, recentEvents: filteredEventsLog.slice(-10) }, null, 2));
+    navigator.clipboard.writeText(JSON.stringify({ timestamp: new Date().toISOString(), selectedDag: currentDag, selectedNodeId, telemetry, tokenStats, documentSummary, latencyMs, wsConnected, pipelineMode, deviceModel, recentEvents: filteredEventsLog.slice(-10) }, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -185,14 +236,21 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
           >
             <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
             <span className="pill-title">TELEMETRY</span><span className="pill-divider">|</span>
-            {currentDag !== 'all' && (
+            {selectedNodeId && isNodeTracingActive ? (
+              <>
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#58a6ff', background: 'rgba(88, 166, 255, 0.2)', border: '1px solid rgba(88, 166, 255, 0.4)', padding: '1px 6px', borderRadius: '4px' }}>
+                  🎯 Tracing: Node {NODE_LABELS[selectedNodeId]?.step || selectedNodeId}
+                </span>
+                <span className="pill-divider">|</span>
+              </>
+            ) : currentDag !== 'all' ? (
               <>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: currentDag === 'initialize' ? '#58a6ff' : '#00ff9d', background: currentDag === 'initialize' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)', padding: '1px 5px', borderRadius: '4px' }}>
                   {currentDag === 'initialize' ? 'DAG 1' : 'DAG 2'}
                 </span>
                 <span className="pill-divider">|</span>
               </>
-            )}
+            ) : null}
             <span className="pill-stat" style={{ color: phaseStyle.text }}>{telemetry.phase || 'IDLE'}</span><span className="pill-divider">|</span>
             <span className="pill-stat">⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}</span><span className="pill-divider">|</span>
             <span className="pill-stat">🪙 {totalTokens.toLocaleString()}</span>
@@ -213,9 +271,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   type="button"
                   onClick={() => handleSelectDag('all')}
                   style={{
-                    background: currentDag === 'all' ? '#21262d' : 'transparent',
-                    border: currentDag === 'all' ? '1px solid #30363d' : 'none',
-                    color: currentDag === 'all' ? '#e6edf3' : '#8b949e',
+                    background: (!isNodeTracingActive && currentDag === 'all') ? '#21262d' : 'transparent',
+                    border: (!isNodeTracingActive && currentDag === 'all') ? '1px solid #30363d' : 'none',
+                    color: (!isNodeTracingActive && currentDag === 'all') ? '#e6edf3' : '#8b949e',
                     padding: '2px 6px',
                     borderRadius: '4px',
                     fontSize: '9.5px',
@@ -230,9 +288,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   type="button"
                   onClick={() => handleSelectDag('initialize')}
                   style={{
-                    background: currentDag === 'initialize' ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
-                    border: currentDag === 'initialize' ? '1px solid #58a6ff66' : 'none',
-                    color: currentDag === 'initialize' ? '#58a6ff' : '#8b949e',
+                    background: (!isNodeTracingActive && currentDag === 'initialize') ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
+                    border: (!isNodeTracingActive && currentDag === 'initialize') ? '1px solid #58a6ff66' : 'none',
+                    color: (!isNodeTracingActive && currentDag === 'initialize') ? '#58a6ff' : '#8b949e',
                     padding: '2px 6px',
                     borderRadius: '4px',
                     fontSize: '9.5px',
@@ -247,9 +305,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   type="button"
                   onClick={() => handleSelectDag('capture_entire_markdown')}
                   style={{
-                    background: currentDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.25)' : 'transparent',
-                    border: currentDag === 'capture_entire_markdown' ? '1px solid #00ff9d66' : 'none',
-                    color: currentDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e',
+                    background: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? 'rgba(0, 255, 157, 0.25)' : 'transparent',
+                    border: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? '1px solid #00ff9d66' : 'none',
+                    color: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? '#00ff9d' : '#8b949e',
                     padding: '2px 6px',
                     borderRadius: '4px',
                     fontSize: '9.5px',
@@ -260,6 +318,37 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                 >
                   DAG 2: CAPTURE
                 </button>
+                {selectedNodeId && (
+                  <button
+                    type="button"
+                    onClick={() => setIsNodeTracingActive(p => !p)}
+                    style={{
+                      background: isNodeTracingActive ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
+                      border: `1px solid ${isNodeTracingActive ? '#58a6ff' : 'rgba(88, 166, 255, 0.4)'}`,
+                      color: isNodeTracingActive ? '#58a6ff' : '#8b949e',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '9.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                    title={`Process tracing for Node ${NODE_LABELS[selectedNodeId]?.step || selectedNodeId}`}
+                  >
+                    <span>🎯 NODE {NODE_LABELS[selectedNodeId]?.step || ''}: {NODE_LABELS[selectedNodeId]?.name || selectedNodeId}</span>
+                    {isNodeTracingActive && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onSelectNodeId?.(null); setIsNodeTracingActive(false); }}
+                        style={{ marginLeft: '2px', opacity: 0.8, cursor: 'pointer', fontWeight: 800 }}
+                        title="Clear node tracing filter"
+                      >
+                        ×
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
             <div className="toaster-header-actions">

@@ -76,6 +76,7 @@ function AppContent() {
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
   const [showDag, setShowDag] = useState(true);
   const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>('all');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>('init_end');
   const [showGotoModal, setShowGotoModal] = useState(false);
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
   const [isNavigating, setIsNavigating] = useState(false);
@@ -794,6 +795,8 @@ function AppContent() {
             onRefresh={fetchData}
             selectedDag={selectedDag}
             onSelectDag={setSelectedDag}
+            selectedNodeId={selectedNodeId}
+            onSelectNodeId={setSelectedNodeId}
             projectInitProgress={projectInitProgress}
             onDismissInitProgress={() => setProjectInitProgress(null)}
             onRetryInit={async () => {
@@ -1143,6 +1146,8 @@ function AppContent() {
         onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); }}
         selectedDag={selectedDag}
         onSelectDag={setSelectedDag}
+        selectedNodeId={selectedNodeId}
+        onSelectNodeId={setSelectedNodeId}
       />
     </div>
   );

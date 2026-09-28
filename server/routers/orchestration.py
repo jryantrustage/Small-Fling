@@ -578,24 +578,31 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "message": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
                     }
 
-            scan_res = await state.scan_image_in_process(temp_calib)
+            scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib)
+            extracted_text = scan_res.get("extracted_text", "")
             lines_detected = scan_res.get("lines", [])
-
-            formatted_lines = []
-            for l in lines_detected:
-                txt = l.get("text", "").strip()
-                ln = l.get("line_number")
-                if txt:
-                    formatted_lines.append(f"{ln:>3}: {txt}")
-                else:
-                    formatted_lines.append(f"{ln:>3}:")
-            extracted_text = "\n".join(formatted_lines)
-            if not extracted_text.strip():
-                extracted_text = "(No editor lines detected in image frame)"
-
-            lines_count = len(lines_detected)
+            lines_count = scan_res.get("lines_count", len(lines_detected))
             char_count = len(extracted_text)
-            engine_name = "RapidOCR (Local AI ONNX)"
+            engine_name = scan_res.get("model_used", "MiniCPM-V (Ollama)")
+
+            for item in lines_detected:
+                ln = item.get("line_number")
+                if ln:
+                    ln = int(ln)
+                    state.document_lines[ln] = {
+                        "line_number": ln,
+                        "gutter_number": ln,
+                        "text": item.get("text", ""),
+                        "is_blank": not bool(item.get("text", "").strip()),
+                        "is_wrapped": False,
+                        "wrapped_line_count": 1,
+                        "status": "verified",
+                        "confidence": 0.98,
+                        "notes": f"MiniCPM-V OCR ({engine_name})",
+                        "updated_at": datetime.now().isoformat()
+                    }
+            if lines_detected:
+                state.save_persisted_state()
 
             node.update({
                 "status": "completed",
@@ -609,7 +616,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if "frame_ocr" in state.dag_state["nodes"]:
                 state.dag_state["current_active_node"] = "frame_ocr"
 
-            state.latest_telemetry["status_message"] = f"DAG Node 3b: Local AI OCR extracted {lines_count} lines ({char_count} chars) ✔"
+            state.latest_telemetry["status_message"] = f"DAG Node 3b: {engine_name} extracted {lines_count} lines ({char_count} chars) ✔"
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
                 "dag": state.dag_state,
@@ -759,21 +766,23 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "error": None
             })
             if "local_ai_ocr" in state.dag_state["nodes"]:
-                formatted_lines = []
-                for l in lines_detected:
-                    txt = l.get("text", "").strip()
-                    ln = l.get("line_number")
-                    if txt: formatted_lines.append(f"{ln:>3}: {txt}")
-                    else: formatted_lines.append(f"{ln:>3}:")
-                ext_txt = "\n".join(formatted_lines) or "(No text lines detected)"
-                state.dag_state["nodes"]["local_ai_ocr"].update({
-                    "status": "completed",
-                    "extracted_text": ext_txt,
-                    "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
-                    "lines_count": len(lines_detected),
-                    "char_count": len(ext_txt),
-                    "model_used": "RapidOCR (Local AI ONNX)"
-                })
+                n3b = state.dag_state["nodes"]["local_ai_ocr"]
+                if not n3b.get("extracted_text") or n3b.get("status") != "completed":
+                    formatted_lines = []
+                    for l in lines_detected:
+                        txt = l.get("text", "").strip()
+                        ln = l.get("line_number")
+                        if txt: formatted_lines.append(f"{ln:>3}: {txt}")
+                        else: formatted_lines.append(f"{ln:>3}:")
+                    ext_txt = "\n".join(formatted_lines) or "(No text lines detected)"
+                    n3b.update({
+                        "status": "completed",
+                        "extracted_text": ext_txt,
+                        "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
+                        "lines_count": len(lines_detected),
+                        "char_count": len(ext_txt),
+                        "model_used": "RapidOCR (Local AI Fallback)"
+                    })
             target_top = bot_ln + 1
             if "arrow_down" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["arrow_down"].update({

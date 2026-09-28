@@ -191,7 +191,7 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
             "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
             "- Do not include markdown code fences, headers, or explanations."
         )
-        models = [config.OLLAMA_VISION_MODEL, "minicpm-v"]
+        models = ["minicpm-v:latest", "minicpm-v", config.OLLAMA_VISION_MODEL]
         last_ex = None
         for m in models:
             try:
@@ -201,7 +201,7 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
                     "options": {"num_predict": 768, "temperature": 0.05}
                 }).encode("utf-8")
                 req = urllib.request.Request(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", data=req_data, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=35) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     connection_stats["ollama_available"] = True
                     return data.get("response", ""), m
@@ -220,7 +220,7 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
             line_clean = line.rstrip()
             if not line_clean.strip():
                 continue
-            if match := re.match(r"^\s*(\d+)\s*[:|]\s?(.*)$", line_clean):
+            if match := re.match(r"^\s*(?:line[_\s]*|ln\s*)?(\d+)\s*[:|]\s?(.*)$", line_clean, re.IGNORECASE):
                 ln = int(match.group(1))
                 code = match.group(2)
                 plines.append({
@@ -291,3 +291,86 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
             return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
         except Exception:
             return await process_frame_with_local_ocr(frame_id, image_path)
+
+async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
+    """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction, with graceful fallback to RapidOCR."""
+    def _call_minicpm_sync():
+        with Image.open(image_path) as img:
+            w, h = img.size
+            scale = min(1.0, 960.0 / h) if h > 960 else 1.0
+            if scale < 1.0:
+                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
+            buf = io.BytesIO()
+            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        prompt = (
+            "Extract code lines verbatim with gutter line numbers from the image.\n"
+            "Output each line in the strict structured format:\n"
+            "LINE_NUM: code_content\n\n"
+            "Rules:\n"
+            "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
+            "- LINE_NUM must be the integer line number visible in the left gutter.\n"
+            "- code_content must be the verbatim code with exact indentation.\n"
+            "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
+            "- Do not include markdown code fences, headers, or explanations."
+        )
+        candidates = ["minicpm-v:latest", "minicpm-v", config.OLLAMA_VISION_MODEL]
+        last_ex = None
+        for m in candidates:
+            try:
+                req_data = json.dumps({
+                    "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
+                    "options": {"num_predict": 768, "temperature": 0.05}
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{config.OLLAMA_URL.rstrip('/')}/api/generate",
+                    data=req_data,
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data.get("response", ""), m
+            except Exception as e:
+                last_ex = e
+        raise last_ex or RuntimeError("MiniCPM-V Ollama vision failed")
+
+    try:
+        raw_resp, model_name = await asyncio.to_thread(_call_minicpm_sync)
+        raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
+        plines = []
+        for line in raw_text.splitlines():
+            line_clean = line.rstrip()
+            if not line_clean.strip():
+                continue
+            if match := re.match(r"^\s*(?:line[_\s]*|ln\s*)?(\d+)\s*[:|]\s?(.*)$", line_clean, re.IGNORECASE):
+                ln = int(match.group(1))
+                code = match.group(2)
+                plines.append({"line_number": ln, "gutter_number": ln, "text": code})
+
+        formatted = "\n".join(f"{p['line_number']:>3}: {p['text']}" for p in plines) if plines else raw_text
+        return {
+            "status": "success",
+            "lines": plines,
+            "extracted_text": formatted,
+            "lines_count": len(plines),
+            "model_used": f"MiniCPM-V ({model_name})"
+        }
+    except Exception as e:
+        print(f"[MiniCPM-V OCR] Ollama call error: {e}, falling back to local RapidOCR")
+        rapid_res = await state.scan_image_in_process(image_path)
+        lines = rapid_res.get("lines", [])
+        formatted = []
+        for l in lines:
+            txt = l.get("text", "").strip()
+            ln = l.get("line_number")
+            formatted.append(f"{ln:>3}: {txt}" if txt else f"{ln:>3}:")
+        text = "\n".join(formatted) if formatted else "(No lines detected)"
+        return {
+            "status": "fallback",
+            "lines": lines,
+            "extracted_text": text,
+            "lines_count": len(lines),
+            "model_used": "RapidOCR (Fallback)"
+        }
+
