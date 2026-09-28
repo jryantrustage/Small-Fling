@@ -2,10 +2,20 @@
 # Ensures clean restart on the same ports without port-in-use collisions.
 
 param(
-    [int[]]$Ports = @(8000, 5173)
+    [string[]]$Ports = @("8000", "5173")
 )
 
-foreach ($port in $Ports) {
+$targetPorts = @()
+foreach ($p in $Ports) {
+    if ($p -match ',') {
+        $targetPorts += ($p -split ',') | ForEach-Object { if ($_.Trim() -match '^\d+$') { [int]$_.Trim() } }
+    } elseif ($p.Trim() -match '^\d+$') {
+        $targetPorts += [int]$p.Trim()
+    }
+}
+$targetPorts = $targetPorts | Select-Object -Unique
+
+foreach ($port in $targetPorts) {
     try {
         $conns = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue
         if ($conns) {

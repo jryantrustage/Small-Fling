@@ -21,7 +21,7 @@ const env = import.meta.env;
 const API_BASE = (() => {
   const u = env.VITE_API_BASE_URL;
   if (!u || u === 'http://127.0.0.1:8000' || u === 'http://localhost:8000') {
-    if (typeof window !== 'undefined' && window.location.port === '5173') return '';
+    return '';
   }
   return u || '';
 })();
