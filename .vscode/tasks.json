@@ -4,19 +4,19 @@
         {
             "label": "ports: clean",
             "type": "shell",
-            "command": "powershell -ExecutionPolicy Bypass -File scripts/free_ports.ps1 -Ports 8000",
+            "command": "powershell -ExecutionPolicy Bypass -File scripts/free_ports.ps1 -Ports 8000,5173",
             "problemMatcher": []
         },
         {
             "label": "adb: connect wifi",
             "type": "shell",
-            "command": "adb connect 192.168.86.81:43677",
+            "command": "adb connect 192.168.86.81:44605",
             "problemMatcher": []
         },
         {
             "label": "adb: stay awake and unlock",
             "type": "shell",
-            "command": "adb -s 192.168.86.81:43677 shell \"settings put global stay_on_while_plugged_in 7 && svc power stayon true && input keyevent KEYCODE_WAKEUP && wm dismiss-keyguard\"",
+            "command": "adb -s 192.168.86.81:44605 shell \"settings put global stay_on_while_plugged_in 7 && svc power stayon true && input keyevent KEYCODE_WAKEUP && wm dismiss-keyguard\"",
             "problemMatcher": []
         },
         {
@@ -45,7 +45,7 @@
         {
             "label": "adb: install and run",
             "type": "shell",
-            "command": "adb -s 192.168.86.81:43677 install -r app/build/outputs/apk/debug/app-debug.apk && adb -s 192.168.86.81:43677 shell am start -n com.matrixcapture.app/.ui.MainActivity",
+            "command": "adb -s 192.168.86.81:44605 install -r app/build/outputs/apk/debug/app-debug.apk && adb -s 192.168.86.81:44605 shell am start -n com.matrixcapture.app/.ui.MainActivity",
             "dependsOn": [
                 "gradle: assembleDebug"
             ],
@@ -54,7 +54,7 @@
         {
             "label": "adb: grant overlay permission",
             "type": "shell",
-            "command": "adb -s 192.168.86.81:43677 shell appops set com.matrixcapture.app SYSTEM_ALERT_WINDOW allow",
+            "command": "adb -s 192.168.86.81:44605 shell appops set com.matrixcapture.app SYSTEM_ALERT_WINDOW allow",
             "problemMatcher": []
         },
         {
@@ -102,6 +102,9 @@
             "options": {
                 "cwd": "${workspaceFolder}/web"
             },
+            "dependsOn": [
+                "ports: clean"
+            ],
             "isBackground": true,
             "problemMatcher": [
                 {
