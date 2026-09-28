@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 import os, re, json, base64, urllib.request, urllib.error
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 import cv2, numpy as np
 
 try:
@@ -10,6 +11,7 @@ except ImportError:
     RapidOCR = None
 
 _rapid_ocr_instance = None
+_fast_ocr_executor = ThreadPoolExecutor(max_workers=2)
 
 def get_rapid_ocr():
     global _rapid_ocr_instance
@@ -17,6 +19,70 @@ def get_rapid_ocr():
         try: _rapid_ocr_instance = RapidOCR()
         except Exception as e: print(f"[Worker] RapidOCR init error: {e}")
     return _rapid_ocr_instance
+
+def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
+    """Helper to extract clean gutter line numbers from a localized image slice."""
+    if crop is None or crop.size == 0: return []
+    ocr = get_rapid_ocr()
+    if ocr is None: return []
+    try:
+        res, _ = ocr(crop)
+    except Exception:
+        return []
+    nums = []
+    if not res: return nums
+    for bbox, text, score in res:
+        clean = text.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1')
+        if m := re.search(r'^(\d+)', clean):
+            try:
+                n = int(m.group(1))
+                if 0 < n < 500000:
+                    pts = np.array(bbox)
+                    y_min = int(np.min(pts[:, 1])) if pts.ndim == 2 else 0
+                    nums.append((y_min, n))
+            except Exception: pass
+    nums.sort(key=lambda x: x[0])
+    return [n for _, n in nums]
+
+def fast_detect_gutter_bounds(img: np.ndarray) -> Tuple[int, int]:
+    """Rapidly extracts top line and bottom line from targeted top/bottom gutter slices."""
+    if img is None: return 0, 0
+    h, w = img.shape[:2]
+    # 1. Primary: standard fullscreen gutter (width ~160px)
+    top_crop = img[int(h * 0.10):int(h * 0.40), :160]
+    bot_crop = img[int(h * 0.70):int(h * 0.95), :160]
+
+    top_nums = extract_numbers_from_slice(top_crop)
+    bot_nums = extract_numbers_from_slice(bot_crop)
+    if top_nums and bot_nums:
+        return top_nums[0], bot_nums[-1]
+
+    # 2. Secondary: sidebar open (gutter around x ~ 300)
+    top_crop2 = img[int(h * 0.10):int(h * 0.40), 260:430]
+    bot_crop2 = img[int(h * 0.70):int(h * 0.95), 260:430]
+    top_nums2 = extract_numbers_from_slice(top_crop2)
+    bot_nums2 = extract_numbers_from_slice(bot_crop2)
+    if top_nums2 and bot_nums2:
+        return top_nums2[0], bot_nums2[-1]
+
+    # Return partial if either top or bot detected
+    t = (top_nums or top_nums2 or [0])[0]
+    b = (bot_nums or bot_nums2 or [0])[-1]
+    return t, b
+
+def fast_verify_first_line(img: np.ndarray) -> Tuple[bool, int]:
+    """Rapidly checks whether Line 1 (or <= 15) is visible at top gutter slice."""
+    if img is None: return False, 0
+    h, w = img.shape[:2]
+    top_crop = img[int(h * 0.10):int(h * 0.40), :160]
+    top_nums = extract_numbers_from_slice(top_crop)
+    if not top_nums:
+        top_crop2 = img[int(h * 0.10):int(h * 0.40), 260:430]
+        top_nums = extract_numbers_from_slice(top_crop2)
+    if not top_nums: return False, 0
+    first_ln = top_nums[0]
+    is_at_home = any(ln == 1 for ln in top_nums[:4]) or first_ln <= 15
+    return is_at_home, (1 if is_at_home else first_ln)
 
 def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
     """
@@ -28,13 +94,21 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
     h, w = img.shape[:2]
     top_y = int(h * 0.10)
     bot_y = int(h * 0.90)
-    sub = img[top_y:bot_y, :int(w * 0.40)]
     ocr = get_rapid_ocr()
     if ocr is None: return []
-    try:
-        results, _ = ocr(sub)
-        if not results: return []
-        
+
+    # Fast check: scan targeted gutter width first
+    candidates = []
+    for sub_w in [int(w * 0.12), int(w * 0.35)]:
+        sub = img[top_y:bot_y, :sub_w]
+        try:
+            results, _ = ocr(sub)
+        except Exception as e:
+            print(f"[find_gutter_numbers_cluster] Error: {e}")
+            return []
+        if not results:
+            continue
+
         candidates = []
         for bbox, text, score in results:
             clean = text.strip()
@@ -48,52 +122,59 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
                     if 0 < num < 500000:
                         candidates.append((x_min, y_min, num))
                 except ValueError: pass
-        
-        if not candidates: return []
-        
-        # Cluster candidates by X-coordinate (within 24px tolerance)
-        clusters = {}
-        for x, y, num in candidates:
-            matched_k = None
-            for k in clusters:
-                if abs(k - x) <= 24:
-                    matched_k = k
-                    break
-            if matched_k is None:
-                matched_k = x
-                clusters[matched_k] = []
-            clusters[matched_k].append((y, num))
-        
-        best_gutter = []
-        for k, items in clusters.items():
-            if len(items) > len(best_gutter):
-                best_gutter = sorted(items, key=lambda it: it[0])
-        
-        # Filter monotonically non-decreasing order
-        valid = []
-        for y_pos, num in best_gutter:
-            if not valid or num >= valid[-1][1]:
-                valid.append((y_pos, num))
-            elif valid and str(valid[-1][1])[:-2] + str(num) == str(valid[-1][1] + 1):
-                valid.append((y_pos, valid[-1][1] + 1))
-        return valid if valid else best_gutter
-    except Exception as e:
-        print(f"[find_gutter_numbers_cluster] Error: {e}")
-        return []
+        if candidates:
+            break
+
+    if not candidates: return []
+    
+    # Cluster candidates by X-coordinate (within 24px tolerance)
+    clusters = {}
+    for x, y, num in candidates:
+        matched_k = None
+        for k in clusters:
+            if abs(k - x) <= 24:
+                matched_k = k
+                break
+        if matched_k is None:
+            matched_k = x
+            clusters[matched_k] = []
+        clusters[matched_k].append((y, num))
+    
+    best_gutter = []
+    for k, items in clusters.items():
+        if len(items) > len(best_gutter):
+            best_gutter = sorted(items, key=lambda it: it[0])
+    
+    # Filter monotonically non-decreasing order
+    valid = []
+    for y_pos, num in best_gutter:
+        if not valid or num >= valid[-1][1]:
+            valid.append((y_pos, num))
+        elif valid and str(valid[-1][1])[:-2] + str(num) == str(valid[-1][1] + 1):
+            valid.append((y_pos, valid[-1][1] + 1))
+    return valid if valid else best_gutter
 
 def worker_detect_gutter_bounds(image_path: str) -> Tuple[int, int]:
     """Worker function to rapidly detect both top line and last line in a single OCR pass."""
     img = cv2.imread(image_path)
     if img is None: return 0, 0
+    # Fast path: check top and bottom slices in parallel
+    top, bot = fast_detect_gutter_bounds(img)
+    if top > 0 and bot > 0:
+        return top, bot
+    # Fallback to column clustering
     gutter = find_gutter_numbers_cluster(img)
     if gutter:
         return gutter[0][1], gutter[-1][1]
-    return 0, 0
+    return top or 0, bot or 0
 
 def worker_detect_last_line(image_path: str) -> int:
     """Worker function to rapidly and accurately detect the last line number on screen (used after Ctrl+End)."""
     img = cv2.imread(image_path)
     if img is None: return 0
+    _, bot = fast_detect_gutter_bounds(img)
+    if bot > 0:
+        return bot
     gutter = find_gutter_numbers_cluster(img)
     if gutter:
         return gutter[-1][1]
@@ -103,17 +184,23 @@ def worker_verify_first_line(image_path: str) -> Tuple[bool, int]:
     """Worker function to verify that line 1 is visible at top of gutter (used after Ctrl+Home)."""
     img = cv2.imread(image_path)
     if img is None: return False, 0
+    is_at_home, ln = fast_verify_first_line(img)
+    if is_at_home:
+        return is_at_home, ln
     gutter = find_gutter_numbers_cluster(img)
     if not gutter: return False, 0
     first_ln = gutter[0][1]
     has_line_1 = any(ln == 1 for _, ln in gutter[:4])
-    is_at_home = has_line_1 or (first_ln <= 5 and gutter[0][0] < 300)
+    is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < 300)
     return is_at_home, (1 if is_at_home else first_ln)
 
 def worker_detect_top_line(image_path: str) -> int:
     """Worker function to detect the line number displayed at the top of the left side gutter."""
     img = cv2.imread(image_path)
     if img is None: return 0
+    top, _ = fast_detect_gutter_bounds(img)
+    if top > 0:
+        return top
     gutter = find_gutter_numbers_cluster(img)
     if gutter:
         return gutter[0][1]

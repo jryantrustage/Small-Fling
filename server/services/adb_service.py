@@ -486,26 +486,64 @@ async def is_ime_visible(serial: Optional[str] = None) -> bool:
         return "mInputShown=true" in out or any(f"mImeWindowVis={v}" in out for v in [1, 2, 3])
     except Exception: return False
 
+async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    High-speed viewport auto-fix & keyboard dismiss for external desktop displays:
+    1. Sends AUTO_REFRESH_DISPLAY broadcast to MatrixCapture Kiosk app.
+    2. Resizes all window tasks on the external display to full 1920x1080 bounds.
+    3. Dismisses any visible IME / soft keyboard on the external display (and default display).
+    4. Enforces hardware keyboard IME suppression.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active device connected"}
+
+    if display_id is None or display_id <= 0:
+        disp_id = await detect_external_display_id(ser)
+        display_id = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 2)
+
+    cmd = (
+        f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
+        f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
+        f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
+        f"settings put secure show_ime_with_hard_keyboard 0; "
+        f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then "
+        f"input -d {display_id} keyevent 4; input -d {display_id} keyevent 111; input -d 0 keyevent 111; fi"
+    )
+    res = await run_adb_shell(cmd, ser, timeout=4.0)
+
+    is_open = await is_ime_visible(ser)
+    if is_open:
+        await run_adb_shell(f"input -d {display_id} keyevent 111; input -d {display_id} keyevent 4; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", ser, timeout=2.0)
+        is_open = await is_ime_visible(ser)
+
+    try:
+        from services import state
+        state.latest_telemetry["keyboard_visible"] = is_open
+        await state.ws_manager.broadcast({
+            "type": "viewport_refreshed",
+            "display_id": display_id,
+            "keyboard_closed": not is_open,
+            "keyboard_visible": is_open
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "display_id": display_id,
+        "keyboard_closed": not is_open,
+        "keyboard_visible": is_open,
+        "output": res.get("stdout", "")
+    }
+
 async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
-        chk_acc = await run_adb_shell("settings get secure enabled_accessibility_services", ser)
-        acc_str = chk_acc.get("stdout", "")
-        if "DesktopPaginationService" not in acc_str:
-            svc = "com.matrixcapture.app/com.matrixcapture.app.service.DesktopPaginationService"
-            new_acc = f"{acc_str.strip()}:{svc}" if acc_str.strip() and acc_str.strip() != "null" else svc
-            await run_adb_shell(f"settings put secure enabled_accessibility_services {new_acc}", ser)
-            await run_adb_shell("settings put secure accessibility_enabled 1", ser)
-
-        if await is_ime_visible(ser):
-            await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", ser)
-            await run_adb_shell("input -d 0 keyevent 111", ser)
-            await asyncio.sleep(0.1)
-            if await is_ime_visible(ser): await run_adb_shell("input -d 0 keyevent 4", ser)
-            return True
-        return False
+        disp_id = await detect_external_display_id(ser)
+        fix_res = await auto_fix_viewport(ser, disp_id)
+        return fix_res.get("keyboard_closed", True)
     except Exception: return False
 
 async def get_device_info() -> Dict[str, Any]:
@@ -553,49 +591,28 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         "source": "studio"
     })
 
-    # 2. Silently ensure soft keyboard is suppressed without sending destructive Back/Escape
+    # 2. Silently ensure soft keyboard is suppressed and dispatch keycombination + flings in a single shell session
     ser = await get_active_adb_serial(serial)
     if ser:
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser)
-
         disp_id = await detect_external_display_id(ser)
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
+        disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # 1. Tap editor content area if not focused to ensure desktop window has input focus & blinking cursor
-        try:
-            ime_chk = await run_adb_shell("dumpsys input_method | grep -E 'mServedView|mInputConnection'", ser, timeout=1.5)
-            ime_out = ime_chk.get("stdout", "") if ime_chk.get("status") == "ok" else ""
-            if "preview_host_view" not in ime_out and "MAMWebView" not in ime_out:
-                if target_d > 0:
-                    await run_adb_shell(f"input -d {target_d} tap 500 500", ser)
-                else:
-                    await run_adb_shell("input tap 500 500", ser)
-                await asyncio.sleep(0.15)
-        except Exception:
-            pass
-
-        # 2. Dispatch HID keycombination to external display
-        if target_d > 0:
-            await run_adb_shell(f"input -d {target_d} keycombination {key1} {key2}", ser)
-        else:
-            await run_adb_shell(f"input keycombination {key1} {key2}", ser)
-
-        # 3. Teams editor WebView on external displays often ignores shell keycombinations for document scrolling.
-        # Complement with high-velocity swipe flings to guarantee instant, reliable EOF or Home navigation.
+        # Build unified execution script for minimal latency
+        cmds = ["settings put secure show_ime_with_hard_keyboard 0"]
+        cmds.append(f"input {disp_pfx}keycombination {key1} {key2}")
         if key2 == 123:  # EOF (Ctrl+End)
-            swipe_cmd = (
-                f"for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input -d {target_d} swipe 500 950 500 100 20; done"
-                if target_d > 0 else
-                "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input swipe 500 950 500 100 20; done"
-            )
-            await run_adb_shell(swipe_cmd, ser, timeout=15.0)
+            nums = " ".join(str(i) for i in range(1, 29))
+            cmds.append(f"for i in {nums}; do input {disp_pfx}swipe 500 950 500 80 15; done")
         elif key2 == 122:  # Home (Ctrl+Home)
-            swipe_cmd = (
-                f"for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input -d {target_d} swipe 500 150 500 950 20; done"
-                if target_d > 0 else
-                "for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25; do input swipe 500 150 500 950 20; done"
-            )
-            await run_adb_shell(swipe_cmd, ser, timeout=15.0)
+            nums = " ".join(str(i) for i in range(1, 29))
+            cmds.append(f"for i in {nums}; do input {disp_pfx}swipe 500 80 500 950 15; done")
+
+        await run_adb_shell("; ".join(cmds), ser, timeout=8.0)
+
+        # For Home and general key input, immediately auto-fix viewport to guarantee keyboard is closed
+        if key2 == 122 or key2 != 123:
+            await auto_fix_viewport(ser, target_d)
 
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:

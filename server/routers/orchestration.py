@@ -9,7 +9,7 @@ import config, db
 from models import TelemetryUpdateRequest, OrchestrationRequest, PipelineModeRequest, OcrSelectionRequest
 from services import state
 from services.adb_service import (
-    ensure_adb_keyboard_closed, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
+    ensure_adb_keyboard_closed, auto_fix_viewport, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
     get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id
 )
 import services.ocr_service as ocr_svc
@@ -171,11 +171,11 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         state.orchestration_state.update({"status": "RUNNING", "active_step": "START_READY", "step_label": f"Restarted at Line 1 by {invoker}", "top_line": 1, "bottom_line": lpp, "next_target_top": lpp + 1, "page": 1, "device_model": current_device_model, "lines_per_page": lpp})
         state.latest_telemetry.update({"current_page": 1, "current_top_line": 1, "current_bottom_line": 0, "is_pacing": True, "phase": "PACING", "status_message": f"Restarted • Invoked by {invoker}"})
     elif cmd in ("CALIBRATE_INSTANT", "CALIBRATE"):
-        await ensure_adb_keyboard_closed()
+        await auto_fix_viewport()
         state.orchestration_state.update({"active_step": "CALIBRATING", "step_label": f"Instant Calibration by {invoker}"})
         state.latest_telemetry.update({"status_message": f"Instant Calibration (Ctrl+End / Ctrl+Home) • Invoked by {invoker}"})
     elif cmd in ("ADVANCE_PAGE_ARROW", "PAGE_DOWN_ARROW"):
-        await ensure_adb_keyboard_closed()
+        await auto_fix_viewport()
         state.orchestration_state.update({"active_step": "PRECISION_SCROLL", "step_label": f"Arrow Step Invoked by {invoker}"})
         state.latest_telemetry.update({"status_message": f"Arrow Step Navigation • Invoked by {invoker}"})
 
@@ -259,19 +259,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     try:
         if target_key == "init_end":
             disp_id = await detect_external_display_id(active_serial)
-            cursor_clf = EditorCursorFocusedClassifier()
-            c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
-            try:
-                c_res = await cursor_clf.detect(c_ctx)
-                if c_res.issue_detected:
-                    await cursor_clf.fix(c_ctx)
-                    await asyncio.sleep(0.2)
-            except Exception as ce:
-                print(f"[init_end] Cursor classifier check note: {ce}")
-
+            if not payload.get("skip_precheck"):
+                cursor_clf = EditorCursorFocusedClassifier()
+                c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
+                try:
+                    c_res = await cursor_clf.detect(c_ctx)
+                    if c_res.issue_detected:
+                        await cursor_clf.fix(c_ctx)
+                        await asyncio.sleep(0.15)
+                except Exception as ce:
+                    print(f"[init_end] Cursor classifier check note: {ce}")
 
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
-            await asyncio.sleep(float(cfg.get("settle_delay_ms", 1200)) / 1000.0)
+            settle_s = float(cfg.get("settle_delay_ms", 400)) / 1000.0
+            await asyncio.sleep(settle_s)
             snap = await capture_external_screenshot(active_serial)
             total_lines = 0
             top_line = 0
@@ -279,10 +280,21 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 calib = state.FRAMES_DIR / "dag_node1_end.png"
                 with open(calib, "wb") as f: f.write(snap)
                 top_line, total_lines = await state.detect_gutter_bounds_in_process(calib)
-                if total_lines <= 0 or top_line <= 0:
+                if total_lines <= 0:
                     scan_res = await state.scan_image_in_process(calib)
-                    if total_lines <= 0: total_lines = scan_res.get("bottom_line", 0)
+                    total_lines = scan_res.get("bottom_line", 0)
                     if top_line <= 0: top_line = scan_res.get("top_line", 0)
+
+            # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
+            await auto_fix_viewport(active_serial, disp_id)
+            if total_lines <= 0:
+                snap_fixed = await capture_external_screenshot(active_serial)
+                if snap_fixed:
+                    calib = state.FRAMES_DIR / "dag_node1_end.png"
+                    with open(calib, "wb") as f: f.write(snap_fixed)
+                    t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib)
+                    if b_fix > 0: total_lines = b_fix
+                    if t_fix > 0: top_line = t_fix
 
             # Evaluate whether editor is still displaying line 1
             is_stuck_on_line_1 = False
@@ -397,13 +409,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "status": "success" if total_lines > 0 else "warning",
                 "node_id": "init_end",
                 "total_lines": total_lines,
+                "top_line": top_line,
                 "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔" if total_lines > 0 else "Ctrl+End sent, but could not detect EOF last line in gutter. Please verify document or connect device."
             }
 
 
         elif target_key == "reset_home":
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
-            await asyncio.sleep(float(cfg.get("settle_delay_ms", 800)) / 1000.0)
+            await auto_fix_viewport(active_serial)
+            await asyncio.sleep(float(cfg.get("settle_delay_ms", 400)) / 1000.0)
             snap = await capture_external_screenshot(active_serial)
             is_verified, detected_first = False, 0
             if snap:
@@ -420,6 +434,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             return {"status": "success" if is_verified else "warning", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'detection returned Ln {detected_first}'} via Ctrl+Home"}
 
         elif target_key == "frame_acquire":
+            await auto_fix_viewport(active_serial)
             if cfg.get("guard_keyboard", True):
                 await ensure_adb_keyboard_closed(active_serial)
 
@@ -745,7 +760,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "dag": state.dag_state
         })
 
-        node1_res = await run_single_dag_node("init_end", {"serial": active_serial})
+        node1_res = await run_single_dag_node("init_end", {"serial": active_serial, "skip_precheck": True})
         total_lines = node1_res.get("total_lines", 0)
 
         if node1_res.get("status") == "error" or total_lines <= 0:

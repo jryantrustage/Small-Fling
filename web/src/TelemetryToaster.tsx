@@ -7,7 +7,30 @@ export interface TelemetryEvent {
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;
+  dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
 }
+
+const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'capture_entire_markdown'): boolean => {
+  if (targetDag === 'all') return true;
+  if (ev.dag) {
+    if (ev.dag === 'all') return true;
+    return ev.dag === targetDag;
+  }
+  const msg = (ev.message || '').toLowerCase();
+  const cat = (ev.category || '').toUpperCase();
+  if (targetDag === 'initialize') {
+    return msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
+           msg.includes('ctrl+home') || msg.includes('gutter bounds') || msg.includes('line 1') ||
+           msg.includes('node 1') || msg.includes('node 2') || msg.includes('workspace');
+  }
+  if (targetDag === 'capture_entire_markdown') {
+    return cat === 'FRAME' || cat === 'PACER' || msg.includes('frame') ||
+           msg.includes('capture') || msg.includes('ocr') || msg.includes('pacing') ||
+           msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 5') ||
+           msg.includes('node 6') || msg.includes('step') || msg.includes('arrow');
+  }
+  return true;
+};
 
 export interface TelemetryData {
   device_id?: string;
@@ -67,13 +90,22 @@ export interface TelemetryToasterProps {
   isAligned?: boolean;
   onReturnAlignmentOverlay?: () => void;
   onOpenStudio?: () => void;
+  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown';
+  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
-  onReturnAlignmentOverlay, onOpenStudio,
+  onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
 }) => {
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
+  const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
+  const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
+    if (onSelectDag) onSelectDag(dag);
+    else setInternalSelectedDag(dag);
+  };
+
   const [isExpanded, setIsExpanded] = useState<boolean>(() => {
     try { return localStorage.getItem('mc_telemetry_expanded') === 'true'; } catch { return false; }
   });
@@ -81,6 +113,8 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  const filteredEventsLog = eventsLog.filter(ev => isEventForDag(ev, currentDag));
 
   const toggleExpanded = () => {
     const next = !isExpanded;
@@ -97,10 +131,10 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
 
   useEffect(() => {
     if (isExpanded && activeTab === 'events') logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [eventsLog, isExpanded, activeTab]);
+  }, [filteredEventsLog, isExpanded, activeTab]);
 
   const handleCopySnapshot = () => {
-    navigator.clipboard.writeText(JSON.stringify({ timestamp: new Date().toISOString(), telemetry, tokenStats, documentSummary, latencyMs, wsConnected, pipelineMode, deviceModel, recentEvents: eventsLog.slice(-10) }, null, 2));
+    navigator.clipboard.writeText(JSON.stringify({ timestamp: new Date().toISOString(), selectedDag: currentDag, telemetry, tokenStats, documentSummary, latencyMs, wsConnected, pipelineMode, deviceModel, recentEvents: filteredEventsLog.slice(-10) }, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -151,6 +185,14 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
           >
             <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
             <span className="pill-title">TELEMETRY</span><span className="pill-divider">|</span>
+            {currentDag !== 'all' && (
+              <>
+                <span style={{ fontSize: '9px', fontWeight: 800, color: currentDag === 'initialize' ? '#58a6ff' : '#00ff9d', background: currentDag === 'initialize' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)', padding: '1px 5px', borderRadius: '4px' }}>
+                  {currentDag === 'initialize' ? 'DAG 1' : 'DAG 2'}
+                </span>
+                <span className="pill-divider">|</span>
+              </>
+            )}
             <span className="pill-stat" style={{ color: phaseStyle.text }}>{telemetry.phase || 'IDLE'}</span><span className="pill-divider">|</span>
             <span className="pill-stat">⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}</span><span className="pill-divider">|</span>
             <span className="pill-stat">🪙 {totalTokens.toLocaleString()}</span>
@@ -164,6 +206,61 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
               <span className="toaster-title">TELEMETRY MONITOR</span>
               <span className="toaster-phase-badge" style={{ background: phaseStyle.bg, color: phaseStyle.text, borderColor: phaseStyle.border }}>{telemetry.phase || 'STANDBY'}</span>
+
+              {/* DAG Filter Pills */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'rgba(0, 0, 0, 0.4)', padding: '2px 4px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)', marginLeft: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleSelectDag('all')}
+                  style={{
+                    background: currentDag === 'all' ? '#21262d' : 'transparent',
+                    border: currentDag === 'all' ? '1px solid #30363d' : 'none',
+                    color: currentDag === 'all' ? '#e6edf3' : '#8b949e',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Show all telemetry activity"
+                >
+                  ALL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectDag('initialize')}
+                  style={{
+                    background: currentDag === 'initialize' ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
+                    border: currentDag === 'initialize' ? '1px solid #58a6ff66' : 'none',
+                    color: currentDag === 'initialize' ? '#58a6ff' : '#8b949e',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Filter to DAG Group 1 (Initialize) activity"
+                >
+                  DAG 1: INIT
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectDag('capture_entire_markdown')}
+                  style={{
+                    background: currentDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.25)' : 'transparent',
+                    border: currentDag === 'capture_entire_markdown' ? '1px solid #00ff9d66' : 'none',
+                    color: currentDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Filter to DAG Group 2 (Capture) activity"
+                >
+                  DAG 2: CAPTURE
+                </button>
+              </div>
             </div>
             <div className="toaster-header-actions">
               {onOpenStudio && (
@@ -188,10 +285,10 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               const icons = { overview: Activity, pacer: Radio, tokens: Coins, events: Terminal };
               const Icon = icons[tab];
               const labels = {
-                overview: 'Overview',
+                overview: currentDag === 'initialize' ? 'DAG 1 Overview' : (currentDag === 'capture_entire_markdown' ? 'DAG 2 Overview' : 'Overview'),
                 pacer: 'Device',
                 tokens: 'Tokens & Cost',
-                events: eventsLog.length > 0 ? `Log (${eventsLog.length})` : 'Log'
+                events: filteredEventsLog.length > 0 ? `Log (${filteredEventsLog.length})` : 'Log'
               };
               return (
                 <button key={tab} className={`toaster-tab ${activeTab === tab ? 'active' : ''}`} onClick={() => setActiveTab(tab)}>
@@ -204,11 +301,40 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
           <div className="toaster-body">
             {activeTab === 'overview' && (
               <div className="toaster-tab-content">
-                <div className="telemetry-section-card">
-                  <div className="section-card-header"><span>DOCUMENT CAPTURE PROGRESS</span><span className="progress-percent">{targetLines > 0 ? `${progressPercent}%` : '—'}</span></div>
-                  <div className="telemetry-progress-bar-bg"><div className="telemetry-progress-bar-fill" style={{ width: targetLines > 0 ? `${progressPercent}%` : '0%' }} /></div>
-                  <div className="telemetry-progress-sub"><span>{targetLines > 0 ? `Line ${currentBottom} of ${targetLines} target lines` : 'Awaiting calibration (Ctrl+End)'}</span><span>{documentSummary.total_frames} frames captured</span></div>
-                </div>
+                {currentDag === 'initialize' ? (
+                  <div className="telemetry-section-card" style={{ borderColor: 'rgba(88, 166, 255, 0.4)' }}>
+                    <div className="section-card-header">
+                      <span style={{ color: '#58a6ff' }}>DAG 1 INITIALIZATION TELEMETRY</span>
+                      <span className="progress-percent" style={{ color: '#58a6ff' }}>
+                        {targetLines > 0 ? 'CALIBRATED ✔' : 'PENDING'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginTop: '8px' }}>
+                      <div style={{ background: '#0d1117', padding: '8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '10px', color: '#8b949e' }}>EOF TOTAL LINES (CTRL+END)</div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, color: targetLines > 0 ? '#00ff9d' : '#8b949e', marginTop: '2px' }}>
+                          {targetLines > 0 ? `${targetLines.toLocaleString()} Lines` : 'Not Calibrated'}
+                        </div>
+                      </div>
+                      <div style={{ background: '#0d1117', padding: '8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '10px', color: '#8b949e' }}>HOME POSITION (CTRL+HOME)</div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, color: '#a371f7', marginTop: '2px' }}>
+                          Top Gutter Ln {telemetry.current_top_line || documentSummary.min_line || 1}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="telemetry-progress-sub" style={{ marginTop: '8px' }}>
+                      <span>Sub-10s Deterministic Navigation Actuator Active</span>
+                      <span>Filtered to DAG Group 1</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="telemetry-section-card">
+                    <div className="section-card-header"><span>DOCUMENT CAPTURE PROGRESS</span><span className="progress-percent">{targetLines > 0 ? `${progressPercent}%` : '—'}</span></div>
+                    <div className="telemetry-progress-bar-bg"><div className="telemetry-progress-bar-fill" style={{ width: targetLines > 0 ? `${progressPercent}%` : '0%' }} /></div>
+                    <div className="telemetry-progress-sub"><span>{targetLines > 0 ? `Line ${currentBottom} of ${targetLines} target lines` : 'Awaiting calibration (Ctrl+End)'}</span><span>{documentSummary.total_frames} frames captured</span></div>
+                  </div>
+                )}
                 <div className="telemetry-tiles-grid">
                   <div className="telemetry-tile"><span className="tile-label">STATUS</span><span className="tile-value" style={{ color: phaseStyle.text, fontSize: '11px' }}>{telemetry.status_message || 'Matrix Capture Studio ready'}</span></div>
                   <div className="telemetry-tile"><span className="tile-label">VERIFIED LINES</span><span className="tile-value text-primary">{documentSummary.total_lines}{documentSummary.issue_count > 0 && <span className="tile-sub text-warning" style={{ marginLeft: '4px' }}>({documentSummary.issue_count} issues)</span>}</span></div>
@@ -258,14 +384,28 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
 
             {activeTab === 'events' && (
               <div className="toaster-tab-content events-tab">
-                <div className="events-toolbar"><span className="events-count">{eventsLog.length} recorded events</span>{onClearEvents && <button className="events-clear-btn" onClick={onClearEvents}>Clear</button>}</div>
+                <div className="events-toolbar">
+                  <span className="events-count">
+                    {filteredEventsLog.length} {currentDag !== 'all' ? `(${currentDag === 'initialize' ? 'DAG 1' : 'DAG 2'} filtered)` : 'recorded'} events
+                  </span>
+                  {onClearEvents && <button className="events-clear-btn" onClick={onClearEvents}>Clear</button>}
+                </div>
                 <div className="events-log-container">
-                  {eventsLog.length === 0 ? <div className="events-empty">No telemetry events recorded yet.</div> : eventsLog.map((ev) => {
+                  {filteredEventsLog.length === 0 ? (
+                    <div className="events-empty">
+                      {currentDag !== 'all' ? `No telemetry events for ${currentDag === 'initialize' ? 'DAG 1 (Initialize)' : 'DAG 2 (Capture)'} yet.` : 'No telemetry events recorded yet.'}
+                    </div>
+                  ) : filteredEventsLog.map((ev) => {
                     const isAlignmentEv = ev.message.toLowerCase().includes('not aligned') || ev.message.toLowerCase().includes('alignment');
                     return (
                       <div key={ev.id} className="event-log-entry" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span className="event-time">{ev.timestamp}</span>
                         <span className={`event-cat-tag ${ev.category.toLowerCase()}`}>{ev.category}</span>
+                        {ev.dag && ev.dag !== 'all' && (
+                          <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px', background: ev.dag === 'initialize' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)', color: ev.dag === 'initialize' ? '#58a6ff' : '#00ff9d' }}>
+                            {ev.dag === 'initialize' ? 'DAG 1' : 'DAG 2'}
+                          </span>
+                        )}
                         <span className="event-msg" style={{ flex: 1 }}>{ev.message}</span>
                         {isAlignmentEv && onReturnAlignmentOverlay && (
                           <button type="button" className="toaster-event-return-btn" onClick={(e) => { e.stopPropagation(); onReturnAlignmentOverlay(); }} title="Return Alignment Alert Overlay">
@@ -285,3 +425,4 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     </div>
   );
 };
+

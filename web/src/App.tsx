@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Scan, Settings, Search, Check, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
+  Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass,
   Monitor, ChevronDown, Info, Eye, EyeOff, Shield
 } from 'lucide-react';
@@ -75,6 +75,7 @@ function AppContent() {
   const { secondsAgo: inspectorAgoSec } = useAgoTimer(streamKey);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
   const [showDag, setShowDag] = useState(true);
+  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>('all');
   const [showGotoModal, setShowGotoModal] = useState(false);
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
   const [isNavigating, setIsNavigating] = useState(false);
@@ -151,8 +152,19 @@ function AppContent() {
   const isDocVisibleRef = useRef(true);
   const lineListRef = useRef<HTMLDivElement>(null);
 
-  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any) => {
-    setEventsLog(prev => [...prev.slice(-99), { id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toLocaleTimeString(), category, message, data }]);
+  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all') => {
+    let inferredDag = dag;
+    if (!inferredDag) {
+      const msg = message.toLowerCase();
+      if (msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') || msg.includes('ctrl+home') || msg.includes('workspace')) {
+        inferredDag = 'initialize';
+      } else if (category === 'FRAME' || category === 'PACER' || msg.includes('frame') || msg.includes('capture') || msg.includes('ocr')) {
+        inferredDag = 'capture_entire_markdown';
+      } else {
+        inferredDag = 'system';
+      }
+    }
+    setEventsLog(prev => [...prev.slice(-99), { id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toLocaleTimeString(), category, message, data, dag: inferredDag }]);
   }, []);
 
   const handleDismissItem = async (itemId: string, dismissed: boolean) => {
@@ -420,6 +432,8 @@ function AppContent() {
     const projName = newProject.name.trim();
     if (!projName) return;
 
+    setShowDag(true);
+    setSelectedDag('initialize');
     setProjectInitProgress({
       active: true,
       percent: 10,
@@ -427,6 +441,7 @@ function AppContent() {
       status: 'running',
       projectName: projName
     });
+    addTelemetryEvent('SYSTEM', `Creating project "${projName}" and starting DAG 1 initialization`, null, 'initialize');
     setShowNewProjectModal(false);
 
     try {
@@ -560,6 +575,8 @@ function AppContent() {
           } else if (msg.type === 'frame_bounding_boxes' && msg.data?.frame_id) {
             setFrameBoundingBoxes(p => ({ ...p, [msg.data.frame_id]: msg.data.boxes }));
           } else if (msg.type === 'project_init_progress') {
+            setShowDag(true);
+            setSelectedDag('initialize');
             setProjectInitProgress(prev => ({
               active: true,
               percent: msg.percent ?? prev?.percent ?? 50,
@@ -569,6 +586,7 @@ function AppContent() {
               error: msg.error,
               projectName: prev?.projectName
             }));
+            addTelemetryEvent('SYSTEM', `[DAG 1 Init] ${msg.stage || 'In progress'} (${msg.percent ?? 50}%)`, msg, 'initialize');
             if (msg.status === 'completed' || msg.percent === 100) {
               fetchData();
             }
@@ -764,7 +782,28 @@ function AppContent() {
 
       {showDag && (
         <div style={{ padding: '0 20px 12px 20px' }}>
-          <FlowDag apiBase={API_BASE} activeProjectId={activeProject?.id} activeDeviceSerial={deviceInfo?.active_serial} currentTopLine={telemetry.current_top_line || documentData.min_line || 1} currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49} targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0} currentPage={telemetry.current_page || frames.length || 1} isOrchestrating={telemetry.is_pacing} onRefresh={fetchData} />
+          <FlowDag
+            apiBase={API_BASE}
+            activeProjectId={activeProject?.id}
+            activeDeviceSerial={deviceInfo?.active_serial}
+            currentTopLine={telemetry.current_top_line || documentData.min_line || 1}
+            currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49}
+            targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
+            currentPage={telemetry.current_page || frames.length || 1}
+            isOrchestrating={telemetry.is_pacing}
+            onRefresh={fetchData}
+            selectedDag={selectedDag}
+            onSelectDag={setSelectedDag}
+            projectInitProgress={projectInitProgress}
+            onDismissInitProgress={() => setProjectInitProgress(null)}
+            onRetryInit={async () => {
+              setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
+              try {
+                await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id }) });
+              } catch {}
+            }}
+            eventsLog={eventsLog}
+          />
         </div>
       )}
 
@@ -1026,132 +1065,6 @@ function AppContent() {
         </Modal>
       )}
 
-      {projectInitProgress && projectInitProgress.active && (
-        <Modal
-          title={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Cpu size={16} color={projectInitProgress.status === 'error' ? '#ff7b72' : '#00ff9d'} />
-              <span>INITIALIZING PROJECT WORKSPACE</span>
-            </div>
-          }
-          onClose={() => setProjectInitProgress(null)}
-          maxWidth="560px"
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#f0f6fc' }}>
-                  {projectInitProgress.projectName ? `Project: "${projectInitProgress.projectName}"` : 'New Markdown Workspace'}
-                </div>
-                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '3px' }}>
-                  Auto-executing DAG Group 1 (Ctrl+End total lines calibration & Line 1 verification)
-                </div>
-              </div>
-              <span style={{ fontSize: '18px', fontWeight: 900, color: projectInitProgress.status === 'completed' ? '#00ff9d' : (projectInitProgress.status === 'error' ? '#ff7b72' : '#58a6ff') }}>
-                {projectInitProgress.percent}%
-              </span>
-            </div>
-
-            {/* Glowing progress bar */}
-            <div style={{ width: '100%', height: '10px', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', overflow: 'hidden' }}>
-              <div
-                style={{
-                  height: '100%',
-                  width: `${projectInitProgress.percent}%`,
-                  background: projectInitProgress.status === 'completed' ? 'linear-gradient(90deg, #238636, #00ff9d)' : (projectInitProgress.status === 'error' ? '#f85149' : 'linear-gradient(90deg, #1f6feb, #a371f7, #00ff9d)'),
-                  boxShadow: projectInitProgress.status === 'completed' ? '0 0 10px rgba(0, 255, 157, 0.4)' : '0 0 8px rgba(88, 166, 255, 0.3)',
-                  transition: 'width 0.4s ease-out'
-                }}
-              />
-            </div>
-
-            {/* Stage description & indicator */}
-            <div style={{ background: '#161b22', border: `1px solid ${projectInitProgress.status === 'error' ? '#f8514966' : '#30363d'}`, borderRadius: '8px', padding: '12px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              {projectInitProgress.status === 'running' && <RefreshCw size={16} className="spin" color="#58a6ff" />}
-              {projectInitProgress.status === 'completed' && <Check size={18} color="#00ff9d" />}
-              {projectInitProgress.status === 'error' && <AlertCircle size={18} color="#ff7b72" />}
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '12px', fontWeight: 700, color: projectInitProgress.status === 'error' ? '#ff7b72' : (projectInitProgress.status === 'completed' ? '#00ff9d' : '#f0f6fc') }}>
-                  {projectInitProgress.stage}
-                </div>
-                {projectInitProgress.status === 'completed' && projectInitProgress.totalLines !== undefined && projectInitProgress.totalLines > 0 && (
-                  <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '2px' }}>
-                    Document EOF confirmed: {projectInitProgress.totalLines.toLocaleString()} total lines detected
-                  </div>
-                )}
-                {projectInitProgress.error && (
-                  <div style={{ fontSize: '11px', color: '#ff7b72', marginTop: '4px' }}>
-                    {projectInitProgress.error}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Step list progression */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px', color: '#8b949e' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 10 ? '#00ff9d' : '#8b949e' }}>
-                <span>{projectInitProgress.percent >= 10 ? '✔' : '○'}</span>
-                <span>1. Database entry & active workspace configured</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 25 ? '#00ff9d' : '#8b949e' }}>
-                <span>{projectInitProgress.percent >= 25 ? '✔' : '○'}</span>
-                <span>2. External display verified & editor cursor focused</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 65 ? '#00ff9d' : '#8b949e' }}>
-                <span>{projectInitProgress.percent >= 65 ? '✔' : '○'}</span>
-                <span>3. Dispatched HID Ctrl+End & calibrated total lines</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: projectInitProgress.percent >= 100 ? '#00ff9d' : '#8b949e' }}>
-                <span>{projectInitProgress.percent >= 100 ? '✔' : '○'}</span>
-                <span>4. Dispatched HID Ctrl+Home & verified Line 1 in gutter</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px', paddingTop: '10px', borderTop: '1px solid #21262d' }}>
-              {projectInitProgress.status === 'completed' && (
-                <button
-                  type="button"
-                  onClick={() => setProjectInitProgress(null)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 16px', background: '#238636', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-                >
-                  <Check size={14} />
-                  <span>Start Capturing Markdown</span>
-                </button>
-              )}
-              {projectInitProgress.status === 'error' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setProjectInitProgress(null)}
-                    style={{ padding: '6px 12px', background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-                  >
-                    Dismiss & View DAG
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
-                      try {
-                        await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id }) });
-                      } catch {}
-                    }}
-                    style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 14px', background: '#1f6feb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-                  >
-                    <RefreshCw size={13} />
-                    <span>Retry Initialize</span>
-                  </button>
-                </>
-              )}
-              {projectInitProgress.status === 'running' && (
-                <div style={{ fontSize: '10.5px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>Communicating with Android HID and OCR engine...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </Modal>
-      )}
-
       <GotoLineModal
         isOpen={showGotoModal} onClose={() => { setShowGotoModal(false); setNavStatus(''); }}
         deviceInfo={deviceInfo} deviceModel={deviceModel} alignmentData={alignmentData} showBoundingBoxes={showBoundingBoxes}
@@ -1228,6 +1141,8 @@ function AppContent() {
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
         onReturnAlignmentOverlay={() => { setIsBannerDismissed(false); setIsBannerMinimized(false); localStorage.setItem('mc_banner_dismissed', 'false'); localStorage.setItem('mc_banner_minimized', 'false'); addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned'); }}
         onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); }}
+        selectedDag={selectedDag}
+        onSelectDag={setSelectedDag}
       />
     </div>
   );

@@ -11,6 +11,7 @@ from services.adb_service import (
     get_active_adb_serial,
     send_hid_keycombination,
     capture_external_screenshot,
+    auto_fix_viewport,
 )
 
 try:
@@ -57,6 +58,9 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
                 if total_lines <= 0: total_lines = res_scan.get("bottom_line", 0)
                 if top_line <= 0: top_line = res_scan.get("top_line", 0)
 
+        # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
+        await auto_fix_viewport(serial)
+
         is_stuck_on_line_1 = (0 < top_line <= 2)
         if is_stuck_on_line_1:
             err_msg = f"EOF Navigation Failed: Editor remained on Line {top_line or 1} at top (bottom: {total_lines})."
@@ -92,7 +96,8 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
 
         # 2. Fast home: Dispatch Ctrl+Home: keycode 113 + 122
         await send_hid_keycombination(113, 122, serial)
-        await asyncio.sleep(0.6)
+        await auto_fix_viewport(serial)
+        await asyncio.sleep(0.4)
         home_bytes = await capture_external_screenshot(serial)
         if home_bytes:
             home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"

@@ -7,7 +7,7 @@ import numpy as np
 from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
-    is_ime_visible, ensure_adb_keyboard_closed, capture_external_screenshot
+    is_ime_visible, ensure_adb_keyboard_closed, auto_fix_viewport, capture_external_screenshot
 )
 
 def _get_cv_img(ctx: ClassifierContext) -> Optional[np.ndarray]:
@@ -27,6 +27,7 @@ async def _tap_coords(serial: str, disp_id: int, coords: Tuple[int, int], delay:
         await run_adb_shell(f"input tap {x} {y}", serial)
     if delay:
         await asyncio.sleep(delay)
+    await auto_fix_viewport(serial, disp_id)
 
 async def _recheck_classifier(classifier: BaseClassifier, serial: str, disp_id: int) -> Optional[ClassificationResult]:
     snap = await capture_external_screenshot(serial)
