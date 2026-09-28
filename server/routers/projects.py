@@ -110,21 +110,24 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
                 is_verified = (detected_first == 1)
 
         state.dag_state["nodes"]["reset_home"].update({
-            "status": "completed",
+            "status": "completed" if is_verified else "error",
             "verified": is_verified,
             "first_line": detected_first
         })
-        state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
-        state.dag_state["current_active_node"] = "frame_acquire"
-
-        state.latest_telemetry["current_top_line"] = 1
-        state.latest_telemetry["current_page"] = 1
-        state.latest_telemetry["status_message"] = f"Calibrated: {total_lines} total lines verified via Ctrl+End / Ctrl+Home ✔"
+        if is_verified:
+            state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
+            state.dag_state["current_active_node"] = "frame_acquire"
+            state.latest_telemetry["current_top_line"] = 1
+            state.latest_telemetry["current_page"] = 1
+            state.latest_telemetry["status_message"] = f"Calibrated: {total_lines} total lines verified via Ctrl+End / Ctrl+Home ✔"
+        else:
+            state.dag_state["nodes"]["reset_home"]["error"] = f"Failed to verify return to Line 1 (detected Ln {detected_first})"
+            state.latest_telemetry["status_message"] = f"Calibration warning: Ctrl+Home did not verify Line 1 (detected Ln {detected_first})"
 
         await state.ws_manager.broadcast({
             "type": "dag_updated",
             "dag": state.dag_state,
-            "calibration_event": "home_verified",
+            "calibration_event": "home_verified" if is_verified else "home_failed",
             "verified": is_verified,
             "first_line": detected_first,
             "telemetry": state.latest_telemetry

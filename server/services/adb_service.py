@@ -598,7 +598,7 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Focus editor text area and dispatch physical keyboard combination in one shell call for minimal latency
+        # Focus editor text area and dispatch physical keyboard combination in one atomic shell call
         cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             f"input {disp_pfx}tap 500 500",
@@ -606,10 +606,6 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         ]
 
         await run_adb_shell("; ".join(cmds), ser, timeout=5.0)
-
-        # For Home or EOF, auto-fix viewport to guarantee keyboard is closed and full 1080p area is available
-        if key2 in (122, 123):
-            await auto_fix_viewport(ser, target_d)
 
 
 
