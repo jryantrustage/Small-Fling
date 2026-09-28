@@ -279,16 +279,17 @@ dag_state: Dict[str, Any] = {
         "local_ai_ocr": {
             "id": "local_ai_ocr",
             "group": "capture_entire_markdown",
-            "title": "3b. Local AI Model OCR",
-            "description": "Executes local AI model (RapidOCR ONNX) to extract OCR text and display lines verbatim.",
+            "title": "3b. Local AI Model OCR (MiniCPM-V)",
+            "description": "Executes local MiniCPM-V multimodal vision model in Ollama to extract markdown code lines verbatim.",
             "status": "idle",
             "extracted_text": "",
             "preview_text": "",
             "lines_count": 0,
             "char_count": 0,
-            "model_used": "RapidOCR (Local AI ONNX)",
+            "model_used": "MiniCPM-V (Ollama)",
             "config": {
-                "engine": "local:rapidocr",
+                "engine": "ollama:minicpm-v",
+                "model": "minicpm-v:latest",
                 "show_raw_text": False
             }
         },
