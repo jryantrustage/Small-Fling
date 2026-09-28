@@ -641,6 +641,7 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 if c_report.get("has_issues"): state.latest_telemetry["classifier_issues"] = c_report.get("issues", [])
             except Exception as ce: print(f"[check_and_update_alignment] Classifier error: {ce}")
 
+            res = state.sanitize_for_json(res)
             state.latest_alignment_status.clear()
             state.latest_alignment_status.update(res)
             if not res.get("is_aligned", False) and state.orchestration_state.get("status") == "RUNNING":

@@ -34,6 +34,27 @@ from routers import (
 )
 
 from contextlib import asynccontextmanager
+import numpy as np
+from fastapi.encoders import ENCODERS_BY_TYPE
+
+def _register_numpy_encoders():
+    def _subclasses(cls):
+        for s in cls.__subclasses__():
+            yield s
+            yield from _subclasses(s)
+    try:
+        for t in _subclasses(np.generic):
+            if issubclass(t, np.bool_):
+                ENCODERS_BY_TYPE[t] = bool
+            elif issubclass(t, np.integer):
+                ENCODERS_BY_TYPE[t] = int
+            elif issubclass(t, np.floating):
+                ENCODERS_BY_TYPE[t] = float
+        ENCODERS_BY_TYPE[np.ndarray] = lambda x: x.tolist()
+    except Exception as e:
+        print(f"Note: error registering numpy encoders: {e}")
+
+_register_numpy_encoders()
 
 db.init_db()
 
