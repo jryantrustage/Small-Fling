@@ -308,31 +308,10 @@ async def auto_refresh_external_display(display_id: Optional[int] = None, serial
         return {"status": "error", "message": "No active device connected"}
 
     if display_id is None or display_id <= 0:
-        displays = await get_connected_displays(ser)
-        ext = next((d for d in displays if d.get("isExternal")), None)
-        display_id = ext.get("displayId", 14) if ext else 14
+        disp_id = await adb.detect_external_display_id(ser)
+        display_id = disp_id if disp_id > 0 else 2
 
-    # 1. Trigger RPC broadcast to Android KioskCommandReceiver
-    bcast_cmd = f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id}"
-    await adb.run_adb_shell(bcast_cmd, ser)
-
-    # 2. Query active tasks on external display
-    res_win = await adb.run_adb_shell(f"dumpsys window | grep -E 'mDisplayId={display_id} taskId='", ser)
-    lines = res_win.get("stdout", "").splitlines()
-    task_ids = set()
-    for line in lines:
-        m = re.search(r'taskId=(\d+)', line)
-        if m:
-            task_ids.add(int(m.group(1)))
-
-    refreshed = []
-    # 3. Force task layout passes via cmd activity task resize
-    for tid in task_ids:
-        await adb.run_adb_shell(f"cmd activity task resize {tid} 0 0 1920 1080", ser)
-        refreshed.append(tid)
-
-    # 4. Dismiss IME / SoftKeyboard if visible on external display
-    await adb.run_adb_shell(f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input -d {display_id} keyevent 4; fi", ser)
+    fix_res = await adb.auto_fix_viewport(ser, display_id)
 
     updated = await query_kiosk_status(ser)
     await ws_manager.broadcast({
@@ -343,8 +322,9 @@ async def auto_refresh_external_display(display_id: Optional[int] = None, serial
     return {
         "status": "ok",
         "display_id": display_id,
-        "refreshed_tasks": refreshed,
-        "message": f"Successfully auto-refreshed external display #{display_id} ({len(refreshed)} tasks reflowed)",
+        "refreshed_tasks": fix_res.get("refreshed_tasks", []),
+        "keyboard_closed": fix_res.get("keyboard_closed", True),
+        "message": f"Successfully auto-refreshed external display #{display_id} (keyboard closed ✔)",
         "kiosk_state": updated
     }
 

@@ -128,6 +128,27 @@ async def close_keyboard_endpoint(serial: Optional[str] = None):
     closed = await adb.ensure_adb_keyboard_closed(serial)
     return {"status": "ok", "keyboard_closed": closed}
 
+@router.post("/api/device/autofix-viewport")
+async def autofix_viewport_endpoint(req: Optional[Dict[str, Any]] = None):
+    req = req or {}
+    ser = await adb.get_active_adb_serial(req.get("serial"))
+    disp_id = req.get("display_id")
+    res = await adb.auto_fix_viewport(ser, disp_id)
+    return res
+
+@router.post("/api/device/key/{key_name}")
+async def send_device_key_endpoint(key_name: str, req: Optional[Dict[str, Any]] = None):
+    req = req or {}
+    ser = await adb.get_active_adb_serial(req.get("serial"))
+    disp_id = await adb.detect_external_display_id(ser)
+    kn = key_name.lower().replace("-", "_").replace(" ", "_")
+    if "end" in kn:
+        await adb.send_hid_keycombination(113, 123, ser)
+    elif "home" in kn:
+        await adb.send_hid_keycombination(113, 122, ser)
+    await adb.auto_fix_viewport(ser, disp_id)
+    return {"status": "ok", "key": key_name}
+
 @router.get("/api/device/keyboard-status")
 async def get_keyboard_status(serial: Optional[str] = None):
     ser = await adb.get_active_adb_serial(serial)

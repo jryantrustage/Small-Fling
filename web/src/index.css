@@ -1208,4 +1208,109 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   line-height: 1.4;
 }
 
+/* ==========================================================================
+   ANIMATED FLOW DAG NODES, FLOWING ARROWS & FILTERED SELECTION
+   ========================================================================== */
+@keyframes dag-node-pulse-cyan {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(88, 166, 255, 0.4), inset 0 0 8px rgba(88, 166, 255, 0.15);
+    border-color: rgba(88, 166, 255, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(88, 166, 255, 0.9), inset 0 0 16px rgba(88, 166, 255, 0.35);
+    border-color: #58a6ff;
+  }
+}
+
+@keyframes dag-node-pulse-purple {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(163, 113, 247, 0.4), inset 0 0 8px rgba(163, 113, 247, 0.15);
+    border-color: rgba(163, 113, 247, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(163, 113, 247, 0.9), inset 0 0 16px rgba(163, 113, 247, 0.35);
+    border-color: #a371f7;
+  }
+}
+
+@keyframes dag-node-pulse-green {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.4), inset 0 0 8px rgba(0, 255, 157, 0.15);
+    border-color: rgba(0, 255, 157, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(0, 255, 157, 0.9), inset 0 0 16px rgba(0, 255, 157, 0.35);
+    border-color: #00ff9d;
+  }
+}
+
+@keyframes dag-node-pulse-orange {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 166, 87, 0.4), inset 0 0 8px rgba(255, 166, 87, 0.15);
+    border-color: rgba(255, 166, 87, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 24px rgba(255, 166, 87, 0.9), inset 0 0 16px rgba(255, 166, 87, 0.35);
+    border-color: #ffa657;
+  }
+}
+
+@keyframes dag-flow-dash {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes dag-progress-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(0, 255, 157, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(0, 255, 157, 0.8), 0 0 30px rgba(88, 166, 255, 0.4);
+  }
+}
+
+.dag-node-active-cyan {
+  animation: dag-node-pulse-cyan 1.5s ease-in-out infinite !important;
+}
+
+.dag-node-active-purple {
+  animation: dag-node-pulse-purple 1.5s ease-in-out infinite !important;
+}
+
+.dag-node-active-green {
+  animation: dag-node-pulse-green 1.5s ease-in-out infinite !important;
+}
+
+.dag-node-active-orange {
+  animation: dag-node-pulse-orange 1.5s ease-in-out infinite !important;
+}
+
+.dag-arrow-active {
+  stroke-dasharray: 6 3;
+  animation: dag-flow-dash 0.75s linear infinite !important;
+}
+
+.dag-progress-fill-anim {
+  animation: dag-progress-glow 2s ease-in-out infinite;
+}
+
+.dag-group-card {
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.dag-group-card.selected-dag-init {
+  border-color: #58a6ff !important;
+  box-shadow: 0 0 20px rgba(88, 166, 255, 0.25), inset 0 0 12px rgba(88, 166, 255, 0.08) !important;
+}
+
+.dag-group-card.selected-dag-capture {
+  border-color: #00ff9d !important;
+  box-shadow: 0 0 20px rgba(0, 255, 157, 0.25), inset 0 0 12px rgba(0, 255, 157, 0.08) !important;
+}
+
+
 

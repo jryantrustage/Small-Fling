@@ -65,12 +65,60 @@ export interface FlowDagProps {
   currentPage?: number;
   isOrchestrating?: boolean;
   onRefresh?: () => void;
+  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown';
+  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
+  projectInitProgress?: {
+    active: boolean;
+    percent: number;
+    stage: string;
+    status: 'running' | 'completed' | 'error';
+    totalLines?: number;
+    error?: string;
+    projectName?: string;
+  } | null;
+  onDismissInitProgress?: () => void;
+  onRetryInit?: () => void;
+  eventsLog?: Array<{
+    id: string;
+    timestamp: string;
+    category: string;
+    message: string;
+    data?: any;
+    dag?: string;
+  }>;
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
   apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 1, currentBottomLine = 49,
-  targetTotalLines = 0, currentPage = 1, isOrchestrating = false, onRefresh
+  targetTotalLines = 0, currentPage = 1, isOrchestrating = false, onRefresh,
+  selectedDag = 'all', onSelectDag, projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = []
 }) => {
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
+  const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
+  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
+    if (onSelectDag) onSelectDag(dag);
+    else setInternalSelectedDag(dag);
+  };
+
+  const dagEvents = eventsLog.filter(ev => {
+    if (effectiveSelectedDag === 'all') return true;
+    if (ev.dag) return ev.dag === 'all' || ev.dag === effectiveSelectedDag;
+    const msg = (ev.message || '').toLowerCase();
+    const cat = (ev.category || '').toUpperCase();
+    if (effectiveSelectedDag === 'initialize') {
+      return msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
+             msg.includes('ctrl+home') || msg.includes('gutter bounds') || msg.includes('line 1') ||
+             msg.includes('node 1') || msg.includes('node 2') || msg.includes('workspace');
+    }
+    if (effectiveSelectedDag === 'capture_entire_markdown') {
+      return cat === 'FRAME' || cat === 'PACER' || msg.includes('frame') ||
+             msg.includes('capture') || msg.includes('ocr') || msg.includes('pacing') ||
+             msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 5') ||
+             msg.includes('node 6') || msg.includes('step') || msg.includes('arrow');
+    }
+    return true;
+  });
+
   const [dagStatus, setDagStatus] = useState<DagStatusData>({
     active_node: 'node_1_end', target_total_lines: targetTotalLines,
     current_top_line: currentTopLine, current_bottom_line: currentBottomLine,
@@ -90,6 +138,26 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [showNode1Troubleshooting, setShowNode1Troubleshooting] = useState(true);
   const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
+
+  const handleAutoFixViewport = async () => {
+    setIsAutoFixingViewport(true);
+    try {
+      const res = await fetch(`${apiBase}/api/device/autofix-viewport`, { method: 'POST' });
+      const d = await res.json();
+      if (res.ok) {
+        setIsKeyboardOpen(Boolean(d.keyboard_visible));
+        setNodeFeedback({ id: 'autofix', message: 'Viewport auto-fixed & keyboard closed successfully ✔' });
+      } else {
+        setNodeFeedback({ id: 'autofix', message: d.detail || 'Failed to auto-fix viewport', isError: true });
+      }
+    } catch (e: any) {
+      setNodeFeedback({ id: 'autofix', message: `Error auto-fixing viewport: ${e.message}`, isError: true });
+    } finally {
+      setIsAutoFixingViewport(false);
+    }
+  };
 
   const [isNode3ConfigOpen, setIsNode3ConfigOpen] = useState(false);
   const [node3Config, setNode3Config] = useState({
@@ -138,6 +206,13 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           if (d.dag?.nodes?.frame_ocr?.config) setNode4Config(prev => ({ ...prev, ...d.dag.nodes.frame_ocr.config }));
           if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
         }
+        try {
+          const kRes = await fetch(`${apiBase}/api/device/keyboard-status`);
+          if (kRes.ok) {
+            const kd = await kRes.json();
+            setIsKeyboardOpen(Boolean(kd.visible));
+          }
+        } catch {}
       } catch {}
     };
     fetchDag();
@@ -307,9 +382,19 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     setNode5Config(prev => prev.qualifiers[id] ? ({ ...prev, qualifiers: { ...prev.qualifiers, [id]: { ...prev.qualifiers[id], enabled: !prev.qualifiers[id].enabled } } }) : prev);
   };
 
-  const renderArrow = (color = '#58a6ff') => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px' }}>
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M5 12H19M19 12L13 6M19 12L13 18" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
+  const renderArrow = (color = '#58a6ff', isActive = false) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '28px', flexShrink: 0 }}>
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <path
+          d="M4 14H24M24 14L17 7M24 14L17 21"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={isActive ? 'dag-arrow-active' : ''}
+          style={isActive ? { filter: `drop-shadow(0 0 6px ${color})` } : {}}
+        />
+      </svg>
     </div>
   );
 
@@ -346,9 +431,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isNode2Verified = node2.status === 'completed' && Boolean(node2.verified);
   const isNode2Error = node2.status === 'error' || (node2.status === 'completed' && !node2.verified);
 
-  const isInitGroupRunning = runningGroupId === 'initialize' || initGroup.status === 'active' || isNode1Running || isNode2Running;
-  const isInitGroupCompleted = !isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified));
-  const isInitGroupError = !isInitGroupRunning && (initGroup.status === 'error' || isNode1Error);
+  const isInitGroupRunning = runningGroupId === 'initialize' || initGroup.status === 'active' || isNode1Running || isNode2Running || (projectInitProgress?.active && projectInitProgress.status === 'running');
+  const isInitGroupCompleted = !isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified) || projectInitProgress?.status === 'completed');
+  const isInitGroupError = !isInitGroupRunning && (initGroup.status === 'error' || isNode1Error || projectInitProgress?.status === 'error');
 
   const isNode3Running = runningNodeId === 'frame_acquire' || node3.status === 'active' || isOrchestrating;
   const isNode3Error = node3.status === 'error' || Boolean(node3.error);
@@ -372,9 +457,90 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           <Layers size={18} color="#00ff9d" /><span style={{ fontWeight: 800, fontSize: '13px', letterSpacing: '0.8px', color: '#00ff9d' }}>PAGINATION FLOW DAG</span>
           <span style={{ fontSize: '10px', background: '#161b22', border: '1px solid #30363d', padding: '2px 8px', borderRadius: '10px', color: '#8b949e' }}>Deterministic Step Actuator</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Cpu size={13} color="#58a6ff" /><span style={{ color: '#8b949e' }}>OCR ENGINE:</span><span style={{ color: '#58a6ff', fontWeight: 700 }}>Separate Process ({dagStatus.ocr_latency_ms}ms)</span></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><Lock size={13} color="#00ff9d" /><span style={{ color: '#8b949e' }}>KEYBOARD:</span><span style={{ color: '#00ff9d', fontWeight: 700 }}>ALWAYS CLOSED</span></div>
+        
+        {/* DAG Selection Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>SELECT DAG:</span>
+          <button
+            type="button"
+            onClick={() => handleDagSelect('all')}
+            style={{
+              padding: '2px 8px', borderRadius: '5px',
+              border: `1px solid ${effectiveSelectedDag === 'all' ? '#58a6ff' : '#30363d'}`,
+              background: effectiveSelectedDag === 'all' ? 'rgba(88, 166, 255, 0.2)' : '#161b22',
+              color: effectiveSelectedDag === 'all' ? '#58a6ff' : '#8b949e',
+              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
+            }}
+          >
+            All DAGs
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDagSelect('initialize')}
+            style={{
+              padding: '2px 8px', borderRadius: '5px',
+              border: `1px solid ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#30363d'}`,
+              background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.2)' : '#161b22',
+              color: effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#8b949e',
+              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
+            }}
+          >
+            DAG 1: Initialize
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDagSelect('capture_entire_markdown')}
+            style={{
+              padding: '2px 8px', borderRadius: '5px',
+              border: `1px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#30363d'}`,
+              background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
+              color: effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e',
+              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
+            }}
+          >
+            DAG 2: Capture
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Cpu size={13} color="#58a6ff" />
+            <span style={{ color: '#8b949e' }}>OCR ENGINE:</span>
+            <span style={{ color: '#58a6ff', fontWeight: 700 }}>Fast Gutter Slice</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <Lock size={13} color={isKeyboardOpen ? '#f85149' : '#00ff9d'} />
+            <span style={{ color: '#8b949e' }}>KEYBOARD:</span>
+            <span style={{ color: isKeyboardOpen ? '#f85149' : '#00ff9d', fontWeight: 700 }}>
+              {isKeyboardOpen ? 'OPEN' : 'CLOSED'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAutoFixViewport}
+            disabled={isAutoFixingViewport}
+            title="Auto-Fix Viewport: close soft keyboard and reflow 1080p desktop layout"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              padding: '3px 10px',
+              borderRadius: '6px',
+              background: isKeyboardOpen ? 'rgba(248, 81, 73, 0.2)' : 'rgba(56, 139, 253, 0.15)',
+              border: `1px solid ${isKeyboardOpen ? '#f85149' : '#388bfd'}`,
+              color: isKeyboardOpen ? '#ff7b72' : '#58a6ff',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: isAutoFixingViewport ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <RefreshCw size={11} className={isAutoFixingViewport ? 'spin' : ''} />
+            <span>AUTO-FIX VIEWPORT</span>
+          </button>
         </div>
       </div>
 
@@ -388,21 +554,189 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         </div>
       )}
 
+      {/* INLINE INITIALIZATION PROGRESS CARD (Replaces Modal) */}
+      {projectInitProgress && projectInitProgress.active && (
+        <div
+          style={{
+            margin: '0 0 16px 0',
+            padding: '16px',
+            borderRadius: '12px',
+            background: 'linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(13, 17, 23, 0.95))',
+            border: `1.5px solid ${projectInitProgress.status === 'error' ? '#f85149' : (projectInitProgress.status === 'completed' ? '#00ff9d' : '#58a6ff')}`,
+            boxShadow: projectInitProgress.status === 'completed'
+              ? '0 0 24px rgba(0, 255, 157, 0.25)'
+              : (projectInitProgress.status === 'error' ? '0 0 20px rgba(248, 81, 73, 0.25)' : '0 0 24px rgba(88, 166, 255, 0.25)'),
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            animation: 'toaster-appear 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '30px', height: '30px', borderRadius: '8px',
+                background: projectInitProgress.status === 'error' ? 'rgba(248, 81, 73, 0.2)' : (projectInitProgress.status === 'completed' ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.2)'),
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}>
+                {projectInitProgress.status === 'running' && <RefreshCw size={15} className="spin" color="#58a6ff" />}
+                {projectInitProgress.status === 'completed' && <Check size={16} color="#00ff9d" />}
+                {projectInitProgress.status === 'error' && <AlertTriangle size={16} color="#ff7b72" />}
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
+                    {projectInitProgress.status === 'completed' ? 'WORKSPACE INITIALIZED INLINE' : (projectInitProgress.status === 'error' ? 'INITIALIZATION HALTED' : 'INITIALIZING WORKSPACE (INLINE DAG PROGRESS)')}
+                  </span>
+                  <span style={{
+                    fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '12px',
+                    background: projectInitProgress.status === 'completed' ? 'rgba(0, 255, 157, 0.15)' : (projectInitProgress.status === 'error' ? 'rgba(248, 81, 73, 0.15)' : 'rgba(88, 166, 255, 0.15)'),
+                    color: projectInitProgress.status === 'completed' ? '#00ff9d' : (projectInitProgress.status === 'error' ? '#ff7b72' : '#58a6ff'),
+                    border: `1px solid ${projectInitProgress.status === 'completed' ? 'rgba(0, 255, 157, 0.3)' : (projectInitProgress.status === 'error' ? 'rgba(248, 81, 73, 0.3)' : 'rgba(88, 166, 255, 0.3)')}`
+                  }}>
+                    {projectInitProgress.percent}%
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '2px' }}>
+                  {projectInitProgress.stage}
+                </div>
+                {projectInitProgress.error && (
+                  <div style={{ fontSize: '11px', color: '#ff7b72', marginTop: '3px' }}>
+                    {projectInitProgress.error}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {projectInitProgress.status === 'completed' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDismissInitProgress?.();
+                    handleDagSelect('capture_entire_markdown');
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    padding: '6px 14px', borderRadius: '6px', border: 'none',
+                    background: '#238636', color: '#fff', fontSize: '11px', fontWeight: 700,
+                    cursor: 'pointer', fontFamily: 'inherit'
+                  }}
+                >
+                  <Check size={14} />
+                  <span>Start Capturing Markdown</span>
+                </button>
+              )}
+              {projectInitProgress.status === 'error' && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onDismissInitProgress?.()}
+                    style={{
+                      padding: '5px 10px', borderRadius: '6px', border: '1px solid #30363d',
+                      background: '#21262d', color: '#8b949e', fontSize: '11px', fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit'
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRetryInit?.()}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '5px',
+                      padding: '5px 12px', borderRadius: '6px', border: 'none',
+                      background: '#1f6feb', color: '#fff', fontSize: '11px', fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit'
+                    }}
+                  >
+                    <RefreshCw size={12} />
+                    <span>Retry Initialize</span>
+                  </button>
+                </>
+              )}
+              {projectInitProgress.status !== 'running' && (
+                <button
+                  type="button"
+                  onClick={() => onDismissInitProgress?.()}
+                  style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '4px' }}
+                  title="Close progress card"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div style={{ width: '100%', height: '8px', background: '#161b22', border: '1px solid #30363d', borderRadius: '4px', overflow: 'hidden' }}>
+            <div
+              className="dag-progress-fill-anim"
+              style={{
+                height: '100%',
+                width: `${projectInitProgress.percent}%`,
+                background: projectInitProgress.status === 'completed'
+                  ? 'linear-gradient(90deg, #238636, #00ff9d)'
+                  : (projectInitProgress.status === 'error' ? '#f85149' : 'linear-gradient(90deg, #1f6feb, #a371f7, #00ff9d)'),
+                transition: 'width 0.35s ease-out'
+              }}
+            />
+          </div>
+
+          {/* 4-Step Checklist */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', fontSize: '10.5px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: projectInitProgress.percent >= 10 ? '#00ff9d' : '#8b949e' }}>
+              <span>{projectInitProgress.percent >= 10 ? '✔' : '○'}</span>
+              <span>1. DB Configured</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: projectInitProgress.percent >= 25 ? '#00ff9d' : '#8b949e' }}>
+              <span>{projectInitProgress.percent >= 25 ? '✔' : '○'}</span>
+              <span>2. Cursor Focused</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: projectInitProgress.percent >= 65 ? '#00ff9d' : '#8b949e' }}>
+              <span>{projectInitProgress.percent >= 65 ? '✔' : '○'}</span>
+              <span>3. Total Lines Calibrated</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: projectInitProgress.percent >= 100 ? '#00ff9d' : '#8b949e' }}>
+              <span>{projectInitProgress.percent >= 100 ? '✔' : '○'}</span>
+              <span>4. Line 1 Verified</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ position: 'relative', padding: '6px 4px 16px 4px', overflowX: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '12px', minWidth: '980px' }}>
           
           {/* DAG GROUP 1: INITIALIZE */}
-          <div style={{ flex: '1.9 1 0', background: 'rgba(31, 111, 235, 0.04)', border: `1px solid ${isInitGroupCompleted ? '#23863666' : (isInitGroupError ? '#f8514966' : '#1f6feb44')}`, borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div
+            className={`dag-group-card ${effectiveSelectedDag === 'initialize' ? 'selected-dag-init' : ''}`}
+            onClick={() => handleDagSelect('initialize')}
+            style={{
+              flex: '1.9 1 0',
+              background: 'rgba(31, 111, 235, 0.04)',
+              border: `1.5px solid ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : (isInitGroupCompleted ? '#23863666' : (isInitGroupError ? '#f8514966' : '#1f6feb44'))}`,
+              borderRadius: '12px',
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              cursor: 'pointer'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '11px', fontWeight: 800, color: '#58a6ff', letterSpacing: '0.5px' }}>DAG GROUP 1: INITIALIZE</span>
                 <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: isInitGroupRunning ? '#a371f733' : (isInitGroupCompleted ? '#23863633' : (isInitGroupError ? '#f8514922' : '#30363d')), color: isInitGroupRunning ? '#a371f7' : (isInitGroupCompleted ? '#00ff9d' : (isInitGroupError ? '#ff7b72' : '#8b949e')), fontWeight: 800 }}>
                   {isInitGroupRunning ? 'INITIALIZING...' : (isInitGroupCompleted ? 'COMPLETED ✔' : (isInitGroupError ? 'ISSUE DETECTED' : 'IDLE'))}
                 </span>
+                {effectiveSelectedDag === 'initialize' && (
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: '#58a6ff33', color: '#58a6ff', fontWeight: 700 }}>SELECTED</span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => handleRunGroup('initialize')}
+                onClick={(e) => { e.stopPropagation(); handleRunGroup('initialize'); }}
                 disabled={runningGroupId !== null || runningNodeId !== null}
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', background: isInitGroupRunning ? '#21262d' : '#1f6feb22', color: isInitGroupRunning ? '#8b949e' : '#58a6ff', border: '1px solid #1f6feb66', borderRadius: '5px', fontSize: '10px', fontWeight: 700, cursor: isInitGroupRunning ? 'wait' : 'pointer', fontFamily: 'inherit' }}
                 title="Run complete initialization routine (Ctrl+End calibrate total lines + Ctrl+Home verify line 1)"
@@ -414,7 +748,20 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
             <div style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
               {/* Node 1 */}
-              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode1Calibrated ? '#238636' : (isNode1Error ? '#f85149' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                className={`dag-node-card ${isNode1Running ? 'dag-node-active-cyan' : ''}`}
+                style={{
+                  flex: 1,
+                  background: '#161b22',
+                  border: `1.5px solid ${isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#238636' : (isNode1Error ? '#f85149' : '#30363d'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>1. DETERMINE TOTAL LINES</span>
                   <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode1Running ? '#58a6ff22' : (isNode1Calibrated ? '#23863633' : (isNode1Error ? 'rgba(248, 81, 73, 0.25)' : '#30363d')), color: isNode1Running ? '#58a6ff' : (isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
@@ -517,10 +864,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               </div>
 
-              {renderArrow('#58a6ff')}
+              {renderArrow(isNode1Calibrated ? '#00ff9d' : '#58a6ff', isNode1Running || isNode2Running)}
 
               {/* Node 2 */}
-              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode2Verified ? '#238636' : (isNode2Error ? '#f8514966' : '#30363d')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                className={`dag-node-card ${isNode2Running ? 'dag-node-active-purple' : ''}`}
+                style={{
+                  flex: 1,
+                  background: '#161b22',
+                  border: `1.5px solid ${isNode2Running ? '#a371f7' : (isNode2Verified ? '#238636' : (isNode2Error ? '#f8514966' : '#30363d'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>2. RETURN TO LINE 1</span>
                   <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode2Running ? '#a371f722' : (isNode2Verified ? '#23863633' : (isNode2Error ? '#f8514922' : '#30363d')), color: isNode2Running ? '#a371f7' : (isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e')), fontWeight: 700 }}>
@@ -545,21 +905,38 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             <div style={{ fontSize: '9px', color: isInitGroupCompleted ? '#00ff9d' : '#8b949e', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>
               {isInitGroupCompleted ? 'Ready' : 'Pending'}
             </div>
-            {renderArrow(isInitGroupCompleted ? '#00ff9d' : '#30363d')}
+            {renderArrow(isInitGroupCompleted ? '#00ff9d' : '#30363d', isInitGroupCompleted || isCaptureGroupRunning)}
           </div>
 
           {/* DAG GROUP 2: CAPTURE ENTIRE MARKDOWN */}
-          <div style={{ flex: '3.1 1 0', background: 'rgba(0, 255, 157, 0.02)', border: `1px solid ${isCaptureGroupRunning ? '#00ff9d55' : '#30363d'}`, borderRadius: '12px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div
+            className={`dag-group-card ${effectiveSelectedDag === 'capture_entire_markdown' ? 'selected-dag-capture' : ''}`}
+            onClick={() => handleDagSelect('capture_entire_markdown')}
+            style={{
+              flex: '3.1 1 0',
+              background: 'rgba(0, 255, 157, 0.02)',
+              border: `1.5px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : (isCaptureGroupRunning ? '#00ff9d55' : '#30363d')}`,
+              borderRadius: '12px',
+              padding: '12px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              cursor: 'pointer'
+            }}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #21262d', paddingBottom: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '11px', fontWeight: 800, color: '#00ff9d', letterSpacing: '0.5px' }}>DAG GROUP 2: CAPTURE ENTIRE MARKDOWN</span>
                 <span style={{ fontSize: '9px', padding: '2px 6px', borderRadius: '4px', background: isCaptureGroupRunning ? '#00ff9d22' : (isTriggerFired ? '#23863633' : '#30363d'), color: isCaptureGroupRunning ? '#00ff9d' : (isTriggerFired ? '#00ff9d' : '#8b949e'), fontWeight: 800 }}>
                   {isCaptureGroupRunning ? 'CAPTURING...' : (isTriggerFired ? 'ALL CAPTURED ✔' : 'IDLE')}
                 </span>
+                {effectiveSelectedDag === 'capture_entire_markdown' && (
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: '#00ff9d33', color: '#00ff9d', fontWeight: 700 }}>SELECTED</span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => handleRunGroup('capture_entire_markdown')}
+                onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
                 disabled={runningGroupId !== null || runningNodeId !== null}
                 style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', background: isCaptureGroupRunning ? '#21262d' : '#00ff9d22', color: isCaptureGroupRunning ? '#8b949e' : '#00ff9d', border: '1px solid #00ff9d66', borderRadius: '5px', fontSize: '10px', fontWeight: 700, cursor: isCaptureGroupRunning ? 'wait' : 'pointer', fontFamily: 'inherit' }}
                 title="Execute capture step cycle (Capture -> Down Arrow -> Qualifier Trigger)"
@@ -571,14 +948,27 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
             <div style={{ display: 'flex', alignItems: 'stretch', gap: '8px' }}>
               {/* Node 3: Screen Capture */}
-              <div style={{ flex: 1, background: isNode3Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode3Running ? '0 0 10px rgba(0, 255, 157, 0.15)' : 'none' }}>
+              <div
+                className={`dag-node-card ${isNode3Running ? 'dag-node-active-green' : ''}`}
+                style={{
+                  flex: 1,
+                  background: isNode3Error ? '#261314' : '#161b22',
+                  border: `1.5px solid ${isNode3Running ? '#00ff9d' : (isNode3Error ? '#f85149' : (isNode3Done ? '#238636' : '#388bfd'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3. SCREEN CAPTURE</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3Running ? '#00ff9d22' : (isNode3Error ? '#f8514933' : (isNode3Done ? '#23863633' : '#30363d')), color: isNode3Running ? '#00ff9d' : (isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
                       {isNode3Running ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY'))}
                     </span>
-                    <button type="button" onClick={() => setIsNode3ConfigOpen(true)} title="Configure Screen Capture" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setIsNode3ConfigOpen(true); }} title="Configure Screen Capture" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
                   </div>
                 </div>
                 <div style={{ fontSize: '12px', fontWeight: 800, color: isNode3Error ? '#ff7b72' : '#00ff9d' }}>Grab Screen Frame</div>
@@ -592,17 +982,30 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               </div>
 
-              {renderArrow('#00ff9d')}
+              {renderArrow(isNode3Done ? '#00ff9d' : '#388bfd', isNode3Running || isNode4Running)}
 
               {/* Node 4: OCR Extraction */}
-              <div style={{ flex: 1, background: isNode4Error ? '#261314' : '#161b22', border: `1.5px solid ${isNode4Running ? '#a371f7' : (isNode4Error ? '#f85149' : (isNode4Done ? '#238636' : '#8957e5'))}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isNode4Running ? '0 0 10px rgba(163, 113, 247, 0.2)' : 'none' }}>
+              <div
+                className={`dag-node-card ${isNode4Running ? 'dag-node-active-purple' : ''}`}
+                style={{
+                  flex: 1,
+                  background: isNode4Error ? '#261314' : '#161b22',
+                  border: `1.5px solid ${isNode4Running ? '#a371f7' : (isNode4Error ? '#f85149' : (isNode4Done ? '#238636' : '#8957e5'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>4. OCR EXTRACTION</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode4Running ? '#a371f722' : (isNode4Error ? '#f8514933' : (isNode4Done ? '#23863633' : '#30363d')), color: isNode4Running ? '#a371f7' : (isNode4Error ? '#ff7b72' : (isNode4Done ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
                       {isNode4Running ? 'READING' : (isNode4Error ? 'FAILED' : (isNode4Done ? 'PARSED' : 'READY'))}
                     </span>
-                    <button type="button" onClick={() => setIsNode4ConfigOpen(true)} title="Configure OCR Extraction" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setIsNode4ConfigOpen(true); }} title="Configure OCR Extraction" style={{ background: '#21262d', color: '#8b949e', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Settings size={10} /></button>
                   </div>
                 </div>
                 <div style={{ fontSize: '12px', fontWeight: 800, color: isNode4Error ? '#ff7b72' : '#a371f7' }}>Gutter & Line Reader</div>
@@ -616,10 +1019,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               </div>
 
-              {renderArrow('#ffa657')}
+              {renderArrow(isNode4Done ? '#00ff9d' : '#ffa657', isNode4Running || isNode5Running)}
 
               {/* Node 5: Down Arrow Navigation */}
-              <div style={{ flex: 1, background: '#161b22', border: `1px solid ${isNode5Done ? '#ffa65766' : '#30363d'}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div
+                className={`dag-node-card ${isNode5Running ? 'dag-node-active-orange' : ''}`}
+                style={{
+                  flex: 1,
+                  background: '#161b22',
+                  border: `1.5px solid ${isNode5Running ? '#ffa657' : (isNode5Done ? '#ffa65766' : '#30363d')}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. NAVIGATION</span>
                   <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode5Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
@@ -637,10 +1053,24 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               </div>
 
-              {renderArrow(triggerDecision.prevented ? '#f85149' : '#00ff9d')}
+              {renderArrow(triggerDecision.prevented ? '#f85149' : (isTriggerFired ? '#00ff9d' : '#ffa657'), isNode5Running || isNode6Running)}
 
               {/* Node 6: Verify Trigger */}
-              <div style={{ flex: 1.2, background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'), border: `1.5px solid ${isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd')}`, borderRadius: '10px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none') }}>
+              <div
+                className={`dag-node-card ${isNode6Running ? 'dag-node-active-cyan' : ''}`}
+                style={{
+                  flex: 1.2,
+                  background: isTriggerFired ? '#11291f' : (triggerDecision.prevented ? '#261314' : '#161b22'),
+                  border: `1.5px solid ${isNode6Running ? '#58a6ff' : (isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f85149' : '#388bfd'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                  boxShadow: isTriggerFired ? '0 0 14px rgba(0, 255, 157, 0.3)' : (triggerDecision.prevented ? '0 0 12px rgba(248, 81, 73, 0.25)' : 'none')
+                }}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>6. VERIFY TRIGGER</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -673,12 +1103,102 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             <div style={{ marginTop: '8px', padding: '0 4px' }}>
               <svg width="100%" height="28" viewBox="0 0 1000 28" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
                 <defs><marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="6 1, 1 4, 6 7" fill="#58a6ff" /></marker></defs>
-                <path d="M 920 4 C 920 22, 80 22, 80 4" fill="none" stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'} strokeWidth="2" strokeDasharray="4 3" markerEnd="url(#loop-arrow)" />
+                <path
+                  d="M 920 4 C 920 22, 80 22, 80 4"
+                  fill="none"
+                  stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'}
+                  strokeWidth="2.5"
+                  strokeDasharray="5 3"
+                  className={isCaptureGroupRunning ? 'dag-arrow-active' : ''}
+                  markerEnd="url(#loop-arrow)"
+                />
                 <text x="500" y="24" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ Loopback to Step 3: Capture Next Page via Arrow Down Keys'}</text>
               </svg>
             </div>
           </div>
 
+        </div>
+      </div>
+
+      {/* Inline Filtered Telemetry Activity Stream */}
+      <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #21262d' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Activity size={13} color={effectiveSelectedDag === 'initialize' ? '#58a6ff' : (effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e')} />
+            <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.4px', color: '#e6edf3' }}>
+              TELEMETRY ACTIVITY STREAM: {effectiveSelectedDag === 'all' ? 'ALL EVENTS' : (effectiveSelectedDag === 'initialize' ? 'DAG 1 (INITIALIZE)' : 'DAG 2 (CAPTURE)')}
+            </span>
+            <span style={{ fontSize: '9.5px', background: '#161b22', border: '1px solid #30363d', padding: '1px 6px', borderRadius: '4px', color: '#8b949e' }}>
+              {dagEvents.length} events
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '10px', color: '#8b949e' }}>Filter DAG:</span>
+            <button
+              type="button"
+              onClick={() => handleDagSelect('all')}
+              style={{
+                padding: '2px 7px', borderRadius: '4px',
+                background: effectiveSelectedDag === 'all' ? '#21262d' : 'transparent',
+                border: `1px solid ${effectiveSelectedDag === 'all' ? '#58a6ff' : '#30363d'}`,
+                color: effectiveSelectedDag === 'all' ? '#58a6ff' : '#8b949e',
+                fontSize: '10px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDagSelect('initialize')}
+              style={{
+                padding: '2px 7px', borderRadius: '4px',
+                background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.2)' : 'transparent',
+                border: `1px solid ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#30363d'}`,
+                color: effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#8b949e',
+                fontSize: '10px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              DAG 1: Init
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDagSelect('capture_entire_markdown')}
+              style={{
+                padding: '2px 7px', borderRadius: '4px',
+                background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.2)' : 'transparent',
+                border: `1px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#30363d'}`,
+                color: effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e',
+                fontSize: '10px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              DAG 2: Capture
+            </button>
+          </div>
+        </div>
+
+        <div style={{ maxHeight: '110px', overflowY: 'auto', background: '#0a0d12', border: '1px solid #21262d', borderRadius: '6px', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {dagEvents.length === 0 ? (
+            <div style={{ color: '#6e7681', fontSize: '10.5px', padding: '6px', textAlign: 'center' }}>
+              No telemetry events recorded for this DAG yet.
+            </div>
+          ) : (
+            dagEvents.slice(-8).map(ev => (
+              <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10.5px', fontFamily: 'var(--font-mono, monospace)' }}>
+                <span style={{ color: '#6e7681', fontSize: '9.5px', flexShrink: 0 }}>{ev.timestamp}</span>
+                <span style={{
+                  fontSize: '9px', fontWeight: 700, padding: '1px 5px', borderRadius: '3px',
+                  background: ev.category === 'SYSTEM' ? 'rgba(88, 166, 255, 0.15)' : (ev.category === 'PACER' || ev.category === 'FRAME' ? 'rgba(0, 255, 157, 0.15)' : 'rgba(163, 113, 247, 0.15)'),
+                  color: ev.category === 'SYSTEM' ? '#58a6ff' : (ev.category === 'PACER' || ev.category === 'FRAME' ? '#00ff9d' : '#a371f7'),
+                  flexShrink: 0
+                }}>
+                  {ev.category}
+                </span>
+                <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {ev.message}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

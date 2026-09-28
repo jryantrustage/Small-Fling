@@ -8,7 +8,7 @@ from services import state
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, run_adb_shell,
     ensure_adb_keyboard_closed, capture_external_screenshot, send_hid_keycombination,
-    get_device_info, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
+    auto_fix_viewport, get_device_info, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
 )
 
 router = APIRouter(tags=["Navigation"])
@@ -16,10 +16,12 @@ router = APIRouter(tags=["Navigation"])
 async def _input_tap(serial: str, disp_id: int, x: int, y: int, delay: float = 0.08):
     await run_adb_shell(f"input -d {disp_id} tap {x} {y}" if disp_id > 0 else f"input tap {x} {y}", serial)
     if delay: await asyncio.sleep(delay)
+    await auto_fix_viewport(serial, disp_id)
 
 async def _input_keys(serial: str, disp_id: int, keys: str, delay: float = 0.0):
     res = await run_adb_shell(f"input -d {disp_id} keyevent {keys}" if disp_id > 0 else f"input keyevent {keys}", serial)
     if delay: await asyncio.sleep(delay)
+    await auto_fix_viewport(serial, disp_id)
     return res
 
 async def _scroll_mouse(serial: str, disp_id: int, vscroll: int, count: int = 12):
