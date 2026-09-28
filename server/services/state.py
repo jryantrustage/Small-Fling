@@ -228,7 +228,7 @@ dag_state: Dict[str, Any] = {
             "id": "capture_entire_markdown",
             "title": "Capture Entire Markdown",
             "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-            "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"],
+            "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger"],
             "status": "idle",
             "progress": None
         }
@@ -274,6 +274,22 @@ dag_state: Dict[str, Any] = {
                 "guard_keyboard": True,
                 "settle_delay_ms": 300,
                 "save_frame": True
+            }
+        },
+        "local_ai_ocr": {
+            "id": "local_ai_ocr",
+            "group": "capture_entire_markdown",
+            "title": "3b. Local AI Model OCR",
+            "description": "Executes local AI model (RapidOCR ONNX) to extract OCR text and display lines verbatim.",
+            "status": "idle",
+            "extracted_text": "",
+            "preview_text": "",
+            "lines_count": 0,
+            "char_count": 0,
+            "model_used": "RapidOCR (Local AI ONNX)",
+            "config": {
+                "engine": "local:rapidocr",
+                "show_raw_text": False
             }
         },
         "frame_ocr": {
@@ -365,7 +381,8 @@ dag_state: Dict[str, Any] = {
     "edges": [
         {"from": "init_end", "to": "reset_home"},
         {"from": "reset_home", "to": "frame_acquire"},
-        {"from": "frame_acquire", "to": "frame_ocr"},
+        {"from": "frame_acquire", "to": "local_ai_ocr"},
+        {"from": "local_ai_ocr", "to": "frame_ocr"},
         {"from": "frame_ocr", "to": "arrow_down"},
         {"from": "arrow_down", "to": "verification_trigger"},
         {"from": "verification_trigger", "to": "frame_acquire", "is_loopback": True}
@@ -570,6 +587,20 @@ def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
 
     dag_state["nodes"]["frame_acquire"].update({"status": "completed"})
     dag_state["nodes"]["frame_ocr"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
+    target_top = bottom_line + 1
+    if "arrow_down" in dag_state["nodes"]:
+        dag_state["nodes"]["arrow_down"].update({
+            "target_top_line": target_top,
+            "target_top": target_top,
+            "prev_bottom": bottom_line,
+            "arrow_count": max(1, target_top - top_line)
+        })
+    if "verification_trigger" in dag_state["nodes"]:
+        dag_state["nodes"]["verification_trigger"].update({
+            "target_top_line": target_top,
+            "target_top": target_top,
+            "expected_top": target_top
+        })
     dag_state["nodes"]["verification_trigger"].update({
         "status": node_status,
         "verified_top_transition": is_verified,

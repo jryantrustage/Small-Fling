@@ -202,6 +202,7 @@ NODE_ALIAS_MAP = {
     "node_1": "init_end", "node_1_end": "init_end", "init_end": "init_end",
     "node_2": "reset_home", "node_2_home": "reset_home", "reset_home": "reset_home",
     "node_3": "frame_acquire", "frame_acquire": "frame_acquire", "frame_capture": "frame_acquire", "capture": "frame_acquire",
+    "node_3b": "local_ai_ocr", "node_3_5": "local_ai_ocr", "local_ai_ocr": "local_ai_ocr", "ai_ocr": "local_ai_ocr", "local_ocr": "local_ai_ocr",
     "node_4": "frame_ocr", "frame_ocr": "frame_ocr", "ocr": "frame_ocr", "frame_ocr_extract": "frame_ocr",
     "node_5": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
     "node_6": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger"
@@ -549,6 +550,86 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "message": f"Screen capture complete ({len(snap):,} bytes) ✔ Ready for OCR extraction."
             }
 
+        elif target_key in {"local_ai_ocr", "node_3b", "frame_local_ai_ocr"}:
+            temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+            if not temp_calib.exists() or temp_calib.stat().st_size < 2000:
+                candidates = sorted(
+                    [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True
+                )
+                if candidates:
+                    temp_calib = candidates[0]
+                else:
+                    node.update({
+                        "status": "error",
+                        "error": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
+                    })
+                    await state.ws_manager.broadcast({
+                        "type": "dag_updated",
+                        "dag": state.dag_state,
+                        "node_id": "local_ai_ocr",
+                        "error": "No captured frame available",
+                        "telemetry": state.latest_telemetry
+                    })
+                    return {
+                        "status": "error",
+                        "node_id": "local_ai_ocr",
+                        "message": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
+                    }
+
+            scan_res = await state.scan_image_in_process(temp_calib)
+            lines_detected = scan_res.get("lines", [])
+
+            formatted_lines = []
+            for l in lines_detected:
+                txt = l.get("text", "").strip()
+                ln = l.get("line_number")
+                if txt:
+                    formatted_lines.append(f"{ln:>3}: {txt}")
+                else:
+                    formatted_lines.append(f"{ln:>3}:")
+            extracted_text = "\n".join(formatted_lines)
+            if not extracted_text.strip():
+                extracted_text = "(No editor lines detected in image frame)"
+
+            lines_count = len(lines_detected)
+            char_count = len(extracted_text)
+            engine_name = "RapidOCR (Local AI ONNX)"
+
+            node.update({
+                "status": "completed",
+                "extracted_text": extracted_text,
+                "preview_text": extracted_text[:300] + ("..." if len(extracted_text) > 300 else ""),
+                "lines_count": lines_count,
+                "char_count": char_count,
+                "model_used": engine_name,
+                "error": None
+            })
+            if "frame_ocr" in state.dag_state["nodes"]:
+                state.dag_state["current_active_node"] = "frame_ocr"
+
+            state.latest_telemetry["status_message"] = f"DAG Node 3b: Local AI OCR extracted {lines_count} lines ({char_count} chars) ✔"
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "local_ai_ocr",
+                "extracted_text": extracted_text,
+                "lines_count": lines_count,
+                "char_count": char_count,
+                "model_used": engine_name,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "local_ai_ocr",
+                "lines_count": lines_count,
+                "char_count": char_count,
+                "extracted_text": extracted_text,
+                "model_used": engine_name,
+                "message": f"Local AI OCR extracted {lines_count} lines ({char_count} chars) ✔"
+            }
+
         elif target_key == "frame_ocr":
             temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
             if not temp_calib.exists() or temp_calib.stat().st_size < 2000:
@@ -677,15 +758,46 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "frame_id": fid,
                 "error": None
             })
+            if "local_ai_ocr" in state.dag_state["nodes"]:
+                formatted_lines = []
+                for l in lines_detected:
+                    txt = l.get("text", "").strip()
+                    ln = l.get("line_number")
+                    if txt: formatted_lines.append(f"{ln:>3}: {txt}")
+                    else: formatted_lines.append(f"{ln:>3}:")
+                ext_txt = "\n".join(formatted_lines) or "(No text lines detected)"
+                state.dag_state["nodes"]["local_ai_ocr"].update({
+                    "status": "completed",
+                    "extracted_text": ext_txt,
+                    "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
+                    "lines_count": len(lines_detected),
+                    "char_count": len(ext_txt),
+                    "model_used": "RapidOCR (Local AI ONNX)"
+                })
+            target_top = bot_ln + 1
             if "arrow_down" in state.dag_state["nodes"]:
-                state.dag_state["nodes"]["arrow_down"]["status"] = "active"
+                state.dag_state["nodes"]["arrow_down"].update({
+                    "status": "active",
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "prev_bottom": bot_ln,
+                    "arrow_count": max(1, target_top - top_ln)
+                })
                 state.dag_state["current_active_node"] = "arrow_down"
+            if "verification_trigger" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["verification_trigger"].update({
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "expected_top": target_top
+                })
+            state.orchestration_state["next_target_top"] = target_top
 
             state.latest_telemetry.update({
                 "current_top_line": top_ln,
                 "current_bottom_line": bot_ln,
+                "next_target_top": target_top,
                 "current_page": pidx,
-                "status_message": f"DAG Node 4: OCR Extracted {len(lines_detected)} lines (Page {pidx}: Ln {top_ln} → {bot_ln}) ✔"
+                "status_message": f"DAG Node 4: OCR Extracted {len(lines_detected)} lines (Page {pidx}: Ln {top_ln} → {bot_ln}) ✔ Next Target: Ln {target_top}"
             })
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
@@ -693,6 +805,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "node_id": "frame_ocr",
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
+                "target_top_line": target_top,
                 "extracted_line_count": len(lines_detected),
                 "frame_id": fid,
                 "telemetry": state.latest_telemetry
@@ -704,35 +817,117 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "page": pidx,
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
+                "target_top_line": target_top,
                 "scan": scan_res,
                 "lines_extracted": len(lines_detected),
-                "message": f"OCR extracted {len(lines_detected)} lines (Ln {top_ln} → {bot_ln}) ✔"
+                "message": f"OCR extracted {len(lines_detected)} lines (Ln {top_ln} → {bot_ln}). Target Top: Ln {target_top} ✔"
             }
 
         elif target_key == "arrow_down":
-            step_count, key_delay = int(cfg.get("step_count", 47)), float(cfg.get("key_delay_ms", 8)) / 1000.0
+            prev_bot = node.get("prev_bottom") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) or 31
+            cur_top = state.latest_telemetry.get("current_top_line", 1) or 1
+            target_top = prev_bot + 1
+            needed_steps = max(1, target_top - cur_top)
+            step_count = int(cfg.get("step_count") or needed_steps)
             disp_id = await detect_external_display_id(active_serial)
-            for _ in range(step_count):
-                cmd = f"input -d {disp_id} keyevent 20" if disp_id > 0 else "input keyevent 20"
+
+            # Ensure editor text body focus before sending navigation keys
+            await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
+            await asyncio.sleep(0.15)
+
+            # Dispatch down arrows in rapid atomic batches to prevent dropped keys
+            remaining = step_count
+            while remaining > 0:
+                batch = min(remaining, 12)
+                keys_arg = " ".join(["20"] * batch)
+                cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
                 await run_adb_shell(cmd, active_serial)
-                if key_delay > 0: await asyncio.sleep(key_delay)
-            await asyncio.sleep(0.4)
+                remaining -= batch
+                await asyncio.sleep(0.06)
+
+            await asyncio.sleep(0.3)
             snap, new_top = await capture_external_screenshot(active_serial), 0
             if snap:
                 calib = state.FRAMES_DIR / "dag_node4_step.png"
                 with open(calib, "wb") as f: f.write(snap)
                 new_top = await state.detect_top_line_in_process(calib)
+
+                # If new_top didn't reach target_top yet, micro-adjust the difference
+                if 0 < new_top < target_top:
+                    diff = target_top - new_top
+                    keys_arg = " ".join(["20"] * diff)
+                    cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
+                    await run_adb_shell(cmd, active_serial)
+                    await asyncio.sleep(0.2)
+                    snap2 = await capture_external_screenshot(active_serial)
+                    if snap2:
+                        with open(calib, "wb") as f: f.write(snap2)
+                        t2 = await state.detect_top_line_in_process(calib)
+                        if t2 > 0: new_top = t2
+
                 if new_top > 0: state.latest_telemetry["current_top_line"] = new_top
 
-            node.update({"status": "completed", "arrow_count": step_count, "new_top_line": new_top})
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "arrow_down", "step_count": step_count, "new_top_line": new_top, "telemetry": state.latest_telemetry})
-            return {"status": "success", "node_id": "arrow_down", "step_count": step_count, "new_top_line": new_top, "message": f"Stepped {step_count} down arrows: New top Ln {new_top} ✔"}
+            final_top = new_top if new_top > 0 else target_top
+            node.update({
+                "status": "completed",
+                "arrow_count": step_count,
+                "target_top_line": target_top,
+                "target_top": target_top,
+                "new_top_line": final_top
+            })
+            if "verification_trigger" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["verification_trigger"].update({
+                    "status": "active",
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "expected_top": target_top
+                })
+                state.dag_state["current_active_node"] = "verification_trigger"
+
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "arrow_down",
+                "step_count": step_count,
+                "target_top_line": target_top,
+                "new_top_line": final_top,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "arrow_down",
+                "step_count": step_count,
+                "target_top_line": target_top,
+                "new_top_line": final_top,
+                "message": f"Stepped {step_count} down arrows: Target top Ln {target_top} (Current: Ln {final_top}) ✔"
+            }
 
         elif target_key == "verification_trigger":
+            target_top = node.get("target_top_line") or (state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) + 1)
             decision = await evaluate_node_5_decision(active_serial)
-            node.update({"status": "completed" if decision.get("allowed") else "prevented", "trigger_decision": decision})
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "verification_trigger", "trigger_decision": decision})
-            return {"status": "success", "node_id": "verification_trigger", "trigger_decision": decision, "allowed": decision.get("allowed", False), "prevented": decision.get("prevented", True), "message": "Trigger allowed ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"}
+            node.update({
+                "status": "completed" if decision.get("allowed") else "prevented",
+                "target_top_line": target_top,
+                "target_top": target_top,
+                "expected_top": target_top,
+                "trigger_decision": decision
+            })
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "verification_trigger",
+                "target_top_line": target_top,
+                "trigger_decision": decision
+            })
+            return {
+                "status": "success",
+                "node_id": "verification_trigger",
+                "target_top_line": target_top,
+                "trigger_decision": decision,
+                "allowed": decision.get("allowed", False),
+                "prevented": decision.get("prevented", True),
+                "message": f"Trigger allowed for Target Top Ln {target_top} ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"
+            }
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported node {target_key}")
     except Exception as e:
@@ -930,7 +1125,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
+        "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
     })
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
@@ -939,6 +1134,11 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     if n3_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
+
+    n3b_res = await run_single_dag_node("local_ai_ocr", {"serial": active_serial})
+    if n3b_res.get("status") == "error":
+        capture_group["status"] = "error"
+        return {"status": "error", "node_id": "local_ai_ocr", "result": n3b_res}
 
     n4_res = await run_single_dag_node("frame_ocr", {"serial": active_serial})
     if n4_res.get("status") == "error":
@@ -952,6 +1152,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         "status": "success",
         "group": "capture_entire_markdown",
         "node3": n3_res,
+        "node3b": n3b_res,
         "node4": n4_res,
         "node5": n5_res,
         "node6": n6_res

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert, Sliders, ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle, Wrench } from 'lucide-react';
+import { Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert, Sliders, ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle, Wrench, FileText } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
 export interface DagNodeState {
@@ -140,6 +140,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
+  const [isTextModalOpen, setIsTextModalOpen] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
 
   const handleAutoFixViewport = async () => {
     setIsAutoFixingViewport(true);
@@ -228,9 +230,15 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const node1 = dagStatus.dag?.nodes?.init_end || {};
   const node2 = dagStatus.dag?.nodes?.reset_home || {};
   const node3 = dagStatus.dag?.nodes?.frame_acquire || {};
+  const node3b = dagStatus.dag?.nodes?.local_ai_ocr || {};
   const node4 = dagStatus.dag?.nodes?.frame_ocr || {};
   const node5 = dagStatus.dag?.nodes?.arrow_down || {};
   const node6 = dagStatus.dag?.nodes?.verification_trigger || {};
+
+  const parsedBottom = node4.bottom_line || effectiveBottom;
+  const nextTargetTop = (parsedBottom && parsedBottom > 0)
+    ? (parsedBottom + 1)
+    : (node5.target_top_line || node6.target_top_line || 32);
 
   const handleRunNode = async (nodeId: string) => {
     setRunningNodeId(nodeId);
@@ -443,12 +451,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isNode4Error = node4.status === 'error' || Boolean(node4.error);
   const isNode4Done = !isNode4Error && node4.status === 'completed';
 
+  const isNode3bRunning = runningNodeId === 'local_ai_ocr' || node3b.status === 'active';
+  const isNode3bError = node3b.status === 'error' || Boolean(node3b.error);
+  const isNode3bDone = !isNode3bError && (node3b.status === 'completed' || Boolean(node3b.extracted_text) || isNode4Done);
+
   const isNode5Running = runningNodeId === 'arrow_down' || node5.status === 'active';
   const isNode5Done = node5.status === 'completed';
 
   const isNode6Running = runningNodeId === 'verification_trigger' || isEvaluating || node6.status === 'active';
 
-  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode4Running || isNode5Running || isNode6Running || isOrchestrating;
+  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode3bRunning || isNode4Running || isNode5Running || isNode6Running || isOrchestrating;
 
   return (
     <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '16px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
@@ -706,7 +718,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       )}
 
       <div style={{ position: 'relative', padding: '6px 4px 16px 4px', overflowX: 'auto' }}>
-        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '12px', minWidth: '980px' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', justifyContent: 'space-between', gap: '12px', minWidth: '1240px' }}>
           
           {/* DAG GROUP 1: INITIALIZE */}
           <div
@@ -913,7 +925,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             className={`dag-group-card ${effectiveSelectedDag === 'capture_entire_markdown' ? 'selected-dag-capture' : ''}`}
             onClick={() => handleDagSelect('capture_entire_markdown')}
             style={{
-              flex: '3.1 1 0',
+              flex: '4.2 1 0',
               background: 'rgba(0, 255, 157, 0.02)',
               border: `1.5px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : (isCaptureGroupRunning ? '#00ff9d55' : '#30363d')}`,
               borderRadius: '12px',
@@ -982,7 +994,81 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               </div>
 
-              {renderArrow(isNode3Done ? '#00ff9d' : '#388bfd', isNode3Running || isNode4Running)}
+              {renderArrow(isNode3Done ? '#00ff9d' : '#388bfd', isNode3Running || isNode3bRunning)}
+
+              {/* Node 3b: Local AI Model OCR (Between 3 and 4) */}
+              <div
+                className={`dag-node-card ${isNode3bRunning ? 'dag-node-active-cyan' : ''}`}
+                style={{
+                  flex: 1.35,
+                  minWidth: '220px',
+                  background: isNode3bError ? '#261314' : '#161b22',
+                  border: `1.5px solid ${isNode3bRunning ? '#79c0ff' : (isNode3bError ? '#f85149' : (isNode3bDone ? '#238636' : '#388bfd'))}`,
+                  borderRadius: '10px',
+                  padding: '12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>3b. LOCAL AI OCR</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode3bRunning ? '#388bfd22' : (isNode3bError ? '#f8514933' : (isNode3bDone ? '#23863633' : '#30363d')), color: isNode3bRunning ? '#58a6ff' : (isNode3bError ? '#ff7b72' : (isNode3bDone ? '#00ff9d' : '#8b949e')), fontWeight: 700 }}>
+                      {isNode3bRunning ? 'EXTRACTING' : (isNode3bError ? 'FAILED' : (isNode3bDone ? 'PARSED' : 'READY'))}
+                    </span>
+                    {node3b.extracted_text && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setIsTextModalOpen(true); }}
+                        title="View Full OCR Text"
+                        style={{ background: '#21262d', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '4px', padding: '2px 5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700 }}
+                      >
+                        <FileText size={10} />
+                        <span>View</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: isNode3bError ? '#ff7b72' : '#58a6ff' }}>Local AI Model OCR</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Extracts verbatim code text using local RapidOCR ONNX model.</div>
+
+                {/* Live OCR Text Display Box */}
+                <div
+                  title="Extracted OCR Text Preview (Click 'View' for full window)"
+                  style={{
+                    background: '#0d1117',
+                    border: '1px solid #30363d',
+                    borderRadius: '6px',
+                    padding: '6px 8px',
+                    maxHeight: '92px',
+                    minHeight: '48px',
+                    overflowY: 'auto',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    fontSize: '9.5px',
+                    color: isNode3bDone ? '#7ee787' : '#8b949e',
+                    whiteSpace: 'pre-wrap',
+                    lineHeight: 1.35,
+                    userSelect: 'text',
+                    scrollbarWidth: 'thin'
+                  }}
+                >
+                  {node3b.extracted_text || (isNode3bRunning ? 'Running local AI OCR inference on frame...' : (node4.extracted_line_count ? `${node4.extracted_line_count} lines extracted from gutter` : 'Awaiting OCR Run (Press Run Node 3b)'))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '10px', color: '#8b949e', paddingTop: '2px' }}>
+                  <span>{node3b.lines_count || node4.extracted_line_count ? `${node3b.lines_count || node4.extracted_line_count} lines` : '0 lines'}</span>
+                  <span style={{ color: '#00ff9d', fontSize: '9px', fontWeight: 700 }}>{node3b.model_used || 'RapidOCR ONNX'}</span>
+                </div>
+
+                <button type="button" onClick={() => handleRunNode('local_ai_ocr')} disabled={runningNodeId !== null} title="Run local AI model OCR on frame" style={runBtnStyle(isNode3bError ? '#f85149' : '#58a6ff', runningNodeId !== null)}>
+                  {runningNodeId === 'local_ai_ocr' ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{runningNodeId === 'local_ai_ocr' ? 'Extracting...' : (isNode3bError ? 'Retry Node 3b' : 'Run Node 3b (AI OCR)')}</span>
+                </button>
+              </div>
+
+              {renderArrow(isNode3bDone ? '#00ff9d' : '#a371f7', isNode3bRunning || isNode4Running)}
 
               {/* Node 4: OCR Extraction */}
               <div
@@ -1039,13 +1125,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>5. NAVIGATION</span>
                   <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isNode5Running ? '#ffa65722' : '#30363d', color: '#ffa657', fontWeight: 700 }}>
-                    {isNode5Running ? 'STEPPING...' : (isNode5Done ? 'STEPPED' : 'PREV BOTTOM + 1')}
+                    {isNode5Running ? 'STEPPING...' : (isNode5Done ? 'STEPPED' : `TARGET: LN ${nextTargetTop}`)}
                   </span>
                 </div>
                 <div style={{ fontSize: '12px', fontWeight: 800, color: '#ffa657' }}>Down Arrow (Next Top)</div>
-                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Positions (prev bottom + 1) onto top gutter.</div>
-                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', fontSize: '11px', color: '#ffa657', fontWeight: 700 }}>
-                  {isNode5Done && node5.new_top_line ? `Target Top: Ln ${node5.new_top_line}` : `Step: ${dagStatus.arrow_step_count || 47} Arrows`}
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Positions line {nextTargetTop} (prev bottom + 1) onto top gutter.</div>
+                <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: '#ffa657', fontWeight: 700 }}>
+                    Target Top: <span style={{ color: '#00ff9d', fontSize: '12px' }}>Ln {nextTargetTop}</span>
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#8b949e' }}>
+                    {isNode5Done && node5.new_top_line ? `(Current: Ln ${node5.new_top_line})` : `${node5.arrow_count || Math.max(1, nextTargetTop - (node4.top_line || effectiveTop || 1))} steps`}
+                  </span>
                 </div>
                 <button type="button" onClick={() => handleRunNode('arrow_down')} disabled={runningNodeId !== null} title="Step down arrow keys" style={runBtnStyle('#ffa657', runningNodeId !== null)}>
                   {isNode5Running ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
@@ -1075,20 +1166,28 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>6. VERIFY TRIGGER</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ fontSize: '9px', padding: '1px 6px', borderRadius: '4px', background: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#f8514933' : '#388bfd22'), color: isTriggerFired ? '#000' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'), fontWeight: 800 }}>
-                      {isTriggerFired ? 'TRIGGER FIRED ✔' : (triggerDecision.prevented ? 'PREVENTED ⛔' : 'TRIGGER ARMED')}
+                      {isTriggerFired ? 'TRIGGER FIRED ✔' : (triggerDecision.prevented ? 'PREVENTED ⛔' : `TARGET: LN ${nextTargetTop}`)}
                     </span>
                     <button onClick={(e) => { e.stopPropagation(); setIsConfigModalOpen(true); }} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', background: triggerDecision.prevented ? '#f8514922' : '#1f6feb22', color: triggerDecision.prevented ? '#ff7b72' : '#58a6ff', border: `1px solid ${triggerDecision.prevented ? '#f8514966' : '#1f6feb66'}`, borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}><Settings size={11} /><span>Config</span></button>
                   </div>
                 </div>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Verify Last Ln + 1 on Top</div>
-                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Verifies last line + 1 on top, triggers loopback flow ({effectiveTop} / {effectiveTotal || '?'}).</div>
+                <div style={{ fontSize: '12px', fontWeight: 800, color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff') }}>Target Line {nextTargetTop} at Top Gutter</div>
+                <div style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.35 }}>Verifies line {nextTargetTop} is on the top gutter before triggering loopback flow.</div>
                 <div style={{ paddingTop: '6px', borderTop: '1px solid #21262d', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', color: '#58a6ff', fontWeight: 700 }}>
+                      Target Top: <span style={{ color: '#00ff9d' }}>Ln {nextTargetTop}</span>
+                    </span>
+                    <span style={{ fontSize: '10px', color: (node6.top_line || effectiveTop) === nextTargetTop ? '#00ff9d' : '#8b949e', fontWeight: 600 }}>
+                      Ln {node6.top_line || effectiveTop || 1} on top
+                    </span>
+                  </div>
                   {triggerDecision.prevented ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#ff7b72', fontWeight: 700 }}><ShieldAlert size={12} /><span>Blocked: {triggerDecision.reasons[0] || 'Quality issue'}</span></div>
                   ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#00ff9d', fontWeight: 700 }}><ShieldCheck size={12} /><span>OCR Qualifiers Clean</span></div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: '#00ff9d', fontWeight: 700 }}><ShieldCheck size={12} /><span>Target Ln {nextTargetTop} Gutter Verified</span></div>
                   )}
-                  <div style={{ fontSize: '10px', color: isTriggerFired ? '#00ff9d' : '#8b949e', fontWeight: 600 }}>{isTriggerFired ? '100% Captured - Complete!' : 'Else: Loopback to Step 3'}</div>
+                  <div style={{ fontSize: '10px', color: isTriggerFired ? '#00ff9d' : '#8b949e', fontWeight: 600 }}>{isTriggerFired ? '100% Captured - Complete!' : `Else: Loopback to Step 3 for Ln ${nextTargetTop}`}</div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', width: '100%', marginTop: 'auto' }}>
                   <button type="button" onClick={() => handleRunNode('verification_trigger')} disabled={runningNodeId !== null} title="Evaluate classifiers and verify trigger condition" style={{ ...runBtnStyle('#58a6ff', runningNodeId !== null), flex: 1, marginTop: 0 }}>
@@ -1100,19 +1199,19 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </div>
 
             {/* Loopback SVG with numeric coordinates */}
-            <div style={{ marginTop: '8px', padding: '0 4px' }}>
-              <svg width="100%" height="28" viewBox="0 0 1000 28" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
+            <div style={{ marginTop: '6px', padding: '0 4px' }}>
+              <svg width="100%" height="24" viewBox="0 0 1000 24" preserveAspectRatio="none" style={{ overflow: 'visible' }}>
                 <defs><marker id="loop-arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="6 1, 1 4, 6 7" fill="#58a6ff" /></marker></defs>
                 <path
-                  d="M 920 4 C 920 22, 80 22, 80 4"
+                  d="M 920 2 C 920 18, 80 18, 80 2"
                   fill="none"
                   stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'}
-                  strokeWidth="2.5"
+                  strokeWidth="2"
                   strokeDasharray="5 3"
                   className={isCaptureGroupRunning ? 'dag-arrow-active' : ''}
                   markerEnd="url(#loop-arrow)"
                 />
-                <text x="500" y="24" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : '↺ Loopback to Step 3: Capture Next Page via Arrow Down Keys'}</text>
+                <text x="500" y="21" fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'} fontSize="10" textAnchor="middle">{triggerDecision.prevented ? '⛔ Trigger Prevented: OCR qualifiers blocked loopback' : `↺ Loopback to Step 3: Capture Next Page via Arrow Down Keys (Target: Ln ${nextTargetTop})`}</text>
               </svg>
             </div>
           </div>
@@ -1206,7 +1305,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         <div style={{ fontSize: '11px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Activity size={14} color="#00ff9d" /><span>Verification Trigger:</span>
           <strong style={{ color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#ffa657') }}>
-            {isTriggerFired ? `✔ All ${effectiveTotal} lines captured!` : (triggerDecision.prevented ? `⛔ Trigger Prevented (${triggerDecision.reasons.length} issue(s))` : `Capturing page ${currentPage} (Ln ${effectiveTop} of ${effectiveTotal || '?'})`)}
+            {isTriggerFired ? `✔ All ${effectiveTotal} lines captured!` : (triggerDecision.prevented ? `⛔ Trigger Prevented (${triggerDecision.reasons.length} issue(s))` : `Capturing page ${currentPage} (Target Top: Ln ${nextTargetTop} of ${effectiveTotal || '?'})`)}
           </strong>
           {calibrationMsg && <span style={{ color: '#58a6ff', marginLeft: '8px' }}>{calibrationMsg}</span>}
         </div>
@@ -1322,6 +1421,55 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 })}
               </div>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Node 3b Full OCR Text Modal */}
+      {isTextModalOpen && (
+        <Modal
+          isOpen={isTextModalOpen}
+          onClose={() => setIsTextModalOpen(false)}
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileText size={18} color="#58a6ff" />
+              <span>DAG Node 3b: Local AI OCR Extracted Text</span>
+            </div>
+          }
+          subtitle={`Extracted ${node3b.lines_count || 0} lines verbatim using ${node3b.model_used || 'RapidOCR ONNX'}`}
+          confirmText="Copy to Clipboard"
+          cancelText="Close"
+          onConfirm={() => {
+            if (node3b.extracted_text) {
+              navigator.clipboard?.writeText(node3b.extracted_text);
+              setCopiedText(true);
+              setTimeout(() => setCopiedText(false), 2500);
+            }
+          }}
+          maxWidth="700px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#8b949e' }}>
+              <span>{node3b.lines_count || 0} lines detected • {node3b.char_count || 0} characters</span>
+              {copiedText && <span style={{ color: '#00ff9d', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}><Check size={12} /> Copied to clipboard!</span>}
+            </div>
+            <pre style={{
+              background: '#0d1117',
+              border: '1px solid #30363d',
+              borderRadius: '8px',
+              padding: '12px',
+              maxHeight: '380px',
+              overflowY: 'auto',
+              fontFamily: 'var(--font-mono, monospace)',
+              fontSize: '11px',
+              color: '#7ee787',
+              lineHeight: 1.45,
+              whiteSpace: 'pre-wrap',
+              margin: 0,
+              userSelect: 'text'
+            }}>
+              {node3b.extracted_text || 'No text extracted yet'}
+            </pre>
           </div>
         </Modal>
       )}
