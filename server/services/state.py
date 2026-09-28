@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+import numpy as np
 from fastapi import WebSocket
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,6 +16,63 @@ FRAMES_DIR = config.FRAMES_DIR
 DOCUMENT_FILE = config.DOCUMENT_FILE
 RECAPTURE_QUEUE_FILE = config.RECAPTURE_QUEUE_FILE
 
+def _register_numpy_encoders():
+    try:
+        from fastapi.encoders import ENCODERS_BY_TYPE
+        def _subclasses(cls):
+            for s in cls.__subclasses__():
+                yield s
+                yield from _subclasses(s)
+        for t in _subclasses(np.generic):
+            if issubclass(t, np.bool_):
+                ENCODERS_BY_TYPE[t] = bool
+            elif issubclass(t, np.integer):
+                ENCODERS_BY_TYPE[t] = int
+            elif issubclass(t, np.floating):
+                ENCODERS_BY_TYPE[t] = float
+        ENCODERS_BY_TYPE[np.ndarray] = lambda x: x.tolist()
+    except Exception as e:
+        print(f"Note: error registering numpy encoders: {e}")
+
+_register_numpy_encoders()
+
+def sanitize_for_json(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {str(k): sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple, set)):
+        return [sanitize_for_json(v) for v in obj]
+    elif isinstance(obj, (np.bool_, getattr(np, 'bool', np.bool_))):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return [sanitize_for_json(v) for v in obj.tolist()]
+    elif hasattr(obj, "item") and callable(getattr(obj, "item")):
+        try:
+            return obj.item()
+        except Exception:
+            pass
+    return obj
+
+class NumpySafeJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.bool_, getattr(np, 'bool', np.bool_))):
+            return bool(obj)
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if hasattr(obj, "item") and callable(getattr(obj, "item")):
+            try:
+                return obj.item()
+            except Exception:
+                pass
+        return super().default(obj)
+
 class WebSocketManager:
     def __init__(self):
         self.active: List[WebSocket] = []
@@ -28,7 +86,7 @@ class WebSocketManager:
             self.active.remove(ws)
 
     async def broadcast(self, message: Any):
-        payload = json.dumps(message) if not isinstance(message, str) else message
+        payload = json.dumps(message, cls=NumpySafeJSONEncoder) if not isinstance(message, str) else message
         for ws in list(self.active):
             try:
                 await ws.send_text(payload)
@@ -399,9 +457,9 @@ def save_persisted_state():
         db.save_document_lines(pid, document_lines)
         db.save_project_telemetry(pid, latest_telemetry, token_stats)
         with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump({"lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())}, "frames": captured_frames, "token_stats": token_stats, "latest_telemetry": latest_telemetry, "updated_at": datetime.now().isoformat()}, f, indent=2)
+            json.dump({"lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())}, "frames": captured_frames, "token_stats": token_stats, "latest_telemetry": latest_telemetry, "updated_at": datetime.now().isoformat()}, f, indent=2, cls=NumpySafeJSONEncoder)
         with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(recapture_queue, f, indent=2)
+            json.dump(recapture_queue, f, indent=2, cls=NumpySafeJSONEncoder)
     except Exception as e:
         print(f"Error saving state to SQLite: {e}")
 

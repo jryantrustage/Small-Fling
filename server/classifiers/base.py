@@ -32,16 +32,17 @@ class ClassificationResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        from services.state import sanitize_for_json
         return {
-            "classifier_id": self.classifier_id,
-            "issue_detected": self.issue_detected,
-            "issue_name": self.issue_name,
-            "fix_name": self.fix_name,
-            "severity": self.severity,
-            "confidence": self.confidence,
-            "details": self.details,
-            "target_coordinates": list(self.target_coordinates) if self.target_coordinates else None,
-            "metadata": self.metadata,
+            "classifier_id": str(self.classifier_id),
+            "issue_detected": bool(self.issue_detected),
+            "issue_name": str(self.issue_name),
+            "fix_name": str(self.fix_name),
+            "severity": str(self.severity),
+            "confidence": float(self.confidence),
+            "details": str(self.details),
+            "target_coordinates": [int(c) for c in self.target_coordinates] if self.target_coordinates else None,
+            "metadata": sanitize_for_json(self.metadata),
         }
 
 
@@ -54,12 +55,13 @@ class FixResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
+        from services.state import sanitize_for_json
         return {
-            "classifier_id": self.classifier_id,
-            "success": self.success,
-            "message": self.message,
-            "actions_taken": self.actions_taken,
-            "metadata": self.metadata,
+            "classifier_id": str(self.classifier_id),
+            "success": bool(self.success),
+            "message": str(self.message),
+            "actions_taken": [str(a) for a in self.actions_taken],
+            "metadata": sanitize_for_json(self.metadata),
         }
 
 
