@@ -270,31 +270,54 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 except Exception as ce:
                     print(f"[init_end] Cursor classifier check note: {ce}")
 
+            # 1. Send Ctrl+End with focus
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
             settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
             await asyncio.sleep(settle_s)
-            snap = await capture_external_screenshot(active_serial)
+
+            # 2. Wait for scroll convergence: sample bottom line until scroll velocity stops
             total_lines = 0
             top_line = 0
-            if snap:
-                calib = state.FRAMES_DIR / "dag_node1_end.png"
-                with open(calib, "wb") as f: f.write(snap)
-                top_line, total_lines = await state.detect_gutter_bounds_in_process(calib)
-                if total_lines <= 0:
-                    scan_res = await state.scan_image_in_process(calib)
-                    total_lines = scan_res.get("bottom_line", 0)
-                    if top_line <= 0: top_line = scan_res.get("top_line", 0)
+            prev_bot = -1
+            stable_count = 0
+            calib = state.FRAMES_DIR / "dag_node1_end.png"
 
-            # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
+            for sample_idx in range(6):
+                snap = await capture_external_screenshot(active_serial)
+                if snap:
+                    with open(calib, "wb") as f: f.write(snap)
+                    t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib)
+                    if b_sample <= 0:
+                        scan_res = await state.scan_image_in_process(calib)
+                        b_sample = scan_res.get("bottom_line", 0)
+                        if t_sample <= 0: t_sample = scan_res.get("top_line", 0)
+
+                    if b_sample > total_lines:
+                        total_lines = b_sample
+                    if t_sample > top_line:
+                        top_line = t_sample
+
+                    # When the bottom line stops increasing and stays stable, the scroll has fully landed at EOF!
+                    if b_sample > 0 and b_sample == prev_bot:
+                        stable_count += 1
+                        if stable_count >= 1:
+                            break
+                    else:
+                        stable_count = 0
+                        prev_bot = b_sample
+
+                await asyncio.sleep(0.35)
+
+            # 3. Auto-fix viewport immediately after scroll has fully landed: close soft keyboard and reflow 1080p desktop layout
             await auto_fix_viewport(active_serial, disp_id)
-            # Re-read gutter after auto-fix to capture any newly revealed bottom lines
+            await asyncio.sleep(0.2)
+            # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full 1080p height
             snap_fixed = await capture_external_screenshot(active_serial)
             if snap_fixed:
-                calib = state.FRAMES_DIR / "dag_node1_end.png"
                 with open(calib, "wb") as f: f.write(snap_fixed)
                 t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib)
                 if b_fix > total_lines: total_lines = b_fix
-                if t_fix > 0: top_line = t_fix
+                if t_fix > 0 and top_line <= 0: top_line = t_fix
 
             # Evaluate whether editor is still displaying line 1 (keystroke dropped or focus lost)
             is_stuck_on_line_1 = False
@@ -316,7 +339,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     await cursor_clf.fix(c_ctx)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.6)
                     snap_retry = await capture_external_screenshot(active_serial)
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
@@ -416,36 +439,46 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
         elif target_key == "reset_home":
             disp_id = await detect_external_display_id(active_serial)
-            await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
-            await auto_fix_viewport(active_serial, disp_id)
-            await asyncio.sleep(float(cfg.get("settle_delay_ms", 300)) / 1000.0)
-            snap = await capture_external_screenshot(active_serial)
-            is_verified, detected_first = False, 0
-            if snap:
-                calib = state.FRAMES_DIR / "dag_node2_home.png"
-                with open(calib, "wb") as f: f.write(snap)
-                is_verified, detected_first = await state.verify_first_line_in_process(calib)
-                if not is_verified and (await state.detect_top_line_in_process(calib)) == 1:
-                    is_verified, detected_first = True, 1
+            calib = state.FRAMES_DIR / "dag_node2_home.png"
+            is_verified = False
+            detected_first = 0
 
-            # Dynamic on-the-fly adjustment if not yet verified at Line 1:
-            if not is_verified:
-                print(f"[reset_home] Line 1 not verified (detected {detected_first}), dynamically adjusting on the fly...")
-                await run_adb_shell(f"input -d {disp_id} tap 500 500; input keyboard -d {disp_id} keycombination 113 122", active_serial)
-                await auto_fix_viewport(active_serial, disp_id)
-                await asyncio.sleep(0.25)
-                snap2 = await capture_external_screenshot(active_serial)
-                if snap2:
-                    with open(calib, "wb") as f: f.write(snap2)
+            # Execute focused attempts to return to Line 1
+            for attempt in range(1, 4):
+                # Send Ctrl+Home (taps editor body then sends keycombination 113 122)
+                await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
+                await asyncio.sleep(0.4)
+
+                snap = await capture_external_screenshot(active_serial)
+                if snap:
+                    with open(calib, "wb") as f: f.write(snap)
                     is_verified, detected_first = await state.verify_first_line_in_process(calib)
-                    if not is_verified and (await state.detect_top_line_in_process(calib)) == 1:
-                        is_verified, detected_first = True, 1
+                    if not is_verified:
+                        top_detected = await state.detect_top_line_in_process(calib)
+                        if top_detected == 1 or (0 < top_detected <= 2):
+                            is_verified, detected_first = True, 1
+
+                if is_verified:
+                    # Once Line 1 is reached, auto-fix viewport to dismiss keyboard and restore full 1080p area
+                    await auto_fix_viewport(active_serial, disp_id)
+                    await asyncio.sleep(0.2)
+                    snap_fixed = await capture_external_screenshot(active_serial)
+                    if snap_fixed:
+                        with open(calib, "wb") as f: f.write(snap_fixed)
+                        is_v2, d2 = await state.verify_first_line_in_process(calib)
+                        if is_v2:
+                            detected_first = d2 or 1
+                    break
+
+                print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), refocusing editor...")
+                await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
+                await asyncio.sleep(0.2)
 
             node.update({"status": "completed" if is_verified else "error", "verified": is_verified, "first_line": detected_first})
             state.latest_telemetry["current_top_line"] = detected_first or 1
             state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 {'verified' if is_verified else 'unverified'} at top (detected Ln {detected_first})"
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "telemetry": state.latest_telemetry})
-            return {"status": "success" if is_verified else "warning", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'detection returned Ln {detected_first}'} via Ctrl+Home"}
+            return {"status": "success" if is_verified else "error", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'verification failed - editor at Ln {detected_first}'} via Ctrl+Home"}
 
         elif target_key == "frame_acquire":
             await auto_fix_viewport(active_serial)
@@ -807,14 +840,48 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         is_verified = node2_res.get("verified", False)
         first_line = node2_res.get("first_line", 1)
 
-        # Mark initialize completed!
+        # Strictly verify Line 1 before advancing to DAG 2
+        if not is_verified:
+            err_msg = f"Failed to return to Line 1 (currently on Line {first_line or 'unknown'}). Please verify Ctrl+Home on external display."
+            init_group["status"] = "error"
+            init_group["progress"] = {
+                "percent": 75,
+                "stage": err_msg,
+                "status": "error",
+                "error": err_msg,
+                "total_lines": total_lines,
+                "verified": False
+            }
+            await state.ws_manager.broadcast({
+                "type": "project_init_progress",
+                "stage": err_msg,
+                "percent": 75,
+                "status": "error",
+                "error": err_msg,
+                "total_lines": total_lines,
+                "verified": False,
+                "dag": state.dag_state,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "error",
+                "group": "initialize",
+                "error": err_msg,
+                "total_lines": total_lines,
+                "first_line": first_line,
+                "verified": False,
+                "node1": node1_res,
+                "node2": node2_res
+            }
+
+        # Mark initialize completed ONLY IF Line 1 is verified!
         init_group["status"] = "completed"
         init_group["progress"] = {
             "percent": 100,
             "stage": f"Project Initialized Successfully! {total_lines:,} total lines calibrated and Line 1 verified ✔",
             "status": "completed",
             "total_lines": total_lines,
-            "verified": is_verified
+            "verified": True
         }
         capture_group["status"] = "idle"
         state.dag_state["current_active_group"] = "capture_entire_markdown"
