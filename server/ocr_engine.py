@@ -36,7 +36,7 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
         if m := re.search(r'^(\d+)', clean):
             try:
                 n = int(m.group(1))
-                if 0 < n < 500000:
+                if 0 < n < 2000000:
                     pts = np.array(bbox)
                     y_min = int(np.min(pts[:, 1])) if pts.ndim == 2 else 0
                     nums.append((y_min, n))
@@ -45,23 +45,25 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
     return [n for _, n in nums]
 
 def fast_detect_gutter_bounds(img: np.ndarray) -> Tuple[int, int]:
-    """Rapidly extracts top line and bottom line from targeted top/bottom gutter slices."""
+    """Rapidly extracts top line and bottom line from targeted top/bottom gutter slices in parallel."""
     if img is None: return 0, 0
     h, w = img.shape[:2]
     # 1. Primary: standard fullscreen gutter (width ~160px)
     top_crop = img[int(h * 0.10):int(h * 0.40), :160]
     bot_crop = img[int(h * 0.70):int(h * 0.95), :160]
 
-    top_nums = extract_numbers_from_slice(top_crop)
-    bot_nums = extract_numbers_from_slice(bot_crop)
+    f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop)
+    f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
+    top_nums, bot_nums = f_top.result(), f_bot.result()
     if top_nums and bot_nums:
         return top_nums[0], bot_nums[-1]
 
     # 2. Secondary: sidebar open (gutter around x ~ 300)
     top_crop2 = img[int(h * 0.10):int(h * 0.40), 260:430]
     bot_crop2 = img[int(h * 0.70):int(h * 0.95), 260:430]
-    top_nums2 = extract_numbers_from_slice(top_crop2)
-    bot_nums2 = extract_numbers_from_slice(bot_crop2)
+    f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop2)
+    f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
+    top_nums2, bot_nums2 = f_top2.result(), f_bot2.result()
     if top_nums2 and bot_nums2:
         return top_nums2[0], bot_nums2[-1]
 

@@ -271,7 +271,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     print(f"[init_end] Cursor classifier check note: {ce}")
 
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
-            settle_s = float(cfg.get("settle_delay_ms", 400)) / 1000.0
+            settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
             await asyncio.sleep(settle_s)
             snap = await capture_external_screenshot(active_serial)
             total_lines = 0
@@ -287,51 +287,51 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
             await auto_fix_viewport(active_serial, disp_id)
-            if total_lines <= 0:
-                snap_fixed = await capture_external_screenshot(active_serial)
-                if snap_fixed:
-                    calib = state.FRAMES_DIR / "dag_node1_end.png"
-                    with open(calib, "wb") as f: f.write(snap_fixed)
-                    t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib)
-                    if b_fix > 0: total_lines = b_fix
-                    if t_fix > 0: top_line = t_fix
+            # Re-read gutter after auto-fix to capture any newly revealed bottom lines
+            snap_fixed = await capture_external_screenshot(active_serial)
+            if snap_fixed:
+                calib = state.FRAMES_DIR / "dag_node1_end.png"
+                with open(calib, "wb") as f: f.write(snap_fixed)
+                t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib)
+                if b_fix > total_lines: total_lines = b_fix
+                if t_fix > 0: top_line = t_fix
 
-            # Evaluate whether editor is still displaying line 1
+            # Evaluate whether editor is still displaying line 1 (keystroke dropped or focus lost)
             is_stuck_on_line_1 = False
             if 0 < top_line <= 5:
                 is_stuck_on_line_1 = True
-            elif top_line == 0:
+            elif top_line == 0 and total_lines <= 50:
                 try:
                     l1_clf = Line1StuckClassifier()
-                    clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap)
+                    clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_fixed or snap)
                     clf_res = await l1_clf.detect(clf_ctx)
                     if clf_res.issue_detected:
                         is_stuck_on_line_1 = True
                 except Exception as ce:
                     print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
 
-            # If initial attempt left page on Line 1, attempt an immediate re-focus & retry
+            # If initial attempt left page on Line 1, dynamically adjust on the fly: refocus & retry Ctrl+End
             if is_stuck_on_line_1:
                 try:
                     await cursor_clf.fix(c_ctx)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
-                    await asyncio.sleep(1.2)
+                    await asyncio.sleep(0.5)
                     snap_retry = await capture_external_screenshot(active_serial)
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
                         with open(calib, "wb") as f: f.write(snap_retry)
                         r_top, r_total = await state.detect_gutter_bounds_in_process(calib)
-                        if r_total > 0: total_lines = r_total
+                        if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
-                        if top_line > 5:
+                        if top_line > 5 or total_lines > 50:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
                         else:
                             is_stuck_on_line_1 = True
                 except Exception as re_err:
-                    print(f"[init_end] Auto-retry error: {re_err}")
+                    print(f"[init_end] Dynamic EOF adjustment error: {re_err}")
 
             troubleshooting_steps = [
                 {
@@ -415,9 +415,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
 
         elif target_key == "reset_home":
+            disp_id = await detect_external_display_id(active_serial)
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
-            await auto_fix_viewport(active_serial)
-            await asyncio.sleep(float(cfg.get("settle_delay_ms", 400)) / 1000.0)
+            await auto_fix_viewport(active_serial, disp_id)
+            await asyncio.sleep(float(cfg.get("settle_delay_ms", 300)) / 1000.0)
             snap = await capture_external_screenshot(active_serial)
             is_verified, detected_first = False, 0
             if snap:
@@ -426,6 +427,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 is_verified, detected_first = await state.verify_first_line_in_process(calib)
                 if not is_verified and (await state.detect_top_line_in_process(calib)) == 1:
                     is_verified, detected_first = True, 1
+
+            # Dynamic on-the-fly adjustment if not yet verified at Line 1:
+            if not is_verified:
+                print(f"[reset_home] Line 1 not verified (detected {detected_first}), dynamically adjusting on the fly...")
+                await run_adb_shell(f"input -d {disp_id} tap 500 500; input keyboard -d {disp_id} keycombination 113 122", active_serial)
+                await auto_fix_viewport(active_serial, disp_id)
+                await asyncio.sleep(0.25)
+                snap2 = await capture_external_screenshot(active_serial)
+                if snap2:
+                    with open(calib, "wb") as f: f.write(snap2)
+                    is_verified, detected_first = await state.verify_first_line_in_process(calib)
+                    if not is_verified and (await state.detect_top_line_in_process(calib)) == 1:
+                        is_verified, detected_first = True, 1
 
             node.update({"status": "completed" if is_verified else "error", "verified": is_verified, "first_line": detected_first})
             state.latest_telemetry["current_top_line"] = detected_first or 1

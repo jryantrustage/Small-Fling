@@ -591,28 +591,26 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         "source": "studio"
     })
 
-    # 2. Silently ensure soft keyboard is suppressed and dispatch keycombination + flings in a single shell session
+    # 2. Silently ensure soft keyboard is suppressed, focus editor, and dispatch hardware keycombination (O(1) instant jump)
     ser = await get_active_adb_serial(serial)
     if ser:
         disp_id = await detect_external_display_id(ser)
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Build unified execution script for minimal latency
-        cmds = ["settings put secure show_ime_with_hard_keyboard 0"]
-        cmds.append(f"input {disp_pfx}keycombination {key1} {key2}")
-        if key2 == 123:  # EOF (Ctrl+End)
-            nums = " ".join(str(i) for i in range(1, 29))
-            cmds.append(f"for i in {nums}; do input {disp_pfx}swipe 500 950 500 80 15; done")
-        elif key2 == 122:  # Home (Ctrl+Home)
-            nums = " ".join(str(i) for i in range(1, 29))
-            cmds.append(f"for i in {nums}; do input {disp_pfx}swipe 500 80 500 950 15; done")
+        # Focus editor text area and dispatch physical keyboard combination in one shell call for minimal latency
+        cmds = [
+            "settings put secure show_ime_with_hard_keyboard 0",
+            f"input {disp_pfx}tap 500 500",
+            f"input keyboard {disp_pfx}keycombination {key1} {key2}"
+        ]
 
-        await run_adb_shell("; ".join(cmds), ser, timeout=8.0)
+        await run_adb_shell("; ".join(cmds), ser, timeout=5.0)
 
-        # For Home and general key input, immediately auto-fix viewport to guarantee keyboard is closed
-        if key2 == 122 or key2 != 123:
+        # For Home or EOF, auto-fix viewport to guarantee keyboard is closed and full 1080p area is available
+        if key2 in (122, 123):
             await auto_fix_viewport(ser, target_d)
+
 
 
 async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
