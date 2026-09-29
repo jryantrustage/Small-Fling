@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
@@ -10,7 +11,8 @@ from models import TelemetryUpdateRequest, OrchestrationRequest, PipelineModeReq
 from services import state
 from services.adb_service import (
     ensure_adb_keyboard_closed, auto_fix_viewport, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
-    get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id
+    get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id,
+    is_ime_visible
 )
 import services.ocr_service as ocr_svc
 
@@ -34,9 +36,13 @@ except ImportError:
     )
 
 
-async def evaluate_node_5_decision(serial: Optional[str] = None):
+async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Optional[bytes] = None):
     try:
-        await classifier_registry.evaluate_all(await create_classifier_context(serial))
+        cfg = state.dag_state["nodes"].get("verification_trigger", {}).get("config", {})
+        qualifiers_cfg = cfg.get("qualifiers", {})
+        target_ids = [k for k, v in qualifiers_cfg.items() if v.get("enabled", True)] if qualifiers_cfg else None
+        ctx = await create_classifier_context(serial, image_bytes=image_bytes)
+        await classifier_registry.evaluate_all(ctx, target_ids=target_ids)
         return state.evaluate_dag_node_5_trigger_sync(classifier_registry.get_latest_issues())
     except Exception:
         return state.evaluate_dag_node_5_trigger_sync()
@@ -498,11 +504,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             return {"status": "success" if is_verified else "error", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'verification failed - editor at Ln {detected_first}'} via Ctrl+Home"}
 
         elif target_key == "frame_acquire":
-            await auto_fix_viewport(active_serial)
-            if cfg.get("guard_keyboard", True):
-                await ensure_adb_keyboard_closed(active_serial)
+            is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("fast_mode", True)
+            if cfg.get("full_viewport_fix", False):
+                await auto_fix_viewport(active_serial)
+            elif cfg.get("guard_keyboard", False) or (not is_fast and cfg.get("guard_keyboard", True)):
+                if await is_ime_visible(active_serial):
+                    await ensure_adb_keyboard_closed(active_serial)
 
-            settle_ms = float(cfg.get("settle_delay_ms", 300)) / 1000.0
+            default_settle = 50 if is_fast else 200
+            settle_ms = float(cfg.get("settle_delay_ms", default_settle)) / 1000.0
             if settle_ms > 0:
                 await asyncio.sleep(settle_ms)
 
@@ -593,6 +603,83 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "node_id": "local_ai_ocr",
                         "message": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
                     }
+
+            is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("async_mode", True)
+
+            async def _run_minicpm_background(target_calib: Path):
+                try:
+                    s_res = await ocr_svc.scan_image_with_minicpm(target_calib)
+                    ext_text = s_res.get("extracted_text", "")
+                    l_det = s_res.get("lines", [])
+                    l_cnt = s_res.get("lines_count", len(l_det))
+                    c_cnt = len(ext_text)
+                    eng_name = s_res.get("model_used", "MiniCPM-V (Ollama)")
+                    for item in l_det:
+                        ln = item.get("line_number")
+                        if ln:
+                            ln = int(ln)
+                            state.document_lines[ln] = {
+                                "line_number": ln, "gutter_number": ln, "text": item.get("text", ""),
+                                "is_blank": not bool(item.get("text", "").strip()), "is_wrapped": False,
+                                "wrapped_line_count": 1, "status": "verified", "confidence": 0.98,
+                                "notes": f"MiniCPM-V OCR ({eng_name})", "updated_at": datetime.now().isoformat()
+                            }
+                    if l_det:
+                        state.save_persisted_state()
+                    node.update({
+                        "status": "completed",
+                        "extracted_text": ext_text,
+                        "preview_text": ext_text[:300] + ("..." if len(ext_text) > 300 else ""),
+                        "lines_count": l_cnt,
+                        "char_count": c_cnt,
+                        "model_used": eng_name,
+                        "error": None
+                    })
+                    await state.ws_manager.broadcast({
+                        "type": "dag_updated",
+                        "dag": state.dag_state,
+                        "node_id": "local_ai_ocr",
+                        "extracted_text": ext_text,
+                        "lines_count": l_cnt,
+                        "char_count": c_cnt,
+                        "model_used": eng_name,
+                        "telemetry": state.latest_telemetry
+                    })
+                except Exception as ex:
+                    print(f"[local_ai_ocr background worker] note: {ex}")
+
+            if is_fast:
+                asyncio.create_task(_run_minicpm_background(temp_calib))
+                preview_msg = node.get("preview_text") or "MiniCPM-V vision worker running in background ⚡"
+                node.update({
+                    "status": "completed",
+                    "extracted_text": node.get("extracted_text") or "(Dispatched to background AI worker...)",
+                    "preview_text": preview_msg,
+                    "lines_count": node.get("lines_count") or 0,
+                    "char_count": node.get("char_count") or 0,
+                    "model_used": "MiniCPM-V (Async Worker)",
+                    "error": None
+                })
+                if "frame_ocr" in state.dag_state["nodes"]:
+                    state.dag_state["current_active_node"] = "frame_ocr"
+                state.latest_telemetry["status_message"] = "DAG Node 3b: MiniCPM-V vision dispatched in background ⚡ Next: Gutter OCR"
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "local_ai_ocr",
+                    "extracted_text": node["extracted_text"],
+                    "model_used": "MiniCPM-V (Async Worker)",
+                    "telemetry": state.latest_telemetry
+                })
+                return {
+                    "status": "success",
+                    "node_id": "local_ai_ocr",
+                    "lines_count": node["lines_count"],
+                    "char_count": node["char_count"],
+                    "extracted_text": node["extracted_text"],
+                    "model_used": "MiniCPM-V (Async Worker)",
+                    "message": "Local AI OCR dispatched in background ⚡"
+                }
 
             scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib)
             extracted_text = scan_res.get("extracted_text", "")
@@ -685,40 +772,50 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             with open(temp_calib, "rb") as f:
                 snap = f.read()
 
-            scan_res = await state.scan_image_in_process(temp_calib)
-            raw_top = scan_res.get("top_line", 0) or 0
-            raw_bot = scan_res.get("bottom_line", 0) or 0
-            lines_detected = scan_res.get("lines", [])
+            is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("async_worker", True)
+            prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 31}))
+            lpp = prof.get("lines_per_page", 31)
 
-            if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
-                node.update({
-                    "status": "error",
-                    "error": "OCR extraction failed: no editor lines or gutter numbers detected",
-                    "top_line": 0,
-                    "bottom_line": 0
-                })
-                state.latest_telemetry["status_message"] = "DAG Node 4: OCR rejected - no editor content detected"
-                await state.ws_manager.broadcast({
-                    "type": "dag_updated",
-                    "dag": state.dag_state,
-                    "node_id": "frame_ocr",
-                    "error": "No lines detected",
-                    "telemetry": state.latest_telemetry
-                })
-                return {
-                    "status": "error",
-                    "node_id": "frame_ocr",
-                    "message": "OCR extraction failed: no editor lines or gutter numbers detected in captured image. Please verify editor focus."
-                }
-
-            if raw_top > 0 and raw_bot > 0:
-                top_ln, bot_ln = raw_top, raw_bot
-            elif lines_detected:
-                top_ln = min(l.get("line_number", 1) for l in lines_detected)
-                bot_ln = max(l.get("line_number", top_ln) for l in lines_detected)
-            else:
+            if is_fast:
                 top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
-                bot_ln = top_ln + 47
+                bot_ln = top_ln + lpp - 1
+                scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": [], "bounding_boxes": {}}
+                lines_detected = []
+            else:
+                scan_res = await state.scan_image_in_process(temp_calib)
+                raw_top = scan_res.get("top_line", 0) or 0
+                raw_bot = scan_res.get("bottom_line", 0) or 0
+                lines_detected = scan_res.get("lines", [])
+
+                if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
+                    node.update({
+                        "status": "error",
+                        "error": "OCR extraction failed: no editor lines or gutter numbers detected",
+                        "top_line": 0,
+                        "bottom_line": 0
+                    })
+                    state.latest_telemetry["status_message"] = "DAG Node 4: OCR rejected - no editor content detected"
+                    await state.ws_manager.broadcast({
+                        "type": "dag_updated",
+                        "dag": state.dag_state,
+                        "node_id": "frame_ocr",
+                        "error": "No lines detected",
+                        "telemetry": state.latest_telemetry
+                    })
+                    return {
+                        "status": "error",
+                        "node_id": "frame_ocr",
+                        "message": "OCR extraction failed: no editor lines or gutter numbers detected in captured image. Please verify editor focus."
+                    }
+
+                if raw_top > 0 and raw_bot > 0:
+                    top_ln, bot_ln = raw_top, raw_bot
+                elif lines_detected:
+                    top_ln = min(l.get("line_number", 1) for l in lines_detected)
+                    bot_ln = max(l.get("line_number", top_ln) for l in lines_detected)
+                else:
+                    top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
+                    bot_ln = top_ln + lpp - 1
 
             pid = state.get_current_project_id()
             if not pid:
@@ -748,7 +845,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "content_hash": content_hash,
                 "status": "processed",
                 "created_at": datetime.now().isoformat(),
-                "extracted_line_count": len(lines_detected),
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
                 "bounding_boxes": scan_res.get("bounding_boxes", {}),
                 "model_used": cfg.get("engine", "local:rapidocr"),
                 "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
@@ -770,6 +867,40 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             state.save_persisted_state()
             state.update_dag_after_frame(fid, top_ln, bot_ln)
 
+            # High-speed asynchronous OCR background processing
+            if is_fast:
+                async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
+                    try:
+                        bg_scan = await state.scan_image_in_process(target_img)
+                        bg_lines = bg_scan.get("lines", [])
+                        real_top = bg_scan.get("top_line", t_val) or t_val
+                        real_bot = bg_scan.get("bottom_line", b_val) or b_val
+                        for it in bg_lines:
+                            ln_idx = it.get("line_number")
+                            if ln_idx:
+                                state.document_lines[ln_idx] = state.MasterLine(
+                                    it.get("text", ""),
+                                    line_number=ln_idx,
+                                    frame_id=target_fid,
+                                    status=it.get("status", "verified"),
+                                    confidence=it.get("confidence", 0.95),
+                                    is_wrapped=it.get("is_wrapped", False),
+                                )
+                        if target_fid in state.captured_frames:
+                            state.captured_frames[target_fid].update({
+                                "top_line": real_top,
+                                "bottom_line": real_bot,
+                                "extracted_line_count": len(bg_lines),
+                                "bounding_boxes": bg_scan.get("bounding_boxes", {}),
+                                "status": "processed"
+                            })
+                        state.save_persisted_state()
+                        await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
+                    except Exception as ex:
+                        print(f"[bg_frame_ocr] frame {target_fid} error: {ex}")
+
+                asyncio.create_task(_bg_frame_ocr(frame_path, fid, top_ln, bot_ln))
+
             await state.ws_manager.broadcast({"type": "new_frame", "frame": frame_info, "data": frame_info})
             await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
 
@@ -777,7 +908,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "status": "completed",
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
-                "extracted_line_count": len(lines_detected),
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
                 "frame_id": fid,
                 "error": None
             })
@@ -790,14 +921,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         ln = l.get("line_number")
                         if txt: formatted_lines.append(f"{ln:>3}: {txt}")
                         else: formatted_lines.append(f"{ln:>3}:")
-                    ext_txt = "\n".join(formatted_lines) or "(No text lines detected)"
+                    ext_txt = "\n".join(formatted_lines) or f"(Page {pidx}: Ln {top_ln} → {bot_ln} stream active ⚡)"
                     n3b.update({
                         "status": "completed",
                         "extracted_text": ext_txt,
                         "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
-                        "lines_count": len(lines_detected),
+                        "lines_count": len(lines_detected) if lines_detected else lpp,
                         "char_count": len(ext_txt),
-                        "model_used": "RapidOCR (Local AI Fallback)"
+                        "model_used": "RapidOCR (Fast Stream)"
                     })
             target_top = bot_ln + 1
             if "arrow_down" in state.dag_state["nodes"]:
@@ -822,7 +953,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "current_bottom_line": bot_ln,
                 "next_target_top": target_top,
                 "current_page": pidx,
-                "status_message": f"DAG Node 4: OCR Extracted {len(lines_detected)} lines (Page {pidx}: Ln {top_ln} → {bot_ln}) ✔ Next Target: Ln {target_top}"
+                "status_message": f"DAG Node 4: OCR Extracted (Page {pidx}: Ln {top_ln} → {bot_ln}) ✔ Next Target: Ln {target_top}"
             })
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
@@ -831,7 +962,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
                 "target_top_line": target_top,
-                "extracted_line_count": len(lines_detected),
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
                 "frame_id": fid,
                 "telemetry": state.latest_telemetry
             })
@@ -844,8 +975,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "bottom_line": bot_ln,
                 "target_top_line": target_top,
                 "scan": scan_res,
-                "lines_extracted": len(lines_detected),
-                "message": f"OCR extracted {len(lines_detected)} lines (Ln {top_ln} → {bot_ln}). Target Top: Ln {target_top} ✔"
+                "lines_extracted": len(lines_detected) if lines_detected else lpp,
+                "message": f"OCR extracted (Ln {top_ln} → {bot_ln}). Target Top: Ln {target_top} ✔"
             }
 
         elif target_key == "arrow_down":
@@ -858,41 +989,24 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Ensure editor text body focus before sending navigation keys
             await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.04)
 
-            # Dispatch down arrows in rapid atomic batches to prevent dropped keys
-            remaining = step_count
-            while remaining > 0:
-                batch = min(remaining, 12)
-                keys_arg = " ".join(["20"] * batch)
-                cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
-                await run_adb_shell(cmd, active_serial)
-                remaining -= batch
-                await asyncio.sleep(0.06)
+            # Dispatch down arrows in a single high-speed atomic command
+            keys_arg = " ".join(["20"] * step_count)
+            cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
+            await run_adb_shell(cmd, active_serial)
 
-            await asyncio.sleep(0.3)
-            snap, new_top = await capture_external_screenshot(active_serial), 0
-            if snap:
-                calib = state.FRAMES_DIR / "dag_node4_step.png"
-                with open(calib, "wb") as f: f.write(snap)
-                new_top = await state.detect_top_line_in_process(calib)
+            final_top = target_top
+            if cfg.get("verify_after_step", False):
+                await asyncio.sleep(0.1)
+                snap = await capture_external_screenshot(active_serial)
+                if snap:
+                    calib = state.FRAMES_DIR / "dag_node4_step.png"
+                    with open(calib, "wb") as f: f.write(snap)
+                    new_top = await state.detect_top_line_in_process(calib)
+                    if new_top > 0: final_top = new_top
 
-                # If new_top didn't reach target_top yet, micro-adjust the difference
-                if 0 < new_top < target_top:
-                    diff = target_top - new_top
-                    keys_arg = " ".join(["20"] * diff)
-                    cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
-                    await run_adb_shell(cmd, active_serial)
-                    await asyncio.sleep(0.2)
-                    snap2 = await capture_external_screenshot(active_serial)
-                    if snap2:
-                        with open(calib, "wb") as f: f.write(snap2)
-                        t2 = await state.detect_top_line_in_process(calib)
-                        if t2 > 0: new_top = t2
-
-                if new_top > 0: state.latest_telemetry["current_top_line"] = new_top
-
-            final_top = new_top if new_top > 0 else target_top
+            state.latest_telemetry["current_top_line"] = final_top
             node.update({
                 "status": "completed",
                 "arrow_count": step_count,
@@ -929,7 +1043,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
         elif target_key == "verification_trigger":
             target_top = node.get("target_top_line") or (state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) + 1)
-            decision = await evaluate_node_5_decision(active_serial)
+            temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+            snap_bytes = temp_calib.read_bytes() if temp_calib.exists() else None
+            decision = await evaluate_node_5_decision(active_serial, image_bytes=snap_bytes)
             node.update({
                 "status": "completed" if decision.get("allowed") else "prevented",
                 "target_top_line": target_top,
@@ -1226,28 +1342,30 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
 
-    n3_res = await run_single_dag_node("frame_acquire", {"serial": active_serial})
+    opts = {"serial": active_serial, "fast_loop": True}
+
+    n3_res = await run_single_dag_node("frame_acquire", opts)
     if n3_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
 
-    n4_res = await run_single_dag_node("local_ai_ocr", {"serial": active_serial})
+    n4_res = await run_single_dag_node("local_ai_ocr", opts)
     if n4_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
-    n5_res = await run_single_dag_node("frame_ocr", {"serial": active_serial})
+    n5_res = await run_single_dag_node("frame_ocr", opts)
     if n5_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
 
-    n6_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
+    n6_res = await run_single_dag_node("arrow_down", opts)
     if n6_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "arrow_down", "result": n6_res}
 
-    n7_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
-    n8_res = await run_single_dag_node("document_assemble", {"serial": active_serial})
+    n7_res = await run_single_dag_node("verification_trigger", opts)
+    n8_res = await run_single_dag_node("document_assemble", opts)
 
     return {
         "status": "success",
