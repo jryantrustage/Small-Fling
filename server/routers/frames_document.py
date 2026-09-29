@@ -6,13 +6,14 @@ from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, Query, R
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from PIL import Image
 
+import config
 import db
 from models import ReprocessRequest, FramePositionRequest, LineEditRequest, FlagRequest, RecaptureRequest
 from services import state
 from services.adb_service import DEVICE_PROFILES, current_device_model
 from services.ocr_service import (
     route_frame_ocr, normalize_model_target, active_pipeline_mode,
-    active_model_target, process_frame_with_target,
+    active_model_target, process_frame_with_target, sync_pipeline_mode_with_keys,
 )
 
 router = APIRouter(tags=["Frames & Document"])
@@ -112,11 +113,13 @@ async def upload_frame(request: Request, background_tasks: BackgroundTasks):
     with open(tpath, "wb") as f:
         f.write(contents)
 
-    pm = pipeline_mode or request.query_params.get("pipeline_mode") or active_pipeline_mode
-    effective_target = model_target or ("ollama" if pm == "local" else active_model_target)
+    sync_pipeline_mode_with_keys()
+    has_key = bool(config.GEMINI_API_KEY)
+    pm = pipeline_mode or request.query_params.get("pipeline_mode") or (active_pipeline_mode if has_key else "local")
+    effective_target = model_target or ("ollama" if pm == "local" or not has_key else active_model_target)
     if model_type:
         mt_lower = str(model_type).strip().lower()
-        effective_target = "gemini" if "gemini" in mt_lower else ("ollama" if any(k in mt_lower for k in ["ollama", "llama", "qwen", "minicpm"]) else mt_lower)
+        effective_target = ("gemini" if has_key else "ollama") if "gemini" in mt_lower else ("ollama" if any(k in mt_lower for k in ["ollama", "llama", "qwen", "minicpm"]) else mt_lower)
     mt = normalize_model_target(effective_target or request.query_params.get("model_target"))
 
     state.captured_frames[fid] = {

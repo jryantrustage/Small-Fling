@@ -1489,6 +1489,7 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
 
 @router.get("/api/pipeline/mode")
 async def get_pipeline_mode():
+    ocr_svc.sync_pipeline_mode_with_keys()
     return {
         "status": "success", "pipeline_mode": ocr_svc.active_pipeline_mode, "mode": ocr_svc.active_pipeline_mode,
         "model_target": ocr_svc.active_model_target, "ocr_engine": ocr_svc.active_ocr_engine, "engine": ocr_svc.active_ocr_engine,
@@ -1500,6 +1501,8 @@ async def get_pipeline_mode():
 async def set_pipeline_mode(req: PipelineModeRequest):
     m = req.mode.strip().lower()
     if m not in {"cloud", "local"}: raise HTTPException(status_code=400, detail="Invalid pipeline mode. Must be 'cloud' or 'local'.")
+    if m == "cloud" and not config.GEMINI_API_KEY:
+        raise HTTPException(status_code=400, detail="Cloud Pipeline requires a Gemini API key. Please configure your key in Secrets or use Local Pipeline.")
     ocr_svc.active_pipeline_mode = m
     if m == "local": ocr_svc.active_model_target, ocr_svc.active_ocr_engine = "ollama", "local"
     else: ocr_svc.active_model_target, ocr_svc.active_ocr_engine = "gemini", "auto"
@@ -1510,9 +1513,10 @@ async def set_pipeline_mode(req: PipelineModeRequest):
 @router.get("/api/ocr/engines")
 async def get_ocr_engines():
     has_gemini = bool(config.GEMINI_API_KEY)
+    ocr_svc.sync_pipeline_mode_with_keys()
     return {
         "engines": [
-            {"id": "auto", "name": "Auto (Gemini with Local Fallback)", "available": True, "type": "auto"},
+            {"id": "auto", "name": "Auto (Gemini with Local Fallback)" if has_gemini else "Auto (Local RapidOCR)", "available": True, "type": "auto"},
             {"id": "local", "name": "Local RapidOCR / OpenCV Engine", "available": True, "type": "local"},
             {"id": "gemini", "name": "Gemini 2.5 Cloud Vision", "available": has_gemini, "type": "cloud"},
             {"id": "hybrid", "name": "Hybrid (Gemini Text + Local Bounding Boxes)", "available": has_gemini, "type": "hybrid"}
@@ -1523,21 +1527,30 @@ async def get_ocr_engines():
 
 @router.post("/api/ocr/select-engine")
 async def select_ocr_engine(req: OcrSelectionRequest):
-    if req.model_target: ocr_svc.active_model_target = ocr_svc.normalize_model_target(req.model_target)
+    has_gemini = bool(config.GEMINI_API_KEY)
     if req.engine:
-        if req.engine.lower() not in {"auto", "local", "gemini", "hybrid"}: raise HTTPException(status_code=400, detail=f"Invalid engine '{req.engine}'.")
-        ocr_svc.active_ocr_engine = req.engine.lower()
+        eng = req.engine.lower()
+        if eng not in {"auto", "local", "gemini", "hybrid"}: raise HTTPException(status_code=400, detail=f"Invalid engine '{req.engine}'.")
+        if eng in {"gemini", "hybrid"} and not has_gemini:
+            raise HTTPException(status_code=400, detail=f"Engine '{req.engine}' requires a configured Gemini API key. Please configure your key or use 'local'.")
+        ocr_svc.active_ocr_engine = eng
+    if req.model_target: ocr_svc.active_model_target = ocr_svc.normalize_model_target(req.model_target)
     await state.ws_manager.broadcast({"type": "ocr_engine_changed", "active_engine": ocr_svc.active_ocr_engine, "active_model_target": ocr_svc.active_model_target})
     return {"status": "success", "active_engine": ocr_svc.active_ocr_engine, "active_model_target": ocr_svc.active_model_target}
 
 @router.post("/api/ocr/scan-direct")
 async def scan_direct(request: Request, file: UploadFile = File(...), engine: Optional[str] = Form("auto"), model_target: Optional[str] = Form(None), pipeline_mode: Optional[str] = Form(None)):
+    has_gemini = bool(config.GEMINI_API_KEY)
     contents = await file.read()
     temp_path = state.FRAMES_DIR / f"temp_scan_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
-    pm = pipeline_mode or request.query_params.get("pipeline_mode") or ocr_svc.active_pipeline_mode
-    mt = ocr_svc.normalize_model_target(model_target or ("ollama" if pm == "local" else ocr_svc.active_model_target) or request.query_params.get("model_target"))
+    pm = pipeline_mode or request.query_params.get("pipeline_mode") or (ocr_svc.active_pipeline_mode if has_gemini else "local")
+    mt = ocr_svc.normalize_model_target(model_target or ("ollama" if pm == "local" or not has_gemini else ocr_svc.active_model_target) or request.query_params.get("model_target"))
+    eff_engine = engine or ("local" if not has_gemini else ocr_svc.active_ocr_engine)
+    if not has_gemini and eff_engine in {"gemini", "hybrid"}:
+        eff_engine = "local"
     try:
         with open(temp_path, "wb") as f: f.write(contents)
-        return {"status": "success", "engine": engine or ocr_svc.active_ocr_engine, "model_target": mt, "pipeline_mode": pm, **state.ocr_engine.scan_image(str(temp_path))}
+        return {"status": "success", "engine": eff_engine, "model_target": mt, "pipeline_mode": pm, **state.ocr_engine.scan_image(str(temp_path))}
     finally:
         if temp_path.exists(): temp_path.unlink()
+

@@ -18,7 +18,7 @@ enum class PipelineMode(val label: String, val badge: String) {
 
     companion object {
         fun fromString(str: String?): PipelineMode =
-            entries.firstOrNull { it.name.equals(str, true) || it.badge.equals(str, true) } ?: CLOUD_GEMINI
+            entries.firstOrNull { it.name.equals(str, true) || it.badge.equals(str, true) } ?: LOCAL_PIPELINE
     }
 }
 
@@ -39,7 +39,7 @@ enum class EngineMode(val label: String) {
             (str?.contains("cloud", true) == true && it == CLOUD_GEMINI) ||
             (str?.contains("ollama", true) == true && it == LOCAL_OLLAMA) ||
             (str?.contains("hybrid", true) == true && it == HYBRID_AUTO)
-        } ?: CLOUD_GEMINI
+        } ?: LOCAL_OLLAMA
     }
 }
 
@@ -47,12 +47,12 @@ class SettingsRepository private constructor(context: Context) {
     private val prefs: SharedPreferences = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _pipelineMode = MutableStateFlow(
-        PipelineMode.fromString(prefs.getString(KEY_PIPELINE_MODE, PipelineMode.CLOUD_GEMINI.name))
+        PipelineMode.fromString(prefs.getString(KEY_PIPELINE_MODE, PipelineMode.LOCAL_PIPELINE.name))
     )
     val pipelineMode: StateFlow<PipelineMode> = _pipelineMode.asStateFlow()
 
     private val _engineMode = MutableStateFlow(
-        EngineMode.fromString(prefs.getString(KEY_ENGINE_MODE, EngineMode.CLOUD_GEMINI.name))
+        EngineMode.fromString(prefs.getString(KEY_ENGINE_MODE, EngineMode.LOCAL_OLLAMA.name))
     )
     val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
 

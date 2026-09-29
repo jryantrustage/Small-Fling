@@ -16,9 +16,20 @@ from google.genai import types
 import config
 from services import state
 
-active_pipeline_mode = "cloud"
-active_model_target = "gemini"
-active_ocr_engine = "auto"
+has_key = bool(config.GEMINI_API_KEY)
+active_pipeline_mode = "cloud" if has_key else "local"
+active_model_target = "gemini" if has_key else "ollama"
+active_ocr_engine = "auto" if has_key else "local"
+
+def sync_pipeline_mode_with_keys() -> None:
+    global active_pipeline_mode, active_model_target, active_ocr_engine
+    key_exists = bool(config.GEMINI_API_KEY)
+    connection_stats["gemini_available"] = key_exists
+    if not key_exists:
+        active_pipeline_mode = "local"
+        active_model_target = "ollama"
+        active_ocr_engine = "local"
+
 
 connection_stats: Dict[str, Any] = {
     "total_http_requests": 0,
@@ -51,10 +62,16 @@ def check_ollama_status() -> Dict[str, Any]:
 
 def normalize_model_target(target: Optional[str]) -> str:
     if not target:
+        if not config.GEMINI_API_KEY:
+            return "ollama"
         return active_model_target
     t = target.strip().lower()
+    if t in {"minicpm-v", "minicpm", "local"}:
+        return "ollama"
     if t not in {"gemini", "ollama"}:
         raise HTTPException(status_code=400, detail=f"Invalid model_target '{target}'. Must be 'gemini' or 'ollama'.")
+    if t == "gemini" and not config.GEMINI_API_KEY:
+        return "ollama"
     return t
 
 def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, model_desc: str) -> int:
@@ -77,9 +94,8 @@ def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, 
 
 async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
     if not config.GEMINI_API_KEY:
-        state.captured_frames[frame_id]["status"] = "awaiting_api_key"
-        state.save_persisted_state()
-        return
+        print(f"[Gemini OCR] No cloud API key configured. Defaulting to local OCR for frame {frame_id}")
+        return await process_frame_with_local_ocr(frame_id, image_path)
     try:
         client = genai.Client(api_key=config.GEMINI_API_KEY)
         prompt = "Extract code document lines verbatim with line numbers in left gutter. Output ONLY JSON: {\"top_gutter_line\": <int>, \"bottom_gutter_line\": <int>, \"lines\": [{\"line_number\": <int>, \"gutter_number\": <int>, \"text\": \"<verbatim>\", \"is_blank\": <bool>, \"is_wrapped\": <bool>, \"wrapped_line_count\": <int>, \"flagged\": <bool>}]}"
@@ -268,12 +284,18 @@ async def process_frame_with_target(frame_id: str, image_path: Path, top_line: i
         await process_frame_with_gemini(frame_id, image_path, top_line, bottom_line)
 
 async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bottom_line: int = 0, engine: Optional[str] = None, model_target: Optional[str] = None, pipeline_mode: Optional[str] = None) -> Dict[str, Any]:
+    has_key = bool(config.GEMINI_API_KEY)
     pm = (pipeline_mode or active_pipeline_mode).lower()
-    effective_engine = engine or ("local" if pm == "local" else active_ocr_engine)
-    effective_target = model_target or ("ollama" if pm == "local" else active_model_target)
+    if not has_key and pm == "cloud":
+        pm = "local"
+    effective_engine = engine or ("local" if pm == "local" or not has_key else active_ocr_engine)
+    effective_target = model_target or ("ollama" if pm == "local" or not has_key else active_model_target)
     mode = effective_engine.lower()
     target = normalize_model_target(effective_target)
-    if mode == "local" or (mode in {"auto", "gemini"} and target == "gemini" and not config.GEMINI_API_KEY):
+    if not has_key and (mode in {"gemini", "cloud"} or target == "gemini"):
+        mode = "local"
+        target = "ollama"
+    if mode == "local" or (mode in {"auto", "gemini"} and target == "gemini" and not has_key):
         return await process_frame_with_local_ocr(frame_id, image_path)
     elif mode in {"gemini", "cloud"}:
         await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
@@ -281,12 +303,15 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
     elif mode == "hybrid":
         local_res = await process_frame_with_local_ocr(frame_id, image_path)
         try:
-            await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
+            if has_key:
+                await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
         except Exception:
             pass
         return local_res
     else:
         try:
+            if not has_key and target == "gemini":
+                return await process_frame_with_local_ocr(frame_id, image_path)
             await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
             return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
         except Exception:
