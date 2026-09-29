@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert,
+  Activity, RefreshCw, Layers, Lock, Settings, ShieldCheck, ShieldAlert,
   ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
   FileText, Move, Clock, Minus, Maximize2, Minimize2
 } from 'lucide-react';
@@ -201,17 +201,6 @@ export interface PositionPct {
   topPx: number;
 }
 
-const DEFAULT_POSITIONS_PCT: Record<string, PositionPct> = {
-  init_end: { leftPct: 1.4, topPx: 64 },
-  reset_home: { leftPct: 13.0, topPx: 64 },
-  frame_acquire: { leftPct: 26.0, topPx: 64 },
-  local_ai_ocr: { leftPct: 38.2, topPx: 64 },
-  frame_ocr: { leftPct: 50.4, topPx: 64 },
-  arrow_down: { leftPct: 62.6, topPx: 64 },
-  verification_trigger: { leftPct: 74.8, topPx: 64 },
-  document_assemble: { leftPct: 87.0, topPx: 64 },
-};
-
 const filterNodeTelemetry = (nodeId: string, ev: { message?: string; category?: string }) => {
   const msg = (ev.message || '').toLowerCase();
   const cat = (ev.category || '').toUpperCase();
@@ -252,7 +241,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
   onClose, isMinimized = false, onToggleMinimize
 }) => {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isInspectorModalOpen, setIsInspectorModalOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
@@ -264,59 +253,13 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>('init_end');
   const activeSelectedNodeId = selectedNodeId !== undefined ? selectedNodeId : internalSelectedNodeId;
   const handleSelectNode = (id: string | null) => {
-    setIsSidebarOpen(true);
     if (onSelectNodeId) onSelectNodeId(id);
     else setInternalSelectedNodeId(id || 'init_end');
   };
 
-  const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
-  const [draggingNode, setDraggingNode] = useState<{
-    id: string;
-    startMouseX: number;
-    startMouseY: number;
-    startOffsetX: number;
-    startOffsetY: number;
-  } | null>(null);
-
-  // Drag interaction
-  const handleNodeMouseDown = (nodeId: string, e: React.MouseEvent) => {
-    handleSelectNode(nodeId);
-    e.preventDefault();
-    setDraggingNode({
-      id: nodeId,
-      startMouseX: e.clientX,
-      startMouseY: e.clientY,
-      startOffsetX: dragOffsets[nodeId]?.x ?? 0,
-      startOffsetY: dragOffsets[nodeId]?.y ?? 0,
-    });
-  };
-
-  useEffect(() => {
-    if (!draggingNode) return;
-    const onMouseMove = (e: MouseEvent) => {
-      const dx = e.clientX - draggingNode.startMouseX;
-      const dy = e.clientY - draggingNode.startMouseY;
-      setDragOffsets(prev => ({
-        ...prev,
-        [draggingNode.id]: {
-          x: Math.max(-50, Math.min(50, draggingNode.startOffsetX + dx)),
-          y: Math.max(-40, Math.min(120, draggingNode.startOffsetY + dy))
-        }
-      }));
-    };
-    const onMouseUp = () => {
-      setDraggingNode(null);
-    };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, [draggingNode]);
-
   const handleResetLayout = () => {
-    setDragOffsets({});
+    handleSelectNode('init_end');
+    handleDagSelect('all');
   };
 
   const [isLoopRunning, setIsLoopRunning] = useState<boolean>(false);
@@ -334,7 +277,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [configFeedback, setConfigFeedback] = useState<string | null>(null);
-  const [showNode1Troubleshooting, setShowNode1Troubleshooting] = useState(true);
   const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
@@ -789,986 +731,908 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     );
   }
 
-  return (
-    <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '14px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)', ...(isMaximized ? { position: 'fixed', inset: '14px', zIndex: 1200, overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {}) }}>
-      {/* Top Header Controls */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid #21262d', paddingBottom: '10px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Layers size={18} color="#00ff9d" />
-          <span style={{ fontWeight: 800, fontSize: '13px', letterSpacing: '0.8px', color: '#00ff9d' }}>PAGINATION FLOW DAG</span>
-          <span style={{ fontSize: '10px', background: '#161b22', border: '1px solid #30363d', padding: '2px 8px', borderRadius: '10px', color: '#8b949e' }}>
-            Interactive Mini-Node Grid
-          </span>
-        </div>
+  // Dynamic progress calculations across 100% width
+  const calcCapturePercent = () => {
+    if (projectInitProgress && projectInitProgress.active) {
+      return projectInitProgress.percent;
+    }
+    const tot = effectiveTotal || 9953;
+    const cur = effectiveBottom || 0;
+    return Math.min(100, Math.max(0, Math.round((cur / tot) * 100)));
+  };
+  const progressPercent = calcCapturePercent();
 
-        {/* DAG Selection Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '10px', color: '#8b949e', fontWeight: 700 }}>FILTER:</span>
-          <button
-            type="button"
-            onClick={() => handleDagSelect('all')}
-            style={{
-              padding: '2px 8px', borderRadius: '5px',
-              border: `1px solid ${effectiveSelectedDag === 'all' ? '#58a6ff' : '#30363d'}`,
-              background: effectiveSelectedDag === 'all' ? 'rgba(88, 166, 255, 0.2)' : '#161b22',
-              color: effectiveSelectedDag === 'all' ? '#58a6ff' : '#8b949e',
-              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
-            }}
-          >
-            All DAGs
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDagSelect('initialize')}
-            style={{
-              padding: '2px 8px', borderRadius: '5px',
-              border: `1px solid ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#30363d'}`,
-              background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.2)' : '#161b22',
-              color: effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#8b949e',
-              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
-            }}
-          >
-            DAG 1: Initialize
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDagSelect('capture_entire_markdown')}
-            style={{
-              padding: '2px 8px', borderRadius: '5px',
-              border: `1px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#30363d'}`,
-              background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
-              color: effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e',
-              fontSize: '10.5px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit'
-            }}
-          >
-            DAG 2: Capture
-          </button>
-        </div>
+  const progressGradient = (projectInitProgress && projectInitProgress.active)
+    ? (projectInitProgress.status === 'completed' ? 'linear-gradient(90deg, #238636, #00ff9d)' : (projectInitProgress.status === 'error' ? 'linear-gradient(90deg, #da3633, #f85149)' : 'linear-gradient(90deg, #1f6feb, #58a6ff)'))
+    : (isLoopRunning || isCaptureGroupRunning
+        ? 'linear-gradient(90deg, #ff9100, #ff3d00, #ff6b25)'
+        : 'linear-gradient(90deg, #1f6feb, #388bfd, #00ff9d)');
 
-        {/* Toolbar action buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
-          <button
-            type="button"
-            onClick={handleToggleLoop}
-            title={isLoopRunning ? "Stop Continuous Capture Loop" : "Start Continuous Capture Loop (Nodes 3→8 Repeating until 100% captured)"}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '6px',
-              background: isLoopRunning ? 'rgba(255, 107, 37, 0.2)' : 'rgba(0, 255, 157, 0.15)',
-              border: `1px solid ${isLoopRunning ? '#ff6b25' : '#00ff9d'}`,
-              color: isLoopRunning ? '#ffa657' : '#00ff9d',
-              fontSize: '10.5px', fontWeight: 800, cursor: 'pointer'
-            }}
-          >
-            {isLoopRunning ? <RefreshCw size={11} className="spin" color="#ff6b25" /> : <Play size={11} />}
-            <span>{isLoopRunning ? 'STOP LOOP' : 'RUN CAPTURE LOOP'}</span>
-          </button>
+  const progressGlow = (projectInitProgress && projectInitProgress.active)
+    ? (projectInitProgress.status === 'completed' ? 'rgba(0, 255, 157, 0.4)' : (projectInitProgress.status === 'error' ? 'rgba(248, 81, 73, 0.4)' : 'rgba(88, 166, 255, 0.4)'))
+    : (isLoopRunning || isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.5)' : 'rgba(0, 255, 157, 0.35)');
 
-          <button
-            type="button"
-            onClick={handleResetLayout}
-            title="Reset node positions to default neat arrangement"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px',
-              background: '#21262d', border: '1px solid #30363d', borderRadius: '6px',
-              color: '#8b949e', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <Move size={11} />
-            <span>Reset Grid</span>
-          </button>
+  // Helper for arrow connection status
+  const isNodeActive = (id: string) => {
+    const status = getNodeLiveStatus(id);
+    return status.isActive || status.isRunning || (currentActiveNode === id);
+  };
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <Cpu size={13} color="#58a6ff" />
-            <span style={{ color: '#8b949e' }}>OCR:</span>
-            <span style={{ color: '#58a6ff', fontWeight: 700 }}>Fast Gutter</span>
-          </div>
+  const isConnectionActive = (nodeAId: string, nodeBId: string) => {
+    return isNodeActive(nodeAId) || isNodeActive(nodeBId) ||
+      (NODES_METADATA.find(n => n.id === nodeAId)?.group === 'capture_entire_markdown' && (isCaptureGroupRunning || isLoopRunning)) ||
+      (NODES_METADATA.find(n => n.id === nodeAId)?.group === 'initialize' && isInitGroupRunning);
+  };
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <Lock size={13} color={isKeyboardOpen ? '#f85149' : '#00ff9d'} />
-            <span style={{ color: '#8b949e' }}>KEYBOARD:</span>
-            <span style={{ color: isKeyboardOpen ? '#f85149' : '#00ff9d', fontWeight: 700 }}>
-              {isKeyboardOpen ? 'OPEN' : 'CLOSED'}
+  const isHeatActive = (nodeAId: string, nodeBId: string) => {
+    return isConnectionActive(nodeAId, nodeBId) && (isCaptureGroupRunning || isLoopRunning || isNodeActive(nodeAId) || isNodeActive(nodeBId));
+  };
+
+  // Micro Arrow Component connecting sequential nodes with neon flow & pulse
+  const renderMicroArrow = (fromNode: NodeMeta, toNode: NodeMeta, width = 20) => {
+    const active = isConnectionActive(fromNode.id, toNode.id);
+    const heat = isHeatActive(fromNode.id, toNode.id);
+    const isInit = toNode.group === 'initialize';
+    const isAi = toNode.id === 'local_ai_ocr';
+    const isAmber = toNode.id === 'arrow_down';
+
+    let gradientId = 'dag-flow-emerald';
+    let markerId = 'dag-arrowhead-green';
+    let strokeFallback = '#00ff9d';
+
+    if (heat) {
+      gradientId = 'dag-flow-heat';
+      markerId = 'dag-arrowhead-heat';
+      strokeFallback = '#ff6b25';
+    } else if (isInit) {
+      gradientId = 'dag-flow-blue';
+      markerId = 'dag-arrowhead-blue';
+      strokeFallback = '#58a6ff';
+    } else if (isAi) {
+      gradientId = 'dag-flow-purple';
+      markerId = 'dag-arrowhead-purple';
+      strokeFallback = '#a371f7';
+    } else if (isAmber) {
+      gradientId = 'dag-flow-amber';
+      markerId = 'dag-arrowhead-amber';
+      strokeFallback = '#ffa657';
+    }
+
+    const y = 16;
+    const startX = 2;
+    const endX = width - 4;
+    const pathD = `M ${startX} ${y} L ${endX} ${y}`;
+
+    return (
+      <div key={`arrow-${fromNode.id}->${toNode.id}`} style={{ width: `${width}px`, height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }}>
+        <svg width={width} height="32" style={{ overflow: 'visible' }}>
+          {active && (
+            <path
+              d={pathD}
+              fill="none"
+              stroke={strokeFallback}
+              strokeWidth="5"
+              strokeOpacity="0.4"
+              filter="url(#dag-wire-glow)"
+            />
+          )}
+          <path
+            d={pathD}
+            fill="none"
+            stroke={`url(#${gradientId})`}
+            strokeWidth={active ? 2.4 : 1.8}
+            strokeOpacity={active ? 1 : 0.75}
+            strokeDasharray={active ? '5 3' : 'none'}
+            className={active ? 'dag-wire-active' : ''}
+            markerEnd={`url(#${markerId})`}
+          />
+          {active && (
+            <circle r="2.5" fill="#ffffff" filter="url(#dag-wire-glow)">
+              <animateMotion path={pathD} dur="0.8s" repeatCount="indefinite" />
+            </circle>
+          )}
+        </svg>
+      </div>
+    );
+  };
+
+  // Micro Node Component
+  const renderMicroNode = (node: NodeMeta) => {
+    const isSelected = activeSelectedNodeId === node.id;
+    const status = getNodeLiveStatus(node.id);
+    const isPulsingSwirl = status.isActive || status.isRunning || (currentActiveNode === node.id);
+
+    return (
+      <div
+        key={node.id}
+        className={`dag-mini-node-compact ${isSelected ? 'selected' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
+        onClick={() => handleSelectNode(node.id)}
+        style={{
+          flex: 1,
+          minWidth: '82px',
+          maxWidth: '106px',
+          height: '56px',
+          background: isSelected ? 'rgba(22, 27, 34, 0.98)' : 'rgba(13, 17, 23, 0.9)',
+          borderRadius: '6px',
+          border: `1.5px solid ${isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d'))}`,
+          boxShadow: isSelected
+            ? `0 0 12px ${node.accentColor}55, 0 2px 8px rgba(0,0,0,0.6)`
+            : (status.isRunning ? '0 0 10px rgba(255, 107, 37, 0.5)' : 'none'),
+          padding: '3px 5px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          position: 'relative',
+          transition: 'all 0.15s ease',
+          boxSizing: 'border-box'
+        }}
+        title={`Node ${node.step}: ${node.fullName}\nClick to inspect in telemetry deck`}
+      >
+        {/* Top: Step badge + Short name + Status indicator */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '3px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '3px', overflow: 'hidden' }}>
+            <span style={{
+              fontSize: '8px', fontWeight: 800, padding: '0px 3px', borderRadius: '3px',
+              background: `${node.accentColor}25`, color: node.accentColor, border: `1px solid ${node.accentColor}55`
+            }}>
+              {node.step}
+            </span>
+            <span style={{ fontSize: '9px', fontWeight: 800, color: '#f0f6fc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {node.shortName}
             </span>
           </div>
+          {status.isRunning ? (
+            <RefreshCw size={9} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} />
+          ) : (
+            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: status.color, boxShadow: `0 0 5px ${status.color}`, flexShrink: 0 }} />
+          )}
+        </div>
 
-          <button
-            type="button"
-            className={`btn btn-sm ${isSidebarOpen ? 'btn-primary' : 'btn-outline'}`}
-            onClick={() => setIsSidebarOpen(p => !p)}
-            style={{ fontSize: '10.5px', padding: '2px 8px' }}
-            title={isSidebarOpen ? "Hide Inspector Sidebar" : "Show Node Inspector Sidebar"}
-          >
-            <Activity size={11} style={{ marginRight: '4px' }} />
-            <span>{isSidebarOpen ? 'Inspector Open' : 'Node Inspector'}</span>
-          </button>
+        {/* Middle: Metric badge */}
+        <div style={{ fontSize: '8.5px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {status.metricLabel || status.statusLabel}
+        </div>
 
-          <div className="window-controls" style={{ marginLeft: '4px' }}>
-            <button
-              type="button"
-              className="win-btn"
-              onClick={onToggleMinimize}
-              title="Minimize DAG Window"
-            >
-              <Minus size={12} />
-            </button>
-            <button
-              type="button"
-              className="win-btn"
-              onClick={() => setIsMaximized(p => !p)}
-              title={isMaximized ? "Restore DAG" : "Maximize DAG"}
-            >
-              {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-            </button>
-            {onClose && (
+        {/* Bottom: Timing */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '7.5px', color: isPulsingSwirl ? '#ffa657' : '#8b949e', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1px' }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {isPulsingSwirl
+              ? (status.startedAt ? `${status.startedAt} (active)` : 'Active...')
+              : (status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : (status.startedAt || 'Idle'))}
+          </span>
+          {isSelected && <span style={{ color: node.accentColor, fontSize: '7px', fontWeight: 800 }}>SEL</span>}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{
+      background: '#0a0e17',
+      border: '1px solid #30363d',
+      borderRadius: '10px',
+      padding: '8px 12px',
+      color: '#e6edf3',
+      fontFamily: 'var(--font-mono, monospace)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '6px',
+      ...(isMaximized ? { position: 'fixed', inset: '14px', zIndex: 1200, overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {})
+    }}>
+      {/* GLOBAL SVG ASSETS: NEON GRADIENTS, GLOW FILTER & CHEVRON ARROWHEADS */}
+      <svg width="0" height="0" style={{ position: 'absolute', pointerEvents: 'none' }}>
+        <defs>
+          <linearGradient id="dag-flow-emerald" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#388bfd" />
+            <stop offset="100%" stopColor="#00ff9d" />
+          </linearGradient>
+          <linearGradient id="dag-flow-blue" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#388bfd" />
+            <stop offset="100%" stopColor="#58a6ff" />
+          </linearGradient>
+          <linearGradient id="dag-flow-purple" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#00ff9d" />
+            <stop offset="100%" stopColor="#a371f7" />
+          </linearGradient>
+          <linearGradient id="dag-flow-amber" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#8957e5" />
+            <stop offset="100%" stopColor="#ffa657" />
+          </linearGradient>
+          <linearGradient id="dag-flow-heat" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#ff9100" />
+            <stop offset="100%" stopColor="#ff3d00" />
+          </linearGradient>
+          <filter id="dag-wire-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="2.2" result="blur" />
+            <feComposite in="SourceGraphic" in2="blur" operator="over" />
+          </filter>
+          <marker id="dag-arrowhead-green" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="1 1, 5.5 3, 1 5" fill="#00ff9d" />
+          </marker>
+          <marker id="dag-arrowhead-blue" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="1 1, 5.5 3, 1 5" fill="#58a6ff" />
+          </marker>
+          <marker id="dag-arrowhead-purple" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="1 1, 5.5 3, 1 5" fill="#a371f7" />
+          </marker>
+          <marker id="dag-arrowhead-amber" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="1 1, 5.5 3, 1 5" fill="#ffa657" />
+          </marker>
+          <marker id="dag-arrowhead-heat" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+            <polygon points="1 1, 5.5 3, 1 5" fill="#ff6b25" />
+          </marker>
+        </defs>
+      </svg>
+
+      {/* TOP HEADER: STATUS & REFINED CONTROLS INTEGRATED WITH PROGRESS AREA */}
+      <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', minHeight: '26px' }}>
+          {/* Left: Info & Progress Stage */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            {projectInitProgress && projectInitProgress.active ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                <div style={{
+                  width: '20px', height: '20px', borderRadius: '4px',
+                  background: projectInitProgress.status === 'error' ? 'rgba(248,81,73,0.2)' : (projectInitProgress.status === 'completed' ? 'rgba(0,255,157,0.2)' : 'rgba(88,166,255,0.2)'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}>
+                  {projectInitProgress.status === 'running' && <RefreshCw size={11} className="spin" color="#58a6ff" />}
+                  {projectInitProgress.status === 'completed' && <Check size={12} color="#00ff9d" />}
+                  {projectInitProgress.status === 'error' && <AlertTriangle size={12} color="#ff7b72" />}
+                </div>
+                <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc' }}>
+                  {projectInitProgress.status === 'completed' ? 'WORKSPACE INITIALIZED' : (projectInitProgress.status === 'error' ? 'INITIALIZATION HALTED' : 'INITIALIZING WORKSPACE')}
+                </span>
+                <span style={{ fontSize: '10px', fontWeight: 800, padding: '0 5px', borderRadius: '8px', background: 'rgba(88,166,255,0.15)', color: '#58a6ff' }}>
+                  {projectInitProgress.percent}%
+                </span>
+                <span style={{ fontSize: '10px', color: '#8b949e', marginLeft: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {projectInitProgress.stage}
+                </span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <Layers size={15} color="#00ff9d" />
+                <span style={{ fontWeight: 800, fontSize: '11px', letterSpacing: '0.6px', color: '#00ff9d' }}>PAGINATION FLOW DAG</span>
+                <span style={{ fontSize: '9.5px', color: '#8b949e', borderLeft: '1px solid #30363d', paddingLeft: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  Page #{currentPage} · Ln {effectiveTop}–{effectiveBottom} of {effectiveTotal || 9953} lines · Target Next Ln {nextTargetTop}
+                </span>
+                <span style={{
+                  fontSize: '8.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '4px',
+                  background: isLoopRunning ? 'rgba(255,107,37,0.25)' : (isCaptureGroupRunning ? 'rgba(0,255,157,0.15)' : '#161b22'),
+                  color: isLoopRunning ? '#ffa657' : (isCaptureGroupRunning ? '#00ff9d' : '#8b949e'),
+                  border: `1px solid ${isLoopRunning ? '#ff6b2588' : 'transparent'}`
+                }}>
+                  {isLoopRunning ? '♨️ THERMAL LOOP ACTIVE' : (isCaptureGroupRunning ? 'CYCLE ACTIVE' : 'READY')}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Controls & Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+            {projectInitProgress && projectInitProgress.active ? (
+              <>
+                {projectInitProgress.status === 'completed' && (
+                  <button
+                    type="button"
+                    onClick={() => { onDismissInitProgress?.(); handleDagSelect('capture_entire_markdown'); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '5px', border: 'none', background: '#238636', color: '#fff', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    <Check size={11} /><span>Start Capturing</span>
+                  </button>
+                )}
+                {projectInitProgress.status === 'error' && (
+                  <button
+                    type="button"
+                    onClick={() => onRetryInit?.()}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '5px', border: 'none', background: '#1f6feb', color: '#fff', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    <RefreshCw size={10} /><span>Retry Init</span>
+                  </button>
+                )}
+                <button type="button" onClick={() => onDismissInitProgress?.()} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px' }}><X size={12} /></button>
+              </>
+            ) : null}
+
+            {/* Filter pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
               <button
                 type="button"
-                className="win-btn win-btn-close"
-                onClick={onClose}
-                title="Close DAG Window"
+                onClick={() => handleDagSelect('all')}
+                style={{
+                  padding: '1px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  border: `1px solid ${effectiveSelectedDag === 'all' ? '#58a6ff' : '#30363d'}`,
+                  background: effectiveSelectedDag === 'all' ? 'rgba(88,166,255,0.2)' : '#161b22',
+                  color: effectiveSelectedDag === 'all' ? '#58a6ff' : '#8b949e'
+                }}
               >
-                <X size={12} />
+                All
               </button>
+              <button
+                type="button"
+                onClick={() => handleDagSelect('initialize')}
+                style={{
+                  padding: '1px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  border: `1px solid ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#30363d'}`,
+                  background: effectiveSelectedDag === 'initialize' ? 'rgba(88,166,255,0.2)' : '#161b22',
+                  color: effectiveSelectedDag === 'initialize' ? '#58a6ff' : '#8b949e'
+                }}
+              >
+                DAG 1
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDagSelect('capture_entire_markdown')}
+                style={{
+                  padding: '1px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  border: `1px solid ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#30363d'}`,
+                  background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0,255,157,0.2)' : '#161b22',
+                  color: effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e'
+                }}
+              >
+                DAG 2
+              </button>
+            </div>
+
+            {/* Capture Loop Button */}
+            <button
+              type="button"
+              onClick={handleToggleLoop}
+              title={isLoopRunning ? "Stop Continuous Capture Loop" : "Start Continuous Capture Loop (Nodes 3→8 Repeating until 100% captured)"}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '5px',
+                background: isLoopRunning ? 'rgba(255, 107, 37, 0.25)' : 'rgba(0, 255, 157, 0.15)',
+                border: `1px solid ${isLoopRunning ? '#ff6b25' : '#00ff9d'}`,
+                color: isLoopRunning ? '#ffa657' : '#00ff9d',
+                fontSize: '9.5px', fontWeight: 800, cursor: 'pointer'
+              }}
+            >
+              {isLoopRunning ? <RefreshCw size={10} className="spin" color="#ff6b25" /> : <Play size={10} />}
+              <span>{isLoopRunning ? 'STOP LOOP' : 'RUN CAPTURE LOOP'}</span>
+            </button>
+
+            {/* Reset Grid */}
+            <button
+              type="button"
+              onClick={handleResetLayout}
+              title="Reset node positions"
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                background: '#21262d', border: '1px solid #30363d', borderRadius: '5px',
+                color: '#8b949e', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              <Move size={10} />
+              <span>Reset Grid</span>
+            </button>
+
+            {/* Keyboard Status */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '9.5px' }}>
+              <Lock size={10} color={isKeyboardOpen ? '#f85149' : '#00ff9d'} />
+              <span style={{ color: isKeyboardOpen ? '#f85149' : '#00ff9d', fontWeight: 700 }}>
+                {isKeyboardOpen ? 'KB OPEN' : 'KB CLOSED'}
+              </span>
+            </div>
+
+            {/* Window Controls */}
+            <div className="window-controls" style={{ marginLeft: '2px' }}>
+              <button type="button" className="win-btn" onClick={onToggleMinimize} title="Minimize DAG"><Minus size={11} /></button>
+              <button type="button" className="win-btn" onClick={() => setIsMaximized(p => !p)} title={isMaximized ? "Restore DAG" : "Maximize DAG"}>
+                {isMaximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+              </button>
+              {onClose && (
+                <button type="button" className="win-btn win-btn-close" onClick={onClose} title="Close DAG"><X size={11} /></button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* FULL-WIDTH PROGRESS CONTROL THROUGHOUT THE WIDTH */}
+        <div style={{ width: '100%', height: '5px', background: '#161b22', border: '1px solid #30363d', borderRadius: '3px', overflow: 'hidden', position: 'relative' }}>
+          <div
+            style={{
+              height: '100%',
+              width: `${progressPercent}%`,
+              background: progressGradient,
+              boxShadow: `0 0 8px ${progressGlow}`,
+              transition: 'width 0.3s ease',
+              borderRadius: '2px'
+            }}
+          />
+        </div>
+      </div>
+
+      {/* COMPACT FEEDBACK NOTIFICATION */}
+      {nodeFeedback && (
+        <div style={{ padding: '4px 10px', borderRadius: '5px', background: nodeFeedback.isError ? 'rgba(248, 81, 73, 0.15)' : 'rgba(0, 255, 157, 0.12)', border: `1px solid ${nodeFeedback.isError ? '#f8514966' : '#00ff9d55'}`, color: nodeFeedback.isError ? '#ff7b72' : '#00ff9d', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {nodeFeedback.isError ? <ShieldAlert size={12} /> : <Check size={12} />}
+            <span style={{ fontWeight: 600 }}>{nodeFeedback.message}</span>
+          </div>
+          <button onClick={() => setNodeFeedback(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', padding: '1px' }}><X size={11} /></button>
+        </div>
+      )}
+
+      {/* MAIN INLINE DECK: MICRO DAG ON LEFT + TELEMETRY ON RIGHT */}
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch', width: '100%', minHeight: '66px', overflowX: 'auto' }}>
+        
+        {/* GROUP 1: DAG 1 INITIALIZE */}
+        <div
+          onClick={() => handleDagSelect('initialize')}
+          style={{
+            width: '216px',
+            flexShrink: 0,
+            borderRadius: '8px',
+            border: `1.5px dashed ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : 'rgba(88, 166, 255, 0.25)'}`,
+            background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.08)' : 'rgba(15, 23, 42, 0.4)',
+            padding: '4px 6px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            boxSizing: 'border-box',
+            cursor: 'pointer'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: '#58a6ff' }}>DAG 1: INIT</span>
+              <span style={{
+                fontSize: '8px', padding: '0 4px', borderRadius: '3px',
+                background: isInitGroupRunning ? 'rgba(163, 113, 247, 0.2)' : (isInitGroupCompleted ? 'rgba(0, 255, 157, 0.15)' : (isInitGroupError ? 'rgba(248, 81, 73, 0.15)' : '#30363d')),
+                color: isInitGroupRunning ? '#a371f7' : (isInitGroupCompleted ? '#00ff9d' : (isInitGroupError ? '#ff7b72' : '#8b949e')),
+                fontWeight: 800
+              }}>
+                {isInitGroupRunning ? 'RUNNING' : (isInitGroupCompleted ? 'DONE' : (isInitGroupError ? 'ISSUE' : 'IDLE'))}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleRunGroup('initialize'); }}
+              disabled={runningGroupId !== null || runningNodeId !== null}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 5px',
+                borderRadius: '3px', border: '1px solid rgba(88, 166, 255, 0.4)',
+                background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff',
+                fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              {isInitGroupRunning ? <RefreshCw size={8} className="spin" /> : <Play size={8} />}
+              <span>Run</span>
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+            {renderMicroNode(NODES_METADATA[0])}
+            {renderMicroArrow(NODES_METADATA[0], NODES_METADATA[1], 18)}
+            {renderMicroNode(NODES_METADATA[1])}
+          </div>
+        </div>
+
+        {/* TRANSITION ARROW: CONNECTING DAG 1 TO DAG 2 */}
+        {renderMicroArrow(NODES_METADATA[1], NODES_METADATA[2], 22)}
+
+        {/* GROUP 2: DAG 2 CAPTURE ENTIRE MARKDOWN */}
+        <div
+          onClick={() => handleDagSelect('capture_entire_markdown')}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            borderRadius: '8px',
+            border: `1.5px dashed ${isCaptureGroupRunning ? '#ff6b25' : (effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : 'rgba(0, 255, 157, 0.25)')}`,
+            background: isCaptureGroupRunning
+              ? 'radial-gradient(ellipse at 50% 20%, rgba(255, 107, 37, 0.15) 0%, rgba(15, 23, 42, 0.5) 85%)'
+              : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
+            padding: '4px 6px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            boxSizing: 'border-box',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
+          }}
+        >
+          {/* Group 2 Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d' }}>
+                DAG 2: CAPTURE ENTIRE MARKDOWN
+              </span>
+              <span style={{
+                fontSize: '8px', padding: '0 4px', borderRadius: '3px',
+                background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.25)' : 'rgba(0, 255, 157, 0.12)',
+                color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d',
+                fontWeight: 800, border: `1px solid ${isCaptureGroupRunning ? '#ff6b2566' : 'transparent'}`
+              }}>
+                {isCaptureGroupRunning ? '♨️ THERMAL CAPTURING' : 'READY'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
+              disabled={runningGroupId !== null || runningNodeId !== null}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 5px',
+                borderRadius: '3px', border: '1px solid rgba(0, 255, 157, 0.4)',
+                background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d',
+                fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              {isCaptureGroupRunning ? <RefreshCw size={8} className="spin" /> : <Play size={8} />}
+              <span>1 Cycle</span>
+            </button>
+          </div>
+
+          {/* Group 2 Sequential Micro Nodes & Neon Connecting Arrows */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+            {renderMicroNode(NODES_METADATA[2])}
+            {renderMicroArrow(NODES_METADATA[2], NODES_METADATA[3], 18)}
+            {renderMicroNode(NODES_METADATA[3])}
+            {renderMicroArrow(NODES_METADATA[3], NODES_METADATA[4], 18)}
+            {renderMicroNode(NODES_METADATA[4])}
+            {renderMicroArrow(NODES_METADATA[4], NODES_METADATA[5], 18)}
+            {renderMicroNode(NODES_METADATA[5])}
+            {renderMicroArrow(NODES_METADATA[5], NODES_METADATA[6], 18)}
+            {renderMicroNode(NODES_METADATA[6])}
+            {renderMicroArrow(NODES_METADATA[6], NODES_METADATA[7], 18)}
+            {renderMicroNode(NODES_METADATA[7])}
+          </div>
+
+          {/* Tucked Loopback Curve underneath Group 2 Nodes (Node 8 -> Node 3) */}
+          <div style={{ width: '100%', height: '17px', position: 'relative', marginTop: '2px', display: 'flex', alignItems: 'center' }}>
+            <svg width="100%" height="17" viewBox="0 0 1000 17" preserveAspectRatio="none" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
+              <path
+                d="M 945 2 C 945 14, 55 14, 55 2"
+                fill="none"
+                stroke={triggerDecision.prevented ? '#f85149' : (isCaptureGroupRunning ? '#00ff9d' : '#00ff9d77')}
+                strokeWidth={isCaptureGroupRunning ? 2 : 1.5}
+                strokeDasharray={isCaptureGroupRunning ? '6 3' : '4 3'}
+                className={isCaptureGroupRunning ? 'dag-wire-active' : ''}
+                markerEnd={triggerDecision.prevented ? 'url(#dag-arrowhead-heat)' : 'url(#dag-arrowhead-green)'}
+              />
+              {isCaptureGroupRunning && (
+                <circle r="2.8" fill="#00ff9d" filter="url(#dag-wire-glow)">
+                  <animateMotion path="M 945 2 C 945 14, 55 14, 55 2" dur="2s" repeatCount="indefinite" />
+                </circle>
+              )}
+            </svg>
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              pointerEvents: 'none', fontSize: '8.5px', fontWeight: 700,
+              color: triggerDecision.prevented ? '#ff7b72' : '#00ff9d',
+              textShadow: '0 1px 4px rgba(0,0,0,0.95)'
+            }}>
+              {triggerDecision.prevented ? '⛔ Trigger Prevented: Qualifier Issue' : `↺ Loopback to Step 3: Next Page Screen Capture (Target Ln ${nextTargetTop})`}
+            </div>
+          </div>
+        </div>
+
+        {/* INTEGRATED DAG TELEMETRY DECK ON RIGHT */}
+        <div style={{
+          width: '290px',
+          flexShrink: 0,
+          background: '#121822',
+          border: '1px solid #30363d',
+          borderRadius: '8px',
+          padding: '5px 8px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          height: '76px',
+          boxSizing: 'border-box'
+        }}>
+          {/* Row 1: Selected Node Header & Actions */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
+              <span style={{
+                fontSize: '9px', fontWeight: 800,
+                background: `${selectedNodeMeta.accentColor}25`,
+                color: selectedNodeMeta.accentColor,
+                border: `1px solid ${selectedNodeMeta.accentColor}55`,
+                padding: '1px 5px', borderRadius: '4px'
+              }}>
+                NODE {selectedNodeMeta.step}
+              </span>
+              <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {selectedNodeMeta.shortName}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              {selectedNodeMeta.hasConfig && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (selectedNodeMeta.id === 'frame_acquire') setIsNode3ConfigOpen(true);
+                    else if (selectedNodeMeta.id === 'frame_ocr') setIsNode4ConfigOpen(true);
+                    else if (selectedNodeMeta.id === 'verification_trigger') setIsConfigModalOpen(true);
+                  }}
+                  title="Configure node"
+                  style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', padding: '2px 5px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                >
+                  <Settings size={10} />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleRunNode(selectedNodeMeta.id)}
+                disabled={runningNodeId !== null}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                  borderRadius: '4px', border: `1px solid ${selectedNodeMeta.accentColor}66`,
+                  background: `${selectedNodeMeta.accentColor}20`, color: selectedNodeMeta.accentColor,
+                  fontSize: '9px', fontWeight: 800, cursor: runningNodeId !== null ? 'wait' : 'pointer'
+                }}
+              >
+                {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={9} className="spin" /> : <Play size={9} />}
+                <span>{runningNodeId === selectedNodeMeta.id ? 'Running...' : `Run Node ${selectedNodeMeta.step}`}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsInspectorModalOpen(true)}
+                title="Open Full Node Inspector & Troubleshooting"
+                style={{ background: '#21262d', border: '1px solid #30363d', color: '#8b949e', padding: '2px 5px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: '9px', fontWeight: 700 }}
+              >
+                <Activity size={10} style={{ marginRight: '2px' }} />
+                <span>Details</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Row 2: Live Timing & Heat Lamp Badge */}
+          {(() => {
+            const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#8b949e' }}>
+                  <Clock size={10} color={liveStatus.isActive ? '#ff6b25' : '#8b949e'} />
+                  <span style={{ color: liveStatus.isActive ? '#ffa657' : '#f0f6fc', fontWeight: 700 }}>
+                    {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : (liveStatus.startedAt || '--:--:--'))}
+                  </span>
+                  <span style={{ color: '#484f58' }}>•</span>
+                  <span style={{ color: liveStatus.color, fontWeight: 700 }}>{liveStatus.metricLabel || '--'}</span>
+                </div>
+                <span style={{
+                  fontSize: '8px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px',
+                  background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
+                  color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
+                  border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`
+                }}>
+                  {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
+                </span>
+              </div>
+            );
+          })()}
+
+          {/* Row 3: Live Process Telemetry Ticker (Latest Event) */}
+          <div style={{
+            background: '#0a0d13', border: '1px solid #21262d', borderRadius: '4px',
+            padding: '2px 5px', fontSize: '8.5px', display: 'flex', alignItems: 'center', gap: '5px',
+            overflow: 'hidden', whiteSpace: 'nowrap'
+          }}>
+            <Activity size={9} color={selectedNodeMeta.accentColor} style={{ flexShrink: 0 }} />
+            {nodeTelemetryEvents.length > 0 ? (
+              <>
+                <span style={{ color: '#6e7681', flexShrink: 0 }}>{nodeTelemetryEvents[nodeTelemetryEvents.length - 1].timestamp}</span>
+                <span style={{
+                  fontSize: '7.5px', fontWeight: 800, padding: '0 3px', borderRadius: '2px',
+                  background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d', flexShrink: 0
+                }}>
+                  {nodeTelemetryEvents[nodeTelemetryEvents.length - 1].category}
+                </span>
+                <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {nodeTelemetryEvents[nodeTelemetryEvents.length - 1].message}
+                </span>
+              </>
+            ) : (
+              <span style={{ color: '#6e7681', fontStyle: 'italic' }}>
+                No telemetry for Node {selectedNodeMeta.step} yet — click "Run Node {selectedNodeMeta.step}" to trace.
+              </span>
             )}
           </div>
         </div>
+
       </div>
 
-      {nodeFeedback && (
-        <div style={{ margin: '0 0 12px 0', padding: '8px 12px', borderRadius: '6px', background: nodeFeedback.isError ? 'rgba(248, 81, 73, 0.15)' : 'rgba(0, 255, 157, 0.12)', border: `1px solid ${nodeFeedback.isError ? '#f8514966' : '#00ff9d55'}`, color: nodeFeedback.isError ? '#ff7b72' : '#00ff9d', fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {nodeFeedback.isError ? <ShieldAlert size={14} /> : <Check size={14} />}
-            <span style={{ fontWeight: 600 }}>{nodeFeedback.message}</span>
-          </div>
-          <button onClick={() => setNodeFeedback(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', padding: '2px' }}><X size={12} /></button>
-        </div>
-      )}
-
-      {/* INLINE INITIALIZATION PROGRESS CARD */}
-      {projectInitProgress && projectInitProgress.active && (
-        <div
-          style={{
-            margin: '0 0 14px 0',
-            padding: '14px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(13, 17, 23, 0.95))',
-            border: `1.5px solid ${projectInitProgress.status === 'error' ? '#f85149' : (projectInitProgress.status === 'completed' ? '#00ff9d' : '#58a6ff')}`,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px'
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div style={{
-                width: '28px', height: '28px', borderRadius: '6px',
-                background: projectInitProgress.status === 'error' ? 'rgba(248, 81, 73, 0.2)' : (projectInitProgress.status === 'completed' ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.2)'),
-                display: 'flex', alignItems: 'center', justifyContent: 'center'
-              }}>
-                {projectInitProgress.status === 'running' && <RefreshCw size={14} className="spin" color="#58a6ff" />}
-                {projectInitProgress.status === 'completed' && <Check size={15} color="#00ff9d" />}
-                {projectInitProgress.status === 'error' && <AlertTriangle size={15} color="#ff7b72" />}
-              </div>
-              <div>
-                <span style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
-                  {projectInitProgress.status === 'completed' ? 'WORKSPACE INITIALIZED' : (projectInitProgress.status === 'error' ? 'INITIALIZATION HALTED' : 'INITIALIZING WORKSPACE')}
-                </span>
-                <span style={{ marginLeft: '8px', fontSize: '10px', fontWeight: 800, padding: '1px 6px', borderRadius: '10px', background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff' }}>
-                  {projectInitProgress.percent}%
-                </span>
-                <div style={{ fontSize: '10.5px', color: '#8b949e', marginTop: '1px' }}>{projectInitProgress.stage}</div>
-              </div>
-            </div>
+      {/* MODAL 0: FULL NODE INSPECTOR & TELEMETRY DETAILS */}
+      {isInspectorModalOpen && (
+        <Modal
+          isOpen={isInspectorModalOpen}
+          onClose={() => setIsInspectorModalOpen(false)}
+          title={
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {projectInitProgress.status === 'completed' && (
-                <button
-                  type="button"
-                  onClick={() => { onDismissInitProgress?.(); handleDagSelect('capture_entire_markdown'); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '6px', border: 'none', background: '#238636', color: '#fff', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  <Check size={13} /><span>Start Capturing</span>
-                </button>
-              )}
-              {projectInitProgress.status === 'error' && (
-                <button
-                  type="button"
-                  onClick={() => onRetryInit?.()}
-                  style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '6px', border: 'none', background: '#1f6feb', color: '#fff', fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  <RefreshCw size={11} /><span>Retry Init</span>
-                </button>
-              )}
-              <button type="button" onClick={() => onDismissInitProgress?.()} style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer' }}><X size={14} /></button>
+              <span style={{
+                fontSize: '11px', fontWeight: 800,
+                background: `${selectedNodeMeta.accentColor}25`,
+                color: selectedNodeMeta.accentColor,
+                border: `1px solid ${selectedNodeMeta.accentColor}55`,
+                padding: '2px 7px', borderRadius: '6px'
+              }}>
+                NODE {selectedNodeMeta.step}
+              </span>
+              <span>{selectedNodeMeta.fullName}</span>
             </div>
-          </div>
-          <div style={{ width: '100%', height: '6px', background: '#161b22', border: '1px solid #30363d', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${projectInitProgress.percent}%`, background: projectInitProgress.status === 'completed' ? '#00ff9d' : (projectInitProgress.status === 'error' ? '#f85149' : '#58a6ff'), transition: 'width 0.3s ease' }} />
-          </div>
-        </div>
-      )}
+          }
+          subtitle={selectedNodeMeta.desc}
+          confirmText="Done"
+          cancelText="Close"
+          onConfirm={() => setIsInspectorModalOpen(false)}
+          maxWidth="720px"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Quick Action Button for Selected Node */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => handleRunNode(selectedNodeMeta.id)}
+                disabled={runningNodeId !== null}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  gap: '6px', padding: '7px 12px', borderRadius: '6px',
+                  border: `1px solid ${selectedNodeMeta.accentColor}66`,
+                  background: `${selectedNodeMeta.accentColor}18`,
+                  color: selectedNodeMeta.accentColor,
+                  fontSize: '11px', fontWeight: 800,
+                  cursor: runningNodeId !== null ? 'wait' : 'pointer',
+                  fontFamily: 'inherit'
+                }}
+              >
+                {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={12} className="spin" /> : <Play size={12} />}
+                <span>{runningNodeId === selectedNodeMeta.id ? `Running Step ${selectedNodeMeta.step}...` : `Run Node ${selectedNodeMeta.step}`}</span>
+              </button>
 
-      {/* MAIN CONTAINER: CANVAS WITH GRID ON LEFT + INSPECTION SIDEBAR CARD ON RIGHT */}
-      <div style={{ display: 'flex', gap: '14px', alignItems: 'stretch', minHeight: '330px' }}>
-        
-        {/* LEFT: GRID CANVAS (RESPONSIVE 100% WIDTH, ZERO HORIZONTAL SCROLL) */}
-        <div className="dag-grid-canvas" style={{ flex: 1, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ width: '100%', height: '100%', minHeight: '305px', position: 'relative' }}>
-            
-            {/* Group 1 Background Region */}
-            <div
-              onClick={() => handleDagSelect('initialize')}
-              style={{
-                position: 'absolute',
-                left: '0.8%', top: '14px', width: '23.8%', height: '260px',
-                borderRadius: '10px',
-                border: `1.5px dashed ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : 'rgba(88, 166, 255, 0.25)'}`,
-                background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.06)' : 'rgba(15, 23, 42, 0.45)',
-                pointerEvents: 'auto',
-                cursor: 'pointer',
-                padding: '8px 10px',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 800, color: '#58a6ff', letterSpacing: '0.5px' }}>
-                    DAG 1: INITIALIZE
-                  </span>
-                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isInitGroupRunning ? 'rgba(163, 113, 247, 0.2)' : (isInitGroupCompleted ? 'rgba(0, 255, 157, 0.15)' : (isInitGroupError ? 'rgba(248, 81, 73, 0.15)' : '#30363d')), color: isInitGroupRunning ? '#a371f7' : (isInitGroupCompleted ? '#00ff9d' : (isInitGroupError ? '#ff7b72' : '#8b949e')), fontWeight: 800 }}>
-                    {isInitGroupRunning ? 'RUNNING' : (isInitGroupCompleted ? 'COMPLETED ✔' : (isInitGroupError ? 'ISSUE' : 'IDLE'))}
-                  </span>
-                </div>
+              {selectedNodeMeta.id === 'local_ai_ocr' && node3b.extracted_text && (
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); handleRunGroup('initialize'); }}
-                  disabled={runningGroupId !== null || runningNodeId !== null}
+                  onClick={() => setIsTextModalOpen(true)}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 7px',
-                    borderRadius: '4px', border: '1px solid rgba(88, 166, 255, 0.4)',
-                    background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff',
-                    fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                    display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
+                    borderRadius: '6px', border: '1px solid #30363d', background: '#21262d',
+                    color: '#58a6ff', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
                   }}
                 >
-                  {isInitGroupRunning ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
-                  <span>Run</span>
+                  <FileText size={12} />
+                  <span>Full Text</span>
                 </button>
-              </div>
+              )}
             </div>
 
-            {/* Group 2 Background Region */}
-            <div
-              onClick={() => handleDagSelect('capture_entire_markdown')}
-              style={{
-                position: 'absolute',
-                left: '25.2%', top: '14px', width: '74.0%', height: '260px',
-                borderRadius: '10px',
-                border: `1.5px dashed ${isCaptureGroupRunning ? '#ff6b25' : (effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : 'rgba(0, 255, 157, 0.25)')}`,
-                background: isCaptureGroupRunning
-                  ? 'radial-gradient(ellipse at 50% 30%, rgba(255, 107, 37, 0.15) 0%, rgba(15, 23, 42, 0.5) 85%)'
-                  : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.45)'),
-                boxShadow: isCaptureGroupRunning ? '0 0 24px rgba(255, 107, 37, 0.35), inset 0 0 16px rgba(255, 60, 0, 0.15)' : 'none',
-                pointerEvents: 'auto',
-                cursor: 'pointer',
-                padding: '8px 10px',
-                boxSizing: 'border-box',
-                transition: 'all 0.3s ease'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 800, color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d', letterSpacing: '0.5px' }}>
-                    DAG 2: CAPTURE ENTIRE MARKDOWN
-                  </span>
-                  <span style={{
-                    fontSize: '9px', padding: '1px 6px', borderRadius: '4px',
-                    background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.3)' : 'rgba(0, 255, 157, 0.15)',
-                    color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d',
-                    fontWeight: 800,
-                    border: `1px solid ${isCaptureGroupRunning ? '#ff6b2588' : 'transparent'}`
-                  }}>
-                    {isCaptureGroupRunning ? '♨️ THERMAL CAPTURING...' : 'READY'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
-                    disabled={runningGroupId !== null || runningNodeId !== null}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 7px',
-                      borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.4)',
-                      background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d',
-                      fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
-                    }}
-                  >
-                    {isCaptureGroupRunning ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
-                    <span>1 Cycle</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* DYNAMIC SVG CONNECTORS LAYER (SCALED 0..1000 ACROSS 100% CANVAS) */}
-            <svg viewBox="0 0 1000 270" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-              <defs>
-                <linearGradient id="dag-flow-emerald" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#388bfd" />
-                  <stop offset="100%" stopColor="#00ff9d" />
-                </linearGradient>
-                <linearGradient id="dag-flow-heat" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#ff9100" />
-                  <stop offset="100%" stopColor="#ff3d00" />
-                </linearGradient>
-                <filter id="dag-wire-glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="3" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-                <marker id="dag-arrowhead-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <polygon points="1 1, 7 4, 1 7" fill="#58a6ff" />
-                </marker>
-                <marker id="dag-arrowhead-green" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <polygon points="1 1, 7 4, 1 7" fill="#00ff9d" />
-                </marker>
-                <marker id="dag-arrowhead-heat" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <polygon points="1 1, 7 4, 1 7" fill="#ff6b25" />
-                </marker>
-                <marker id="dag-arrowhead-loop" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-                  <polygon points="1 1, 7 4, 1 7" fill="#00ff9d" />
-                </marker>
-              </defs>
-
-              {/* Sequential connecting bezier paths */}
-              {(() => {
-                const nodeLefts = [14, 130, 260, 382, 504, 626, 748, 870];
-                const nodeW = 108;
-                const paths = [];
-
-                for (let i = 0; i < NODES_METADATA.length - 1; i++) {
-                  const nodeA = NODES_METADATA[i];
-                  const nodeB = NODES_METADATA[i + 1];
-                  const x1 = nodeLefts[i] + nodeW + 1;
-                  const x2 = nodeLefts[i + 1] - 1;
-                  const y1 = 105;
-                  const y2 = 105;
-
-                  const isConnectionActive = (runningNodeId === nodeA.id || runningNodeId === nodeB.id) ||
-                    (nodeA.group === 'capture_entire_markdown' && isCaptureGroupRunning) ||
-                    (nodeA.group === 'initialize' && isInitGroupRunning);
-
-                  const isHeatActive = isConnectionActive && (isCaptureGroupRunning || runningNodeId === nodeA.id || runningNodeId === nodeB.id);
-                  const strokeColor = isHeatActive ? 'url(#dag-flow-heat)' : (nodeB.group === 'initialize' ? '#58a6ff' : 'url(#dag-flow-emerald)');
-                  const markerId = isHeatActive ? 'dag-arrowhead-heat' : (nodeB.group === 'initialize' ? 'dag-arrowhead-blue' : 'dag-arrowhead-green');
-                  const pathD = `M ${x1} ${y1} C ${x1 + 4} ${y1}, ${x2 - 4} ${y2}, ${x2} ${y2}`;
-
-                  paths.push(
-                    <g key={`${nodeA.id}->${nodeB.id}`}>
-                      {isConnectionActive && (
-                        <path
-                          d={pathD}
-                          fill="none"
-                          stroke={isHeatActive ? '#ff6b25' : '#00ff9d'}
-                          strokeWidth="6"
-                          strokeOpacity="0.35"
-                          filter="url(#dag-wire-glow)"
-                        />
-                      )}
-                      <path
-                        d={pathD}
-                        className={`dag-wire ${isConnectionActive ? (isHeatActive ? 'dag-wire-active wire-heat' : 'dag-wire-active') : ''}`}
-                        stroke={strokeColor}
-                        strokeOpacity={isConnectionActive ? 1 : 0.65}
-                        markerEnd={`url(#${markerId})`}
-                      />
-                      {isConnectionActive && (
-                        <circle r="3" fill="#ffffff" filter="url(#dag-wire-glow)">
-                          <animateMotion path={pathD} dur="0.9s" repeatCount="indefinite" />
-                        </circle>
-                      )}
-                    </g>
-                  );
-                }
-                return paths;
-              })()}
-
-              {/* Loopback Curve: Node 8 (document_assemble) -> Node 3 (frame_acquire) */}
-              {(() => {
-                const nodeLefts = [14, 130, 260, 382, 504, 626, 748, 870];
-                const nodeW = 108;
-                const startX = nodeLefts[7] + nodeW / 2;
-                const startY = 146;
-                const endX = nodeLefts[2] + nodeW / 2;
-                const endY = 146;
-                const loopPath = `M ${startX} ${startY} C ${startX} 242, ${endX} 242, ${endX} ${endY}`;
-                const isLoopActive = isCaptureGroupRunning;
-
-                return (
-                  <g>
-                    {isLoopActive && (
-                      <path
-                        d={loopPath}
-                        fill="none"
-                        stroke="#00ff9d"
-                        strokeWidth="5"
-                        strokeOpacity="0.3"
-                        filter="url(#dag-wire-glow)"
-                      />
-                    )}
-                    <path
-                      d={loopPath}
-                      fill="none"
-                      stroke={triggerDecision.prevented ? '#f85149' : (isLoopActive ? '#00ff9d' : '#00ff9d88')}
-                      strokeWidth="2.2"
-                      strokeDasharray="6 3"
-                      className={isLoopActive ? 'dag-wire-active' : ''}
-                      markerEnd="url(#dag-arrowhead-loop)"
-                    />
-                    {isLoopActive && (
-                      <circle r="3.2" fill="#00ff9d" filter="url(#dag-wire-glow)">
-                        <animateMotion path={loopPath} dur="2.2s" repeatCount="indefinite" />
-                      </circle>
-                    )}
-                    <text
-                      x={(startX + endX) / 2}
-                      y={235}
-                      fill={triggerDecision.prevented ? '#ff7b72' : '#00ff9d'}
-                      fontSize="9.5"
-                      fontFamily="var(--font-mono, monospace)"
-                      textAnchor="middle"
-                      fontWeight="700"
-                    >
-                      {triggerDecision.prevented ? '⛔ Trigger Prevented: Qualifier Issue' : `↺ Loopback to Step 3: Next Page Screen Capture (Ln ${nextTargetTop})`}
-                    </text>
-                  </g>
-                );
-              })()}
-            </svg>
-
-            {/* THE 8 MINIATURE DAG NODES (RESPONSIVE, ZERO HORIZONTAL SCROLL) */}
-            {NODES_METADATA.map((node) => {
-              const basePos = DEFAULT_POSITIONS_PCT[node.id] || { leftPct: 0, topPx: 64 };
-              const offset = dragOffsets[node.id] || { x: 0, y: 0 };
-              const isSelected = activeSelectedNodeId === node.id;
-              const isDraggingThis = draggingNode?.id === node.id;
-              const status = getNodeLiveStatus(node.id);
-              const isPulsingSwirl = status.isActive || status.isRunning || (currentActiveNode === node.id);
-
+            {/* Real-time Execution Timings & Node Active State */}
+            {(() => {
+              const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
               return (
-                <div
-                  key={node.id}
-                  className={`dag-mini-node ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
-                  style={{
-                    left: `calc(${basePos.leftPct}% + ${offset.x}px)`,
-                    top: `${basePos.topPx + offset.y}px`,
-                    borderColor: isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d')),
-                    boxShadow: isSelected
-                      ? `0 0 16px ${node.accentColor}66, 0 4px 14px rgba(0,0,0,0.7)`
-                      : (status.isRunning ? `0 0 14px rgba(255, 107, 37, 0.65)` : '0 4px 12px rgba(0,0,0,0.45)')
-                  }}
-                  onMouseDown={(e) => handleNodeMouseDown(node.id, e)}
-                  title={`Node ${node.step}: ${node.fullName}\nClick to inspect details. Drag to nudge.`}
-                >
-                  {/* Top Bar of Miniature Node */}
+                <div style={{
+                  background: liveStatus.isActive ? 'radial-gradient(ellipse at 50% 0%, rgba(255, 107, 37, 0.15) 0%, #0d1117 80%)' : '#0d1117',
+                  border: `1.5px solid ${liveStatus.isActive ? '#ff6b25' : '#21262d'}`,
+                  borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px'
+                }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
-                      <span
-                        className="dag-mini-node-badge"
-                        style={{
-                          background: `${node.accentColor}22`,
-                          color: node.accentColor,
-                          border: `1px solid ${node.accentColor}55`,
-                          fontSize: '8.5px',
-                          padding: '1px 4px'
-                        }}
-                      >
-                        {node.step}
-                      </span>
-                      <span style={{ fontSize: '9.5px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {node.shortName}
-                      </span>
+                    <div style={{ fontSize: '10px', fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : '#58a6ff', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <Clock size={11} color={liveStatus.isActive ? '#ff6b25' : '#58a6ff'} />
+                      <span>NODE EXECUTION TIMINGS & STATE</span>
                     </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
-                      {status.isRunning ? (
-                        <RefreshCw size={10} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} />
-                      ) : (
-                        <span
-                          style={{
-                            width: '6px',
-                            height: '6px',
-                            borderRadius: '50%',
-                            background: status.color,
-                            boxShadow: `0 0 6px ${status.color}`
-                          }}
-                        />
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Middle: Live Metric Badge */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1px 0' }}>
-                    <span style={{ fontSize: '9px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {status.metricLabel}
-                    </span>
-                    <span style={{ fontSize: '8px', color: '#6e7681', flexShrink: 0 }}>
-                      {status.statusLabel}
+                    <span style={{
+                      fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
+                      background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
+                      color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
+                      border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`
+                    }}>
+                      {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
                     </span>
                   </div>
 
-                  {/* Bottom: Timings (Start -> Finish & Duration) */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px', borderTop: '1px solid rgba(255, 255, 255, 0.07)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '8px', color: isPulsingSwirl ? '#ffa657' : '#8b949e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      <Clock size={8} color={isPulsingSwirl ? '#ff6b25' : '#8b949e'} />
-                      <span style={{ fontWeight: isPulsingSwirl ? 800 : 500 }}>
-                        {isPulsingSwirl
-                          ? (status.startedAt ? `${status.startedAt} (active)` : 'Active...')
-                          : (status.startedAt && status.finishedAt
-                              ? `${status.startedAt}→${status.finishedAt} (${status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : ''})`
-                              : (status.startedAt ? status.startedAt : '--:--:--'))}
-                      </span>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px', marginTop: '2px' }}>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>STARTED AT</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.startedAt ? '#f0f6fc' : '#6e7681', marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                        {liveStatus.startedAt || '--:--:--'}
+                      </div>
                     </div>
-                    {isSelected && (
-                      <span style={{ fontSize: '7.5px', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '1px', opacity: 0.85, flexShrink: 0 }}>
-                        <Move size={7} />
-                      </span>
-                    )}
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>FINISHED AT</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : (liveStatus.finishedAt ? '#00ff9d' : '#6e7681'), marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                        {liveStatus.isActive ? '⚡ Running...' : (liveStatus.finishedAt || '--:--:--')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>ELAPSED DURATION</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.durationMs !== null ? '#58a6ff' : '#6e7681', marginTop: '2px' }}>
+                        {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : '--')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>CURRENT METRIC</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.color, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {liveStatus.metricLabel || '--'}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
-            })}
+            })()}
 
-          </div>
-        </div>
-
-        {/* RIGHT: INSPECTION SIDEBAR CARD (SHOWS ALL INFORMATION DETAILS & NODE PROCESS TELEMETRY) */}
-        {isSidebarOpen && (
-          <div className="dag-sidebar-card" style={{ display: 'flex', flexDirection: 'column' }}>
-            
-            {/* Sidebar Header */}
-            <div style={{ padding: '12px 14px', background: '#1c2128', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 800,
-                    background: `${selectedNodeMeta.accentColor}25`,
-                    color: selectedNodeMeta.accentColor,
-                    border: `1px solid ${selectedNodeMeta.accentColor}55`,
-                    padding: '2px 7px',
-                    borderRadius: '6px'
-                  }}
-                >
-                  NODE {selectedNodeMeta.step}
-                </span>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
-                    {selectedNodeMeta.shortName}
-                  </div>
-                  <div style={{ fontSize: '9.5px', color: '#8b949e' }}>
-                    {selectedNodeMeta.group === 'initialize' ? 'Group 1: Initialize' : 'Group 2: Capture'}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                {selectedNodeMeta.hasConfig && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (selectedNodeMeta.id === 'frame_acquire') setIsNode3ConfigOpen(true);
-                      if (selectedNodeMeta.id === 'frame_ocr') setIsNode4ConfigOpen(true);
-                      if (selectedNodeMeta.id === 'verification_trigger') setIsConfigModalOpen(true);
-                    }}
-                    title="Configure Node Parameters"
-                    style={{
-                      background: '#21262d', border: '1px solid #30363d', color: '#58a6ff',
-                      padding: '3px 6px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center'
-                    }}
-                  >
-                    <Settings size={12} />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="win-btn win-btn-close"
-                  onClick={() => setIsSidebarOpen(false)}
-                  title="Close Inspector Sidebar"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            </div>
-
-            {/* Sidebar Body (Scrollable details card) */}
-            <div style={{ padding: '12px 14px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              
-              {/* Quick Action Button for Selected Node */}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  onClick={() => handleRunNode(selectedNodeMeta.id)}
-                  disabled={runningNodeId !== null}
-                  style={{
-                    flex: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    padding: '7px 12px',
-                    borderRadius: '6px',
-                    border: `1px solid ${selectedNodeMeta.accentColor}66`,
-                    background: `${selectedNodeMeta.accentColor}18`,
-                    color: selectedNodeMeta.accentColor,
-                    fontSize: '11px',
-                    fontWeight: 800,
-                    cursor: runningNodeId !== null ? 'wait' : 'pointer',
-                    fontFamily: 'inherit'
-                  }}
-                >
-                  {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={12} className="spin" /> : <Play size={12} />}
-                  <span>{runningNodeId === selectedNodeMeta.id ? `Running Step ${selectedNodeMeta.step}...` : `Run Node ${selectedNodeMeta.step}`}</span>
-                </button>
-
-                {selectedNodeMeta.id === 'local_ai_ocr' && node3b.extracted_text && (
-                  <button
-                    type="button"
-                    onClick={() => setIsTextModalOpen(true)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
-                      borderRadius: '6px', border: '1px solid #30363d', background: '#21262d',
-                      color: '#58a6ff', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
-                    }}
-                  >
-                    <FileText size={12} />
-                    <span>Full Text</span>
-                  </button>
-                )}
-              </div>
-
-              {/* Real-time Execution Timings & Node Active State */}
-              {(() => {
-                const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
-                return (
-                  <div style={{
-                    background: liveStatus.isActive ? 'radial-gradient(ellipse at 50% 0%, rgba(255, 107, 37, 0.15) 0%, #0d1117 80%)' : '#0d1117',
-                    border: `1.5px solid ${liveStatus.isActive ? '#ff6b25' : '#21262d'}`,
-                    boxShadow: liveStatus.isActive ? '0 0 18px rgba(255, 107, 37, 0.35), inset 0 0 12px rgba(255, 107, 37, 0.15)' : 'none',
-                    borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: '10px', fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : '#58a6ff', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                        <Clock size={11} color={liveStatus.isActive ? '#ff6b25' : '#58a6ff'} />
-                        <span>NODE EXECUTION TIMINGS & STATE</span>
-                      </div>
-                      <span style={{
-                        fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
-                        background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
-                        color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
-                        border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`,
-                        boxShadow: liveStatus.isActive ? '0 0 8px rgba(255, 107, 37, 0.4)' : 'none'
-                      }}>
-                        {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px', marginTop: '2px' }}>
-                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>STARTED AT</div>
-                        <div style={{ fontWeight: 800, color: liveStatus.startedAt ? '#f0f6fc' : '#6e7681', marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
-                          {liveStatus.startedAt || '--:--:--'}
-                        </div>
-                      </div>
-                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>FINISHED AT</div>
-                        <div style={{ fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : (liveStatus.finishedAt ? '#00ff9d' : '#6e7681'), marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
-                          {liveStatus.isActive ? '⚡ Running...' : (liveStatus.finishedAt || '--:--:--')}
-                        </div>
-                      </div>
-                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>ELAPSED DURATION</div>
-                        <div style={{ fontWeight: 800, color: liveStatus.durationMs !== null ? '#58a6ff' : '#6e7681', marginTop: '2px' }}>
-                          {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : '--')}
-                        </div>
-                      </div>
-                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>CURRENT METRIC</div>
-                        <div style={{ fontWeight: 800, color: liveStatus.color, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {liveStatus.metricLabel || '--'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Description & Objective */}
-              <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
-                <div style={{ fontSize: '10px', fontWeight: 700, color: '#8b949e', marginBottom: '2px' }}>OPERATION / PURPOSE</div>
-                <div style={{ fontSize: '11px', color: '#c9d1d9', lineHeight: 1.4 }}>
-                  {selectedNodeMeta.desc}
-                </div>
-              </div>
-
-              {/* Node-Specific Details & Diagnostic Information */}
-              {selectedNodeMeta.id === 'init_end' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Calibrated Total Lines:</span>
-                    <span style={{ fontWeight: 800, color: node1TotalLines > 0 ? '#00ff9d' : '#8b949e' }}>
-                      {node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : 'Not Calibrated'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>EOF Gutter Verification:</span>
-                    <span style={{ fontWeight: 700, color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e') }}>
-                      {isNode1Calibrated ? 'Verified at EOF' : (isNode1Error ? 'Failed (Line 1)' : 'Pending')}
-                    </span>
-                  </div>
-
-                  {isNode1Error && (
-                    <div style={{ background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <AlertTriangle size={12} /> Page did not move to EOF
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
-                          style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '9.5px', cursor: 'pointer', fontWeight: 600 }}
-                        >
-                          {showNode1Troubleshooting ? 'Hide' : 'Show'}
-                        </button>
-                      </div>
-
-                      {showNode1Troubleshooting && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px', color: '#c9d1d9' }}>
-                          <div>1. <strong>Editor Focus:</strong> Tap in markdown document to focus blinking cursor.</div>
-                          <div>2. <strong>Soft Keyboard:</strong> Suppress on-screen IME keyboard.</div>
-                          <div>3. <strong>Desktop Mode:</strong> Verify Teams editor visible on external screen.</div>
-                        </div>
-                      )}
-
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-                        <button
-                          type="button"
-                          disabled={isFixingNode1Focus}
-                          onClick={async () => {
-                            setIsFixingNode1Focus(true);
-                            try {
-                              await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
-                              onRefresh?.();
-                            } catch {}
-                            finally { setIsFixingNode1Focus(false); }
-                          }}
-                          style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          {isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isHidingKeyboard}
-                          onClick={async () => {
-                            setIsHidingKeyboard(true);
-                            try {
-                              await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
-                              onRefresh?.();
-                            } catch {}
-                            finally { setIsHidingKeyboard(false); }
-                          }}
-                          style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
-                        >
-                          {isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'reset_home' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Top Gutter Verified:</span>
-                    <span style={{ fontWeight: 800, color: isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e') }}>
-                      {isNode2Verified ? 'Verified: Line 1' : (isNode2Error ? 'Failed: Line 1 Missing' : 'Awaiting Test')}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Detected First Line:</span>
-                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
-                      {node2.first_line ? `Ln ${node2.first_line}` : 'Line 1'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'frame_acquire' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Current Page:</span>
-                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>Page #{node3.page || currentPage}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Settle Delay:</span>
-                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3Config.settle_delay_ms} ms</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Keyboard Guard:</span>
-                    <span style={{ fontWeight: 700, color: node3Config.guard_keyboard ? '#00ff9d' : '#8b949e' }}>
-                      {node3Config.guard_keyboard ? 'ACTIVE' : 'OFF'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'local_ai_ocr' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Model Engine:</span>
-                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>{node3b.model_used || 'MiniCPM-V (Ollama)'}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Extracted Lines / Chars:</span>
-                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3b.lines_count || 0} lines • {node3b.char_count || 0} chars</span>
-                  </div>
-                  {node3b.extracted_text && (
-                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '6px 8px', maxHeight: '70px', overflowY: 'auto', fontSize: '9px', color: '#7ee787', whiteSpace: 'pre-wrap' }}>
-                      {node3b.extracted_text}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'frame_ocr' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Gutter Bounds:</span>
-                    <span style={{ fontWeight: 800, color: '#a371f7' }}>
-                      Ln {node4.top_line || effectiveTop} → Ln {node4.bottom_line || effectiveBottom}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Detected Lines Count:</span>
-                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node4.extracted_line_count || (effectiveBottom - effectiveTop + 1)} lines</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>OCR Engine:</span>
-                    <span style={{ fontWeight: 700, color: '#58a6ff' }}>{node4Config.engine}</span>
-                  </div>
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'arrow_down' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Next Target Top Line:</span>
-                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>Ln {nextTargetTop}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Arrow Down Key Steps:</span>
-                    <span style={{ fontWeight: 700, color: '#ffa657' }}>
-                      {node5.arrow_count || Math.max(1, nextTargetTop - (node4.top_line || effectiveTop || 1))} steps
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'verification_trigger' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Trigger Decision:</span>
-                    <span style={{ fontWeight: 800, color: triggerDecision.prevented ? '#ff7b72' : '#00ff9d' }}>
-                      {triggerDecision.prevented ? 'PREVENTED ⛔' : 'ALLOWED ✔'}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Verification Gutter:</span>
-                    <span style={{ fontWeight: 700, color: '#58a6ff' }}>Target Ln {nextTargetTop}</span>
-                  </div>
-                  {triggerDecision.prevented && triggerDecision.reasons?.length > 0 && (
-                    <div style={{ background: 'rgba(248, 81, 73, 0.1)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '4px', padding: '6px 8px', color: '#ff7b72', fontSize: '9.5px' }}>
-                      <strong>Blocking Reason:</strong> {triggerDecision.reasons[0]}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {selectedNodeMeta.id === 'document_assemble' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Total Lines Verified:</span>
-                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>
-                      {node8.total_captured_lines || 0} / {node8.total_lines_target || effectiveTotal || '?'} lines
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Document Completion:</span>
-                    <span style={{ fontWeight: 800, color: node8.is_complete ? '#00ff9d' : '#58a6ff' }}>
-                      {node8.completion_percent || 0}% {node8.is_complete ? '✔ (100% Complete)' : ''}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Loop Iteration Cycle:</span>
-                    <span style={{ fontWeight: 700, color: '#ffa657' }}>
-                      Cycle #{node8.loop_iteration || 1}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                    <span style={{ color: '#8b949e' }}>Reconstructed Size:</span>
-                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
-                      {node8.reconstructed_length ? `${node8.reconstructed_length.toLocaleString()} characters` : 'Pending capture'}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* PROCESS TRACING TELEMETRY TOASTER (SPECIFIC FOR SELECTED NODE) */}
-              <div style={{ marginTop: 'auto', paddingTop: '8px', borderTop: '1px solid #21262d' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Activity size={12} color={selectedNodeMeta.accentColor} />
-                    <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
-                      PROCESS TRACING TELEMETRY
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '9px', background: '#0d1117', border: '1px solid #21262d', padding: '1px 5px', borderRadius: '3px', color: selectedNodeMeta.accentColor, fontWeight: 700 }}>
-                    {nodeTelemetryEvents.length} events
+            {/* Diagnostic Details */}
+            {selectedNodeMeta.id === 'init_end' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                  <span style={{ color: '#8b949e' }}>Calibrated Total Lines:</span>
+                  <span style={{ fontWeight: 800, color: node1TotalLines > 0 ? '#00ff9d' : '#8b949e' }}>
+                    {node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : 'Not Calibrated'}
                   </span>
                 </div>
-
-                {/* Live Toaster Stream for Selected Node */}
-                <div className="dag-toaster-card-stream">
-                  {nodeTelemetryEvents.length === 0 ? (
-                    <div style={{ color: '#6e7681', fontSize: '10px', padding: '8px', textAlign: 'center' }}>
-                      No telemetry trace events for Node {selectedNodeMeta.step} yet.
-                      <div style={{ marginTop: '3px', fontSize: '9px', color: '#8b949e' }}>
-                        Press "Run Node {selectedNodeMeta.step}" above to record real-time execution.
-                      </div>
-                    </div>
-                  ) : (
-                    nodeTelemetryEvents.slice(-6).map(ev => (
-                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
-                        <span style={{ color: '#6e7681', fontSize: '9px', flexShrink: 0 }}>{ev.timestamp}</span>
-                        <span style={{
-                          fontSize: '8.5px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px',
-                          background: ev.category === 'SYSTEM' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)',
-                          color: ev.category === 'SYSTEM' ? '#58a6ff' : '#00ff9d',
-                          flexShrink: 0
-                        }}>
-                          {ev.category}
-                        </span>
-                        <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {ev.message}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
+                {isNode1Error && (
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                    <button
+                      type="button"
+                      disabled={isFixingNode1Focus}
+                      onClick={async () => {
+                        setIsFixingNode1Focus(true);
+                        try {
+                          await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
+                          onRefresh?.();
+                        } catch {}
+                        finally { setIsFixingNode1Focus(false); }
+                      }}
+                      style={{ flex: 1, padding: '5px 8px', background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      {isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isHidingKeyboard}
+                      onClick={async () => {
+                        setIsHidingKeyboard(true);
+                        try {
+                          await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
+                          onRefresh?.();
+                        } catch {}
+                        finally { setIsHidingKeyboard(false); }
+                      }}
+                      style={{ flex: 1, padding: '5px 8px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
+                    >
+                      {isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}
+                    </button>
+                  </div>
+                )}
               </div>
+            )}
 
+            {/* PROCESS TRACING TELEMETRY */}
+            <div style={{ borderTop: '1px solid #21262d', paddingTop: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
+                  PROCESS TRACING TELEMETRY ({nodeTelemetryEvents.length} events)
+                </span>
+              </div>
+              <div className="dag-toaster-card-stream" style={{ maxHeight: '160px' }}>
+                {nodeTelemetryEvents.length === 0 ? (
+                  <div style={{ color: '#6e7681', fontSize: '10px', padding: '8px', textAlign: 'center' }}>
+                    No telemetry trace events for Node {selectedNodeMeta.step} yet.
+                  </div>
+                ) : (
+                  nodeTelemetryEvents.slice(-12).map(ev => (
+                    <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
+                      <span style={{ color: '#6e7681', fontSize: '9px', flexShrink: 0 }}>{ev.timestamp}</span>
+                      <span style={{
+                        fontSize: '8.5px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px',
+                        background: ev.category === 'SYSTEM' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)',
+                        color: ev.category === 'SYSTEM' ? '#58a6ff' : '#00ff9d',
+                        flexShrink: 0
+                      }}>
+                        {ev.category}
+                      </span>
+                      <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ev.message}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
-        )}
-
-      </div>
+        </Modal>
+      )}
 
       {/* MODAL 1: Node 3 Screen Capture Config */}
       {isNode3ConfigOpen && (

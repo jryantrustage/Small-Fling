@@ -1333,6 +1333,31 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   user-select: none;
 }
 
+.dag-mini-node-compact {
+  font-family: var(--font-mono, monospace);
+  -webkit-user-select: none;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.dag-mini-node-compact:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  border-color: #58a6ff88 !important;
+}
+
+.dag-mini-node-compact.selected {
+  border-color: #58a6ff !important;
+  box-shadow: 0 0 12px rgba(88, 166, 255, 0.4), 0 2px 8px rgba(0, 0, 0, 0.6) !important;
+}
+
+.dag-mini-node-compact.heat-lamp-active,
+.dag-mini-node-compact.running-swirl {
+  border-color: #ff6b25 !important;
+  animation: heat-lamp-glow 2.4s infinite ease-in-out;
+  background: radial-gradient(circle at 50% 25%, rgba(255, 107, 37, 0.18) 0%, rgba(22, 27, 34, 0.96) 80%) !important;
+}
+
 .dag-mini-node {
   position: absolute;
   width: calc(11.6% - 5px);
