@@ -3,7 +3,7 @@ import {
   Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle,
   RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, EyeOff, Sliders,
   Key, Cpu, Zap, Activity, Clock, Layers, Keyboard, CheckCircle2, Copy, Trash2,
-  Maximize2, Minimize2
+  Maximize2, Minimize2, Minus
 } from 'lucide-react';
 import type {
   ConnectedDisplay, KioskTelemetry, DeviceInfoData, AlignmentData,
@@ -68,6 +68,9 @@ export interface DeviceStudioDrawerProps {
     projectName?: string;
   } | null;
   onDismissInitProgress?: () => void;
+  isIntegrated?: boolean;
+  isMinimized?: boolean;
+  onToggleMinimize?: () => void;
 }
 
 export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
@@ -110,6 +113,9 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   onShowToast,
   projectInitProgress,
   onDismissInitProgress,
+  isIntegrated = false,
+  isMinimized = false,
+  onToggleMinimize,
 }) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>(initialTab);
@@ -398,10 +404,30 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   const captureProgressPercent = targetLines > 0 ? Math.min(100, Math.max(0, Math.round((currentBottom / targetLines) * 100))) : 0;
   const totalTokens = tokenStats.total_tokens + (tokenStats.mobile_tokens?.total_tokens || 0);
 
+  if (isMinimized) {
+    return (
+      <div className="device-studio-minimized-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', background: '#161b22', border: '1px solid #1f6feb', borderRadius: '8px', margin: isIntegrated ? '0 20px 12px 20px' : '0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Shield size={14} color="#00ff9d" />
+          <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc' }}>DEVICE & KIOSK STUDIO</span>
+          <span style={{ fontSize: '10px', color: '#8b949e' }}>({deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'} · {isLocked ? 'Locked' : 'Unlocked'})</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button type="button" className="btn btn-sm btn-outline" onClick={onToggleMinimize} style={{ fontSize: '10.5px', padding: '2px 8px' }}>
+            <Maximize2 size={11} style={{ marginRight: '4px' }} /> Restore Studio
+          </button>
+          <button type="button" className="win-btn win-btn-close" onClick={onClose} title="Close Studio">
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      <div className="device-studio-drawer-overlay" onClick={onClose} />
-      <div className={`device-studio-drawer ${isMaximized ? 'maximized' : ''}`}>
+      {!isIntegrated && <div className="device-studio-drawer-overlay" onClick={onClose} />}
+      <div className={`device-studio-drawer ${isIntegrated ? 'integrated' : ''} ${isMaximized ? 'maximized' : ''}`}>
         {/* Top Header */}
         <div className="device-studio-header">
           <div className="studio-header-title-group">
@@ -492,6 +518,14 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
             <button
               type="button"
               className="studio-action-icon-btn"
+              onClick={onToggleMinimize}
+              title={isMinimized ? 'Restore Drawer' : 'Minimize Drawer'}
+            >
+              <Minus size={13} />
+            </button>
+            <button
+              type="button"
+              className="studio-action-icon-btn"
               onClick={() => setIsMaximized(p => !p)}
               title={isMaximized ? 'Restore Drawer' : 'Maximize Drawer'}
             >
@@ -530,10 +564,10 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                       type="button"
                       className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
                       onClick={onToggleBoundingBoxes}
-                      title="Toggle AI Bounding Boxes overlay"
+                      title="Toggle Content Framing overlay"
                     >
                       {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
-                      <span>AI BOXES</span>
+                      <span>CONTENT FRAMING</span>
                     </button>
                   )}
 

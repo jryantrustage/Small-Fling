@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert,
-  Sliders, ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
-  FileText, Move, Clock
+  ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
+  FileText, Move, Clock, Minus, Maximize2, Minimize2
 } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
@@ -92,6 +92,9 @@ export interface FlowDagProps {
     data?: any;
     dag?: string;
   }>;
+  onClose?: () => void;
+  isMinimized?: boolean;
+  onToggleMinimize?: () => void;
 }
 
 export interface NodeMeta {
@@ -246,8 +249,11 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 1, currentBottomLine = 49,
   targetTotalLines = 0, currentPage = 1, isOrchestrating = false, onRefresh,
   selectedDag = 'all', onSelectDag, selectedNodeId, onSelectNodeId,
-  projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = []
+  projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
+  onClose, isMinimized = false, onToggleMinimize
 }) => {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
   const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
@@ -258,6 +264,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>('init_end');
   const activeSelectedNodeId = selectedNodeId !== undefined ? selectedNodeId : internalSelectedNodeId;
   const handleSelectNode = (id: string | null) => {
+    setIsSidebarOpen(true);
     if (onSelectNodeId) onSelectNodeId(id);
     else setInternalSelectedNodeId(id || 'init_end');
   };
@@ -323,8 +330,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
   const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
   const [nodeFeedback, setNodeFeedback] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
-  const [isRunningCalibration, setIsRunningCalibration] = useState(false);
-  const [calibrationMsg, setCalibrationMsg] = useState('');
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
@@ -333,27 +338,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
-
-  const handleAutoFixViewport = async () => {
-    setIsAutoFixingViewport(true);
-    try {
-      const res = await fetch(`${apiBase}/api/device/autofix-viewport`, { method: 'POST' });
-      const d = await res.json();
-      if (res.ok) {
-        setIsKeyboardOpen(Boolean(d.keyboard_visible));
-        setNodeFeedback({ id: 'autofix', message: 'Viewport auto-fixed & keyboard closed successfully ✔' });
-      } else {
-        setNodeFeedback({ id: 'autofix', message: d.detail || 'Failed to auto-fix viewport', isError: true });
-      }
-    } catch (e: any) {
-      setNodeFeedback({ id: 'autofix', message: `Error auto-fixing viewport: ${e.message}`, isError: true });
-    } finally {
-      setIsAutoFixingViewport(false);
-    }
-  };
 
   const [node3Config, setNode3Config] = useState({
     settle_delay_ms: 300,
@@ -527,29 +513,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     } finally {
       setRunningGroupId(null);
     }
-  };
-
-  const handleTriggerCalibration = async () => {
-    if (!activeProjectId) { setCalibrationMsg('No active project selected'); return; }
-    setIsRunningCalibration(true);
-    setCalibrationMsg('1. Dispatched Ctrl+End -> Server OCR detecting last line...');
-    try {
-      const endRes = await fetch(`${apiBase}/api/projects/${activeProjectId}/calibrate-end`, { method: 'POST' });
-      const endData = await endRes.json();
-      if (!endRes.ok) throw new Error(endData.detail || 'End calibration failed');
-      const detected = endData.target_total_lines || endData.total_lines || 0;
-      if (detected <= 0) {
-        setCalibrationMsg('⚠️ Calibration warning: 0 lines detected at EOF. Ensure document is visible.');
-        return;
-      }
-      setCalibrationMsg(`Last line: Ln ${detected}. Dispatched Ctrl+Home -> Verifying Line 1...`);
-      const homeRes = await fetch(`${apiBase}/api/projects/${activeProjectId}/verify-home`, { method: 'POST' });
-      const homeData = await homeRes.json();
-      if (!homeRes.ok) throw new Error(homeData.detail || 'Home verification failed');
-      setCalibrationMsg(`✔ Calibrated! Total: ${detected} Lines. Verified Line 1.`);
-      onRefresh?.();
-    } catch (err: any) { setCalibrationMsg(`Calibration error: ${err.message}`); }
-    finally { setIsRunningCalibration(false); }
   };
 
   const handleSaveNode3Config = async () => {
@@ -802,8 +765,32 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  if (isMinimized) {
+    return (
+      <div style={{ background: '#0d1117', border: '1.5px solid #00ff9d55', borderRadius: '10px', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Layers size={15} color="#00ff9d" />
+          <span style={{ fontWeight: 800, fontSize: '11px', color: '#00ff9d', letterSpacing: '0.6px' }}>PAGINATION FLOW DAG</span>
+          <span style={{ fontSize: '9.5px', color: '#8b949e', background: '#161b22', border: '1px solid #30363d', padding: '1px 6px', borderRadius: '4px' }}>
+            {isCaptureGroupRunning ? 'Capturing Cycle...' : (isInitGroupRunning ? 'Initializing...' : 'Ready')}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button type="button" className="btn btn-sm btn-outline" onClick={onToggleMinimize} style={{ fontSize: '10.5px', padding: '2px 8px' }}>
+            <Maximize2 size={11} style={{ marginRight: '4px' }} /> Restore DAG
+          </button>
+          {onClose && (
+            <button type="button" className="win-btn win-btn-close" onClick={onClose} title="Close DAG Window">
+              <X size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '14px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
+    <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '12px', padding: '14px', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)', ...(isMaximized ? { position: 'fixed', inset: '14px', zIndex: 1200, overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {}) }}>
       {/* Top Header Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid #21262d', paddingBottom: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -906,20 +893,43 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
           <button
             type="button"
-            onClick={handleAutoFixViewport}
-            disabled={isAutoFixingViewport}
-            title="Auto-Fix Viewport: close soft keyboard and reflow 1080p desktop layout"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 9px', borderRadius: '6px',
-              background: isKeyboardOpen ? 'rgba(248, 81, 73, 0.2)' : 'rgba(56, 139, 253, 0.15)',
-              border: `1px solid ${isKeyboardOpen ? '#f85149' : '#388bfd'}`,
-              color: isKeyboardOpen ? '#ff7b72' : '#58a6ff',
-              fontSize: '10.5px', fontWeight: 700, cursor: isAutoFixingViewport ? 'not-allowed' : 'pointer'
-            }}
+            className={`btn btn-sm ${isSidebarOpen ? 'btn-primary' : 'btn-outline'}`}
+            onClick={() => setIsSidebarOpen(p => !p)}
+            style={{ fontSize: '10.5px', padding: '2px 8px' }}
+            title={isSidebarOpen ? "Hide Inspector Sidebar" : "Show Node Inspector Sidebar"}
           >
-            <RefreshCw size={11} className={isAutoFixingViewport ? 'spin' : ''} />
-            <span>AUTO-FIX VIEWPORT</span>
+            <Activity size={11} style={{ marginRight: '4px' }} />
+            <span>{isSidebarOpen ? 'Inspector Open' : 'Node Inspector'}</span>
           </button>
+
+          <div className="window-controls" style={{ marginLeft: '4px' }}>
+            <button
+              type="button"
+              className="win-btn"
+              onClick={onToggleMinimize}
+              title="Minimize DAG Window"
+            >
+              <Minus size={12} />
+            </button>
+            <button
+              type="button"
+              className="win-btn"
+              onClick={() => setIsMaximized(p => !p)}
+              title={isMaximized ? "Restore DAG" : "Maximize DAG"}
+            >
+              {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+            </button>
+            {onClose && (
+              <button
+                type="button"
+                className="win-btn win-btn-close"
+                onClick={onClose}
+                title="Close DAG Window"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1051,21 +1061,31 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 position: 'absolute',
                 left: '25.2%', top: '14px', width: '74.0%', height: '260px',
                 borderRadius: '10px',
-                border: `1.5px dashed ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : 'rgba(0, 255, 157, 0.25)'}`,
-                background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.45)',
+                border: `1.5px dashed ${isCaptureGroupRunning ? '#ff6b25' : (effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : 'rgba(0, 255, 157, 0.25)')}`,
+                background: isCaptureGroupRunning
+                  ? 'radial-gradient(ellipse at 50% 30%, rgba(255, 107, 37, 0.15) 0%, rgba(15, 23, 42, 0.5) 85%)'
+                  : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.45)'),
+                boxShadow: isCaptureGroupRunning ? '0 0 24px rgba(255, 107, 37, 0.35), inset 0 0 16px rgba(255, 60, 0, 0.15)' : 'none',
                 pointerEvents: 'auto',
                 cursor: 'pointer',
                 padding: '8px 10px',
-                boxSizing: 'border-box'
+                boxSizing: 'border-box',
+                transition: 'all 0.3s ease'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '10px', fontWeight: 800, color: '#00ff9d', letterSpacing: '0.5px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 800, color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d', letterSpacing: '0.5px' }}>
                     DAG 2: CAPTURE ENTIRE MARKDOWN
                   </span>
-                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.2)' : 'rgba(0, 255, 157, 0.15)', color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d', fontWeight: 800 }}>
-                    {isCaptureGroupRunning ? 'CAPTURING...' : 'READY'}
+                  <span style={{
+                    fontSize: '9px', padding: '1px 6px', borderRadius: '4px',
+                    background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.3)' : 'rgba(0, 255, 157, 0.15)',
+                    color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d',
+                    fontWeight: 800,
+                    border: `1px solid ${isCaptureGroupRunning ? '#ff6b2588' : 'transparent'}`
+                  }}>
+                    {isCaptureGroupRunning ? '♨️ THERMAL CAPTURING...' : 'READY'}
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1090,44 +1110,80 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             {/* DYNAMIC SVG CONNECTORS LAYER (SCALED 0..1000 ACROSS 100% CANVAS) */}
             <svg viewBox="0 0 1000 270" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
               <defs>
-                <marker id="dag-arrowhead-blue" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
-                  <polygon points="0 0, 6 3, 0 6" fill="#58a6ff" />
+                <linearGradient id="dag-flow-emerald" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#388bfd" />
+                  <stop offset="100%" stopColor="#00ff9d" />
+                </linearGradient>
+                <linearGradient id="dag-flow-heat" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#ff9100" />
+                  <stop offset="100%" stopColor="#ff3d00" />
+                </linearGradient>
+                <filter id="dag-wire-glow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+                <marker id="dag-arrowhead-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <polygon points="1 1, 7 4, 1 7" fill="#58a6ff" />
                 </marker>
-                <marker id="dag-arrowhead-green" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
-                  <polygon points="0 0, 6 3, 0 6" fill="#00ff9d" />
+                <marker id="dag-arrowhead-green" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <polygon points="1 1, 7 4, 1 7" fill="#00ff9d" />
                 </marker>
-                <marker id="dag-arrowhead-loop" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
-                  <polygon points="0 0, 6 3, 0 6" fill="#00ff9d" />
+                <marker id="dag-arrowhead-heat" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <polygon points="1 1, 7 4, 1 7" fill="#ff6b25" />
+                </marker>
+                <marker id="dag-arrowhead-loop" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+                  <polygon points="1 1, 7 4, 1 7" fill="#00ff9d" />
                 </marker>
               </defs>
 
               {/* Sequential connecting bezier paths */}
               {(() => {
-                // Normalized center X coordinates (0..1000) for the 8 nodes
-                const centers = [71, 187, 317, 439, 561, 683, 805, 927];
+                const nodeLefts = [14, 130, 260, 382, 504, 626, 748, 870];
+                const nodeW = 108;
                 const paths = [];
+
                 for (let i = 0; i < NODES_METADATA.length - 1; i++) {
                   const nodeA = NODES_METADATA[i];
                   const nodeB = NODES_METADATA[i + 1];
-                  const x1 = centers[i] + 54;
-                  const x2 = centers[i + 1] - 54;
+                  const x1 = nodeLefts[i] + nodeW + 1;
+                  const x2 = nodeLefts[i + 1] - 1;
                   const y1 = 105;
                   const y2 = 105;
+
                   const isConnectionActive = (runningNodeId === nodeA.id || runningNodeId === nodeB.id) ||
                     (nodeA.group === 'capture_entire_markdown' && isCaptureGroupRunning) ||
                     (nodeA.group === 'initialize' && isInitGroupRunning);
-                  const strokeColor = nodeB.group === 'initialize' ? '#58a6ff' : '#00ff9d';
-                  const pathD = `M ${x1} ${y1} C ${x1 + 10} ${y1}, ${x2 - 10} ${y2}, ${x2} ${y2}`;
+
+                  const isHeatActive = isConnectionActive && (isCaptureGroupRunning || runningNodeId === nodeA.id || runningNodeId === nodeB.id);
+                  const strokeColor = isHeatActive ? 'url(#dag-flow-heat)' : (nodeB.group === 'initialize' ? '#58a6ff' : 'url(#dag-flow-emerald)');
+                  const markerId = isHeatActive ? 'dag-arrowhead-heat' : (nodeB.group === 'initialize' ? 'dag-arrowhead-blue' : 'dag-arrowhead-green');
+                  const pathD = `M ${x1} ${y1} C ${x1 + 4} ${y1}, ${x2 - 4} ${y2}, ${x2} ${y2}`;
 
                   paths.push(
-                    <path
-                      key={`${nodeA.id}->${nodeB.id}`}
-                      d={pathD}
-                      className={`dag-wire ${isConnectionActive ? 'dag-wire-active' : ''}`}
-                      stroke={strokeColor}
-                      strokeOpacity={isConnectionActive ? 1 : 0.65}
-                      markerEnd={`url(#dag-arrowhead-${strokeColor === '#00ff9d' ? 'green' : 'blue'})`}
-                    />
+                    <g key={`${nodeA.id}->${nodeB.id}`}>
+                      {isConnectionActive && (
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke={isHeatActive ? '#ff6b25' : '#00ff9d'}
+                          strokeWidth="6"
+                          strokeOpacity="0.35"
+                          filter="url(#dag-wire-glow)"
+                        />
+                      )}
+                      <path
+                        d={pathD}
+                        className={`dag-wire ${isConnectionActive ? (isHeatActive ? 'dag-wire-active wire-heat' : 'dag-wire-active') : ''}`}
+                        stroke={strokeColor}
+                        strokeOpacity={isConnectionActive ? 1 : 0.65}
+                        markerEnd={`url(#${markerId})`}
+                      />
+                      {isConnectionActive && (
+                        <circle r="3" fill="#ffffff" filter="url(#dag-wire-glow)">
+                          <animateMotion path={pathD} dur="0.9s" repeatCount="indefinite" />
+                        </circle>
+                      )}
+                    </g>
                   );
                 }
                 return paths;
@@ -1135,22 +1191,41 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
               {/* Loopback Curve: Node 8 (document_assemble) -> Node 3 (frame_acquire) */}
               {(() => {
-                const startX = 927;
+                const nodeLefts = [14, 130, 260, 382, 504, 626, 748, 870];
+                const nodeW = 108;
+                const startX = nodeLefts[7] + nodeW / 2;
                 const startY = 146;
-                const endX = 317;
+                const endX = nodeLefts[2] + nodeW / 2;
                 const endY = 146;
                 const loopPath = `M ${startX} ${startY} C ${startX} 242, ${endX} 242, ${endX} ${endY}`;
+                const isLoopActive = isCaptureGroupRunning;
+
                 return (
                   <g>
+                    {isLoopActive && (
+                      <path
+                        d={loopPath}
+                        fill="none"
+                        stroke="#00ff9d"
+                        strokeWidth="5"
+                        strokeOpacity="0.3"
+                        filter="url(#dag-wire-glow)"
+                      />
+                    )}
                     <path
                       d={loopPath}
                       fill="none"
-                      stroke={triggerDecision.prevented ? '#f85149' : '#00ff9d'}
-                      strokeWidth="2"
-                      strokeDasharray="5 3"
-                      className={isCaptureGroupRunning ? 'dag-wire-active' : ''}
+                      stroke={triggerDecision.prevented ? '#f85149' : (isLoopActive ? '#00ff9d' : '#00ff9d88')}
+                      strokeWidth="2.2"
+                      strokeDasharray="6 3"
+                      className={isLoopActive ? 'dag-wire-active' : ''}
                       markerEnd="url(#dag-arrowhead-loop)"
                     />
+                    {isLoopActive && (
+                      <circle r="3.2" fill="#00ff9d" filter="url(#dag-wire-glow)">
+                        <animateMotion path={loopPath} dur="2.2s" repeatCount="indefinite" />
+                      </circle>
+                    )}
                     <text
                       x={(startX + endX) / 2}
                       y={235}
@@ -1179,14 +1254,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               return (
                 <div
                   key={node.id}
-                  className={`dag-mini-node ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''} ${isPulsingSwirl ? 'running-swirl' : ''}`}
+                  className={`dag-mini-node ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
                   style={{
                     left: `calc(${basePos.leftPct}% + ${offset.x}px)`,
                     top: `${basePos.topPx + offset.y}px`,
                     borderColor: isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d')),
                     boxShadow: isSelected
                       ? `0 0 16px ${node.accentColor}66, 0 4px 14px rgba(0,0,0,0.7)`
-                      : (status.isRunning ? `0 0 12px ${node.accentColor}44` : '0 4px 12px rgba(0,0,0,0.45)')
+                      : (status.isRunning ? `0 0 14px rgba(255, 107, 37, 0.65)` : '0 4px 12px rgba(0,0,0,0.45)')
                   }}
                   onMouseDown={(e) => handleNodeMouseDown(node.id, e)}
                   title={`Node ${node.step}: ${node.fullName}\nClick to inspect details. Drag to nudge.`}
@@ -1264,451 +1339,435 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         </div>
 
         {/* RIGHT: INSPECTION SIDEBAR CARD (SHOWS ALL INFORMATION DETAILS & NODE PROCESS TELEMETRY) */}
-        <div className="dag-sidebar-card" style={{ display: 'flex', flexDirection: 'column' }}>
-          
-          {/* Sidebar Header */}
-          <div style={{ padding: '12px 14px', background: '#1c2128', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  background: `${selectedNodeMeta.accentColor}25`,
-                  color: selectedNodeMeta.accentColor,
-                  border: `1px solid ${selectedNodeMeta.accentColor}55`,
-                  padding: '2px 7px',
-                  borderRadius: '6px'
-                }}
-              >
-                NODE {selectedNodeMeta.step}
-              </span>
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
-                  {selectedNodeMeta.shortName}
+        {isSidebarOpen && (
+          <div className="dag-sidebar-card" style={{ display: 'flex', flexDirection: 'column' }}>
+            
+            {/* Sidebar Header */}
+            <div style={{ padding: '12px 14px', background: '#1c2128', borderBottom: '1px solid #30363d', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    background: `${selectedNodeMeta.accentColor}25`,
+                    color: selectedNodeMeta.accentColor,
+                    border: `1px solid ${selectedNodeMeta.accentColor}55`,
+                    padding: '2px 7px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  NODE {selectedNodeMeta.step}
+                </span>
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
+                    {selectedNodeMeta.shortName}
+                  </div>
+                  <div style={{ fontSize: '9.5px', color: '#8b949e' }}>
+                    {selectedNodeMeta.group === 'initialize' ? 'Group 1: Initialize' : 'Group 2: Capture'}
+                  </div>
                 </div>
-                <div style={{ fontSize: '9.5px', color: '#8b949e' }}>
-                  {selectedNodeMeta.group === 'initialize' ? 'Group 1: Initialize' : 'Group 2: Capture'}
-                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {selectedNodeMeta.hasConfig && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedNodeMeta.id === 'frame_acquire') setIsNode3ConfigOpen(true);
+                      if (selectedNodeMeta.id === 'frame_ocr') setIsNode4ConfigOpen(true);
+                      if (selectedNodeMeta.id === 'verification_trigger') setIsConfigModalOpen(true);
+                    }}
+                    title="Configure Node Parameters"
+                    style={{
+                      background: '#21262d', border: '1px solid #30363d', color: '#58a6ff',
+                      padding: '3px 6px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center'
+                    }}
+                  >
+                    <Settings size={12} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="win-btn win-btn-close"
+                  onClick={() => setIsSidebarOpen(false)}
+                  title="Close Inspector Sidebar"
+                >
+                  <X size={12} />
+                </button>
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              {selectedNodeMeta.hasConfig && (
+            {/* Sidebar Body (Scrollable details card) */}
+            <div style={{ padding: '12px 14px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              
+              {/* Quick Action Button for Selected Node */}
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selectedNodeMeta.id === 'frame_acquire') setIsNode3ConfigOpen(true);
-                    if (selectedNodeMeta.id === 'frame_ocr') setIsNode4ConfigOpen(true);
-                    if (selectedNodeMeta.id === 'verification_trigger') setIsConfigModalOpen(true);
-                  }}
-                  title="Configure Node Parameters"
+                  onClick={() => handleRunNode(selectedNodeMeta.id)}
+                  disabled={runningNodeId !== null}
                   style={{
-                    background: '#21262d', border: '1px solid #30363d', color: '#58a6ff',
-                    padding: '3px 6px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center'
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '7px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${selectedNodeMeta.accentColor}66`,
+                    background: `${selectedNodeMeta.accentColor}18`,
+                    color: selectedNodeMeta.accentColor,
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    cursor: runningNodeId !== null ? 'wait' : 'pointer',
+                    fontFamily: 'inherit'
                   }}
                 >
-                  <Settings size={12} />
+                  {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={12} className="spin" /> : <Play size={12} />}
+                  <span>{runningNodeId === selectedNodeMeta.id ? `Running Step ${selectedNodeMeta.step}...` : `Run Node ${selectedNodeMeta.step}`}</span>
                 </button>
-              )}
-            </div>
-          </div>
 
-          {/* Sidebar Body (Scrollable details card) */}
-          <div style={{ padding: '12px 14px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            
-            {/* Quick Action Button for Selected Node */}
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => handleRunNode(selectedNodeMeta.id)}
-                disabled={runningNodeId !== null}
-                style={{
-                  flex: 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  padding: '7px 12px',
-                  borderRadius: '6px',
-                  border: `1px solid ${selectedNodeMeta.accentColor}66`,
-                  background: `${selectedNodeMeta.accentColor}18`,
-                  color: selectedNodeMeta.accentColor,
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  cursor: runningNodeId !== null ? 'wait' : 'pointer',
-                  fontFamily: 'inherit'
-                }}
-              >
-                {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={12} className="spin" /> : <Play size={12} />}
-                <span>{runningNodeId === selectedNodeMeta.id ? `Running Step ${selectedNodeMeta.step}...` : `Run Node ${selectedNodeMeta.step}`}</span>
-              </button>
+                {selectedNodeMeta.id === 'local_ai_ocr' && node3b.extracted_text && (
+                  <button
+                    type="button"
+                    onClick={() => setIsTextModalOpen(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
+                      borderRadius: '6px', border: '1px solid #30363d', background: '#21262d',
+                      color: '#58a6ff', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    <FileText size={12} />
+                    <span>Full Text</span>
+                  </button>
+                )}
+              </div>
 
-              {selectedNodeMeta.id === 'local_ai_ocr' && node3b.extracted_text && (
-                <button
-                  type="button"
-                  onClick={() => setIsTextModalOpen(true)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '7px 10px',
-                    borderRadius: '6px', border: '1px solid #30363d', background: '#21262d',
-                    color: '#58a6ff', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
-                  }}
-                >
-                  <FileText size={12} />
-                  <span>Full Text</span>
-                </button>
-              )}
-            </div>
-
-            {/* Real-time Execution Timings & Node Active State */}
-            {(() => {
-              const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
-              return (
-                <div style={{ background: '#0d1117', border: `1.5px solid ${liveStatus.isActive ? '#ff6b25' : '#21262d'}`, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : '#58a6ff', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <Clock size={11} color={liveStatus.isActive ? '#ff6b25' : '#58a6ff'} />
-                      <span>NODE EXECUTION TIMINGS & STATE</span>
+              {/* Real-time Execution Timings & Node Active State */}
+              {(() => {
+                const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
+                return (
+                  <div style={{
+                    background: liveStatus.isActive ? 'radial-gradient(ellipse at 50% 0%, rgba(255, 107, 37, 0.15) 0%, #0d1117 80%)' : '#0d1117',
+                    border: `1.5px solid ${liveStatus.isActive ? '#ff6b25' : '#21262d'}`,
+                    boxShadow: liveStatus.isActive ? '0 0 18px rgba(255, 107, 37, 0.35), inset 0 0 12px rgba(255, 107, 37, 0.15)' : 'none',
+                    borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ fontSize: '10px', fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : '#58a6ff', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Clock size={11} color={liveStatus.isActive ? '#ff6b25' : '#58a6ff'} />
+                        <span>NODE EXECUTION TIMINGS & STATE</span>
+                      </div>
+                      <span style={{
+                        fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
+                        background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
+                        color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
+                        border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`,
+                        boxShadow: liveStatus.isActive ? '0 0 8px rgba(255, 107, 37, 0.4)' : 'none'
+                      }}>
+                        {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
+                      </span>
                     </div>
-                    <span style={{
-                      fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
-                      background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.2)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
-                      color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
-                      border: `1px solid ${liveStatus.isActive ? '#ff6b2566' : 'transparent'}`
-                    }}>
-                      {liveStatus.isActive ? '🔥 SWIRLING ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px', marginTop: '2px' }}>
+                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>STARTED AT</div>
+                        <div style={{ fontWeight: 800, color: liveStatus.startedAt ? '#f0f6fc' : '#6e7681', marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                          {liveStatus.startedAt || '--:--:--'}
+                        </div>
+                      </div>
+                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>FINISHED AT</div>
+                        <div style={{ fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : (liveStatus.finishedAt ? '#00ff9d' : '#6e7681'), marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                          {liveStatus.isActive ? '⚡ Running...' : (liveStatus.finishedAt || '--:--:--')}
+                        </div>
+                      </div>
+                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>ELAPSED DURATION</div>
+                        <div style={{ fontWeight: 800, color: liveStatus.durationMs !== null ? '#58a6ff' : '#6e7681', marginTop: '2px' }}>
+                          {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : '--')}
+                        </div>
+                      </div>
+                      <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>CURRENT METRIC</div>
+                        <div style={{ fontWeight: 800, color: liveStatus.color, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {liveStatus.metricLabel || '--'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Description & Objective */}
+              <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
+                <div style={{ fontSize: '10px', fontWeight: 700, color: '#8b949e', marginBottom: '2px' }}>OPERATION / PURPOSE</div>
+                <div style={{ fontSize: '11px', color: '#c9d1d9', lineHeight: 1.4 }}>
+                  {selectedNodeMeta.desc}
+                </div>
+              </div>
+
+              {/* Node-Specific Details & Diagnostic Information */}
+              {selectedNodeMeta.id === 'init_end' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Calibrated Total Lines:</span>
+                    <span style={{ fontWeight: 800, color: node1TotalLines > 0 ? '#00ff9d' : '#8b949e' }}>
+                      {node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : 'Not Calibrated'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>EOF Gutter Verification:</span>
+                    <span style={{ fontWeight: 700, color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e') }}>
+                      {isNode1Calibrated ? 'Verified at EOF' : (isNode1Error ? 'Failed (Line 1)' : 'Pending')}
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px', marginTop: '2px' }}>
-                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>STARTED AT</div>
-                      <div style={{ fontWeight: 800, color: liveStatus.startedAt ? '#f0f6fc' : '#6e7681', marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
-                        {liveStatus.startedAt || '--:--:--'}
+                  {isNode1Error && (
+                    <div style={{ background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <AlertTriangle size={12} /> Page did not move to EOF
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
+                          style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '9.5px', cursor: 'pointer', fontWeight: 600 }}
+                        >
+                          {showNode1Troubleshooting ? 'Hide' : 'Show'}
+                        </button>
+                      </div>
+
+                      {showNode1Troubleshooting && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px', color: '#c9d1d9' }}>
+                          <div>1. <strong>Editor Focus:</strong> Tap in markdown document to focus blinking cursor.</div>
+                          <div>2. <strong>Soft Keyboard:</strong> Suppress on-screen IME keyboard.</div>
+                          <div>3. <strong>Desktop Mode:</strong> Verify Teams editor visible on external screen.</div>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                        <button
+                          type="button"
+                          disabled={isFixingNode1Focus}
+                          onClick={async () => {
+                            setIsFixingNode1Focus(true);
+                            try {
+                              await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
+                              onRefresh?.();
+                            } catch {}
+                            finally { setIsFixingNode1Focus(false); }
+                          }}
+                          style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          {isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isHidingKeyboard}
+                          onClick={async () => {
+                            setIsHidingKeyboard(true);
+                            try {
+                              await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
+                              onRefresh?.();
+                            } catch {}
+                            finally { setIsHidingKeyboard(false); }
+                          }}
+                          style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
+                        >
+                          {isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}
+                        </button>
                       </div>
                     </div>
-                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>FINISHED AT</div>
-                      <div style={{ fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : (liveStatus.finishedAt ? '#00ff9d' : '#6e7681'), marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
-                        {liveStatus.isActive ? '⚡ Running...' : (liveStatus.finishedAt || '--:--:--')}
-                      </div>
-                    </div>
-                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>ELAPSED DURATION</div>
-                      <div style={{ fontWeight: 800, color: liveStatus.durationMs !== null ? '#58a6ff' : '#6e7681', marginTop: '2px' }}>
-                        {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : '--')}
-                      </div>
-                    </div>
-                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
-                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>CURRENT METRIC</div>
-                      <div style={{ fontWeight: 800, color: liveStatus.color, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {liveStatus.metricLabel || '--'}
-                      </div>
-                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'reset_home' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Top Gutter Verified:</span>
+                    <span style={{ fontWeight: 800, color: isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e') }}>
+                      {isNode2Verified ? 'Verified: Line 1' : (isNode2Error ? 'Failed: Line 1 Missing' : 'Awaiting Test')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Detected First Line:</span>
+                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
+                      {node2.first_line ? `Ln ${node2.first_line}` : 'Line 1'}
+                    </span>
                   </div>
                 </div>
-              );
-            })()}
+              )}
 
-            {/* Description & Objective */}
-            <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
-              <div style={{ fontSize: '10px', fontWeight: 700, color: '#8b949e', marginBottom: '2px' }}>OPERATION / PURPOSE</div>
-              <div style={{ fontSize: '11px', color: '#c9d1d9', lineHeight: 1.4 }}>
-                {selectedNodeMeta.desc}
+              {selectedNodeMeta.id === 'frame_acquire' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Current Page:</span>
+                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>Page #{node3.page || currentPage}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Settle Delay:</span>
+                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3Config.settle_delay_ms} ms</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Keyboard Guard:</span>
+                    <span style={{ fontWeight: 700, color: node3Config.guard_keyboard ? '#00ff9d' : '#8b949e' }}>
+                      {node3Config.guard_keyboard ? 'ACTIVE' : 'OFF'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'local_ai_ocr' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Model Engine:</span>
+                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>{node3b.model_used || 'MiniCPM-V (Ollama)'}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Extracted Lines / Chars:</span>
+                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3b.lines_count || 0} lines • {node3b.char_count || 0} chars</span>
+                  </div>
+                  {node3b.extracted_text && (
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '6px 8px', maxHeight: '70px', overflowY: 'auto', fontSize: '9px', color: '#7ee787', whiteSpace: 'pre-wrap' }}>
+                      {node3b.extracted_text}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'frame_ocr' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Gutter Bounds:</span>
+                    <span style={{ fontWeight: 800, color: '#a371f7' }}>
+                      Ln {node4.top_line || effectiveTop} → Ln {node4.bottom_line || effectiveBottom}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Detected Lines Count:</span>
+                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node4.extracted_line_count || (effectiveBottom - effectiveTop + 1)} lines</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>OCR Engine:</span>
+                    <span style={{ fontWeight: 700, color: '#58a6ff' }}>{node4Config.engine}</span>
+                  </div>
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'arrow_down' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Next Target Top Line:</span>
+                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>Ln {nextTargetTop}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Arrow Down Key Steps:</span>
+                    <span style={{ fontWeight: 700, color: '#ffa657' }}>
+                      {node5.arrow_count || Math.max(1, nextTargetTop - (node4.top_line || effectiveTop || 1))} steps
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'verification_trigger' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Trigger Decision:</span>
+                    <span style={{ fontWeight: 800, color: triggerDecision.prevented ? '#ff7b72' : '#00ff9d' }}>
+                      {triggerDecision.prevented ? 'PREVENTED ⛔' : 'ALLOWED ✔'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Verification Gutter:</span>
+                    <span style={{ fontWeight: 700, color: '#58a6ff' }}>Target Ln {nextTargetTop}</span>
+                  </div>
+                  {triggerDecision.prevented && triggerDecision.reasons?.length > 0 && (
+                    <div style={{ background: 'rgba(248, 81, 73, 0.1)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '4px', padding: '6px 8px', color: '#ff7b72', fontSize: '9.5px' }}>
+                      <strong>Blocking Reason:</strong> {triggerDecision.reasons[0]}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {selectedNodeMeta.id === 'document_assemble' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Total Lines Verified:</span>
+                    <span style={{ fontWeight: 800, color: '#00ff9d' }}>
+                      {node8.total_captured_lines || 0} / {node8.total_lines_target || effectiveTotal || '?'} lines
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Document Completion:</span>
+                    <span style={{ fontWeight: 800, color: node8.is_complete ? '#00ff9d' : '#58a6ff' }}>
+                      {node8.completion_percent || 0}% {node8.is_complete ? '✔ (100% Complete)' : ''}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Loop Iteration Cycle:</span>
+                    <span style={{ fontWeight: 700, color: '#ffa657' }}>
+                      Cycle #{node8.loop_iteration || 1}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                    <span style={{ color: '#8b949e' }}>Reconstructed Size:</span>
+                    <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
+                      {node8.reconstructed_length ? `${node8.reconstructed_length.toLocaleString()} characters` : 'Pending capture'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* PROCESS TRACING TELEMETRY TOASTER (SPECIFIC FOR SELECTED NODE) */}
+              <div style={{ marginTop: 'auto', paddingTop: '8px', borderTop: '1px solid #21262d' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Activity size={12} color={selectedNodeMeta.accentColor} />
+                    <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
+                      PROCESS TRACING TELEMETRY
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '9px', background: '#0d1117', border: '1px solid #21262d', padding: '1px 5px', borderRadius: '3px', color: selectedNodeMeta.accentColor, fontWeight: 700 }}>
+                    {nodeTelemetryEvents.length} events
+                  </span>
+                </div>
+
+                {/* Live Toaster Stream for Selected Node */}
+                <div className="dag-toaster-card-stream">
+                  {nodeTelemetryEvents.length === 0 ? (
+                    <div style={{ color: '#6e7681', fontSize: '10px', padding: '8px', textAlign: 'center' }}>
+                      No telemetry trace events for Node {selectedNodeMeta.step} yet.
+                      <div style={{ marginTop: '3px', fontSize: '9px', color: '#8b949e' }}>
+                        Press "Run Node {selectedNodeMeta.step}" above to record real-time execution.
+                      </div>
+                    </div>
+                  ) : (
+                    nodeTelemetryEvents.slice(-6).map(ev => (
+                      <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
+                        <span style={{ color: '#6e7681', fontSize: '9px', flexShrink: 0 }}>{ev.timestamp}</span>
+                        <span style={{
+                          fontSize: '8.5px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px',
+                          background: ev.category === 'SYSTEM' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)',
+                          color: ev.category === 'SYSTEM' ? '#58a6ff' : '#00ff9d',
+                          flexShrink: 0
+                        }}>
+                          {ev.category}
+                        </span>
+                        <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ev.message}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
+
             </div>
-
-            {/* Node-Specific Details & Diagnostic Information */}
-            {selectedNodeMeta.id === 'init_end' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Calibrated Total Lines:</span>
-                  <span style={{ fontWeight: 800, color: node1TotalLines > 0 ? '#00ff9d' : '#8b949e' }}>
-                    {node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : 'Not Calibrated'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>EOF Gutter Verification:</span>
-                  <span style={{ fontWeight: 700, color: isNode1Calibrated ? '#00ff9d' : (isNode1Error ? '#ff7b72' : '#8b949e') }}>
-                    {isNode1Calibrated ? 'Verified at EOF' : (isNode1Error ? 'Failed (Line 1)' : 'Pending')}
-                  </span>
-                </div>
-
-                {isNode1Error && (
-                  <div style={{ background: 'rgba(248, 81, 73, 0.08)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px', padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#f85149', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <AlertTriangle size={12} /> Page did not move to EOF
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowNode1Troubleshooting(!showNode1Troubleshooting)}
-                        style={{ background: 'transparent', border: 'none', color: '#58a6ff', fontSize: '9.5px', cursor: 'pointer', fontWeight: 600 }}
-                      >
-                        {showNode1Troubleshooting ? 'Hide' : 'Show'}
-                      </button>
-                    </div>
-
-                    {showNode1Troubleshooting && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px', color: '#c9d1d9' }}>
-                        <div>1. <strong>Editor Focus:</strong> Tap in markdown document to focus blinking cursor.</div>
-                        <div>2. <strong>Soft Keyboard:</strong> Suppress on-screen IME keyboard.</div>
-                        <div>3. <strong>Desktop Mode:</strong> Verify Teams editor visible on external screen.</div>
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-                      <button
-                        type="button"
-                        disabled={isFixingNode1Focus}
-                        onClick={async () => {
-                          setIsFixingNode1Focus(true);
-                          try {
-                            await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
-                            onRefresh?.();
-                          } catch {}
-                          finally { setIsFixingNode1Focus(false); }
-                        }}
-                        style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        {isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isHidingKeyboard}
-                        onClick={async () => {
-                          setIsHidingKeyboard(true);
-                          try {
-                            await fetch(`${apiBase}/api/device/close-keyboard`, { method: 'POST' });
-                            onRefresh?.();
-                          } catch {}
-                          finally { setIsHidingKeyboard(false); }
-                        }}
-                        style={{ flex: 1, padding: '4px 6px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer' }}
-                      >
-                        {isHidingKeyboard ? 'Closing...' : 'Hide Keyboard'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'reset_home' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Top Gutter Verified:</span>
-                  <span style={{ fontWeight: 800, color: isNode2Verified ? '#00ff9d' : (isNode2Error ? '#ff7b72' : '#8b949e') }}>
-                    {isNode2Verified ? 'Verified: Line 1' : (isNode2Error ? 'Failed: Line 1 Missing' : 'Awaiting Test')}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Detected First Line:</span>
-                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
-                    {node2.first_line ? `Ln ${node2.first_line}` : 'Line 1'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'frame_acquire' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Current Page:</span>
-                  <span style={{ fontWeight: 800, color: '#00ff9d' }}>Page #{node3.page || currentPage}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Settle Delay:</span>
-                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3Config.settle_delay_ms} ms</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Keyboard Guard:</span>
-                  <span style={{ fontWeight: 700, color: node3Config.guard_keyboard ? '#00ff9d' : '#8b949e' }}>
-                    {node3Config.guard_keyboard ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'local_ai_ocr' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Model Engine:</span>
-                  <span style={{ fontWeight: 800, color: '#00ff9d' }}>{node3b.model_used || 'MiniCPM-V (Ollama)'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Extracted Lines / Chars:</span>
-                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node3b.lines_count || 0} lines • {node3b.char_count || 0} chars</span>
-                </div>
-                {node3b.extracted_text && (
-                  <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '6px 8px', maxHeight: '70px', overflowY: 'auto', fontSize: '9px', color: '#7ee787', whiteSpace: 'pre-wrap' }}>
-                    {node3b.extracted_text}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'frame_ocr' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Gutter Bounds:</span>
-                  <span style={{ fontWeight: 800, color: '#a371f7' }}>
-                    Ln {node4.top_line || effectiveTop} → Ln {node4.bottom_line || effectiveBottom}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Detected Lines Count:</span>
-                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>{node4.extracted_line_count || (effectiveBottom - effectiveTop + 1)} lines</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>OCR Engine:</span>
-                  <span style={{ fontWeight: 700, color: '#58a6ff' }}>{node4Config.engine}</span>
-                </div>
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'arrow_down' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Next Target Top Line:</span>
-                  <span style={{ fontWeight: 800, color: '#00ff9d' }}>Ln {nextTargetTop}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Arrow Down Key Steps:</span>
-                  <span style={{ fontWeight: 700, color: '#ffa657' }}>
-                    {node5.arrow_count || Math.max(1, nextTargetTop - (node4.top_line || effectiveTop || 1))} steps
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'verification_trigger' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Trigger Decision:</span>
-                  <span style={{ fontWeight: 800, color: triggerDecision.prevented ? '#ff7b72' : '#00ff9d' }}>
-                    {triggerDecision.prevented ? 'PREVENTED ⛔' : 'ALLOWED ✔'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Verification Gutter:</span>
-                  <span style={{ fontWeight: 700, color: '#58a6ff' }}>Target Ln {nextTargetTop}</span>
-                </div>
-                {triggerDecision.prevented && triggerDecision.reasons?.length > 0 && (
-                  <div style={{ background: 'rgba(248, 81, 73, 0.1)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '4px', padding: '6px 8px', color: '#ff7b72', fontSize: '9.5px' }}>
-                    <strong>Blocking Reason:</strong> {triggerDecision.reasons[0]}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {selectedNodeMeta.id === 'document_assemble' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Total Lines Verified:</span>
-                  <span style={{ fontWeight: 800, color: '#00ff9d' }}>
-                    {node8.total_captured_lines || 0} / {node8.total_lines_target || effectiveTotal || '?'} lines
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Document Completion:</span>
-                  <span style={{ fontWeight: 800, color: node8.is_complete ? '#00ff9d' : '#58a6ff' }}>
-                    {node8.completion_percent || 0}% {node8.is_complete ? '✔ (100% Complete)' : ''}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Loop Iteration Cycle:</span>
-                  <span style={{ fontWeight: 700, color: '#ffa657' }}>
-                    Cycle #{node8.loop_iteration || 1}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
-                  <span style={{ color: '#8b949e' }}>Reconstructed Size:</span>
-                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
-                    {node8.reconstructed_length ? `${node8.reconstructed_length.toLocaleString()} characters` : 'Pending capture'}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* PROCESS TRACING TELEMETRY TOASTER (SPECIFIC FOR SELECTED NODE) */}
-            <div style={{ marginTop: 'auto', paddingTop: '8px', borderTop: '1px solid #21262d' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Activity size={12} color={selectedNodeMeta.accentColor} />
-                  <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
-                    PROCESS TRACING TELEMETRY
-                  </span>
-                </div>
-                <span style={{ fontSize: '9px', background: '#0d1117', border: '1px solid #21262d', padding: '1px 5px', borderRadius: '3px', color: selectedNodeMeta.accentColor, fontWeight: 700 }}>
-                  {nodeTelemetryEvents.length} events
-                </span>
-              </div>
-
-              {/* Live Toaster Stream for Selected Node */}
-              <div className="dag-toaster-card-stream">
-                {nodeTelemetryEvents.length === 0 ? (
-                  <div style={{ color: '#6e7681', fontSize: '10px', padding: '8px', textAlign: 'center' }}>
-                    No telemetry trace events for Node {selectedNodeMeta.step} yet.
-                    <div style={{ marginTop: '3px', fontSize: '9px', color: '#8b949e' }}>
-                      Press "Run Node {selectedNodeMeta.step}" above to record real-time execution.
-                    </div>
-                  </div>
-                ) : (
-                  nodeTelemetryEvents.slice(-6).map(ev => (
-                    <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
-                      <span style={{ color: '#6e7681', fontSize: '9px', flexShrink: 0 }}>{ev.timestamp}</span>
-                      <span style={{
-                        fontSize: '8.5px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px',
-                        background: ev.category === 'SYSTEM' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)',
-                        color: ev.category === 'SYSTEM' ? '#58a6ff' : '#00ff9d',
-                        flexShrink: 0
-                      }}>
-                        {ev.category}
-                      </span>
-                      <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ev.message}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
           </div>
-        </div>
+        )}
 
-      </div>
-
-      {/* FOOTER BAR: OVERALL PROGRESS & CALIBRATION SHORTCUT */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #21262d', gap: '12px' }}>
-        <div style={{ fontSize: '11px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Activity size={14} color="#00ff9d" />
-          <span>Actuator Progress:</span>
-          <strong style={{ color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#ffa657') }}>
-            {isTriggerFired
-              ? `✔ All ${effectiveTotal} lines captured!`
-              : (triggerDecision.prevented
-                  ? `⛔ Trigger Prevented (${triggerDecision.reasons.length} issue(s))`
-                  : `Capturing page ${currentPage} (Target Top: Ln ${nextTargetTop} of ${effectiveTotal || '?'})`)}
-          </strong>
-          {calibrationMsg && <span style={{ color: '#58a6ff', marginLeft: '8px' }}>{calibrationMsg}</span>}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={() => setIsConfigModalOpen(true)}
-            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', background: '#21262d', color: '#58a6ff', border: '1px solid #30363d', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}
-          >
-            <Sliders size={12} /><span>Configure Trigger (Node 6)</span>
-          </button>
-          <button
-            onClick={handleTriggerCalibration}
-            disabled={isRunningCalibration}
-            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', background: isRunningCalibration ? '#21262d' : '#1f6feb', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: 700, cursor: isRunningCalibration ? 'wait' : 'pointer', fontFamily: 'inherit' }}
-          >
-            <RefreshCw size={11} className={isRunningCalibration ? 'spin' : ''} /><span>{isRunningCalibration ? 'Calibrating...' : 'Run Ctrl+End / Ctrl+Home Calibrate'}</span>
-          </button>
-        </div>
       </div>
 
       {/* MODAL 1: Node 3 Screen Capture Config */}

@@ -116,7 +116,7 @@ export const GotoLineModal: React.FC<Props> = ({
           </div>
           {mode === 'desktop' && (
             <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={onToggleBoundingBoxes} style={{ height: '24px', padding: '0 8px' }}>
-              {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>AI BOXES</span>
+              {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>CONTENT FRAMING</span>
             </button>
           )}
           <button type="button" className={`live-tab-btn ${expanded ? 'active' : ''}`} onClick={() => setExpanded(p => !p)} style={{ fontSize: '11px', padding: '4px 9px' }}>
