@@ -426,7 +426,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
               title="Click to manage target device"
             >
               <Smartphone size={12} />
-              <span>{deviceModel === 'pixel_8' ? 'PIXEL 8 (31L)' : 'PIXEL 10 (47L)'}</span>
+              <span>{deviceModel === 'pixel_8' ? 'PIXEL 8 (49L)' : 'PIXEL 10 (49L)'}</span>
               <span className="status-dot-mini" />
             </button>
 
@@ -1001,7 +1001,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>PIXEL 8</span>
-                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(31L)</span>
+                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
                             </div>
                             <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
                               {pixel8Ip || 'No IP configured'}
@@ -1142,7 +1142,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>PIXEL 10</span>
-                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(47L)</span>
+                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
                             </div>
                             <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
                               {pixel10Ip || 'No IP configured'}

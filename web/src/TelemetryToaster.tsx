@@ -437,7 +437,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               <div className="toaster-tab-content">
                 <div className="telemetry-pacer-grid">
                   {[
-                    ['Target Device:', deviceModel === 'pixel_8' ? 'Google Pixel 8 (31L)' : 'Google Pixel 10 (36L)', 'val highlight'],
+                    ['Target Device:', deviceModel === 'pixel_8' ? 'Google Pixel 8 (49L)' : 'Google Pixel 10 (49L)', 'val highlight'],
                     ['Active Step:', telemetry.orchestration?.active_step || (telemetry.is_pacing ? 'PACING' : 'IDLE'), 'val font-mono'],
                     ['Current Page:', `Page #${telemetry.current_page || 1}`, 'val'],
                     ['Top Gutter Line:', `Ln ${telemetry.current_top_line || documentSummary.min_line || 0}`, 'val'],
