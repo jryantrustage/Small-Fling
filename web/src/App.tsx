@@ -953,7 +953,7 @@ function AppContent() {
       />
 
       {showDag && (
-        <div style={{ padding: '0 20px 12px 20px' }}>
+        <div style={{ padding: '0 20px 6px 20px' }}>
           <FlowDag
             apiBase={API_BASE}
             activeProjectId={activeProject?.id}
@@ -1299,7 +1299,7 @@ function AppContent() {
                     </div>
                     <div className="gutter-line-callout top"><span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">TOP GUTTER:</span><span className="gutter-callout-value">{alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}</span></div>
                     <div className="source-image-wrapper fit" style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <img key={`main-desktop-stream-${streamKey}`} src={`${API_BASE}/api/device/stream?mode=desktop&t=${streamKey}`} alt="Live Desktop" style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 240px)', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=desktop&t=${Date.now()}`; }} />
+                      <img key={`main-desktop-stream-${streamKey}`} src={`${API_BASE}/api/device/stream?mode=desktop&t=${streamKey}`} alt="Live Desktop" style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 165px)', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=desktop&t=${Date.now()}`; }} />
                       {showBoundingBoxes && renderBoundingBoxesOverlay(alignmentData)}
                     </div>
                     <div className="gutter-line-callout bottom"><span className="gutter-callout-icon">▼</span><span className="gutter-callout-label">BOTTOM GUTTER:</span><span className="gutter-callout-value">{alignmentData.last_line_number || telemetry.current_bottom_line ? `Line #${alignmentData.last_line_number || telemetry.current_bottom_line}` : 'Detecting...'}</span></div>
@@ -1309,7 +1309,7 @@ function AppContent() {
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={14} color="#00ff9d" /><span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>SPLICED CANVAS · {frames.length} FRAMES</span></div>
                     </div>
-                    <div className="source-image-wrapper fit"><img src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} alt="Spliced" style={{ width: '100%', display: 'block' }} /></div>
+                    <div className="source-image-wrapper fit"><img src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} alt="Spliced" style={{ width: '100%', maxHeight: 'calc(100vh - 165px)', objectFit: 'contain', display: 'block' }} /></div>
                   </div>
                 ) : activeFrame ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
