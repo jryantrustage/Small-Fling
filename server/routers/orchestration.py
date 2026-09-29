@@ -38,6 +38,18 @@ except ImportError:
 
 async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Optional[bytes] = None):
     try:
+        import importlib
+        from services import adb_service
+        try:
+            from ..classifiers import editor_classifiers
+        except ImportError:
+            from classifiers import editor_classifiers
+        from services import state
+        importlib.reload(state)
+        importlib.reload(adb_service)
+        importlib.reload(editor_classifiers)
+        classifier_registry.register(editor_classifiers.KeyboardOpenClassifier())
+
         cfg = state.dag_state["nodes"].get("verification_trigger", {}).get("config", {})
         qualifiers_cfg = cfg.get("qualifiers", {})
         target_ids = [k for k, v in qualifiers_cfg.items() if v.get("enabled", True)] if qualifiers_cfg else None

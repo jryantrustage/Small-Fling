@@ -543,7 +543,11 @@ def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]
 
     active_issues = []
     # Check latest issues cached from classifiers or telemetry
-    known_issues = eval_results or latest_telemetry.get("classifier_issues", [])
+    if eval_results is not None:
+        known_issues = eval_results
+        latest_telemetry["classifier_issues"] = eval_results
+    else:
+        known_issues = latest_telemetry.get("classifier_issues", [])
     issue_map = {item.get("classifier_id", ""): item for item in known_issues}
 
     # Also evaluate OCR degradation directly from captured frames

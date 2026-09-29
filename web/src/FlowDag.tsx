@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Activity, RefreshCw, Layers, Lock, Settings, ShieldCheck, ShieldAlert,
   ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
-  FileText, Move, Clock, Minus, Maximize2, Minimize2
+  FileText, Move, Clock, Minus, Maximize2, Minimize2, Zap
 } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
@@ -312,6 +312,53 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   });
 
   const [triggerDecision, setTriggerDecision] = useState<TriggerDecisionState>({ allowed: true, prevented: false, reasons: [] });
+  const [pinnedHoverNodeId, setPinnedHoverNodeId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [dismissedNode7Diagnostic, setDismissedNode7Diagnostic] = useState(false);
+  const [isFixingQualifier, setIsFixingQualifier] = useState(false);
+
+  const handleAutoFixKeyboardAndUnblock = async () => {
+    setIsFixingQualifier(true);
+    try {
+      await fetch(`${apiBase}/api/device/alignment/fix-viewport`, { method: 'POST' });
+      await fetch(`${apiBase}/api/classifiers/fix/keyboard_open`, { method: 'POST' });
+      const res = await fetch(`${apiBase}/api/dag/nodes/verification_trigger/evaluate`, { method: 'POST' });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
+      }
+      setNodeFeedback({ id: 'verification_trigger', message: 'Auto-fixed viewport & dismissed soft keyboard ✔' });
+    } catch {
+      setNodeFeedback({ id: 'verification_trigger', message: 'Failed to auto-fix viewport', isError: true });
+    } finally {
+      setIsFixingQualifier(false);
+    }
+  };
+
+  const handleBypassKeyboardQualifier = async () => {
+    setIsFixingQualifier(true);
+    try {
+      const updatedQualifiers = {
+        ...node5Config.qualifiers,
+        keyboard_open: { ...node5Config.qualifiers.keyboard_open, enabled: false }
+      };
+      const res = await fetch(`${apiBase}/api/dag/nodes/verification_trigger/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qualifiers: updatedQualifiers })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setNode5Config(prev => ({ ...prev, qualifiers: updatedQualifiers }));
+        if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
+        setNodeFeedback({ id: 'verification_trigger', message: 'Bypassed Virtual Keyboard qualifier ✔' });
+      }
+    } catch {
+      setNodeFeedback({ id: 'verification_trigger', message: 'Failed to bypass qualifier', isError: true });
+    } finally {
+      setIsFixingQualifier(false);
+    }
+  };
 
   useEffect(() => {
     const fetchDag = async () => {
@@ -839,26 +886,35 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   // Micro Node Component
   const renderMicroNode = (node: NodeMeta) => {
     const isSelected = activeSelectedNodeId === node.id;
+    const isPinned = pinnedHoverNodeId === node.id;
     const status = getNodeLiveStatus(node.id);
     const isPulsingSwirl = status.isActive || status.isRunning || (currentActiveNode === node.id);
 
     return (
       <div
         key={node.id}
-        className={`dag-mini-node-compact ${isSelected ? 'selected' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
+        className={`dag-mini-node-compact ${isSelected ? 'selected' : ''} ${isPinned ? 'pinned-active' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
         onClick={() => handleSelectNode(node.id)}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          setPinnedHoverNodeId(prev => prev === node.id ? null : node.id);
+        }}
+        onMouseEnter={() => setHoveredNodeId(node.id)}
+        onMouseLeave={() => setHoveredNodeId(prev => prev === node.id ? null : prev)}
         style={{
           flex: 1,
-          minWidth: '82px',
-          maxWidth: '106px',
+          minWidth: '80px',
+          maxWidth: '175px',
           height: '56px',
           background: isSelected ? 'rgba(22, 27, 34, 0.98)' : 'rgba(13, 17, 23, 0.9)',
           borderRadius: '6px',
-          border: `1.5px solid ${isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d'))}`,
-          boxShadow: isSelected
-            ? `0 0 12px ${node.accentColor}55, 0 2px 8px rgba(0,0,0,0.6)`
-            : (status.isRunning ? '0 0 10px rgba(255, 107, 37, 0.5)' : 'none'),
-          padding: '3px 5px',
+          border: `1.5px solid ${isPinned ? '#58a6ff' : (isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d')))}`,
+          boxShadow: isPinned
+            ? `0 0 14px rgba(88, 166, 255, 0.6), 0 2px 8px rgba(0,0,0,0.7)`
+            : (isSelected
+              ? `0 0 12px ${node.accentColor}55, 0 2px 8px rgba(0,0,0,0.6)`
+              : (status.isRunning ? '0 0 10px rgba(255, 107, 37, 0.5)' : 'none')),
+          padding: '3px 6px',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
@@ -867,7 +923,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           transition: 'all 0.15s ease',
           boxSizing: 'border-box'
         }}
-        title={`Node ${node.step}: ${node.fullName}\nClick to inspect in telemetry deck`}
+        title={`Node ${node.step}: ${node.fullName}\n• Double-click to reveal dynamic details popover\n• Single-click to select`}
       >
         {/* Top: Step badge + Short name + Status indicator */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '3px' }}>
@@ -902,6 +958,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               : (status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : (status.startedAt || 'Idle'))}
           </span>
           {isSelected && <span style={{ color: node.accentColor, fontSize: '7px', fontWeight: 800 }}>SEL</span>}
+          {isPinned && <span style={{ color: '#58a6ff', fontSize: '7px', fontWeight: 800 }}>OPEN</span>}
         </div>
       </div>
     );
@@ -909,6 +966,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   return (
     <div style={{
+      position: isMaximized ? 'fixed' : 'relative',
+      zIndex: isMaximized ? 1200 : 50,
       background: '#0a0e17',
       border: '1px solid #30363d',
       borderRadius: '10px',
@@ -918,7 +977,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       display: 'flex',
       flexDirection: 'column',
       gap: '6px',
-      ...(isMaximized ? { position: 'fixed', inset: '14px', zIndex: 1200, overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {})
+      ...(isMaximized ? { inset: '14px', overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {})
     }}>
       {/* GLOBAL SVG ASSETS: NEON GRADIENTS, GLOW FILTER & CHEVRON ARROWHEADS */}
       <svg width="0" height="0" style={{ position: 'absolute', pointerEvents: 'none' }}>
@@ -1265,175 +1324,345 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
 
           {/* Group 2 Sequential Micro Nodes & Neon Connecting Arrows */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px', width: '100%' }}>
             {renderMicroNode(NODES_METADATA[2])}
-            {renderMicroArrow(NODES_METADATA[2], NODES_METADATA[3], 18)}
+            {renderMicroArrow(NODES_METADATA[2], NODES_METADATA[3], 14)}
             {renderMicroNode(NODES_METADATA[3])}
-            {renderMicroArrow(NODES_METADATA[3], NODES_METADATA[4], 18)}
+            {renderMicroArrow(NODES_METADATA[3], NODES_METADATA[4], 14)}
             {renderMicroNode(NODES_METADATA[4])}
-            {renderMicroArrow(NODES_METADATA[4], NODES_METADATA[5], 18)}
+            {renderMicroArrow(NODES_METADATA[4], NODES_METADATA[5], 14)}
             {renderMicroNode(NODES_METADATA[5])}
-            {renderMicroArrow(NODES_METADATA[5], NODES_METADATA[6], 18)}
+            {renderMicroArrow(NODES_METADATA[5], NODES_METADATA[6], 14)}
             {renderMicroNode(NODES_METADATA[6])}
-            {renderMicroArrow(NODES_METADATA[6], NODES_METADATA[7], 18)}
+            {renderMicroArrow(NODES_METADATA[6], NODES_METADATA[7], 14)}
             {renderMicroNode(NODES_METADATA[7])}
+            {/* Arrow at end of Node 8 exiting into loopback line */}
+            <div style={{ width: '20px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, position: 'relative' }} title="Loopback exit from Assemble Doc">
+              <svg width="20" height="56" viewBox="0 0 20 56" style={{ overflow: 'visible' }}>
+                <path
+                  d="M 1 28 C 12 28, 15 38, 15 54"
+                  fill="none"
+                  stroke={triggerDecision.prevented ? '#f85149' : (isCaptureGroupRunning ? '#00ff9d' : '#00ff9d88')}
+                  strokeWidth="2.2"
+                  strokeDasharray={isCaptureGroupRunning ? '5 2' : 'none'}
+                  className={isCaptureGroupRunning ? 'dag-wire-active' : ''}
+                  markerEnd={triggerDecision.prevented ? 'url(#dag-arrowhead-heat)' : 'url(#dag-arrowhead-green)'}
+                />
+              </svg>
+            </div>
           </div>
 
-          {/* Tucked Loopback Curve underneath Group 2 Nodes (Node 8 -> Node 3) */}
-          <div style={{ width: '100%', height: '17px', position: 'relative', marginTop: '2px', display: 'flex', alignItems: 'center' }}>
-            <svg width="100%" height="17" viewBox="0 0 1000 17" preserveAspectRatio="none" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
+          {/* Tucked Loopback Curve underneath Group 2 Nodes (Node 8 -> Node 3) WITHOUT text */}
+          <div style={{ width: '100%', height: '15px', position: 'relative', marginTop: '2px', display: 'flex', alignItems: 'center' }}>
+            <svg width="100%" height="15" viewBox="0 0 1000 15" preserveAspectRatio="none" style={{ overflow: 'visible', width: '100%', height: '100%' }}>
               <path
-                d="M 945 2 C 945 14, 55 14, 55 2"
+                d="M 988 1 C 988 13, 30 13, 30 1"
                 fill="none"
                 stroke={triggerDecision.prevented ? '#f85149' : (isCaptureGroupRunning ? '#00ff9d' : '#00ff9d77')}
-                strokeWidth={isCaptureGroupRunning ? 2 : 1.5}
+                strokeWidth={isCaptureGroupRunning ? 2.2 : 1.6}
                 strokeDasharray={isCaptureGroupRunning ? '6 3' : '4 3'}
                 className={isCaptureGroupRunning ? 'dag-wire-active' : ''}
                 markerEnd={triggerDecision.prevented ? 'url(#dag-arrowhead-heat)' : 'url(#dag-arrowhead-green)'}
               />
               {isCaptureGroupRunning && (
-                <circle r="2.8" fill="#00ff9d" filter="url(#dag-wire-glow)">
-                  <animateMotion path="M 945 2 C 945 14, 55 14, 55 2" dur="2s" repeatCount="indefinite" />
+                <circle r="3" fill="#00ff9d" filter="url(#dag-wire-glow)">
+                  <animateMotion path="M 988 1 C 988 13, 30 13, 30 1" dur="2s" repeatCount="indefinite" />
                 </circle>
               )}
             </svg>
-            <div style={{
-              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              pointerEvents: 'none', fontSize: '8.5px', fontWeight: 700,
-              color: triggerDecision.prevented ? '#ff7b72' : '#00ff9d',
-              textShadow: '0 1px 4px rgba(0,0,0,0.95)'
-            }}>
-              {triggerDecision.prevented ? '⛔ Trigger Prevented: Qualifier Issue' : `↺ Loopback to Step 3: Next Page Screen Capture (Target Ln ${nextTargetTop})`}
-            </div>
-          </div>
-        </div>
-
-        {/* INTEGRATED DAG TELEMETRY DECK ON RIGHT */}
-        <div style={{
-          width: '290px',
-          flexShrink: 0,
-          background: '#121822',
-          border: '1px solid #30363d',
-          borderRadius: '8px',
-          padding: '5px 8px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          height: '76px',
-          boxSizing: 'border-box'
-        }}>
-          {/* Row 1: Selected Node Header & Actions */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
-              <span style={{
-                fontSize: '9px', fontWeight: 800,
-                background: `${selectedNodeMeta.accentColor}25`,
-                color: selectedNodeMeta.accentColor,
-                border: `1px solid ${selectedNodeMeta.accentColor}55`,
-                padding: '1px 5px', borderRadius: '4px'
-              }}>
-                NODE {selectedNodeMeta.step}
-              </span>
-              <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {selectedNodeMeta.shortName}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              {selectedNodeMeta.hasConfig && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedNodeMeta.id === 'frame_acquire') setIsNode3ConfigOpen(true);
-                    else if (selectedNodeMeta.id === 'frame_ocr') setIsNode4ConfigOpen(true);
-                    else if (selectedNodeMeta.id === 'verification_trigger') setIsConfigModalOpen(true);
-                  }}
-                  title="Configure node"
-                  style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', padding: '2px 5px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
-                >
-                  <Settings size={10} />
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => handleRunNode(selectedNodeMeta.id)}
-                disabled={runningNodeId !== null}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
-                  borderRadius: '4px', border: `1px solid ${selectedNodeMeta.accentColor}66`,
-                  background: `${selectedNodeMeta.accentColor}20`, color: selectedNodeMeta.accentColor,
-                  fontSize: '9px', fontWeight: 800, cursor: runningNodeId !== null ? 'wait' : 'pointer'
-                }}
-              >
-                {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={9} className="spin" /> : <Play size={9} />}
-                <span>{runningNodeId === selectedNodeMeta.id ? 'Running...' : `Run Node ${selectedNodeMeta.step}`}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsInspectorModalOpen(true)}
-                title="Open Full Node Inspector & Troubleshooting"
-                style={{ background: '#21262d', border: '1px solid #30363d', color: '#8b949e', padding: '2px 5px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', fontSize: '9px', fontWeight: 700 }}
-              >
-                <Activity size={10} style={{ marginRight: '2px' }} />
-                <span>Details</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Row 2: Live Timing & Heat Lamp Badge */}
-          {(() => {
-            const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#8b949e' }}>
-                  <Clock size={10} color={liveStatus.isActive ? '#ff6b25' : '#8b949e'} />
-                  <span style={{ color: liveStatus.isActive ? '#ffa657' : '#f0f6fc', fontWeight: 700 }}>
-                    {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : (liveStatus.startedAt || '--:--:--'))}
-                  </span>
-                  <span style={{ color: '#484f58' }}>•</span>
-                  <span style={{ color: liveStatus.color, fontWeight: 700 }}>{liveStatus.metricLabel || '--'}</span>
-                </div>
-                <span style={{
-                  fontSize: '8px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px',
-                  background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
-                  color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
-                  border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`
-                }}>
-                  {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
-                </span>
-              </div>
-            );
-          })()}
-
-          {/* Row 3: Live Process Telemetry Ticker (Latest Event) */}
-          <div style={{
-            background: '#0a0d13', border: '1px solid #21262d', borderRadius: '4px',
-            padding: '2px 5px', fontSize: '8.5px', display: 'flex', alignItems: 'center', gap: '5px',
-            overflow: 'hidden', whiteSpace: 'nowrap'
-          }}>
-            <Activity size={9} color={selectedNodeMeta.accentColor} style={{ flexShrink: 0 }} />
-            {nodeTelemetryEvents.length > 0 ? (
-              <>
-                <span style={{ color: '#6e7681', flexShrink: 0 }}>{nodeTelemetryEvents[nodeTelemetryEvents.length - 1].timestamp}</span>
-                <span style={{
-                  fontSize: '7.5px', fontWeight: 800, padding: '0 3px', borderRadius: '2px',
-                  background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d', flexShrink: 0
-                }}>
-                  {nodeTelemetryEvents[nodeTelemetryEvents.length - 1].category}
-                </span>
-                <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {nodeTelemetryEvents[nodeTelemetryEvents.length - 1].message}
-                </span>
-              </>
-            ) : (
-              <span style={{ color: '#6e7681', fontStyle: 'italic' }}>
-                No telemetry for Node {selectedNodeMeta.step} yet — click "Run Node {selectedNodeMeta.step}" to trace.
-              </span>
-            )}
           </div>
         </div>
 
       </div>
+
+      {/* DYNAMIC HOVER / POPOVER REVEALED ON DOUBLE CLICKING ANY DAG NODE */}
+      {(() => {
+        const activeHoverNode = pinnedHoverNodeId
+          ? NODES_METADATA.find(n => n.id === pinnedHoverNodeId)
+          : (hoveredNodeId ? NODES_METADATA.find(n => n.id === hoveredNodeId) : null);
+        if (!activeHoverNode) return null;
+
+        const liveStatus = getNodeLiveStatus(activeHoverNode.id);
+        const nodeEvents = (eventsLog || []).filter((e: any) => !e.node_id || e.node_id === activeHoverNode.id || e.node_id === activeHoverNode.step || (e.message && e.message.toLowerCase().includes(activeHoverNode.shortName.toLowerCase())));
+
+        return (
+          <div
+            className="dag-dynamic-node-popover"
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              width: '460px',
+              maxWidth: '96vw',
+              background: 'linear-gradient(180deg, #131923 0%, #0d1117 100%)',
+              border: `1.5px solid ${activeHoverNode.accentColor}`,
+              borderRadius: '10px',
+              boxShadow: `0 16px 40px rgba(0, 0, 0, 0.9), 0 0 24px ${activeHoverNode.accentColor}33`,
+              padding: '10px 14px',
+              zIndex: 1100,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '9.5px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
+                  background: `${activeHoverNode.accentColor}25`, color: activeHoverNode.accentColor,
+                  border: `1px solid ${activeHoverNode.accentColor}55`
+                }}>
+                  NODE {activeHoverNode.step}
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
+                  {activeHoverNode.fullName}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '8.5px', color: '#8b949e' }}>
+                  {pinnedHoverNodeId === activeHoverNode.id ? '📌 Pinned (Double-click node to unpin)' : 'Hover preview'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { setPinnedHoverNodeId(null); setHoveredNodeId(null); }}
+                  style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px', display: 'flex' }}
+                  title="Close hover details"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Description */}
+            <div style={{ fontSize: '10.5px', color: '#8b949e', lineHeight: 1.35 }}>
+              {activeHoverNode.desc}
+            </div>
+
+            {/* Live Timing & Status Pill */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(0,0,0,0.35)', padding: '5px 8px', borderRadius: '6px', fontSize: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Clock size={12} color={liveStatus.isActive ? '#ff6b25' : '#8b949e'} />
+                <span style={{ color: liveStatus.isActive ? '#ffa657' : '#f0f6fc', fontWeight: 700 }}>
+                  {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Active Execution...' : (liveStatus.startedAt || 'Idle'))}
+                </span>
+                <span style={{ color: '#484f58' }}>•</span>
+                <span style={{ color: liveStatus.color, fontWeight: 700 }}>{liveStatus.metricLabel || liveStatus.statusLabel}</span>
+              </div>
+              <span style={{
+                fontSize: '8.5px', fontWeight: 800, padding: '1px 6px', borderRadius: '3px',
+                background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.25)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : (liveStatus.isError ? 'rgba(248, 81, 73, 0.2)' : '#161b22')),
+                color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : (liveStatus.isError ? '#ff7b72' : '#8b949e')),
+                border: `1px solid ${liveStatus.isActive ? '#ff6b2588' : 'transparent'}`
+              }}>
+                {liveStatus.isActive ? '♨️ HEAT LAMP ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : (liveStatus.isError ? 'BLOCKED ⛔' : 'READY'))}
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleRunNode(activeHoverNode.id)}
+                  disabled={runningNodeId !== null}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px',
+                    borderRadius: '5px', border: `1px solid ${activeHoverNode.accentColor}`,
+                    background: `${activeHoverNode.accentColor}25`, color: activeHoverNode.accentColor,
+                    fontSize: '10px', fontWeight: 800, cursor: runningNodeId !== null ? 'wait' : 'pointer'
+                  }}
+                >
+                  {runningNodeId === activeHoverNode.id ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
+                  <span>{runningNodeId === activeHoverNode.id ? 'Running...' : `Run Node ${activeHoverNode.step}`}</span>
+                </button>
+                {activeHoverNode.hasConfig && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (activeHoverNode.id === 'frame_acquire') setIsNode3ConfigOpen(true);
+                      else if (activeHoverNode.id === 'frame_ocr') setIsNode4ConfigOpen(true);
+                      else if (activeHoverNode.id === 'verification_trigger') setIsConfigModalOpen(true);
+                    }}
+                    style={{ background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700 }}
+                  >
+                    <Settings size={11} />
+                    <span>Settings</span>
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => { handleSelectNode(activeHoverNode.id); setIsInspectorModalOpen(true); }}
+                style={{ background: '#21262d', border: '1px solid #30363d', color: '#8b949e', padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700 }}
+              >
+                <Activity size={11} />
+                <span>Full Inspector</span>
+              </button>
+            </div>
+
+            {/* Telemetry Events Ticker */}
+            <div style={{
+              background: '#090d14', border: '1px solid #21262d', borderRadius: '6px',
+              padding: '4px 8px', fontSize: '9px', display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden'
+            }}>
+              <Activity size={10} color={activeHoverNode.accentColor} style={{ flexShrink: 0 }} />
+              {nodeEvents.length > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: '#6e7681', flexShrink: 0 }}>{nodeEvents[nodeEvents.length - 1].timestamp}</span>
+                  <span style={{ fontSize: '8px', fontWeight: 800, padding: '0 4px', borderRadius: '2px', background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d', flexShrink: 0 }}>
+                    {nodeEvents[nodeEvents.length - 1].category}
+                  </span>
+                  <span style={{ color: '#c9d1d9', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {nodeEvents[nodeEvents.length - 1].message}
+                  </span>
+                </div>
+              ) : (
+                <span style={{ color: '#6e7681', fontStyle: 'italic' }}>No telemetry recorded for Node {activeHoverNode.step} yet.</span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* AUTO-OPENING DIAGNOSTIC HOVER BOX FOR DAG 7 (VERIFICATION TRIGGER BLOCKED) */}
+      {triggerDecision.prevented && !dismissedNode7Diagnostic && (
+        <div
+          className="dag-blocked-diagnostic-box"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            right: '12px',
+            width: '420px',
+            maxWidth: '94vw',
+            background: 'linear-gradient(180deg, #261214 0%, #170b0c 100%)',
+            border: '1.5px solid #f85149',
+            borderRadius: '10px',
+            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.9), 0 0 24px rgba(248, 81, 73, 0.35)',
+            padding: '12px 14px',
+            zIndex: 1050,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+              <ShieldAlert size={16} color="#ff7b72" />
+              <span style={{ fontSize: '11px', fontWeight: 900, color: '#ff7b72', letterSpacing: '0.4px' }}>
+                DAG 7: TRIGGER PREVENTED (BLOCKED)
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedNode7Diagnostic(true)}
+              style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px', display: 'flex' }}
+              title="Dismiss diagnostic box"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          {/* Diagnostic Details */}
+          <div style={{ background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(248, 81, 73, 0.3)', borderRadius: '6px', padding: '6px 8px', fontSize: '10px' }}>
+            <div style={{ fontWeight: 700, color: '#f85149', marginBottom: '2px' }}>Blocking Qualifier Issue:</div>
+            {triggerDecision.reasons && triggerDecision.reasons.length > 0 ? (
+              <ul style={{ margin: 0, paddingLeft: '16px', color: '#f0f6fc', lineHeight: 1.4 }}>
+                {triggerDecision.reasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            ) : (
+              <div style={{ color: '#f0f6fc' }}>Virtual Keyboard or Gutter check prevented next cycle transition.</div>
+            )}
+          </div>
+
+          {/* Solutions Section */}
+          <div>
+            <div style={{ fontSize: '9.5px', fontWeight: 800, color: '#ffa657', marginBottom: '4px', letterSpacing: '0.3px' }}>
+              SOLUTIONS TO OVERCOME THIS ISSUE:
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+              <button
+                type="button"
+                onClick={handleAutoFixKeyboardAndUnblock}
+                disabled={isFixingQualifier}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: 'rgba(35, 134, 54, 0.25)', border: '1px solid #2ea043',
+                  color: '#00ff9d', padding: '5px 8px', borderRadius: '5px',
+                  fontSize: '10px', fontWeight: 700, cursor: isFixingQualifier ? 'wait' : 'pointer'
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Zap size={11} /> 1. Dismiss Keyboard & Auto-Fix Viewport
+                </span>
+                <span style={{ fontSize: '8px', color: '#8b949e' }}>Recommended</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleBypassKeyboardQualifier}
+                disabled={isFixingQualifier}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: 'rgba(88, 166, 255, 0.15)', border: '1px solid #388bfd',
+                  color: '#58a6ff', padding: '5px 8px', borderRadius: '5px',
+                  fontSize: '10px', fontWeight: 700, cursor: isFixingQualifier ? 'wait' : 'pointer'
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Check size={11} /> 2. Bypass Virtual Keyboard Qualifier
+                </span>
+                <span style={{ fontSize: '8px', color: '#8b949e' }}>Allow Loop</span>
+              </button>
+
+              <div style={{ display: 'flex', gap: '5px', marginTop: '2px' }}>
+                <button
+                  type="button"
+                  onClick={handleEvaluateNode5}
+                  disabled={isEvaluating}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                    background: '#21262d', border: '1px solid #30363d', color: '#e6edf3',
+                    padding: '4px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                  }}
+                >
+                  <RefreshCw size={10} className={isEvaluating ? 'spin' : ''} />
+                  <span>Re-Test Qualifiers</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleRunNode('verification_trigger')}
+                  disabled={runningNodeId !== null}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                    background: '#21262d', border: '1px solid #30363d', color: '#ffa657',
+                    padding: '4px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                  }}
+                >
+                  <Play size={10} />
+                  <span>Force Trigger</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsConfigModalOpen(true)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
+                    padding: '4px 6px', borderRadius: '4px', fontSize: '9.5px', cursor: 'pointer'
+                  }}
+                  title="Open full qualifier configuration modal"
+                >
+                  <Settings size={10} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 0: FULL NODE INSPECTOR & TELEMETRY DETAILS */}
       {isInspectorModalOpen && (
