@@ -326,7 +326,7 @@ fun MatrixCaptureDashboard(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             listOf(
                                 DeviceModel.AUTO to "Auto (${activeResolved.displayName})",
-                                DeviceModel.PIXEL_8 to "Pixel 8 (31L)",
+                                DeviceModel.PIXEL_8 to "Pixel 8 (49L)",
                                 DeviceModel.PIXEL_10 to "Pixel 10 (49L)"
                             ).forEach { (model, label) ->
                                 val isSelected = uiState.deviceModel == model

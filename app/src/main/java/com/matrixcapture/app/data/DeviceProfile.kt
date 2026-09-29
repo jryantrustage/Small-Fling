@@ -13,10 +13,10 @@ enum class DeviceModel(
     PIXEL_8(
         id = "pixel_8",
         displayName = "Pixel 8",
-        linesPerPage = 31,
-        arrowCountInitial = 63,
-        arrowCountStep = 30,
-        stepSize = 30
+        linesPerPage = 49,
+        arrowCountInitial = 99,
+        arrowCountStep = 48,
+        stepSize = 48
     ),
     PIXEL_10(
         id = "pixel_10",

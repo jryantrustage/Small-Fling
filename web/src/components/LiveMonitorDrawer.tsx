@@ -132,8 +132,8 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
 
                 <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
                 <div className="profile-pills-row">
-                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (31L)</span></button>
-                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (47L)</span></button>
+                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (49L)</span></button>
+                  <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (49L)</span></button>
                 </div>
               </div>
             )}

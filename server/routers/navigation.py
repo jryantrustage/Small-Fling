@@ -92,7 +92,7 @@ async def goto_line_api(req: GotoLineRequest):
     dev_info = await get_device_info()
     dev_name = dev_info.get("active_model") or ("Pixel 8 Pro" if "8" in current_device_model else "Pixel 10 Pro XL")
     profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
-    page_size = profile.get("lines_per_page", 47 if "10" in current_device_model else 31)
+    page_size = profile.get("lines_per_page", 49)
     disp_id = await detect_external_display_id(serial)
 
     await _input_tap(serial, disp_id, 500, 120, 0.08)

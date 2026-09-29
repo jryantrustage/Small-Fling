@@ -58,7 +58,7 @@ export const GotoLineModal: React.FC<Props> = ({
             <div className={`device-status-dot ${deviceInfo?.connected ? 'online' : 'offline'}`} />
             <Smartphone size={13} color="var(--color-primary)" />
             <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{deviceInfo?.active_model?.toUpperCase() || (deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10')}</span>
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({deviceInfo?.profile?.lines_per_page || (deviceModel === 'pixel_8' ? 31 : 47)}L)</span>
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>({deviceInfo?.profile?.lines_per_page || 49}L)</span>
             <ChevronDown size={12} style={{ transform: showMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
           </button>
 
@@ -96,8 +96,8 @@ export const GotoLineModal: React.FC<Props> = ({
 
               <div className="dropdown-section-title" style={{ marginTop: '6px' }}>PROFILE CALIBRATION</div>
               <div className="profile-pills-row">
-                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (31L)</span></button>
-                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (47L)</span></button>
+                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_8' ? 'active pixel-8' : ''}`} onClick={() => { onSelectDevice('pixel_8'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 8 (49L)</span></button>
+                <button type="button" className={`profile-pill-btn ${deviceModel === 'pixel_10' ? 'active pixel-10' : ''}`} onClick={() => { onSelectDevice('pixel_10'); setShowMenu(false); }}><Smartphone size={10} /><span>PIXEL 10 (49L)</span></button>
               </div>
 
               <div className="dropdown-section-title" style={{ marginTop: '6px' }}>INPUT METHOD & IME</div>

@@ -9,8 +9,8 @@ from alignment_engine import detect_teams_markdown_alignment
 import config
 
 DEVICE_PROFILES = {
-    "pixel_10": {"id": "pixel_10", "displayName": "Pixel 10", "lines_per_page": 47, "arrow_count_init": 95, "arrow_count_step": 47, "step_size": 47},
-    "pixel_8": {"id": "pixel_8", "displayName": "Pixel 8", "lines_per_page": 31, "arrow_count_init": 63, "arrow_count_step": 30, "step_size": 30}
+    "pixel_10": {"id": "pixel_10", "displayName": "Pixel 10", "lines_per_page": 49, "arrow_count_init": 99, "arrow_count_step": 48, "step_size": 48},
+    "pixel_8": {"id": "pixel_8", "displayName": "Pixel 8", "lines_per_page": 49, "arrow_count_init": 99, "arrow_count_step": 48, "step_size": 48}
 }
 
 def init_device_model_from_cache() -> str:
@@ -503,6 +503,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         display_id = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 2)
 
     cmd = (
+        f"wm density 120 -d {display_id} >/dev/null 2>&1; "
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
         f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
         f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
