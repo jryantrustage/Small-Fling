@@ -44,8 +44,6 @@ async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Op
             from ..classifiers import editor_classifiers
         except ImportError:
             from classifiers import editor_classifiers
-        from services import state
-        importlib.reload(state)
         importlib.reload(adb_service)
         importlib.reload(editor_classifiers)
         classifier_registry.register(editor_classifiers.KeyboardOpenClassifier())
@@ -55,7 +53,9 @@ async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Op
         target_ids = [k for k, v in qualifiers_cfg.items() if v.get("enabled", True)] if qualifiers_cfg else None
         ctx = await create_classifier_context(serial, image_bytes=image_bytes)
         await classifier_registry.evaluate_all(ctx, target_ids=target_ids)
-        return state.evaluate_dag_node_5_trigger_sync(classifier_registry.get_latest_issues())
+        issues = classifier_registry.get_latest_issues()
+        state.latest_telemetry["classifier_issues"] = issues
+        return state.evaluate_dag_node_5_trigger_sync(issues)
     except Exception:
         return state.evaluate_dag_node_5_trigger_sync()
 
