@@ -14,6 +14,7 @@ import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
 import { DeviceStudioDrawer } from './components/DeviceStudioDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
+import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
 import { useAgoTimer } from './hooks/useAgoTimer';
 
@@ -118,6 +119,7 @@ function AppContent() {
   const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
   const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
+  const [isInfoHovered, setIsInfoHovered] = useState(false);
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
   const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>(() => {
@@ -969,7 +971,7 @@ function AppContent() {
       />
 
       {showDag && (
-        <div style={{ padding: '0 20px 6px 20px' }}>
+        <div style={{ padding: '0 20px 6px 20px', position: 'relative', zIndex: 100 }}>
           <FlowDag
             apiBase={API_BASE}
             activeProjectId={activeProject?.id}
@@ -1169,7 +1171,99 @@ function AppContent() {
                   {inspectorMode === 'live' && (
                     <>
                       <div className="live-refreshed-badge"><span className="dot" /><span>{inspectorAgoSec <= 1 ? 'LIVE' : `${inspectorAgoSec}s ago`}</span></div>
-                      <button type="button" className={`live-info-btn ${showInspectorMetaPopover ? 'active' : ''}`} onClick={() => setShowInspectorMetaPopover(p => !p)}><Info size={11} /><span>INFO</span></button>
+                      <div
+                        style={{ position: 'relative', display: 'inline-flex' }}
+                        onMouseEnter={() => setIsInfoHovered(true)}
+                        onMouseLeave={() => setIsInfoHovered(false)}
+                      >
+                        <button
+                          type="button"
+                          className={`live-info-btn ${showInspectorMetaPopover || isInfoHovered ? 'active' : ''}`}
+                          onClick={() => setShowInspectorMetaPopover(p => !p)}
+                          title="View live metadata details (Hover for quick attributes, Click for full details)"
+                        >
+                          <Info size={11} />
+                          <span>INFO</span>
+                        </button>
+
+                        {/* Anchored dynamic hover box for INFO button */}
+                        {isInfoHovered && !showInspectorMetaPopover && (
+                          <div
+                            className="live-info-dynamic-hover-box"
+                            style={{
+                              position: 'absolute',
+                              top: 'calc(100% + 6px)',
+                              right: 0,
+                              width: '320px',
+                              background: 'linear-gradient(180deg, #131923 0%, #0d1117 100%)',
+                              border: '1.5px solid #58a6ff',
+                              borderRadius: '8px',
+                              boxShadow: '0 12px 32px rgba(0,0,0,0.85), 0 0 20px rgba(88, 166, 255, 0.3)',
+                              padding: '10px 12px',
+                              zIndex: 1200,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '6px',
+                              fontFamily: 'var(--font-mono, monospace)',
+                              pointerEvents: 'auto'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <Info size={13} color="#58a6ff" />
+                                <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc' }}>LIVE DESKTOP METADATA</span>
+                              </div>
+                              <span style={{ fontSize: '9px', color: '#00ff9d', fontWeight: 700 }}>
+                                {inspectorAgoSec <= 1 ? 'LIVE' : `${inspectorAgoSec}s ago`}
+                              </span>
+                            </div>
+
+                            <div style={{ fontSize: '10px', color: '#8b949e', display: 'flex', flexDirection: 'column', gap: '4px', background: 'rgba(0,0,0,0.3)', padding: '6px 8px', borderRadius: '5px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Display Mode:</span>
+                                <strong style={{ color: '#fff' }}>Desktop 1080p @ 60Hz</strong>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Top Gutter:</span>
+                                <strong style={{ color: '#22c55e' }}>▲ Line #{alignmentData?.first_line_number || telemetry.current_top_line || 1}</strong>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Bottom Gutter:</span>
+                                <strong style={{ color: '#ef4444' }}>▼ Line #{alignmentData?.last_line_number || telemetry.current_bottom_line || 50}</strong>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span>Alignment:</span>
+                                <strong style={{ color: alignmentData?.is_aligned ? '#00ff9d' : '#ffa657' }}>
+                                  {alignmentData?.is_aligned ? 'TEAMS ALIGNED ✔' : 'AUTO-ALIGNING...'}
+                                </strong>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '2px' }}>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setShowInspectorMetaPopover(true); setIsInfoHovered(false); }}
+                                style={{
+                                  background: 'rgba(88, 166, 255, 0.15)', border: '1px solid #58a6ff', color: '#58a6ff',
+                                  padding: '3px 8px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                                }}
+                              >
+                                Open Full Details
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleAutoFixViewport(); }}
+                                style={{
+                                  background: 'rgba(0, 255, 157, 0.12)', border: '1px solid #00ff9d', color: '#00ff9d',
+                                  padding: '3px 8px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                                }}
+                              >
+                                Auto-Fix Viewport
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <button className="btn btn-sm btn-outline" onClick={() => setStreamKey(Date.now())} style={{ padding: '2px 8px', fontSize: '10px' }}><RefreshCw size={11} /></button>
                     </>
                   )}
@@ -1562,6 +1656,16 @@ function AppContent() {
         onInspectLiveScreen={() => { setShowAlignmentModal(false); setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
         onFixClassifier={handleFixClassifier} onFixAllClassifiers={handleFixAllClassifiers} fixingClassifierId={fixingClassifierId}
         isFixingAll={isFixingAll} dismissedItems={dismissedItems} onDismissItem={handleDismissItem}
+      />
+
+      <LiveMetaInfoPopover
+        isOpen={showInspectorMetaPopover}
+        onClose={() => setShowInspectorMetaPopover(false)}
+        apiBase={API_BASE}
+        streamKey={streamKey}
+        onRefresh={() => setStreamKey(Date.now())}
+        alignmentData={alignmentData}
+        liveMode={liveMode}
       />
 
       <TelemetryToaster

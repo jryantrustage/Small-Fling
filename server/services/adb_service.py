@@ -33,6 +33,8 @@ def _exec_adb_sync(args: List[str], timeout: float = 4.0, text: bool = True) -> 
             [(getattr(config, "ADB_PATH", None) or "adb")] + args,
             capture_output=True,
             text=text,
+            encoding="utf-8" if text else None,
+            errors="replace" if text else None,
             timeout=timeout,
             stdin=subprocess.DEVNULL
         )
@@ -481,9 +483,24 @@ async def is_ime_visible(serial: Optional[str] = None) -> bool:
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
-        chk = await run_adb_shell("dumpsys input_method | grep -E 'mInputShown=true|mImeWindowVis=[123]'", ser)
+        chk = await run_adb_shell("dumpsys input_method", ser)
         out = chk.get("stdout", "")
-        return "mInputShown=true" in out or any(f"mImeWindowVis={v}" in out for v in [1, 2, 3])
+        # Check actual window visibility from dumpsys
+        has_visible_window = False
+        for line in out.splitlines():
+            line_str = line.strip()
+            if "mImeWindowVis=" in line_str:
+                val_part = line_str.split("mImeWindowVis=")[1].split()[0]
+                if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
+                    has_visible_window = True
+                    break
+        if has_visible_window:
+            return True
+        # If no visible IME window flag was found, check if hard keyboard suppression is on
+        supp_chk = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", ser)
+        if (supp_chk.get("stdout") or "").strip() == "0":
+            return False
+        return "mInputShown=true" in out
     except Exception: return False
 
 async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
