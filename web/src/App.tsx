@@ -143,6 +143,11 @@ function AppContent() {
   const [framesMinimized, setFramesMinimized] = useState(false);
   const [linesMinimized, setLinesMinimized] = useState(false);
   const [inspectorMaximized, setInspectorMaximized] = useState(false);
+  const [studioPanelWidth, setStudioPanelWidth] = useState(() => {
+    try { return Number(localStorage.getItem('mc_studio_panel_width')) || 460; } catch { return 460; }
+  });
+  const [isDraggingStudio, setIsDraggingStudio] = useState(false);
+  const [studioMaximized, setStudioMaximized] = useState(false);
 
   // Group Edit / Selection States
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
@@ -256,8 +261,18 @@ function AppContent() {
     setIsDraggingSplit(true);
     const startX = e.clientX, startPct = inspectorPercent;
     startDrag(
-      m => { const p = Math.max(20, Math.min(80, startPct + ((m.clientX - startX) / (window.innerWidth - framesPanelWidth - 60)) * 100)); setInspectorPercent(p); },
+      m => { const p = Math.max(20, Math.min(80, startPct + ((m.clientX - startX) / (window.innerWidth - framesPanelWidth - (showStudioDrawer && !studioMinimized ? studioPanelWidth : 0) - 60)) * 100)); setInspectorPercent(p); },
       () => { setIsDraggingSplit(false); try { localStorage.setItem('mc_inspector_split_percent', String(inspectorPercent)); } catch {} }
+    );
+  };
+
+  const handleStudioResizer = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingStudio(true);
+    const startX = e.clientX, startW = studioPanelWidth;
+    startDrag(
+      m => { const w = Math.max(320, Math.min(850, startW - (m.clientX - startX))); setStudioPanelWidth(w); },
+      () => { setIsDraggingStudio(false); try { localStorage.setItem('mc_studio_panel_width', String(studioPanelWidth)); } catch {} }
     );
   };
 
@@ -846,10 +861,11 @@ function AppContent() {
         <div className="header-center">
           <div className="device-selector-wrapper" ref={deviceDropdownRef}>
             <button
-              className={`device-selector-btn ${showStudioDrawer && studioInitialTab === 'device' ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
+              className={`device-selector-btn ${showStudioDrawer && studioInitialTab === 'device' && !studioMinimized ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
               onClick={() => {
                 setStudioInitialTab('device');
                 setShowStudioDrawer(true);
+                setStudioMinimized(false);
               }}
               title="Select connected Android device & configure wireless ADB in Studio"
             >
@@ -863,7 +879,7 @@ function AppContent() {
           <div className="window-dock-bar">
             <button
               type="button"
-              className={`window-dock-pill ${showDag ? 'active' : ''}`}
+              className={`window-dock-pill ${showDag ? 'active' : ''} ${dagMinimized ? 'minimized' : ''}`}
               onClick={() => {
                 if (!showDag) { setShowDag(true); setDagMinimized(false); }
                 else setDagMinimized(p => !p);
@@ -875,7 +891,7 @@ function AppContent() {
             </button>
             <button
               type="button"
-              className={`window-dock-pill ${showStudioDrawer ? 'active' : ''}`}
+              className={`window-dock-pill ${showStudioDrawer ? 'active' : ''} ${studioMinimized ? 'minimized' : ''}`}
               onClick={() => {
                 if (!showStudioDrawer) { setShowStudioDrawer(true); setStudioMinimized(false); }
                 else setStudioMinimized(p => !p);
@@ -887,7 +903,7 @@ function AppContent() {
             </button>
             <button
               type="button"
-              className={`window-dock-pill ${!framesMinimized ? 'active' : ''}`}
+              className={`window-dock-pill ${!framesMinimized ? 'active' : ''} ${framesMinimized ? 'minimized' : ''}`}
               onClick={() => setFramesMinimized(p => !p)}
               title="Toggle Captured Frames Panel"
             >
@@ -896,7 +912,7 @@ function AppContent() {
             </button>
             <button
               type="button"
-              className={`window-dock-pill ${!linesMinimized ? 'active' : ''}`}
+              className={`window-dock-pill ${!linesMinimized ? 'active' : ''} ${linesMinimized ? 'minimized' : ''}`}
               onClick={() => setLinesMinimized(p => !p)}
               title="Toggle Verified Lines Panel"
             >
@@ -984,61 +1000,6 @@ function AppContent() {
         </div>
       )}
 
-      {showStudioDrawer && (
-        <div style={{ padding: '0 20px 12px 20px' }}>
-          <DeviceStudioDrawer
-            isOpen={showStudioDrawer}
-            onClose={() => setShowStudioDrawer(false)}
-            isIntegrated={true}
-            isMinimized={studioMinimized}
-            onToggleMinimize={() => setStudioMinimized(p => !p)}
-            apiBase={API_BASE}
-            initialTab={studioInitialTab}
-            deviceInfo={deviceInfo}
-            deviceModel={deviceModel}
-            onSelectDevice={handleSelectDevice}
-            onSelectSerial={handleSelectSerial}
-            onConnectAdbIp={handleConnectAdbIp}
-            isConnectingIp={isConnectingIp}
-            connectStatusMsg={connectStatusMsg}
-            onPairAdb={handlePairAdb}
-            isPairing={isPairing}
-            pairStatusMsg={pairStatusMsg}
-            pixel8Ip={pixel8Ip}
-            setPixel8Ip={setPixel8Ip}
-            pixel10Ip={pixel10Ip}
-            setPixel10Ip={setPixel10Ip}
-            alignmentData={alignmentData}
-            onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
-            onOpenAlignmentModal={() => setShowAlignmentModal(true)}
-            liveMode={liveMode}
-            onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
-            streamKey={streamKey}
-            onRefreshStream={() => setStreamKey(Date.now())}
-            showBoundingBoxes={showBoundingBoxes}
-            onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
-            onCloseKeyboard={handleCloseKeyboard}
-            isClosingKeyboard={isClosingKeyboard}
-            telemetry={telemetry}
-            tokenStats={tokenStats}
-            documentSummary={{
-              total_lines: documentData?.total_lines || 0,
-              min_line: documentData?.min_line || 0,
-              max_line: documentData?.max_line || 0,
-              total_frames: frames.length,
-              issue_count: documentData?.issue_count || 0,
-              verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
-            }}
-            wsConnected={wsConnected}
-            latencyMs={latencyMs}
-            eventsLog={eventsLog}
-            onClearEvents={() => setEventsLog([])}
-            onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
-            projectInitProgress={projectInitProgress}
-            onDismissInitProgress={() => setProjectInitProgress(null)}
-          />
-        </div>
-      )}
 
       {!backendConnected && (
         <div style={{ backgroundColor: '#ff7b7218', borderBottom: '1px solid #ff7b7233', color: '#ff7b72', padding: '6px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', fontWeight: 500 }}>
@@ -1433,6 +1394,92 @@ function AppContent() {
                 )}
               </>
             ) : null}
+
+            {/* Device & Kiosk Studio Integrated Window */}
+            {showStudioDrawer && (
+              studioMinimized ? (
+                <aside
+                  className="window-minimized-rail"
+                  onClick={() => setStudioMinimized(false)}
+                  title="Click to restore Device Studio panel"
+                  style={{ borderLeft: '1px solid var(--border-color)', borderRight: 'none' }}
+                >
+                  <Smartphone size={14} color="#58a6ff" />
+                  <span className="minimized-rail-label">DEVICE STUDIO ({deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10'})</span>
+                  <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+                </aside>
+              ) : (
+                <>
+                  {!studioMaximized && (
+                    <div
+                      className={`panel-resizer ${isDraggingStudio ? 'dragging' : ''}`}
+                      onMouseDown={handleStudioResizer}
+                      title="Drag to resize Device Studio window"
+                    >
+                      <div className="panel-resizer-line" />
+                    </div>
+                  )}
+                  <section
+                    className={`device-studio-panel ${studioMaximized ? 'maximized' : ''}`}
+                    style={!studioMaximized ? { width: `${studioPanelWidth}px`, flexShrink: 0 } : undefined}
+                  >
+                    <DeviceStudioDrawer
+                      isOpen={showStudioDrawer}
+                      onClose={() => setShowStudioDrawer(false)}
+                      isIntegrated={true}
+                      isMinimized={studioMinimized}
+                      onToggleMinimize={() => setStudioMinimized(p => !p)}
+                      isMaximized={studioMaximized}
+                      onToggleMaximize={() => setStudioMaximized(p => !p)}
+                      apiBase={API_BASE}
+                      initialTab={studioInitialTab}
+                      deviceInfo={deviceInfo}
+                      deviceModel={deviceModel}
+                      onSelectDevice={handleSelectDevice}
+                      onSelectSerial={handleSelectSerial}
+                      onConnectAdbIp={handleConnectAdbIp}
+                      isConnectingIp={isConnectingIp}
+                      connectStatusMsg={connectStatusMsg}
+                      onPairAdb={handlePairAdb}
+                      isPairing={isPairing}
+                      pairStatusMsg={pairStatusMsg}
+                      pixel8Ip={pixel8Ip}
+                      setPixel8Ip={setPixel8Ip}
+                      pixel10Ip={pixel10Ip}
+                      setPixel10Ip={setPixel10Ip}
+                      alignmentData={alignmentData}
+                      onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
+                      onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+                      liveMode={liveMode}
+                      onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
+                      streamKey={streamKey}
+                      onRefreshStream={() => setStreamKey(Date.now())}
+                      showBoundingBoxes={showBoundingBoxes}
+                      onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
+                      onCloseKeyboard={handleCloseKeyboard}
+                      isClosingKeyboard={isClosingKeyboard}
+                      telemetry={telemetry}
+                      tokenStats={tokenStats}
+                      documentSummary={{
+                        total_lines: documentData?.total_lines || 0,
+                        min_line: documentData?.min_line || 0,
+                        max_line: documentData?.max_line || 0,
+                        total_frames: frames.length,
+                        issue_count: documentData?.issue_count || 0,
+                        verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
+                      }}
+                      wsConnected={wsConnected}
+                      latencyMs={latencyMs}
+                      eventsLog={eventsLog}
+                      onClearEvents={() => setEventsLog([])}
+                      onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
+                      projectInitProgress={projectInitProgress}
+                      onDismissInitProgress={() => setProjectInitProgress(null)}
+                    />
+                  </section>
+                </>
+              )
+            )}
           </>
         )}
       </div>
@@ -1524,7 +1571,7 @@ function AppContent() {
         deviceModel={deviceModel} eventsLog={eventsLog} onClearEvents={() => setEventsLog([])} onExpandedChange={setIsTelemetryExpanded}
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
         onReturnAlignmentOverlay={() => { setIsBannerDismissed(false); setIsBannerMinimized(false); localStorage.setItem('mc_banner_dismissed', 'false'); localStorage.setItem('mc_banner_minimized', 'false'); addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned'); }}
-        onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); }}
+        onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); setStudioMinimized(false); }}
         selectedDag={selectedDag}
         onSelectDag={setSelectedDag}
         selectedNodeId={selectedNodeId}

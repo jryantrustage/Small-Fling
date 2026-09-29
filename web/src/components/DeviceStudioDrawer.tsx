@@ -71,6 +71,8 @@ export interface DeviceStudioDrawerProps {
   isIntegrated?: boolean;
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
 }
 
 export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
@@ -116,6 +118,8 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   isIntegrated = false,
   isMinimized = false,
   onToggleMinimize,
+  isMaximized: controlledMaximized,
+  onToggleMaximize,
 }) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>(initialTab);
@@ -126,7 +130,9 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   }, [isOpen, initialTab]);
 
   // Window state
-  const [isMaximized, setIsMaximized] = useState(false);
+  const [internalMaximized, setInternalMaximized] = useState(false);
+  const isMaximized = controlledMaximized !== undefined ? controlledMaximized : internalMaximized;
+  const toggleMaximize = onToggleMaximize || (() => setInternalMaximized(p => !p));
   const [viewportSize, setViewportSize] = useState<'sm' | 'md' | 'lg' | 'fit'>('fit');
 
   // Kiosk state
@@ -526,8 +532,8 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
             <button
               type="button"
               className="studio-action-icon-btn"
-              onClick={() => setIsMaximized(p => !p)}
-              title={isMaximized ? 'Restore Drawer' : 'Maximize Drawer'}
+              onClick={toggleMaximize}
+              title={isMaximized ? 'Restore View' : 'Maximize Studio'}
             >
               {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </button>

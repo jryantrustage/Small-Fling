@@ -144,13 +144,23 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
+  const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
+
+  useEffect(() => {
+    if (selectedDag) {
+      setInternalSelectedDag(selectedDag);
+      if (selectedDag !== 'all') {
+        setIsNodeTracingActive(false);
+      }
+    }
+  }, [selectedDag]);
+
   const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
     setIsNodeTracingActive(false);
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);
   };
 
-  const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
   useEffect(() => {
     if (selectedNodeId) setIsNodeTracingActive(true);
   }, [selectedNodeId]);
@@ -224,15 +234,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
           )}
           <button
             className="telemetry-toaster-pill"
-            onClick={() => {
-              if (onOpenStudio) {
-                onOpenStudio();
-              } else {
-                toggleExpanded();
-              }
-            }}
-            title="Open Telemetry in Studio"
-            aria-label="Open Telemetry in Studio"
+            onClick={toggleExpanded}
+            title="Open Telemetry Monitor Sidebar"
+            aria-label="Toggle Telemetry Monitor Sidebar"
           >
             <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
             <span className="pill-title">TELEMETRY</span><span className="pill-divider">|</span>
