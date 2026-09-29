@@ -206,6 +206,30 @@ async def delete_frame(frame_id: str):
 async def delete_frame_post(frame_id: str):
     return await delete_frame(frame_id)
 
+@router.post("/api/frames/batch-delete")
+async def batch_delete_frames(req: Dict[str, Any]):
+    frame_ids = req.get("frame_ids", [])
+    if not isinstance(frame_ids, list):
+        raise HTTPException(status_code=400, detail="frame_ids must be a list")
+    deleted = []
+    for fid in frame_ids:
+        if db.delete_frame(str(fid)):
+            deleted.append(str(fid))
+    if deleted:
+        state.load_persisted_state()
+        try:
+            with open(state.DOCUMENT_FILE, "w", encoding="utf-8") as f:
+                json.dump({
+                    "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(state.document_lines.items())},
+                    "frames": state.captured_frames, "token_stats": state.token_stats, "latest_telemetry": state.latest_telemetry, "updated_at": datetime.now().isoformat()
+                }, f, indent=2)
+        except Exception as e:
+            print(f"Error saving JSON after batch frame deletion: {e}")
+        await state.ws_manager.broadcast({"type": "frame_deleted", "frame_ids": deleted, "frames": db.get_frames(state.get_current_project_id())})
+        await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
+    return {"status": "success", "deleted_count": len(deleted), "deleted_frames": deleted}
+
+
 @router.post("/api/frames/purge")
 async def purge_all_frames():
     purged_files = 0
@@ -283,6 +307,36 @@ async def edit_line(line_number: int, req: LineEditRequest):
     state.save_persisted_state()
     lv = state.document_lines[line_number]
     return {"status": "success", "line": lv.to_dict() if hasattr(lv, "to_dict") else lv}
+
+@router.delete("/api/lines/{line_number}")
+async def delete_line(line_number: int):
+    if line_number not in state.document_lines:
+        raise HTTPException(status_code=404, detail=f"Line {line_number} not found")
+    del state.document_lines[line_number]
+    state.save_persisted_state()
+    await state.ws_manager.broadcast({"type": "line_deleted", "line_number": line_number})
+    await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
+    return {"status": "success", "deleted_line": line_number}
+
+@router.post("/api/lines/batch-delete")
+async def batch_delete_lines(req: Dict[str, Any]):
+    line_numbers = req.get("line_numbers", [])
+    if not isinstance(line_numbers, list):
+        raise HTTPException(status_code=400, detail="line_numbers must be a list")
+    deleted = []
+    for ln in line_numbers:
+        try:
+            ln_int = int(ln)
+            if ln_int in state.document_lines:
+                del state.document_lines[ln_int]
+                deleted.append(ln_int)
+        except (ValueError, TypeError):
+            continue
+    if deleted:
+        state.save_persisted_state()
+        await state.ws_manager.broadcast({"type": "lines_deleted", "line_numbers": deleted})
+        await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
+    return {"status": "success", "deleted_count": len(deleted), "deleted_lines": deleted}
 
 @router.post("/api/lines/{line_number}/flag")
 async def flag_line(line_number: int, req: FlagRequest):

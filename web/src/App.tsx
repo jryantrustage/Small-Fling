@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu, Compass,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Shield
+  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
+  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -136,6 +136,23 @@ function AppContent() {
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
   const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
   const [isClosingKeyboard, setIsClosingKeyboard] = useState(false);
+
+  // Window & Panel Management States
+  const [dagMinimized, setDagMinimized] = useState(false);
+  const [studioMinimized, setStudioMinimized] = useState(false);
+  const [framesMinimized, setFramesMinimized] = useState(false);
+  const [linesMinimized, setLinesMinimized] = useState(false);
+  const [inspectorMaximized, setInspectorMaximized] = useState(false);
+
+  // Group Edit / Selection States
+  const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
+  const [isBatchDeletingFrames, setIsBatchDeletingFrames] = useState(false);
+  const [selectedLineNumbers, setSelectedLineNumbers] = useState<Set<number>>(new Set());
+  const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
+
+  // Auto-Fix & Calibrate States
+  const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
+  const [isRunningCalibration, setIsRunningCalibration] = useState(false);
 
   const selectedFrameIdRef = useRef<string | null>(null);
   useEffect(() => { selectedFrameIdRef.current = selectedFrameId; }, [selectedFrameId]);
@@ -639,6 +656,149 @@ function AppContent() {
     else { await showAlert({ title: 'Invalid API Key', message: 'The provided key could not be verified.', variant: 'danger' }); }
   };
 
+  const handleAutoFixViewport = async () => {
+    setIsAutoFixingViewport(true);
+    try {
+      const res = await api('/api/device/autofix-viewport', { method: 'POST' });
+      const d = await res.json();
+      if (res.ok) {
+        setStreamKey(Date.now());
+        addTelemetryEvent('SYSTEM', 'Viewport auto-fixed & keyboard closed successfully ✔');
+      } else {
+        addTelemetryEvent('SYSTEM', d.detail || 'Failed to auto-fix viewport', undefined, 'system');
+      }
+    } catch (e: any) {
+      addTelemetryEvent('SYSTEM', `Error auto-fixing viewport: ${e.message}`, undefined, 'system');
+    } finally {
+      setIsAutoFixingViewport(false);
+    }
+  };
+
+  const handleTriggerCalibration = async () => {
+    setIsRunningCalibration(true);
+    try {
+      const res = await api('/api/dag/groups/initialize/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: activeProject?.id })
+      });
+      const d = await res.json();
+      if (res.ok) {
+        addTelemetryEvent('SYSTEM', 'Triggered Ctrl+End / Ctrl+Home Calibration sequence ✔');
+        await fetchData();
+      } else {
+        addTelemetryEvent('SYSTEM', d.detail || 'Failed to trigger calibration', undefined, 'system');
+      }
+    } catch (e: any) {
+      addTelemetryEvent('SYSTEM', `Calibration error: ${e.message}`, undefined, 'system');
+    } finally {
+      setIsRunningCalibration(false);
+    }
+  };
+
+  const handleToggleSelectFrame = (fid: string, e: React.MouseEvent | React.ChangeEvent) => {
+    e.stopPropagation();
+    setSelectedFrameIds(prev => {
+      const next = new Set(prev);
+      if (next.has(fid)) next.delete(fid);
+      else next.add(fid);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllFrames = () => {
+    if (selectedFrameIds.size === frames.length) {
+      setSelectedFrameIds(new Set());
+    } else {
+      setSelectedFrameIds(new Set(frames.map(f => f.frame_id)));
+    }
+  };
+
+  const handleDeleteSelectedFrames = async () => {
+    if (selectedFrameIds.size === 0) return;
+    const count = selectedFrameIds.size;
+    const ok = await confirm({
+      title: 'Batch Delete Captured Frames',
+      message: `Are you sure you want to permanently delete ${count} selected frame(s)? This will remove their OCR lines from the document.`
+    });
+    if (!ok) return;
+
+    setIsBatchDeletingFrames(true);
+    try {
+      const res = await api('/api/frames/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ frame_ids: Array.from(selectedFrameIds) })
+      });
+      if (res.ok) {
+        setSelectedFrameIds(new Set());
+        if (selectedFrameId && selectedFrameIds.has(selectedFrameId)) {
+          setSelectedFrameId(null);
+        }
+        await fetchData();
+        addTelemetryEvent('FRAME', `Batch deleted ${count} captured frame(s) ✔`);
+      } else {
+        await showAlert({ title: 'Error', message: 'Failed to delete selected frames' });
+      }
+    } catch (err: any) {
+      await showAlert({ title: 'Error', message: `Batch delete error: ${err.message}` });
+    } finally {
+      setIsBatchDeletingFrames(false);
+    }
+  };
+
+  const handleToggleSelectLine = (ln: number, e: React.MouseEvent | React.ChangeEvent) => {
+    e.stopPropagation();
+    setSelectedLineNumbers(prev => {
+      const next = new Set(prev);
+      if (next.has(ln)) next.delete(ln);
+      else next.add(ln);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllLines = () => {
+    const allLns = (documentData?.lines || []).map(l => l.line_number);
+    if (selectedLineNumbers.size === allLns.length) {
+      setSelectedLineNumbers(new Set());
+    } else {
+      setSelectedLineNumbers(new Set(allLns));
+    }
+  };
+
+  const handleDeleteSelectedLines = async () => {
+    if (selectedLineNumbers.size === 0) return;
+    const count = selectedLineNumbers.size;
+    const ok = await confirm({
+      title: 'Batch Delete Verified Lines',
+      message: `Are you sure you want to delete ${count} selected line(s) from the document?`
+    });
+    if (!ok) return;
+
+    setIsBatchDeletingLines(true);
+    try {
+      const res = await api('/api/lines/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ line_numbers: Array.from(selectedLineNumbers) })
+      });
+      if (res.ok) {
+        setSelectedLineNumbers(new Set());
+        if (selectedLine && selectedLineNumbers.has(selectedLine.line_number)) {
+          setSelectedLine(null);
+        }
+        await fetchData();
+        addTelemetryEvent('SYSTEM', `Batch deleted ${count} line(s) ✔`);
+      } else {
+        await showAlert({ title: 'Error', message: 'Failed to delete selected lines' });
+      }
+    } catch (err: any) {
+      await showAlert({ title: 'Error', message: `Batch delete error: ${err.message}` });
+    } finally {
+      setIsBatchDeletingLines(false);
+    }
+  };
+
   const sortedFrames = [...frames].sort((a, b) => a.top_line - b.top_line || a.page_index - b.page_index);
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId) || frames[0] || null;
   const filteredLines = (documentData?.lines || []).filter(l => {
@@ -700,31 +860,50 @@ function AppContent() {
             </button>
           </div>
 
-          <button
-            onClick={() => {
-              setStudioInitialTab('kiosk');
-              setShowStudioDrawer(true);
-              setLiveMode('desktop');
-              setStreamKey(Date.now());
-            }}
-            className="kiosk-nav-btn"
-            style={{ borderColor: showStudioDrawer ? '#1f6feb' : undefined }}
-            title="Open Unified Device & Kiosk Studio (Live Viewport & Lockdown)"
-          >
-            <Monitor size={12} /><span>STUDIO VIEW</span>
-            {showStudioDrawer && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff9d' }} />}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setStudioInitialTab('kiosk');
-              setShowStudioDrawer(true);
-            }}
-            className={`kiosk-nav-btn ${showStudioDrawer && studioInitialTab === 'kiosk' ? 'active' : ''}`}
-            title="External Desktop Isolation & Kiosk Lockdown"
-          >
-            <Shield size={12} /><span>KIOSK LOCK</span>
-          </button>
+          <div className="window-dock-bar">
+            <button
+              type="button"
+              className={`window-dock-pill ${showDag ? 'active' : ''}`}
+              onClick={() => {
+                if (!showDag) { setShowDag(true); setDagMinimized(false); }
+                else setDagMinimized(p => !p);
+              }}
+              title="Toggle / Minimize / Restore Flow DAG window"
+            >
+              <Layers size={11} />
+              <span>DAG {showDag ? (dagMinimized ? '▲' : '●') : '○'}</span>
+            </button>
+            <button
+              type="button"
+              className={`window-dock-pill ${showStudioDrawer ? 'active' : ''}`}
+              onClick={() => {
+                if (!showStudioDrawer) { setShowStudioDrawer(true); setStudioMinimized(false); }
+                else setStudioMinimized(p => !p);
+              }}
+              title="Toggle / Minimize / Restore Device & Kiosk Studio workspace"
+            >
+              <Monitor size={11} />
+              <span>Studio {showStudioDrawer ? (studioMinimized ? '▲' : '●') : '○'}</span>
+            </button>
+            <button
+              type="button"
+              className={`window-dock-pill ${!framesMinimized ? 'active' : ''}`}
+              onClick={() => setFramesMinimized(p => !p)}
+              title="Toggle Captured Frames Panel"
+            >
+              <Camera size={11} />
+              <span>Frames {!framesMinimized ? '●' : '▲'}</span>
+            </button>
+            <button
+              type="button"
+              className={`window-dock-pill ${!linesMinimized ? 'active' : ''}`}
+              onClick={() => setLinesMinimized(p => !p)}
+              title="Toggle Verified Lines Panel"
+            >
+              <Search size={11} />
+              <span>Lines {!linesMinimized ? '●' : '▲'}</span>
+            </button>
+          </div>
 
           {isCurrentDeviceConnected ? (
             <div className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`} onClick={() => alignmentData.is_aligned ? handleTriggerAlignmentCheck() : setIsBannerDismissed(p => !p)}>
@@ -773,14 +952,6 @@ function AppContent() {
         onDismissItem={handleDismissItem}
       />
 
-      <div className="orchestration-bar">
-        <div className="orchestration-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button className="btn btn-orch btn-capture-desktop" onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} title="Switch to Live Desktop & Refresh Capture Stream"><Camera size={14} /><span>Live Desktop Stream</span></button>
-          <button className={`btn btn-sm ${showDag ? 'btn-primary' : 'btn-outline'}`} onClick={() => setShowDag(!showDag)} style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}><Layers size={14} /><span>{showDag ? 'Hide Flow DAG' : 'Show Flow DAG'}</span></button>
-          <button className="btn btn-sm btn-outline" onClick={() => setShowGotoModal(true)} style={{ height: '36px', borderRadius: '8px', padding: '0 12px' }}><Compass size={14} /><span>Go To Line (Ctrl+G)</span></button>
-        </div>
-      </div>
-
       {showDag && (
         <div style={{ padding: '0 20px 12px 20px' }}>
           <FlowDag
@@ -806,6 +977,65 @@ function AppContent() {
               } catch {}
             }}
             eventsLog={eventsLog}
+            onClose={() => setShowDag(false)}
+            isMinimized={dagMinimized}
+            onToggleMinimize={() => setDagMinimized(p => !p)}
+          />
+        </div>
+      )}
+
+      {showStudioDrawer && (
+        <div style={{ padding: '0 20px 12px 20px' }}>
+          <DeviceStudioDrawer
+            isOpen={showStudioDrawer}
+            onClose={() => setShowStudioDrawer(false)}
+            isIntegrated={true}
+            isMinimized={studioMinimized}
+            onToggleMinimize={() => setStudioMinimized(p => !p)}
+            apiBase={API_BASE}
+            initialTab={studioInitialTab}
+            deviceInfo={deviceInfo}
+            deviceModel={deviceModel}
+            onSelectDevice={handleSelectDevice}
+            onSelectSerial={handleSelectSerial}
+            onConnectAdbIp={handleConnectAdbIp}
+            isConnectingIp={isConnectingIp}
+            connectStatusMsg={connectStatusMsg}
+            onPairAdb={handlePairAdb}
+            isPairing={isPairing}
+            pairStatusMsg={pairStatusMsg}
+            pixel8Ip={pixel8Ip}
+            setPixel8Ip={setPixel8Ip}
+            pixel10Ip={pixel10Ip}
+            setPixel10Ip={setPixel10Ip}
+            alignmentData={alignmentData}
+            onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
+            onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+            liveMode={liveMode}
+            onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
+            streamKey={streamKey}
+            onRefreshStream={() => setStreamKey(Date.now())}
+            showBoundingBoxes={showBoundingBoxes}
+            onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
+            onCloseKeyboard={handleCloseKeyboard}
+            isClosingKeyboard={isClosingKeyboard}
+            telemetry={telemetry}
+            tokenStats={tokenStats}
+            documentSummary={{
+              total_lines: documentData?.total_lines || 0,
+              min_line: documentData?.min_line || 0,
+              max_line: documentData?.max_line || 0,
+              total_frames: frames.length,
+              issue_count: documentData?.issue_count || 0,
+              verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
+            }}
+            wsConnected={wsConnected}
+            latencyMs={latencyMs}
+            eventsLog={eventsLog}
+            onClearEvents={() => setEventsLog([])}
+            onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
+            projectInitProgress={projectInitProgress}
+            onDismissInitProgress={() => setProjectInitProgress(null)}
           />
         </div>
       )}
@@ -853,61 +1083,121 @@ function AppContent() {
 
         {activeProject && (
           <>
-            <aside className="frames-feed-panel" style={{ width: `${framesPanelWidth}px`, flexShrink: 0 }}>
-              <div className="panel-header">
-                <span>Captured Frames ({frames.length})</span>
-                {frames.some(f => f.status.startsWith('error')) && <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}><RotateCw size={11} /> Retry Failed</button>}
-              </div>
-
-              <div className="frames-list">
-                {sortedFrames.length === 0 ? (
-                  <div className="drop-zone-placeholder" style={{ cursor: 'default' }}>
-                    <span style={{ fontWeight: 600, color: '#e6edf3' }}>Captured Frames</span>
-                    <span style={{ fontSize: '11px', color: '#8b949e' }}>Settled {devDisplayName} frames appear here automatically</span>
-                  </div>
-                ) : sortedFrames.map((f, idx) => {
-                  const prevFrame = idx > 0 ? sortedFrames[idx - 1] : null;
-                  const hasGap = prevFrame && prevFrame.bottom_line > 0 && f.top_line > prevFrame.bottom_line + 1;
-                  return (
-                    <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
-                      <div className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`} onClick={() => setSelectedFrameId(f.frame_id)}>
-                        <div className="frame-card-preview">
-                          <img src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
-                          <span className="frame-badge">Pg {f.page_index}</span>
-                          {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
-                          <button className="frame-card-delete-overlay" onClick={(e) => handleDeleteFrame(f.frame_id, e)} disabled={deletingFrameId === f.frame_id} title="Delete frame"><Trash2 size={12} /></button>
-                        </div>
-                        <div className="frame-card-info">
-                          <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
-                            <span className="frame-status-text" title={f.status}>{f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}</span>
-                            {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
-                              <button className="frame-retry-btn" onClick={(e) => handleReprocessFrame(f.frame_id, e)} disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}>
-                                <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
-                              </button>
-                            )}
-                          </div>
-                          <div className="frame-position-controls" onClick={e => e.stopPropagation()} title="Nudge offset (px)">
-                            <MoveVertical size={10} color="#8b949e" />
-                            <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, -1)}>▲</button>
-                            <span className="nudge-val">{f.custom_offset_y || 0}px</span>
-                            <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, 1)}>▼</button>
-                          </div>
-                        </div>
+            {framesMinimized ? (
+              <aside
+                className="window-minimized-rail"
+                onClick={() => setFramesMinimized(false)}
+                title="Click to restore Captured Frames panel"
+              >
+                <Camera size={14} color="#00ff9d" />
+                <span className="minimized-rail-label">CAPTURED FRAMES ({frames.length})</span>
+                <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+              </aside>
+            ) : !inspectorMaximized ? (
+              <>
+                <aside className="frames-feed-panel" style={{ width: `${framesPanelWidth}px`, flexShrink: 0 }}>
+                  <div className="panel-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="checkbox"
+                        checked={sortedFrames.length > 0 && selectedFrameIds.size === sortedFrames.length}
+                        onChange={handleToggleSelectAllFrames}
+                        title="Select or deselect all frames"
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <span>Captured Frames ({frames.length})</span>
+                      {selectedFrameIds.size > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-danger-group"
+                          onClick={handleDeleteSelectedFrames}
+                          disabled={isBatchDeletingFrames}
+                          title="Delete selected frames"
+                        >
+                          <Trash2 size={10} />
+                          <span>Delete ({selectedFrameIds.size})</span>
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {frames.some(f => f.status.startsWith('error')) && (
+                        <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
+                          <RotateCw size={11} /> Retry Failed
+                        </button>
+                      )}
+                      <div className="window-controls">
+                        <button
+                          type="button"
+                          className="win-btn"
+                          onClick={() => setFramesMinimized(true)}
+                          title="Minimize frames panel"
+                        >
+                          <Minus size={11} />
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            </aside>
+                  </div>
 
-            <div className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`} onMouseDown={handleFramesResizer} onDoubleClick={() => setFramesPanelWidth(280)} role="separator">
-              <div className="panel-resizer-line" />
-            </div>
+                  <div className="frames-list">
+                    {sortedFrames.length === 0 ? (
+                      <div className="drop-zone-placeholder" style={{ cursor: 'default' }}>
+                        <span style={{ fontWeight: 600, color: '#e6edf3' }}>Captured Frames</span>
+                        <span style={{ fontSize: '11px', color: '#8b949e' }}>Settled {devDisplayName} frames appear here automatically</span>
+                      </div>
+                    ) : sortedFrames.map((f, idx) => {
+                      const prevFrame = idx > 0 ? sortedFrames[idx - 1] : null;
+                      const hasGap = prevFrame && prevFrame.bottom_line > 0 && f.top_line > prevFrame.bottom_line + 1;
+                      const isSelected = selectedFrameIds.has(f.frame_id);
+                      return (
+                        <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
+                          <div className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${isSelected ? 'selected-for-edit' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`} onClick={() => setSelectedFrameId(f.frame_id)}>
+                            <div className="frame-card-preview">
+                              <input
+                                type="checkbox"
+                                className="frame-card-checkbox"
+                                checked={isSelected}
+                                onChange={(e) => handleToggleSelectFrame(f.frame_id, e)}
+                                onClick={(e) => e.stopPropagation()}
+                                title="Select frame for group operations"
+                              />
+                              <img src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
+                              <span className="frame-badge">Pg {f.page_index}</span>
+                              {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
+                              <button className="frame-card-delete-overlay" onClick={(e) => handleDeleteFrame(f.frame_id, e)} disabled={deletingFrameId === f.frame_id} title="Delete frame"><Trash2 size={12} /></button>
+                            </div>
+                            <div className="frame-card-info">
+                              <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
+                                <span className="frame-status-text" title={f.status}>{f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}</span>
+                                {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
+                                  <button className="frame-retry-btn" onClick={(e) => handleReprocessFrame(f.frame_id, e)} disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}>
+                                    <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="frame-position-controls" onClick={e => e.stopPropagation()} title="Nudge offset (px)">
+                                <MoveVertical size={10} color="#8b949e" />
+                                <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, -1)}>▲</button>
+                                <span className="nudge-val">{f.custom_offset_y || 0}px</span>
+                                <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, 1)}>▼</button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </aside>
 
-            <main className="frame-inspector-panel" style={{ flex: `${inspectorPercent} 1 0`, minWidth: '220px' }}>
+                <div className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`} onMouseDown={handleFramesResizer} onDoubleClick={() => setFramesPanelWidth(280)} role="separator">
+                  <div className="panel-resizer-line" />
+                </div>
+              </>
+            ) : null}
+
+            <main className="frame-inspector-panel" style={{ flex: inspectorMaximized ? '1 1 100%' : `${inspectorPercent} 1 0`, minWidth: '220px' }}>
               <div className="panel-header">
                 <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
                   <button className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`} onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} style={{ fontSize: '11px', padding: '3px 8px' }}><Monitor size={11} style={{ marginRight: '4px' }} /><span>Live Desktop</span></button>
@@ -926,20 +1216,86 @@ function AppContent() {
                     <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}><Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'OCR Scan'}</span></button>
                   )}
                   {scanStatusMsg && <span className="scan-status-pill">{scanStatusMsg}</span>}
+                  <div className="window-controls">
+                    <button
+                      type="button"
+                      className="win-btn"
+                      onClick={() => setInspectorMaximized(p => !p)}
+                      title={inspectorMaximized ? "Restore view layout" : "Maximize live desktop view"}
+                    >
+                      {inspectorMaximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+                    </button>
+                  </div>
                 </div>
               </div>
 
               <div className="inspector-view-container">
                 {inspectorMode === 'live' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Monitor size={14} color="#00ff9d" />
                         <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>LIVE DESKTOP · MARKDOWN VIEW</span>
                       </div>
-                      <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={() => setShowBoundingBoxes(p => !p)} style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}>
-                        {showBoundingBoxes ? <Eye size={10} /> : <EyeOff size={10} />}<span>AI BOXES</span>
-                      </button>
+
+                      {/* Yellow Arrow 1 Target: Actuator Progress */}
+                      <div className="actuator-progress-bar">
+                        <Activity size={12} color="#00ff9d" />
+                        <span>Actuator Progress:</span>
+                        <strong style={{ color: '#ffa657' }}>
+                          Capturing page {telemetry.current_page || frames.length || 1} (Target Top: Ln {telemetry.current_bottom_line ? telemetry.current_bottom_line + 1 : (documentData.max_line ? documentData.max_line + 1 : 50)} of {activeProject?.target_total_lines || telemetry.target_total_lines || 9953})
+                        </strong>
+                      </div>
+
+                      {/* Yellow Arrow 2 Target + Rename AI Boxes to Content Framing */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline btn-autofix"
+                          onClick={handleAutoFixViewport}
+                          disabled={isAutoFixingViewport}
+                          title="Auto-fix desktop viewport layout & suppress software keyboard"
+                        >
+                          <Zap size={11} className={isAutoFixingViewport ? 'spin' : ''} />
+                          <span>{isAutoFixingViewport ? 'Fixing...' : 'AUTO-FIX VIEWPORT'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => {
+                            setShowDag(true);
+                            setDagMinimized(false);
+                            setSelectedDag('capture_entire_markdown');
+                            setSelectedNodeId('verify_trigger');
+                          }}
+                          title="Configure Node 6 Verification Trigger & Qualifiers"
+                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                        >
+                          <Sliders size={11} />
+                          <span>Configure Trigger (Node 6)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-primary"
+                          onClick={handleTriggerCalibration}
+                          disabled={isRunningCalibration}
+                          title="Run EOF / SOF calibration sequence"
+                          style={{ padding: '2px 10px', height: '24px', fontSize: '10px' }}
+                        >
+                          <RefreshCw size={11} className={isRunningCalibration ? 'spin' : ''} />
+                          <span>{isRunningCalibration ? 'Calibrating...' : 'Run Ctrl+End / Ctrl+Home Calibrate'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
+                          onClick={() => setShowBoundingBoxes(p => !p)}
+                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
+                          title="Toggle Content Framing Overlays"
+                        >
+                          {showBoundingBoxes ? <Eye size={10} /> : <EyeOff size={10} />}
+                          <span>CONTENT FRAMING</span>
+                        </button>
+                      </div>
                     </div>
                     <div className="gutter-line-callout top"><span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">TOP GUTTER:</span><span className="gutter-callout-value">{alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}</span></div>
                     <div className="source-image-wrapper fit" style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -976,33 +1332,107 @@ function AppContent() {
               </div>
             </main>
 
-            <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
+            {!inspectorMaximized ? (
+              <>
+                <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
 
-            <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
-              <div className="panel-header">
-                <span>Verified Lines ({filteredLines.length})</span>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')}>All ({documentData.total_lines})</button>
-                  <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
-                </div>
-              </div>
-              <div className="filter-bar"><Search size={14} color="#8b949e" /><input type="text" className="search-input" placeholder="Search lines..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
-              <div className="lines-table-container" ref={lineListRef} style={{ paddingBottom: isTelemetryExpanded ? '340px' : '40px' }}>
-                {filteredLines.length === 0 ? <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}><p>No lines transcribed yet.</p></div> : (
-                  <table className="clean-lines-table">
-                    <thead><tr><th className="th-line-num">Line #</th><th className="th-line-text">text</th></tr></thead>
-                    <tbody>
-                      {filteredLines.map(line => (
-                        <tr key={line.line_number} className={`table-line-row ${line.status} ${selectedLine?.line_number === line.line_number ? 'selected' : ''}`} onClick={() => { setSelectedLine(line); if (line.frame_id && line.frame_id !== 'manual') setSelectedFrameId(line.frame_id); }}>
-                          <td className="td-line-num">{line.gutter_number || line.line_number}{line.is_wrapped && <span className="wrap-tag"> ↵</span>}</td>
-                          <td className="td-line-text"><pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                {linesMinimized ? (
+                  <aside
+                    className="window-minimized-rail"
+                    onClick={() => setLinesMinimized(false)}
+                    title="Click to restore Verified Lines panel"
+                  >
+                    <Search size={14} color="#00ff9d" />
+                    <span className="minimized-rail-label">VERIFIED LINES ({filteredLines.length})</span>
+                    <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+                  </aside>
+                ) : (
+                  <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
+                    <div className="panel-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="checkbox"
+                          checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
+                          onChange={handleToggleSelectAllLines}
+                          title="Select or deselect all lines"
+                          style={{ cursor: 'pointer' }}
+                        />
+                        <span>Verified Lines ({filteredLines.length})</span>
+                        {selectedLineNumbers.size > 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-danger-group"
+                            onClick={handleDeleteSelectedLines}
+                            disabled={isBatchDeletingLines}
+                            title="Delete selected lines"
+                          >
+                            <Trash2 size={10} />
+                            <span>Delete ({selectedLineNumbers.size})</span>
+                          </button>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')}>All ({documentData.total_lines})</button>
+                        <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
+                        <div className="window-controls">
+                          <button
+                            type="button"
+                            className="win-btn"
+                            onClick={() => setLinesMinimized(true)}
+                            title="Minimize lines panel"
+                          >
+                            <Minus size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="filter-bar"><Search size={14} color="#8b949e" /><input type="text" className="search-input" placeholder="Search lines..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
+                    <div className="lines-table-container" ref={lineListRef} style={{ paddingBottom: isTelemetryExpanded ? '340px' : '40px' }}>
+                      {filteredLines.length === 0 ? <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}><p>No lines transcribed yet.</p></div> : (
+                        <table className="clean-lines-table">
+                          <thead>
+                            <tr>
+                              <th className="th-select">
+                                <input
+                                  type="checkbox"
+                                  checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
+                                  onChange={handleToggleSelectAllLines}
+                                />
+                              </th>
+                              <th className="th-line-num">Line #</th>
+                              <th className="th-line-text">text</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredLines.map(line => {
+                              const isSelected = selectedLineNumbers.has(line.line_number);
+                              return (
+                                <tr
+                                  key={line.line_number}
+                                  className={`table-line-row ${line.status} ${selectedLine?.line_number === line.line_number ? 'selected' : ''} ${isSelected ? 'selected-for-edit' : ''}`}
+                                  onClick={() => { setSelectedLine(line); if (line.frame_id && line.frame_id !== 'manual') setSelectedFrameId(line.frame_id); }}
+                                >
+                                  <td className="td-select" onClick={e => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      className="line-select-checkbox"
+                                      checked={isSelected}
+                                      onChange={(e) => handleToggleSelectLine(line.line_number, e)}
+                                    />
+                                  </td>
+                                  <td className="td-line-num">{line.gutter_number || line.line_number}{line.is_wrapped && <span className="wrap-tag"> ↵</span>}</td>
+                                  <td className="td-line-text"><pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre></td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </section>
                 )}
-              </div>
-            </section>
+              </>
+            ) : null}
           </>
         )}
       </div>
@@ -1077,55 +1507,6 @@ function AppContent() {
         setGotoTargetLine={setGotoTargetLine} onGotoLine={handleGotoLine} isNavigating={isNavigating} navStatus={navStatus}
         onSendControlHome={() => handleSendControlKey('home')} onSendControlEnd={() => handleSendControlKey('end')}
         apiBase={API_BASE} streamKey={streamKey}
-      />
-
-      <DeviceStudioDrawer
-        isOpen={showStudioDrawer}
-        onClose={() => setShowStudioDrawer(false)}
-        apiBase={API_BASE}
-        initialTab={studioInitialTab}
-        deviceInfo={deviceInfo}
-        deviceModel={deviceModel}
-        onSelectDevice={handleSelectDevice}
-        onSelectSerial={handleSelectSerial}
-        onConnectAdbIp={handleConnectAdbIp}
-        isConnectingIp={isConnectingIp}
-        connectStatusMsg={connectStatusMsg}
-        onPairAdb={handlePairAdb}
-        isPairing={isPairing}
-        pairStatusMsg={pairStatusMsg}
-        pixel8Ip={pixel8Ip}
-        setPixel8Ip={setPixel8Ip}
-        pixel10Ip={pixel10Ip}
-        setPixel10Ip={setPixel10Ip}
-        alignmentData={alignmentData}
-        onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
-        onOpenAlignmentModal={() => setShowAlignmentModal(true)}
-        liveMode={liveMode}
-        onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
-        streamKey={streamKey}
-        onRefreshStream={() => setStreamKey(Date.now())}
-        showBoundingBoxes={showBoundingBoxes}
-        onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
-        onCloseKeyboard={handleCloseKeyboard}
-        isClosingKeyboard={isClosingKeyboard}
-        telemetry={telemetry}
-        tokenStats={tokenStats}
-        documentSummary={{
-          total_lines: documentData?.total_lines || 0,
-          min_line: documentData?.min_line || 0,
-          max_line: documentData?.max_line || 0,
-          total_frames: frames.length,
-          issue_count: documentData?.issue_count || 0,
-          verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
-        }}
-        wsConnected={wsConnected}
-        latencyMs={latencyMs}
-        eventsLog={eventsLog}
-        onClearEvents={() => setEventsLog([])}
-        onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
-        projectInitProgress={projectInitProgress}
-        onDismissInitProgress={() => setProjectInitProgress(null)}
       />
 
       <AlignmentDiagnosticsModal

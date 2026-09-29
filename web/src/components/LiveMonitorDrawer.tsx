@@ -152,7 +152,7 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
 
           {liveMode === 'desktop' && (
             <button type="button" className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`} onClick={onToggleBoundingBoxes} title="Toggle AI Bounding Boxes">
-              {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>AI BOXES</span>
+              {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}<span>CONTENT FRAMING</span>
             </button>
           )}
 
