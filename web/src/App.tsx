@@ -121,7 +121,7 @@ function AppContent() {
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
   const [isInfoHovered, setIsInfoHovered] = useState(false);
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
-  const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('cloud');
+  const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('local');
   const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>(() => {
     try { return (localStorage.getItem('mc_target_device_model') as any) || 'pixel_8'; } catch { return 'pixel_8'; }
   });
@@ -637,10 +637,24 @@ function AppContent() {
   }, [addTelemetryEvent, fetchData]);
 
   const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
+    if (mode === 'cloud' && !apiKeyConfigured) {
+      await showAlert({
+        title: 'Gemini Cloud Key Required',
+        message: 'A Cloud API key has not been configured. Please enter your Gemini API key under Secrets to activate Cloud Pipeline, or continue with Local Pipeline.',
+        variant: 'warning'
+      });
+      setSettingsTab('secrets');
+      return;
+    }
     setIsSwitchingPipeline(true);
     try {
       const res = await api('/api/pipeline/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
-      if (res.ok) setPipelineMode((await res.json()).pipeline_mode);
+      if (res.ok) {
+        setPipelineMode((await res.json()).pipeline_mode);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        await showAlert({ title: 'Pipeline Mode Error', message: err.detail || 'Failed to switch pipeline mode', variant: 'danger' });
+      }
     } finally { setIsSwitchingPipeline(false); }
   };
 
@@ -669,7 +683,11 @@ function AppContent() {
 
   const handleSaveApiKey = async () => {
     const res = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: apiKeyInput.trim() }) });
-    if (res.ok) { setApiKeyConfigured(true); setShowConfigModal(false); }
+    if (res.ok) {
+      setApiKeyConfigured(Boolean(apiKeyInput.trim()));
+      setShowConfigModal(false);
+      await fetchData();
+    }
     else { await showAlert({ title: 'Invalid API Key', message: 'The provided key could not be verified.', variant: 'danger' }); }
   };
 
@@ -1594,17 +1612,44 @@ function AppContent() {
           {settingsTab === 'pipeline' ? (
             <div className="settings-tab-content">
               <div className="pipeline-choices">
-                <div className={`pipeline-choice-card ${pipelineMode === 'cloud' ? 'active cloud-active' : ''}`} onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('cloud')} role="button" tabIndex={0}>
+                <div
+                  className={`pipeline-choice-card ${pipelineMode === 'cloud' ? 'active cloud-active' : ''}`}
+                  onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('cloud')}
+                  role="button"
+                  tabIndex={0}
+                  style={!apiKeyConfigured ? { opacity: 0.75 } : undefined}
+                >
                   <div className="pipeline-choice-icon" style={{ color: '#58a6ff' }}><Cloud size={18} /></div>
                   <div className="pipeline-choice-info">
-                    <div className="pipeline-choice-title"><span>Cloud Pipeline (Gemini 2.5 Flash)</span>{pipelineMode === 'cloud' && <span className="badge-active-pill" style={{ background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff', borderColor: 'rgba(88, 166, 255, 0.3)' }}>ACTIVE</span>}</div>
-                    <p className="pipeline-choice-desc">Fast, high-fidelity cloud vision model. Processes settled frames with zero local GPU load.</p>
+                    <div className="pipeline-choice-title">
+                      <span>Cloud Pipeline (Gemini 2.5 Flash)</span>
+                      {pipelineMode === 'cloud' && (
+                        <span className="badge-active-pill" style={{ background: 'rgba(88, 166, 255, 0.15)', color: '#58a6ff', borderColor: 'rgba(88, 166, 255, 0.3)' }}>ACTIVE</span>
+                      )}
+                      {!apiKeyConfigured && (
+                        <span className="badge-active-pill" style={{ background: 'rgba(255, 123, 114, 0.15)', color: '#ff7b72', borderColor: 'rgba(255, 123, 114, 0.3)', marginLeft: '6px' }}>NO KEY</span>
+                      )}
+                    </div>
+                    <p className="pipeline-choice-desc">
+                      Fast, high-fidelity cloud vision model. Processes settled frames with zero local GPU load.{!apiKeyConfigured && ' (Requires API key in Secrets)'}
+                    </p>
                   </div>
                 </div>
-                <div className={`pipeline-choice-card ${pipelineMode === 'local' ? 'active' : ''}`} onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('local')} role="button" tabIndex={0}>
+                <div
+                  className={`pipeline-choice-card ${pipelineMode === 'local' ? 'active' : ''}`}
+                  onClick={() => !isSwitchingPipeline && handleTogglePipelineMode('local')}
+                  role="button"
+                  tabIndex={0}
+                >
                   <div className="pipeline-choice-icon" style={{ color: 'var(--color-primary)' }}><Zap size={18} /></div>
                   <div className="pipeline-choice-info">
-                    <div className="pipeline-choice-title"><span>Local Pipeline (MiniCPM-V 2.6)</span>{pipelineMode === 'local' && <span className="badge-active-pill">ACTIVE</span>}</div>
+                    <div className="pipeline-choice-title">
+                      <span>Local Pipeline (MiniCPM-V 2.6)</span>
+                      {pipelineMode === 'local' && <span className="badge-active-pill">ACTIVE</span>}
+                      {!apiKeyConfigured && (
+                        <span className="badge-active-pill" style={{ background: 'rgba(56, 139, 253, 0.15)', color: '#58a6ff', borderColor: 'rgba(56, 139, 253, 0.3)', marginLeft: '6px' }}>DEFAULT</span>
+                      )}
+                    </div>
                     <p className="pipeline-choice-desc">100% offline vision-language model execution via local engine. Zero network calls.</p>
                   </div>
                 </div>

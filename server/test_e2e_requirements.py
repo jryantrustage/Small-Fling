@@ -107,3 +107,40 @@ def test_full_pipeline():
         client.delete(f"/api/projects/{proj_id}")
 
 
+def test_ocr_defaults_to_local_without_cloud_key():
+    import config
+    orig_key = config.GEMINI_API_KEY
+    try:
+        # Simulate missing cloud API key
+        config.GEMINI_API_KEY = ""
+        
+        # 1. Pipeline mode should default to local
+        res = client.get("/api/pipeline/mode")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["pipeline_mode"] == "local"
+        assert data["gemini_available"] is False
+        assert data["ocr_engine"] == "local"
+
+        # 2. Engines list should mark active as local and gemini as unavailable
+        eng_res = client.get("/api/ocr/engines")
+        assert eng_res.status_code == 200
+        eng_data = eng_res.json()
+        assert eng_data["active_engine"] == "local"
+        assert eng_data["pipeline_mode"] == "local"
+        gemini_eng = next((e for e in eng_data["engines"] if e["id"] == "gemini"), None)
+        assert gemini_eng is not None
+        assert gemini_eng["available"] is False
+
+        # 3. Switching to cloud mode without key should be rejected
+        switch_res = client.post("/api/pipeline/mode", json={"mode": "cloud"})
+        assert switch_res.status_code == 400
+
+        # 4. Selecting gemini engine without key should be rejected
+        select_res = client.post("/api/ocr/select-engine", json={"engine": "gemini"})
+        assert select_res.status_code == 400
+    finally:
+        config.GEMINI_API_KEY = orig_key
+
+
+

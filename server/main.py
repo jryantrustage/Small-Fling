@@ -16,12 +16,14 @@ from services.adb_service import (
     alignment_monitor_loop,
     awake_keepalive_loop,
 )
+from services import ocr_service as ocr_svc
 from services.ocr_service import (
     check_ollama_status,
     active_pipeline_mode,
     active_model_target,
     active_ocr_engine,
     connection_stats,
+    sync_pipeline_mode_with_keys,
 )
 from routers import (
     device,
@@ -151,6 +153,7 @@ async def get_system_status():
 
 @app.get("/api/config")
 async def get_config():
+    ocr_svc.sync_pipeline_mode_with_keys()
     return {
         "api_key_configured": bool(config.GEMINI_API_KEY),
         "api_key_preview": config.get_api_key_preview()
@@ -159,6 +162,16 @@ async def get_config():
 @app.post("/api/config")
 async def set_config(req: ConfigRequest):
     config.set_api_key(req.api_key)
+    ocr_svc.sync_pipeline_mode_with_keys()
+    await state.ws_manager.broadcast({
+        "type": "pipeline_mode_changed",
+        "pipeline_mode": ocr_svc.active_pipeline_mode,
+        "mode": ocr_svc.active_pipeline_mode,
+        "model_target": ocr_svc.active_model_target,
+        "ocr_engine": ocr_svc.active_ocr_engine,
+        "engine": ocr_svc.active_ocr_engine,
+        "gemini_available": bool(config.GEMINI_API_KEY)
+    })
     return {"status": "success", "message": "API key updated."}
 
 @app.get("/api/token-stats")
