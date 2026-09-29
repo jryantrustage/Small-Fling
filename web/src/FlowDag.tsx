@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Activity, RefreshCw, Layers, Lock, Cpu, Settings, ShieldCheck, ShieldAlert,
   Sliders, ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
-  FileText, Move
+  FileText, Move, Clock
 } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
@@ -140,9 +140,9 @@ const NODES_METADATA: NodeMeta[] = [
   },
   {
     id: 'local_ai_ocr',
-    step: '3b',
-    shortName: 'MiniCPM-V OCR',
-    fullName: '3b. LOCAL AI OCR',
+    step: '4',
+    shortName: 'MiniCPM-V',
+    fullName: '4. LOCAL AI OCR',
     subhead: 'MiniCPM-V Vision',
     desc: 'Extracts verbatim markdown & code lines using local MiniCPM-V multimodal vision model in Ollama.',
     group: 'capture_entire_markdown',
@@ -150,46 +150,63 @@ const NODES_METADATA: NodeMeta[] = [
   },
   {
     id: 'frame_ocr',
-    step: '4',
-    shortName: 'OCR Extraction',
-    fullName: '4. OCR EXTRACTION',
-    subhead: 'Gutter & Line Reader',
-    desc: 'Extracts gutter lines and text from captured frame.',
+    step: '5',
+    shortName: 'Gutter OCR',
+    fullName: '5. GUTTER OCR',
+    subhead: 'Lines & Bounds Reader',
+    desc: 'Extracts gutter lines and text bounds from captured frame.',
     group: 'capture_entire_markdown',
     accentColor: '#8957e5',
     hasConfig: true
   },
   {
     id: 'arrow_down',
-    step: '5',
-    shortName: 'Navigation',
-    fullName: '5. NAVIGATION',
-    subhead: 'Down Arrow (Next Top)',
-    desc: 'Positions line next target top (prev bottom + 1) onto top gutter.',
+    step: '6',
+    shortName: 'Scroll Down',
+    fullName: '6. DOWN NAVIGATION',
+    subhead: 'Next Top Position',
+    desc: 'Positions next target top line (prev bottom + 1) onto top gutter.',
     group: 'capture_entire_markdown',
     accentColor: '#ffa657'
   },
   {
     id: 'verification_trigger',
-    step: '6',
+    step: '7',
     shortName: 'Verify Trigger',
-    fullName: '6. VERIFY TRIGGER',
-    subhead: 'Target Line Gutter Verification',
+    fullName: '7. VERIFY TRIGGER',
+    subhead: 'Target Gutter & Qualifiers',
     desc: 'Verifies line is on top gutter and evaluates qualifiers before loopback flow.',
     group: 'capture_entire_markdown',
     accentColor: '#58a6ff',
     hasConfig: true
+  },
+  {
+    id: 'document_assemble',
+    step: '8',
+    shortName: 'Assemble Doc',
+    fullName: '8. ASSEMBLE MARKDOWN',
+    subhead: 'Reconstruct Master Document',
+    desc: 'Assembles verified code blocks into continuous markdown and evaluates EOF loopback completion.',
+    group: 'capture_entire_markdown',
+    accentColor: '#00ff9d',
+    hasConfig: true
   }
 ];
 
-const DEFAULT_POSITIONS: Record<string, { x: number; y: number }> = {
-  init_end: { x: 30, y: 70 },
-  reset_home: { x: 195, y: 70 },
-  frame_acquire: { x: 395, y: 70 },
-  local_ai_ocr: { x: 560, y: 70 },
-  frame_ocr: { x: 725, y: 70 },
-  arrow_down: { x: 890, y: 70 },
-  verification_trigger: { x: 1055, y: 70 },
+export interface PositionPct {
+  leftPct: number;
+  topPx: number;
+}
+
+const DEFAULT_POSITIONS_PCT: Record<string, PositionPct> = {
+  init_end: { leftPct: 1.4, topPx: 64 },
+  reset_home: { leftPct: 13.0, topPx: 64 },
+  frame_acquire: { leftPct: 26.0, topPx: 64 },
+  local_ai_ocr: { leftPct: 38.2, topPx: 64 },
+  frame_ocr: { leftPct: 50.4, topPx: 64 },
+  arrow_down: { leftPct: 62.6, topPx: 64 },
+  verification_trigger: { leftPct: 74.8, topPx: 64 },
+  document_assemble: { leftPct: 87.0, topPx: 64 },
 };
 
 const filterNodeTelemetry = (nodeId: string, ev: { message?: string; category?: string }) => {
@@ -206,17 +223,20 @@ const filterNodeTelemetry = (nodeId: string, ev: { message?: string; category?: 
       return msg.includes('frame_acquire') || msg.includes('capture') || msg.includes('screenshot') ||
              msg.includes('grab') || msg.includes('node 3') || cat === 'FRAME';
     case 'local_ai_ocr':
-      return msg.includes('local_ai') || msg.includes('rapidocr') || msg.includes('onnx') ||
-             msg.includes('ai ocr') || msg.includes('node 3b') || msg.includes('verbatim');
+      return msg.includes('local_ai') || msg.includes('minicpm') || msg.includes('rapidocr') || msg.includes('onnx') ||
+             msg.includes('ai ocr') || msg.includes('node 4') || msg.includes('node 3b') || msg.includes('verbatim');
     case 'frame_ocr':
       return msg.includes('frame_ocr') || msg.includes('gutter') || msg.includes('line reader') ||
-             msg.includes('node 4') || (cat === 'OCR' && !msg.includes('local_ai'));
+             msg.includes('node 5') || msg.includes('node 4') || (cat === 'OCR' && !msg.includes('local_ai'));
     case 'arrow_down':
       return msg.includes('arrow_down') || msg.includes('down arrow') || msg.includes('arrow') ||
-             msg.includes('step') || msg.includes('pacer') || msg.includes('node 5') || cat === 'PACER';
+             msg.includes('step') || msg.includes('pacer') || msg.includes('node 6') || msg.includes('node 5') || cat === 'PACER';
     case 'verification_trigger':
       return msg.includes('verification_trigger') || msg.includes('qualifier') || msg.includes('trigger') ||
-             msg.includes('loopback') || msg.includes('decision') || msg.includes('node 6');
+             msg.includes('loopback') || msg.includes('decision') || msg.includes('node 7') || msg.includes('node 6');
+    case 'document_assemble':
+      return msg.includes('assemble') || msg.includes('markdown') || msg.includes('reconstruct') ||
+             msg.includes('node 8') || msg.includes('complete');
     default:
       return true;
   }
@@ -242,13 +262,13 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     else setInternalSelectedNodeId(id || 'init_end');
   };
 
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(DEFAULT_POSITIONS);
+  const [dragOffsets, setDragOffsets] = useState<Record<string, { x: number; y: number }>>({});
   const [draggingNode, setDraggingNode] = useState<{
     id: string;
     startMouseX: number;
     startMouseY: number;
-    startNodeX: number;
-    startNodeY: number;
+    startOffsetX: number;
+    startOffsetY: number;
   } | null>(null);
 
   // Drag interaction
@@ -259,8 +279,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       id: nodeId,
       startMouseX: e.clientX,
       startMouseY: e.clientY,
-      startNodeX: positions[nodeId]?.x ?? DEFAULT_POSITIONS[nodeId].x,
-      startNodeY: positions[nodeId]?.y ?? DEFAULT_POSITIONS[nodeId].y,
+      startOffsetX: dragOffsets[nodeId]?.x ?? 0,
+      startOffsetY: dragOffsets[nodeId]?.y ?? 0,
     });
   };
 
@@ -269,11 +289,11 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     const onMouseMove = (e: MouseEvent) => {
       const dx = e.clientX - draggingNode.startMouseX;
       const dy = e.clientY - draggingNode.startMouseY;
-      setPositions(prev => ({
+      setDragOffsets(prev => ({
         ...prev,
         [draggingNode.id]: {
-          x: Math.max(10, Math.min(1250, draggingNode.startNodeX + dx)),
-          y: Math.max(10, Math.min(220, draggingNode.startNodeY + dy))
+          x: Math.max(-50, Math.min(50, draggingNode.startOffsetX + dx)),
+          y: Math.max(-40, Math.min(120, draggingNode.startOffsetY + dy))
         }
       }));
     };
@@ -289,9 +309,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   }, [draggingNode]);
 
   const handleResetLayout = () => {
-    setPositions(DEFAULT_POSITIONS);
+    setDragOffsets({});
   };
 
+  const [isLoopRunning, setIsLoopRunning] = useState<boolean>(false);
   const [dagStatus, setDagStatus] = useState<DagStatusData>({
     active_node: 'node_1_end', target_total_lines: targetTotalLines,
     current_top_line: currentTopLine, current_bottom_line: currentBottomLine,
@@ -384,6 +405,13 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
         }
         try {
+          const lRes = await fetch(`${apiBase}/api/dag/loop/status`);
+          if (lRes.ok) {
+            const ld = await lRes.json();
+            setIsLoopRunning(Boolean(ld.running));
+          }
+        } catch {}
+        try {
           const kRes = await fetch(`${apiBase}/api/device/keyboard-status`);
           if (kRes.ok) {
             const kd = await kRes.json();
@@ -409,11 +437,35 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const node4 = dagStatus.dag?.nodes?.frame_ocr || {};
   const node5 = dagStatus.dag?.nodes?.arrow_down || {};
   const node6 = dagStatus.dag?.nodes?.verification_trigger || {};
+  const node8 = dagStatus.dag?.nodes?.document_assemble || {};
+
+  const currentActiveNode = dagStatus.dag?.current_active_node || dagStatus.active_node;
 
   const parsedBottom = node4.bottom_line || effectiveBottom;
   const nextTargetTop = (parsedBottom && parsedBottom > 0)
     ? (parsedBottom + 1)
     : (node5.target_top_line || node6.target_top_line || 32);
+
+  const handleToggleLoop = async () => {
+    try {
+      if (isLoopRunning) {
+        await fetch(`${apiBase}/api/dag/loop/stop`, { method: 'POST' });
+        setIsLoopRunning(false);
+        setNodeFeedback({ id: 'loop', message: 'Continuous capture loop stopped' });
+      } else {
+        await fetch(`${apiBase}/api/dag/loop/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: activeDeviceSerial })
+        });
+        setIsLoopRunning(true);
+        setNodeFeedback({ id: 'loop', message: 'Continuous capture loop started (Nodes 3→8 looping until 100% captured)' });
+      }
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({ id: 'loop', message: `Loop control error: ${err.message}`, isError: true });
+    }
+  };
 
   const handleRunNode = async (nodeId: string) => {
     setRunningNodeId(nodeId);
@@ -600,7 +652,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   const isNode6Running = runningNodeId === 'verification_trigger' || isEvaluating || node6.status === 'active';
 
-  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isNode3Running || isNode3bRunning || isNode4Running || isNode5Running || isNode6Running || isOrchestrating;
+  const isNode8Running = runningNodeId === 'document_assemble' || node8.status === 'active';
+  const isNode8Done = node8.status === 'completed';
+
+  const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isLoopRunning || isNode3Running || isNode3bRunning || isNode4Running || isNode5Running || isNode6Running || isNode8Running || isOrchestrating;
 
   // Selected node item metadata
   const selectedNodeMeta = NODES_METADATA.find(n => n.id === activeSelectedNodeId) || NODES_METADATA[0];
@@ -608,74 +663,142 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   // Telemetry events filtered specifically for the selected node
   const nodeTelemetryEvents = eventsLog.filter(ev => filterNodeTelemetry(selectedNodeMeta.id, ev));
 
-  // Determine node live status
+  // Determine node live status with timing and active state
   const getNodeLiveStatus = (id: string) => {
+    const nodeData = dagStatus.dag?.nodes?.[id] || {};
+    const startedAt = nodeData.started_at || null;
+    const finishedAt = nodeData.finished_at || null;
+    const durationMs = typeof nodeData.duration_ms === 'number' ? nodeData.duration_ms : null;
+    const isExplicitlyActive = Boolean(nodeData.is_active) || (currentActiveNode === id);
+
     switch (id) {
-      case 'init_end':
+      case 'init_end': {
+        const isRunning = isExplicitlyActive || isNode1Running;
         return {
-          isRunning: isNode1Running,
+          isRunning,
+          isActive: isRunning,
           isError: isNode1Error,
           isDone: isNode1Calibrated,
-          statusLabel: isNode1Running ? 'CALIBRATING' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN')),
-          metricLabel: isNode1Calibrated && node1TotalLines > 0 ? `${node1TotalLines} Lines` : (isNode1Error ? 'Page Stuck' : 'Auto Detect'),
-          color: isNode1Error ? '#ff7b72' : (isNode1Calibrated ? '#00ff9d' : '#58a6ff')
+          statusLabel: isRunning ? 'CALIBRATING' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN')),
+          metricLabel: isNode1Calibrated && node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : (isNode1Error ? 'Page Stuck' : 'Auto Detect'),
+          color: isNode1Error ? '#ff7b72' : (isNode1Calibrated ? '#00ff9d' : '#58a6ff'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'reset_home':
+      }
+      case 'reset_home': {
+        const isRunning = isExplicitlyActive || isNode2Running;
         return {
-          isRunning: isNode2Running,
+          isRunning,
+          isActive: isRunning,
           isError: isNode2Error,
           isDone: isNode2Verified,
-          statusLabel: isNode2Running ? 'VERIFYING' : (isNode2Verified ? 'VERIFIED' : (isNode2Error ? 'UNVERIFIED' : 'READY')),
+          statusLabel: isRunning ? 'VERIFYING' : (isNode2Verified ? 'VERIFIED' : (isNode2Error ? 'UNVERIFIED' : 'READY')),
           metricLabel: isNode2Verified ? 'Ln 1 at Top' : (isNode2Error ? 'Ln 1 Missing' : 'Line 1 Check'),
-          color: isNode2Error ? '#ff7b72' : (isNode2Verified ? '#00ff9d' : '#a371f7')
+          color: isNode2Error ? '#ff7b72' : (isNode2Verified ? '#00ff9d' : '#a371f7'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'frame_acquire':
+      }
+      case 'frame_acquire': {
+        const isRunning = isExplicitlyActive || isNode3Running;
         return {
-          isRunning: isNode3Running,
+          isRunning,
+          isActive: isRunning,
           isError: isNode3Error,
           isDone: isNode3Done,
-          statusLabel: isNode3Running ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY')),
+          statusLabel: isRunning ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY')),
           metricLabel: isNode3Done ? `Page ${node3.page || currentPage}` : 'Frame Grab',
-          color: isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#00ff9d')
+          color: isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#00ff9d'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'local_ai_ocr':
+      }
+      case 'local_ai_ocr': {
+        const isRunning = isExplicitlyActive || isNode3bRunning;
         return {
-          isRunning: isNode3bRunning,
+          isRunning,
+          isActive: isRunning,
           isError: isNode3bError,
           isDone: isNode3bDone,
-          statusLabel: isNode3bRunning ? 'EXTRACTING' : (isNode3bError ? 'FAILED' : (isNode3bDone ? 'PARSED' : 'READY')),
+          statusLabel: isRunning ? 'EXTRACTING' : (isNode3bError ? 'FAILED' : (isNode3bDone ? 'PARSED' : 'READY')),
           metricLabel: node3b.lines_count ? `${node3b.lines_count} lines` : 'MiniCPM-V',
-          color: isNode3bError ? '#ff7b72' : (isNode3bDone ? '#00ff9d' : '#388bfd')
+          color: isNode3bError ? '#ff7b72' : (isNode3bDone ? '#00ff9d' : '#388bfd'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'frame_ocr':
+      }
+      case 'frame_ocr': {
+        const isRunning = isExplicitlyActive || isNode4Running;
         return {
-          isRunning: isNode4Running,
+          isRunning,
+          isActive: isRunning,
           isError: isNode4Error,
           isDone: isNode4Done,
-          statusLabel: isNode4Running ? 'READING' : (isNode4Error ? 'FAILED' : (isNode4Done ? 'PARSED' : 'READY')),
+          statusLabel: isRunning ? 'READING' : (isNode4Error ? 'FAILED' : (isNode4Done ? 'PARSED' : 'READY')),
           metricLabel: node4.bottom_line ? `Ln ${node4.top_line || 1}→${node4.bottom_line}` : 'Gutter OCR',
-          color: isNode4Error ? '#ff7b72' : (isNode4Done ? '#00ff9d' : '#8957e5')
+          color: isNode4Error ? '#ff7b72' : (isNode4Done ? '#00ff9d' : '#8957e5'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'arrow_down':
+      }
+      case 'arrow_down': {
+        const isRunning = isExplicitlyActive || isNode5Running;
         return {
-          isRunning: isNode5Running,
+          isRunning,
+          isActive: isRunning,
           isError: false,
           isDone: isNode5Done,
-          statusLabel: isNode5Running ? 'STEPPING' : (isNode5Done ? 'STEPPED' : 'READY'),
+          statusLabel: isRunning ? 'STEPPING' : (isNode5Done ? 'STEPPED' : 'READY'),
           metricLabel: `Target Ln ${nextTargetTop}`,
-          color: '#ffa657'
+          color: '#ffa657',
+          startedAt,
+          finishedAt,
+          durationMs
         };
-      case 'verification_trigger':
+      }
+      case 'verification_trigger': {
+        const isRunning = isExplicitlyActive || isNode6Running;
         return {
-          isRunning: isNode6Running,
+          isRunning,
+          isActive: isRunning,
           isError: triggerDecision.prevented,
           isDone: isTriggerFired,
           statusLabel: isTriggerFired ? 'FIRED' : (triggerDecision.prevented ? 'PREVENTED' : 'PENDING'),
           metricLabel: isTriggerFired ? '100% Captured' : (triggerDecision.prevented ? 'Blocked ⛔' : `Ln ${nextTargetTop}`),
-          color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff')
+          color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'),
+          startedAt,
+          finishedAt,
+          durationMs
         };
+      }
+      case 'document_assemble': {
+        const isRunning = isExplicitlyActive || isNode8Running;
+        const isComplete = Boolean(node8.is_complete);
+        return {
+          isRunning,
+          isActive: isRunning,
+          isError: Boolean(node8.error),
+          isDone: isNode8Done,
+          statusLabel: isRunning ? 'ASSEMBLING' : (isComplete ? 'COMPLETE' : (isNode8Done ? 'ASSEMBLED' : 'READY')),
+          metricLabel: isComplete ? '100% Verified' : (node8.total_captured_lines ? `${node8.total_captured_lines} lines` : 'Reconstruct'),
+          color: isComplete ? '#00ff9d' : (isNode8Done ? '#388bfd' : '#8b949e'),
+          startedAt,
+          finishedAt,
+          durationMs
+        };
+      }
       default:
-        return { isRunning: false, isError: false, isDone: false, statusLabel: 'IDLE', metricLabel: '', color: '#8b949e' };
+        return {
+          isRunning: false, isActive: false, isError: false, isDone: false,
+          statusLabel: 'IDLE', metricLabel: '', color: '#8b949e',
+          startedAt: null, finishedAt: null, durationMs: null
+        };
     }
   };
 
@@ -736,7 +859,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         </div>
 
         {/* Toolbar action buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px' }}>
+          <button
+            type="button"
+            onClick={handleToggleLoop}
+            title={isLoopRunning ? "Stop Continuous Capture Loop" : "Start Continuous Capture Loop (Nodes 3→8 Repeating until 100% captured)"}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '6px',
+              background: isLoopRunning ? 'rgba(255, 107, 37, 0.2)' : 'rgba(0, 255, 157, 0.15)',
+              border: `1px solid ${isLoopRunning ? '#ff6b25' : '#00ff9d'}`,
+              color: isLoopRunning ? '#ffa657' : '#00ff9d',
+              fontSize: '10.5px', fontWeight: 800, cursor: 'pointer'
+            }}
+          >
+            {isLoopRunning ? <RefreshCw size={11} className="spin" color="#ff6b25" /> : <Play size={11} />}
+            <span>{isLoopRunning ? 'STOP LOOP' : 'RUN CAPTURE LOOP'}</span>
+          </button>
+
           <button
             type="button"
             onClick={handleResetLayout}
@@ -860,16 +999,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       {/* MAIN CONTAINER: CANVAS WITH GRID ON LEFT + INSPECTION SIDEBAR CARD ON RIGHT */}
       <div style={{ display: 'flex', gap: '14px', alignItems: 'stretch', minHeight: '330px' }}>
         
-        {/* LEFT: GRID CANVAS */}
-        <div className="dag-grid-canvas" style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-          <div style={{ width: '1240px', height: '100%', minHeight: '305px', position: 'relative' }}>
+        {/* LEFT: GRID CANVAS (RESPONSIVE 100% WIDTH, ZERO HORIZONTAL SCROLL) */}
+        <div className="dag-grid-canvas" style={{ flex: 1, minWidth: 0, position: 'relative', overflow: 'hidden' }}>
+          <div style={{ width: '100%', height: '100%', minHeight: '305px', position: 'relative' }}>
             
             {/* Group 1 Background Region */}
             <div
               onClick={() => handleDagSelect('initialize')}
               style={{
                 position: 'absolute',
-                left: '16px', top: '16px', width: '345px', height: '255px',
+                left: '0.8%', top: '14px', width: '23.8%', height: '260px',
                 borderRadius: '10px',
                 border: `1.5px dashed ${effectiveSelectedDag === 'initialize' ? '#58a6ff' : 'rgba(88, 166, 255, 0.25)'}`,
                 background: effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.06)' : 'rgba(15, 23, 42, 0.45)',
@@ -882,10 +1021,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ fontSize: '10px', fontWeight: 800, color: '#58a6ff', letterSpacing: '0.5px' }}>
-                    DAG GROUP 1: INITIALIZE
+                    DAG 1: INITIALIZE
                   </span>
                   <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isInitGroupRunning ? 'rgba(163, 113, 247, 0.2)' : (isInitGroupCompleted ? 'rgba(0, 255, 157, 0.15)' : (isInitGroupError ? 'rgba(248, 81, 73, 0.15)' : '#30363d')), color: isInitGroupRunning ? '#a371f7' : (isInitGroupCompleted ? '#00ff9d' : (isInitGroupError ? '#ff7b72' : '#8b949e')), fontWeight: 800 }}>
-                    {isInitGroupRunning ? 'INITIALIZING...' : (isInitGroupCompleted ? 'COMPLETED ✔' : (isInitGroupError ? 'ISSUE' : 'IDLE'))}
+                    {isInitGroupRunning ? 'RUNNING' : (isInitGroupCompleted ? 'COMPLETED ✔' : (isInitGroupError ? 'ISSUE' : 'IDLE'))}
                   </span>
                 </div>
                 <button
@@ -900,7 +1039,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   }}
                 >
                   {isInitGroupRunning ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
-                  <span>{isInitGroupRunning ? 'Running...' : 'Run Group'}</span>
+                  <span>Run</span>
                 </button>
               </div>
             </div>
@@ -910,7 +1049,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               onClick={() => handleDagSelect('capture_entire_markdown')}
               style={{
                 position: 'absolute',
-                left: '375px', top: '16px', width: '845px', height: '255px',
+                left: '25.2%', top: '14px', width: '74.0%', height: '260px',
                 borderRadius: '10px',
                 border: `1.5px dashed ${effectiveSelectedDag === 'capture_entire_markdown' ? '#00ff9d' : 'rgba(0, 255, 157, 0.25)'}`,
                 background: effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.45)',
@@ -921,86 +1060,92 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '10px', fontWeight: 800, color: '#00ff9d', letterSpacing: '0.5px' }}>
-                  DAG GROUP 2: CAPTURE ENTIRE MARKDOWN
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
-                  disabled={runningGroupId !== null || runningNodeId !== null}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 7px',
-                    borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.4)',
-                    background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d',
-                    fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
-                  }}
-                >
-                  {isCaptureGroupRunning ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
-                  <span>{isCaptureGroupRunning ? 'Capturing...' : 'Run Cycle'}</span>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '10px', fontWeight: 800, color: '#00ff9d', letterSpacing: '0.5px' }}>
+                    DAG 2: CAPTURE ENTIRE MARKDOWN
+                  </span>
+                  <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.2)' : 'rgba(0, 255, 157, 0.15)', color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d', fontWeight: 800 }}>
+                    {isCaptureGroupRunning ? 'CAPTURING...' : 'READY'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
+                    disabled={runningGroupId !== null || runningNodeId !== null}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 7px',
+                      borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.4)',
+                      background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d',
+                      fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {isCaptureGroupRunning ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
+                    <span>1 Cycle</span>
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* DYNAMIC SVG CONNECTORS LAYER */}
-            <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+            {/* DYNAMIC SVG CONNECTORS LAYER (SCALED 0..1000 ACROSS 100% CANVAS) */}
+            <svg viewBox="0 0 1000 270" preserveAspectRatio="none" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
               <defs>
-                <marker id="dag-arrowhead-blue" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-                  <polygon points="0 0, 7 3.5, 0 7" fill="#58a6ff" />
+                <marker id="dag-arrowhead-blue" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+                  <polygon points="0 0, 6 3, 0 6" fill="#58a6ff" />
                 </marker>
-                <marker id="dag-arrowhead-green" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-                  <polygon points="0 0, 7 3.5, 0 7" fill="#00ff9d" />
+                <marker id="dag-arrowhead-green" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+                  <polygon points="0 0, 6 3, 0 6" fill="#00ff9d" />
                 </marker>
-                <marker id="dag-arrowhead-loop" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto">
-                  <polygon points="0 0, 7 3.5, 0 7" fill="#58a6ff" />
+                <marker id="dag-arrowhead-loop" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+                  <polygon points="0 0, 6 3, 0 6" fill="#00ff9d" />
                 </marker>
               </defs>
 
               {/* Sequential connecting bezier paths */}
-              {NODES_METADATA.slice(0, -1).map((nodeA, idx) => {
-                const nodeB = NODES_METADATA[idx + 1];
-                const posA = positions[nodeA.id] || DEFAULT_POSITIONS[nodeA.id];
-                const posB = positions[nodeB.id] || DEFAULT_POSITIONS[nodeB.id];
-                const x1 = posA.x + 142;
-                const y1 = posA.y + 37;
-                const x2 = posB.x;
-                const y2 = posB.y + 37;
-                const dx = Math.abs(x2 - x1) * 0.5;
-                const pathD = x2 >= x1
-                  ? `M ${x1} ${y1} C ${x1 + Math.max(25, dx)} ${y1}, ${x2 - Math.max(25, dx)} ${y2}, ${x2} ${y2}`
-                  : `M ${x1} ${y1} C ${x1 + 40} ${y1 + 40}, ${x2 - 40} ${y2 - 40}, ${x2} ${y2}`;
-                
-                const isConnectionActive = (runningNodeId === nodeA.id || runningNodeId === nodeB.id) ||
-                  (nodeA.group === 'capture_entire_markdown' && isCaptureGroupRunning) ||
-                  (nodeA.group === 'initialize' && isInitGroupRunning);
-                const strokeColor = nodeB.group === 'initialize' ? '#58a6ff' : (idx === 1 ? '#00ff9d' : '#00ff9d');
-
-                return (
-                  <path
-                    key={`${nodeA.id}->${nodeB.id}`}
-                    d={pathD}
-                    className={`dag-wire ${isConnectionActive ? 'dag-wire-active' : ''}`}
-                    stroke={strokeColor}
-                    strokeOpacity={isConnectionActive ? 1 : 0.65}
-                    markerEnd={`url(#dag-arrowhead-${strokeColor === '#00ff9d' ? 'green' : 'blue'})`}
-                  />
-                );
-              })}
-
-              {/* Loopback Curve: Node 6 (verification_trigger) -> Node 3 (frame_acquire) */}
               {(() => {
-                const node6Pos = positions['verification_trigger'] || DEFAULT_POSITIONS['verification_trigger'];
-                const node3Pos = positions['frame_acquire'] || DEFAULT_POSITIONS['frame_acquire'];
-                const startX = node6Pos.x + 71;
-                const startY = node6Pos.y + 74;
-                const endX = node3Pos.x + 71;
-                const endY = node3Pos.y + 74;
-                const loopPath = `M ${startX} ${startY} C ${startX} ${startY + 45}, ${endX} ${endY + 45}, ${endX} ${endY}`;
+                // Normalized center X coordinates (0..1000) for the 8 nodes
+                const centers = [71, 187, 317, 439, 561, 683, 805, 927];
+                const paths = [];
+                for (let i = 0; i < NODES_METADATA.length - 1; i++) {
+                  const nodeA = NODES_METADATA[i];
+                  const nodeB = NODES_METADATA[i + 1];
+                  const x1 = centers[i] + 54;
+                  const x2 = centers[i + 1] - 54;
+                  const y1 = 105;
+                  const y2 = 105;
+                  const isConnectionActive = (runningNodeId === nodeA.id || runningNodeId === nodeB.id) ||
+                    (nodeA.group === 'capture_entire_markdown' && isCaptureGroupRunning) ||
+                    (nodeA.group === 'initialize' && isInitGroupRunning);
+                  const strokeColor = nodeB.group === 'initialize' ? '#58a6ff' : '#00ff9d';
+                  const pathD = `M ${x1} ${y1} C ${x1 + 10} ${y1}, ${x2 - 10} ${y2}, ${x2} ${y2}`;
+
+                  paths.push(
+                    <path
+                      key={`${nodeA.id}->${nodeB.id}`}
+                      d={pathD}
+                      className={`dag-wire ${isConnectionActive ? 'dag-wire-active' : ''}`}
+                      stroke={strokeColor}
+                      strokeOpacity={isConnectionActive ? 1 : 0.65}
+                      markerEnd={`url(#dag-arrowhead-${strokeColor === '#00ff9d' ? 'green' : 'blue'})`}
+                    />
+                  );
+                }
+                return paths;
+              })()}
+
+              {/* Loopback Curve: Node 8 (document_assemble) -> Node 3 (frame_acquire) */}
+              {(() => {
+                const startX = 927;
+                const startY = 146;
+                const endX = 317;
+                const endY = 146;
+                const loopPath = `M ${startX} ${startY} C ${startX} 242, ${endX} 242, ${endX} ${endY}`;
                 return (
                   <g>
                     <path
                       d={loopPath}
                       fill="none"
-                      stroke={triggerDecision.prevented ? '#f85149' : '#58a6ff'}
+                      stroke={triggerDecision.prevented ? '#f85149' : '#00ff9d'}
                       strokeWidth="2"
                       strokeDasharray="5 3"
                       className={isCaptureGroupRunning ? 'dag-wire-active' : ''}
@@ -1008,68 +1153,72 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     />
                     <text
                       x={(startX + endX) / 2}
-                      y={Math.max(startY, endY) + 38}
-                      fill={triggerDecision.prevented ? '#ff7b72' : '#58a6ff'}
+                      y={235}
+                      fill={triggerDecision.prevented ? '#ff7b72' : '#00ff9d'}
                       fontSize="9.5"
                       fontFamily="var(--font-mono, monospace)"
                       textAnchor="middle"
                       fontWeight="700"
                     >
-                      {triggerDecision.prevented ? '⛔ Blocked' : `↺ Loopback to Step 3 (Next Top: Ln ${nextTargetTop})`}
+                      {triggerDecision.prevented ? '⛔ Trigger Prevented: Qualifier Issue' : `↺ Loopback to Step 3: Next Page Screen Capture (Ln ${nextTargetTop})`}
                     </text>
                   </g>
                 );
               })()}
             </svg>
 
-            {/* THE 7 MINIATURE DAG NODES */}
+            {/* THE 8 MINIATURE DAG NODES (RESPONSIVE, ZERO HORIZONTAL SCROLL) */}
             {NODES_METADATA.map((node) => {
-              const pos = positions[node.id] || DEFAULT_POSITIONS[node.id];
+              const basePos = DEFAULT_POSITIONS_PCT[node.id] || { leftPct: 0, topPx: 64 };
+              const offset = dragOffsets[node.id] || { x: 0, y: 0 };
               const isSelected = activeSelectedNodeId === node.id;
               const isDraggingThis = draggingNode?.id === node.id;
               const status = getNodeLiveStatus(node.id);
+              const isPulsingSwirl = status.isActive || status.isRunning || (currentActiveNode === node.id);
 
               return (
                 <div
                   key={node.id}
-                  className={`dag-mini-node ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''}`}
+                  className={`dag-mini-node ${isSelected ? 'selected' : ''} ${isDraggingThis ? 'dragging' : ''} ${isPulsingSwirl ? 'running-swirl' : ''}`}
                   style={{
-                    left: `${pos.x}px`,
-                    top: `${pos.y}px`,
+                    left: `calc(${basePos.leftPct}% + ${offset.x}px)`,
+                    top: `${basePos.topPx + offset.y}px`,
                     borderColor: isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d')),
                     boxShadow: isSelected
                       ? `0 0 16px ${node.accentColor}66, 0 4px 14px rgba(0,0,0,0.7)`
                       : (status.isRunning ? `0 0 12px ${node.accentColor}44` : '0 4px 12px rgba(0,0,0,0.45)')
                   }}
                   onMouseDown={(e) => handleNodeMouseDown(node.id, e)}
-                  title={`Click to inspect details. Drag to reposition on grid.`}
+                  title={`Node ${node.step}: ${node.fullName}\nClick to inspect details. Drag to nudge.`}
                 >
                   {/* Top Bar of Miniature Node */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
                       <span
                         className="dag-mini-node-badge"
                         style={{
                           background: `${node.accentColor}22`,
                           color: node.accentColor,
-                          border: `1px solid ${node.accentColor}55`
+                          border: `1px solid ${node.accentColor}55`,
+                          fontSize: '8.5px',
+                          padding: '1px 4px'
                         }}
                       >
                         {node.step}
                       </span>
-                      <span style={{ fontSize: '10px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.2px' }}>
+                      <span style={{ fontSize: '9.5px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.1px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {node.shortName}
                       </span>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
                       {status.isRunning ? (
-                        <RefreshCw size={11} className="spin" color={node.accentColor} />
+                        <RefreshCw size={10} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} />
                       ) : (
                         <span
                           style={{
-                            width: '7px',
-                            height: '7px',
+                            width: '6px',
+                            height: '6px',
                             borderRadius: '50%',
                             background: status.color,
                             boxShadow: `0 0 6px ${status.color}`
@@ -1079,24 +1228,31 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     </div>
                   </div>
 
-                  {/* Middle Subhead */}
-                  <div style={{ fontSize: '9px', color: '#8b949e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {node.subhead}
-                  </div>
-
-                  {/* Bottom Line / Live Metric Badge */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '2px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                    <span style={{ fontSize: '9.5px', fontWeight: 700, color: status.color }}>
+                  {/* Middle: Live Metric Badge */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '1px 0' }}>
+                    <span style={{ fontSize: '9px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {status.metricLabel}
                     </span>
+                    <span style={{ fontSize: '8px', color: '#6e7681', flexShrink: 0 }}>
+                      {status.statusLabel}
+                    </span>
+                  </div>
 
-                    {isSelected ? (
-                      <span style={{ fontSize: '8px', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '2px', opacity: 0.85 }}>
-                        <Move size={8} /> Drag
+                  {/* Bottom: Timings (Start -> Finish & Duration) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '2px', borderTop: '1px solid rgba(255, 255, 255, 0.07)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '8px', color: isPulsingSwirl ? '#ffa657' : '#8b949e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <Clock size={8} color={isPulsingSwirl ? '#ff6b25' : '#8b949e'} />
+                      <span style={{ fontWeight: isPulsingSwirl ? 800 : 500 }}>
+                        {isPulsingSwirl
+                          ? (status.startedAt ? `${status.startedAt} (active)` : 'Active...')
+                          : (status.startedAt && status.finishedAt
+                              ? `${status.startedAt}→${status.finishedAt} (${status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : ''})`
+                              : (status.startedAt ? status.startedAt : '--:--:--'))}
                       </span>
-                    ) : (
-                      <span style={{ fontSize: '8.5px', color: '#6e7681' }}>
-                        {status.statusLabel}
+                    </div>
+                    {isSelected && (
+                      <span style={{ fontSize: '7.5px', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '1px', opacity: 0.85, flexShrink: 0 }}>
+                        <Move size={7} />
                       </span>
                     )}
                   </div>
@@ -1202,6 +1358,56 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
               )}
             </div>
+
+            {/* Real-time Execution Timings & Node Active State */}
+            {(() => {
+              const liveStatus = getNodeLiveStatus(selectedNodeMeta.id);
+              return (
+                <div style={{ background: '#0d1117', border: `1.5px solid ${liveStatus.isActive ? '#ff6b25' : '#21262d'}`, borderRadius: '8px', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : '#58a6ff', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <Clock size={11} color={liveStatus.isActive ? '#ff6b25' : '#58a6ff'} />
+                      <span>NODE EXECUTION TIMINGS & STATE</span>
+                    </div>
+                    <span style={{
+                      fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
+                      background: liveStatus.isActive ? 'rgba(255, 107, 37, 0.2)' : (liveStatus.isDone ? 'rgba(0, 255, 157, 0.15)' : '#161b22'),
+                      color: liveStatus.isActive ? '#ffa657' : (liveStatus.isDone ? '#00ff9d' : '#8b949e'),
+                      border: `1px solid ${liveStatus.isActive ? '#ff6b2566' : 'transparent'}`
+                    }}>
+                      {liveStatus.isActive ? '🔥 SWIRLING ACTIVE' : (liveStatus.isDone ? 'COMPLETED ✔' : 'IDLE')}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px', marginTop: '2px' }}>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>STARTED AT</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.startedAt ? '#f0f6fc' : '#6e7681', marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                        {liveStatus.startedAt || '--:--:--'}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>FINISHED AT</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.isActive ? '#ffa657' : (liveStatus.finishedAt ? '#00ff9d' : '#6e7681'), marginTop: '2px', fontFamily: 'var(--font-mono, monospace)' }}>
+                        {liveStatus.isActive ? '⚡ Running...' : (liveStatus.finishedAt || '--:--:--')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>ELAPSED DURATION</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.durationMs !== null ? '#58a6ff' : '#6e7681', marginTop: '2px' }}>
+                        {liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Measuring...' : '--')}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>CURRENT METRIC</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.color, marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {liveStatus.metricLabel || '--'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Description & Objective */}
             <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
@@ -1392,6 +1598,35 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     <strong>Blocking Reason:</strong> {triggerDecision.reasons[0]}
                   </div>
                 )}
+              </div>
+            )}
+
+            {selectedNodeMeta.id === 'document_assemble' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '10.5px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                  <span style={{ color: '#8b949e' }}>Total Lines Verified:</span>
+                  <span style={{ fontWeight: 800, color: '#00ff9d' }}>
+                    {node8.total_captured_lines || 0} / {node8.total_lines_target || effectiveTotal || '?'} lines
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                  <span style={{ color: '#8b949e' }}>Document Completion:</span>
+                  <span style={{ fontWeight: 800, color: node8.is_complete ? '#00ff9d' : '#58a6ff' }}>
+                    {node8.completion_percent || 0}% {node8.is_complete ? '✔ (100% Complete)' : ''}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                  <span style={{ color: '#8b949e' }}>Loop Iteration Cycle:</span>
+                  <span style={{ fontWeight: 700, color: '#ffa657' }}>
+                    Cycle #{node8.loop_iteration || 1}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 8px', background: '#0d1117', borderRadius: '4px', border: '1px solid #21262d' }}>
+                  <span style={{ color: '#8b949e' }}>Reconstructed Size:</span>
+                  <span style={{ fontWeight: 700, color: '#f0f6fc' }}>
+                    {node8.reconstructed_length ? `${node8.reconstructed_length.toLocaleString()} characters` : 'Pending capture'}
+                  </span>
+                </div>
               </div>
             )}
 
