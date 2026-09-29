@@ -58,45 +58,41 @@ class ClassifierRegistry:
             for c in self._classifiers.values()
         ]
 
-    async def evaluate_all(self, context: ClassifierContext) -> List[ClassificationResult]:
-        """Run all registered classifiers and return results."""
+    async def evaluate_all(self, context: ClassifierContext, target_ids: Optional[List[str]] = None) -> List[ClassificationResult]:
+        """Run registered classifiers concurrently and return results."""
         try:
             from services.state import dismissed_alignment_items
             dismissed_set = set(dismissed_alignment_items)
         except Exception:
             dismissed_set = set()
 
-        results: List[ClassificationResult] = []
-        for c in self._classifiers.values():
+        async def _eval_one(c: BaseClassifier) -> ClassificationResult:
             if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
-                results.append(
-                    ClassificationResult(
-                        classifier_id=c.id,
-                        issue_detected=False,
-                        issue_name=c.issue_description,
-                        fix_name=c.fix_description,
-                        details="Classifier issue dismissed by user as false positive",
-                    )
+                return ClassificationResult(
+                    classifier_id=c.id,
+                    issue_detected=False,
+                    issue_name=c.issue_description,
+                    fix_name=c.fix_description,
+                    details="Classifier issue dismissed by user as false positive",
                 )
-                continue
-
             try:
                 res = await c.detect(context)
                 if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
                     res.issue_detected = False
-                results.append(res)
+                return res
             except Exception as e:
-                results.append(
-                    ClassificationResult(
-                        classifier_id=c.id,
-                        issue_detected=False,
-                        issue_name=c.issue_description,
-                        fix_name=c.fix_description,
-                        details=f"Detection error: {e}",
-                    )
+                return ClassificationResult(
+                    classifier_id=c.id,
+                    issue_detected=False,
+                    issue_name=c.issue_description,
+                    fix_name=c.fix_description,
+                    details=f"Detection error: {e}",
                 )
-        self._latest_results = results
-        return results
+
+        selected = [c for c in self._classifiers.values() if target_ids is None or c.id in target_ids]
+        results = await asyncio.gather(*[_eval_one(c) for c in selected])
+        self._latest_results = list(results)
+        return list(results)
 
     async def fix_classifier(self, classifier_id: str, context: ClassifierContext) -> FixResult:
         """Execute fix for a specific classifier."""

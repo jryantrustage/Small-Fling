@@ -90,12 +90,12 @@ class BaseClassifier(ABC):
         """
         pass
 
-async def create_classifier_context(serial: Optional[str] = None) -> ClassifierContext:
+async def create_classifier_context(serial: Optional[str] = None, image_bytes: Optional[bytes] = None) -> ClassifierContext:
     from services.adb_service import get_active_adb_serial, detect_external_display_id, capture_external_screenshot
     from services import state
     active_serial = await get_active_adb_serial(serial)
     disp_id = await detect_external_display_id(active_serial)
-    snap = await capture_external_screenshot(active_serial)
+    snap = image_bytes if image_bytes is not None else await capture_external_screenshot(active_serial)
     return ClassifierContext(
         serial=active_serial,
         display_id=disp_id,

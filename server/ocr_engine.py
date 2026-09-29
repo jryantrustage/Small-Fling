@@ -16,7 +16,7 @@ _fast_ocr_executor = ThreadPoolExecutor(max_workers=2)
 def get_rapid_ocr():
     global _rapid_ocr_instance
     if _rapid_ocr_instance is None and RapidOCR is not None:
-        try: _rapid_ocr_instance = RapidOCR()
+        try: _rapid_ocr_instance = RapidOCR(use_angle_cls=False)
         except Exception as e: print(f"[Worker] RapidOCR init error: {e}")
     return _rapid_ocr_instance
 
