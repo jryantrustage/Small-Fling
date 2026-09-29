@@ -228,7 +228,7 @@ dag_state: Dict[str, Any] = {
             "id": "capture_entire_markdown",
             "title": "Capture Entire Markdown",
             "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-            "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger"],
+            "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger", "document_assemble"],
             "status": "idle",
             "progress": None
         }
@@ -241,6 +241,10 @@ dag_state: Dict[str, Any] = {
             "description": "Send HID Ctrl+End, verify gutter position at EOF, display total lines by OCR of last line of EOF.",
             "status": "idle",
             "total_lines": 0,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "key1": 113,
                 "key2": 123,
@@ -255,6 +259,10 @@ dag_state: Dict[str, Any] = {
             "description": "Send HID Ctrl+Home to return to line 1, verify line 1 is in the top position in gutter.",
             "status": "idle",
             "verified": False,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "key1": 113,
                 "key2": 122,
@@ -269,6 +277,10 @@ dag_state: Dict[str, Any] = {
             "description": "Capture high-resolution screenshot frame from external device display and save raw image.",
             "status": "idle",
             "page": 1,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "mode": "desktop",
                 "guard_keyboard": True,
@@ -279,7 +291,7 @@ dag_state: Dict[str, Any] = {
         "local_ai_ocr": {
             "id": "local_ai_ocr",
             "group": "capture_entire_markdown",
-            "title": "3b. Local AI Model OCR (MiniCPM-V)",
+            "title": "4. Local AI Model OCR (MiniCPM-V)",
             "description": "Executes local MiniCPM-V multimodal vision model in Ollama to extract markdown code lines verbatim.",
             "status": "idle",
             "extracted_text": "",
@@ -287,6 +299,10 @@ dag_state: Dict[str, Any] = {
             "lines_count": 0,
             "char_count": 0,
             "model_used": "MiniCPM-V (Ollama)",
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "engine": "ollama:minicpm-v",
                 "model": "minicpm-v:latest",
@@ -296,12 +312,16 @@ dag_state: Dict[str, Any] = {
         "frame_ocr": {
             "id": "frame_ocr",
             "group": "capture_entire_markdown",
-            "title": "4. OCR & Gutter Extraction",
+            "title": "5. OCR & Gutter Extraction",
             "description": "Run OCR worker on acquired screen frame: extract gutter line numbers, top/bottom bounds, and document text.",
             "status": "idle",
             "top_line": 0,
             "bottom_line": 0,
             "extracted_line_count": 0,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "engine": "local:rapidocr",
                 "ocr_worker_timeout_s": 15,
@@ -311,10 +331,14 @@ dag_state: Dict[str, Any] = {
         "arrow_down": {
             "id": "arrow_down",
             "group": "capture_entire_markdown",
-            "title": "5. Intelligent Navigation (Down Arrow)",
+            "title": "6. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
             "arrow_count": 47,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "step_mode": "auto",
                 "step_count": 47,
@@ -324,11 +348,15 @@ dag_state: Dict[str, Any] = {
         "verification_trigger": {
             "id": "verification_trigger",
             "group": "capture_entire_markdown",
-            "title": "6. Recapture & Verification Trigger",
+            "title": "7. Recapture & Verification Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",
             "loop_count": 0,
             "is_complete": False,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
             "config": {
                 "prevent_trigger_on_issue": True,
                 "qualifiers": {
@@ -377,6 +405,25 @@ dag_state: Dict[str, Any] = {
                 "evaluated_at": None,
                 "qualifier_statuses": {}
             }
+        },
+        "document_assemble": {
+            "id": "document_assemble",
+            "group": "capture_entire_markdown",
+            "title": "8. Markdown Document Assemble",
+            "description": "Reconstructs continuous markdown document, links verified code blocks, and evaluates loopback completion against total lines.",
+            "status": "idle",
+            "total_captured_lines": 0,
+            "completion_percent": 0.0,
+            "is_complete": False,
+            "loop_iteration": 0,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "auto_save_markdown": True,
+                "output_filename": "reconstructed.md"
+            }
         }
     },
     "edges": [
@@ -386,10 +433,13 @@ dag_state: Dict[str, Any] = {
         {"from": "local_ai_ocr", "to": "frame_ocr"},
         {"from": "frame_ocr", "to": "arrow_down"},
         {"from": "arrow_down", "to": "verification_trigger"},
-        {"from": "verification_trigger", "to": "frame_acquire", "is_loopback": True}
+        {"from": "verification_trigger", "to": "document_assemble"},
+        {"from": "document_assemble", "to": "frame_acquire", "is_loopback": True}
     ],
     "current_active_node": "init_end"
 }
+
+capture_loop_running: bool = False
 
 current_pipeline_mode = "cloud"
 selected_ocr_engine = "local"

@@ -202,10 +202,11 @@ NODE_ALIAS_MAP = {
     "node_1": "init_end", "node_1_end": "init_end", "init_end": "init_end",
     "node_2": "reset_home", "node_2_home": "reset_home", "reset_home": "reset_home",
     "node_3": "frame_acquire", "frame_acquire": "frame_acquire", "frame_capture": "frame_acquire", "capture": "frame_acquire",
-    "node_3b": "local_ai_ocr", "node_3_5": "local_ai_ocr", "local_ai_ocr": "local_ai_ocr", "ai_ocr": "local_ai_ocr", "local_ocr": "local_ai_ocr",
-    "node_4": "frame_ocr", "frame_ocr": "frame_ocr", "ocr": "frame_ocr", "frame_ocr_extract": "frame_ocr",
-    "node_5": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
-    "node_6": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger"
+    "node_4": "local_ai_ocr", "node_3b": "local_ai_ocr", "node_3_5": "local_ai_ocr", "local_ai_ocr": "local_ai_ocr", "ai_ocr": "local_ai_ocr", "local_ocr": "local_ai_ocr", "minicpm": "local_ai_ocr",
+    "node_5": "frame_ocr", "frame_ocr": "frame_ocr", "ocr": "frame_ocr", "frame_ocr_extract": "frame_ocr",
+    "node_6": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
+    "node_7": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger",
+    "node_8": "document_assemble", "document_assemble": "document_assemble", "assemble": "document_assemble", "markdown_assemble": "document_assemble"
 }
 
 @router.get("/api/dag/nodes/{node_id}/config")
@@ -253,9 +254,24 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     active_serial = await get_active_adb_serial(payload.get("serial"))
     cfg = node.get("config", {})
 
-    state.dag_state["current_active_node"] = target_key
+    start_time = datetime.now()
+    started_at_str = start_time.strftime("%H:%M:%S")
+    node["started_at"] = started_at_str
+    node["started_at_iso"] = start_time.isoformat()
+    node["finished_at"] = None
+    node["duration_ms"] = None
+    node["is_active"] = True
     node["status"] = "active"
-    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "running_node": target_key})
+
+    state.dag_state["current_active_node"] = target_key
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state,
+        "running_node": target_key,
+        "node_id": target_key,
+        "is_active": True,
+        "started_at": started_at_str
+    })
 
     try:
         if target_key == "init_end":
@@ -937,11 +953,82 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "prevented": decision.get("prevented", True),
                 "message": f"Trigger allowed for Target Top Ln {target_top} ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"
             }
+        elif target_key == "document_assemble":
+            total_lines_target = state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
+            captured_count = len([k for k, v in state.document_lines.items() if str(v).strip()])
+            latest_bottom = state.latest_telemetry.get("current_bottom_line", 0)
+
+            doc_lines = []
+            for k in sorted(state.document_lines.keys()):
+                doc_lines.append(str(state.document_lines[k]))
+            full_markdown = "\n".join(doc_lines)
+
+            is_complete = False
+            if total_lines_target > 0 and latest_bottom >= total_lines_target:
+                is_complete = True
+            elif total_lines_target > 0 and captured_count >= total_lines_target:
+                is_complete = True
+
+            loop_iter = (node.get("loop_iteration") or 0) + 1
+            pct = round((captured_count / total_lines_target * 100) if total_lines_target > 0 else 0, 1)
+            node.update({
+                "status": "completed",
+                "total_captured_lines": captured_count,
+                "completion_percent": pct,
+                "is_complete": is_complete,
+                "loop_iteration": loop_iter,
+                "reconstructed_length": len(full_markdown),
+                "error": None
+            })
+
+            state.latest_telemetry["status_message"] = (
+                f"DAG Node 8: Markdown Assembled ({captured_count}/{total_lines_target or '?'} lines • {pct}%) "
+                f"{'✔ 100% COMPLETE' if is_complete else f'↺ Loop {loop_iter}'}"
+            )
+
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "document_assemble",
+                "captured_count": captured_count,
+                "is_complete": is_complete,
+                "completion_percent": pct,
+                "telemetry": state.latest_telemetry
+            })
+            return {
+                "status": "success",
+                "node_id": "document_assemble",
+                "total_captured_lines": captured_count,
+                "total_lines_target": total_lines_target,
+                "completion_percent": pct,
+                "is_complete": is_complete,
+                "loop_iteration": loop_iter,
+                "message": f"Document assemble: {captured_count} lines verified" + (" (COMPLETE ✔)" if is_complete else "")
+            }
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported node {target_key}")
     except Exception as e:
         node["status"] = "error"
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        end_time = datetime.now()
+        finished_at_str = end_time.strftime("%H:%M:%S")
+        dur_ms = int((end_time - start_time).total_seconds() * 1000)
+        node["finished_at"] = finished_at_str
+        node["finished_at_iso"] = end_time.isoformat()
+        node["duration_ms"] = dur_ms
+        node["is_active"] = False
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "node_id": target_key,
+            "timing": {
+                "started_at": node.get("started_at"),
+                "finished_at": finished_at_str,
+                "duration_ms": dur_ms,
+                "is_active": False
+            }
+        })
 
 @router.post("/api/dag/nodes/node_5/evaluate")
 @router.post("/api/dag/nodes/node_6/evaluate")
@@ -1134,7 +1221,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
+        "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger", "document_assemble"], "status": "active"
     })
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
@@ -1144,27 +1231,118 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
 
-    n3b_res = await run_single_dag_node("local_ai_ocr", {"serial": active_serial})
-    if n3b_res.get("status") == "error":
-        capture_group["status"] = "error"
-        return {"status": "error", "node_id": "local_ai_ocr", "result": n3b_res}
-
-    n4_res = await run_single_dag_node("frame_ocr", {"serial": active_serial})
+    n4_res = await run_single_dag_node("local_ai_ocr", {"serial": active_serial})
     if n4_res.get("status") == "error":
         capture_group["status"] = "error"
-        return {"status": "error", "node_id": "frame_ocr", "result": n4_res}
+        return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
-    n5_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
-    n6_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
+    n5_res = await run_single_dag_node("frame_ocr", {"serial": active_serial})
+    if n5_res.get("status") == "error":
+        capture_group["status"] = "error"
+        return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
+
+    n6_res = await run_single_dag_node("arrow_down", {"serial": active_serial})
+    if n6_res.get("status") == "error":
+        capture_group["status"] = "error"
+        return {"status": "error", "node_id": "arrow_down", "result": n6_res}
+
+    n7_res = await run_single_dag_node("verification_trigger", {"serial": active_serial})
+    n8_res = await run_single_dag_node("document_assemble", {"serial": active_serial})
 
     return {
         "status": "success",
         "group": "capture_entire_markdown",
         "node3": n3_res,
-        "node3b": n3b_res,
         "node4": n4_res,
         "node5": n5_res,
-        "node6": n6_res
+        "node6": n6_res,
+        "node7": n7_res,
+        "node8": n8_res
+    }
+
+capture_loop_task: Optional[asyncio.Task] = None
+
+async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
+    active_serial = await get_active_adb_serial(serial)
+    state.capture_loop_running = True
+    state.latest_telemetry["is_pacing"] = True
+    state.orchestration_state["status"] = "RUNNING"
+
+    try:
+        while state.capture_loop_running:
+            res = await execute_dag_group_capture_markdown(serial=active_serial)
+            if res.get("status") == "error":
+                state.latest_telemetry["status_message"] = f"Loop stopped on error: {res.get('node_id')}"
+                break
+
+            n8 = res.get("node8", {})
+            if n8.get("is_complete"):
+                state.latest_telemetry["status_message"] = "🎉 100% Markdown Captured! All lines verified."
+                break
+
+            n7 = res.get("node7", {})
+            if not n7.get("allowed", True):
+                state.latest_telemetry["status_message"] = f"Trigger blocked next loop: {n7.get('message')}"
+                break
+
+            await asyncio.sleep(0.18)
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"[CaptureLoop] Exception: {e}")
+        state.latest_telemetry["status_message"] = f"Capture loop halted: {e}"
+    finally:
+        state.capture_loop_running = False
+        state.latest_telemetry["is_pacing"] = False
+        state.dag_state["current_active_node"] = None
+        state.orchestration_state["status"] = "PAUSED"
+        await state.ws_manager.broadcast({
+            "type": "capture_loop_status",
+            "running": False,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+
+@router.post("/api/dag/loop/start")
+async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
+    global capture_loop_task
+    payload = payload or {}
+    serial = payload.get("serial")
+    if getattr(state, "capture_loop_running", False):
+        return {"status": "already_running", "message": "Capture loop is already running"}
+
+    state.capture_loop_running = True
+    capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(serial))
+    await state.ws_manager.broadcast({
+        "type": "capture_loop_status",
+        "running": True,
+        "dag": state.dag_state,
+        "telemetry": state.latest_telemetry
+    })
+    return {"status": "started", "message": "Capture loop started"}
+
+@router.post("/api/dag/loop/stop")
+async def stop_dag_loop():
+    global capture_loop_task
+    state.capture_loop_running = False
+    if capture_loop_task and not capture_loop_task.done():
+        capture_loop_task.cancel()
+    state.latest_telemetry["is_pacing"] = False
+    state.dag_state["current_active_node"] = None
+    await state.ws_manager.broadcast({
+        "type": "capture_loop_status",
+        "running": False,
+        "dag": state.dag_state,
+        "telemetry": state.latest_telemetry
+    })
+    return {"status": "stopped", "message": "Capture loop stopped"}
+
+@router.get("/api/dag/loop/status")
+async def get_dag_loop_status():
+    return {
+        "status": "success",
+        "running": getattr(state, "capture_loop_running", False),
+        "current_active_node": state.dag_state.get("current_active_node")
     }
 
 @router.post("/api/dag/groups/{group_id}/run")
