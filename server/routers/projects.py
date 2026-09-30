@@ -115,8 +115,8 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
             "first_line": detected_first
         })
         if is_verified:
-            state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
-            state.dag_state["current_active_node"] = "frame_acquire"
+            state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1, "is_active": False})
+            state.dag_state["current_active_node"] = None
             state.latest_telemetry["current_top_line"] = 1
             state.latest_telemetry["current_page"] = 1
             state.latest_telemetry["status_message"] = f"Calibrated: {total_lines} total lines verified via Ctrl+End / Ctrl+Home ✔"
@@ -293,8 +293,8 @@ async def verify_project_home(project_id: str, request: Request):
         "first_line": detected_first
     })
     if is_verified:
-        state.dag_state["nodes"]["frame_acquire"].update({"status": "active", "page": 1})
-        state.dag_state["current_active_node"] = "frame_acquire"
+        state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1, "is_active": False})
+        state.dag_state["current_active_node"] = None
         state.latest_telemetry["current_top_line"] = 1
         state.latest_telemetry["current_page"] = 1
         state.latest_telemetry["status_message"] = "Line 1 Verified at Top via Ctrl+Home ✔"

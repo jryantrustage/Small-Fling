@@ -415,7 +415,11 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const node8 = dagStatus.dag?.nodes?.document_assemble || {};
 
   const currentActiveNode = dagStatus.dag?.current_active_node || dagStatus.active_node || null;
-  const activeRunningId = runningNodeId || currentActiveNode || null;
+  const activeNodeObj = currentActiveNode ? dagStatus.dag?.nodes?.[currentActiveNode] : null;
+  const isCurrentNodeReallyActive = Boolean(
+    activeNodeObj && (activeNodeObj.status === 'active' || activeNodeObj.is_active === true)
+  );
+  const activeRunningId = runningNodeId || (isCurrentNodeReallyActive ? currentActiveNode : null);
 
   const parsedBottom = node4.bottom_line || effectiveBottom;
   const nextTargetTop = (parsedBottom && parsedBottom > 0)
@@ -698,7 +702,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           isError: isNode3Error,
           isDone: isNode3Done,
           statusLabel: isRunning ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY')),
-          metricLabel: isNode3Done ? `Page ${node3.page || currentPage}` : 'Frame Grab',
+          metricLabel: isNode3Done ? (node3.duration_ms ? `Page ${node3.page || currentPage} (${node3.duration_ms}ms)` : `Page ${node3.page || currentPage}`) : 'Frame Grab',
           color: isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#00ff9d'),
           startedAt,
           finishedAt,

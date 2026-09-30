@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
@@ -12,7 +13,7 @@ from services import state
 from services.adb_service import (
     ensure_adb_keyboard_closed, auto_fix_viewport, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
     get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id,
-    is_ime_visible
+    detect_surfaceflinger_displays, is_ime_visible, fetch_current_display_dpi_factor
 )
 import services.ocr_service as ocr_svc
 
@@ -390,7 +391,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
             await asyncio.sleep(settle_s)
 
-            # 2. Wait for scroll convergence: sample bottom line until scroll velocity stops
+            # 2. Fetch current density/DPI from the phone right before running OCR to normalize gutter search bounding boxes
+            dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
+            state.latest_telemetry.setdefault("capture_telemetry", {})
+            state.latest_telemetry["capture_telemetry"].update({"active_dpi": active_dpi, "dpi_factor": dpi_factor})
+
+            # Wait for scroll convergence: sample bottom line until scroll velocity stops
             total_lines = 0
             top_line = 0
             prev_bot = -1
@@ -401,7 +407,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 snap = await capture_external_screenshot(active_serial)
                 if snap:
                     with open(calib, "wb") as f: f.write(snap)
-                    t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib)
+                    t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                     if b_sample <= 0:
                         scan_res = await state.scan_image_in_process(calib)
                         b_sample = scan_res.get("bottom_line", 0)
@@ -423,14 +429,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
                 await asyncio.sleep(0.35)
 
-            # 3. Auto-fix viewport immediately after scroll has fully landed: close soft keyboard and reflow 1080p desktop layout
+            # 3. Auto-fix viewport immediately after scroll has fully landed: close soft keyboard and reflow desktop layout
             await auto_fix_viewport(active_serial, disp_id)
             await asyncio.sleep(0.2)
-            # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full 1080p height
+            # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial)
             if snap_fixed:
                 with open(calib, "wb") as f: f.write(snap_fixed)
-                t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib)
+                t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                 if b_fix > total_lines: total_lines = b_fix
                 if t_fix > 0 and top_line <= 0: top_line = t_fix
 
@@ -459,7 +465,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
                         with open(calib, "wb") as f: f.write(snap_retry)
-                        r_top, r_total = await state.detect_gutter_bounds_in_process(calib)
+                        r_top, r_total = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                         if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
@@ -564,23 +570,28 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
                 await asyncio.sleep(0.4)
 
+                # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
+                dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
+                state.latest_telemetry.setdefault("capture_telemetry", {})
+                state.latest_telemetry["capture_telemetry"].update({"active_dpi": active_dpi, "dpi_factor": dpi_factor})
+
                 snap = await capture_external_screenshot(active_serial)
                 if snap:
                     with open(calib, "wb") as f: f.write(snap)
-                    is_verified, detected_first = await state.verify_first_line_in_process(calib)
+                    is_verified, detected_first = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
                     if not is_verified:
-                        top_detected = await state.detect_top_line_in_process(calib)
+                        top_detected = await state.detect_top_line_in_process(calib, dpi_factor=dpi_factor)
                         if top_detected == 1 or (0 < top_detected <= 2):
                             is_verified, detected_first = True, 1
 
                 if is_verified:
-                    # Once Line 1 is reached, auto-fix viewport to dismiss keyboard and restore full 1080p area
+                    # Once Line 1 is reached, auto-fix viewport to dismiss keyboard and restore full area
                     await auto_fix_viewport(active_serial, disp_id)
                     await asyncio.sleep(0.2)
                     snap_fixed = await capture_external_screenshot(active_serial)
                     if snap_fixed:
                         with open(calib, "wb") as f: f.write(snap_fixed)
-                        is_v2, d2 = await state.verify_first_line_in_process(calib)
+                        is_v2, d2 = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
                         if is_v2:
                             detected_first = d2 or 1
                     break
@@ -596,23 +607,46 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             return {"status": "success" if is_verified else "error", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'verification failed - editor at Ln {detected_first}'} via Ctrl+Home"}
 
         elif target_key == "frame_acquire":
+            t_cap_start = time.time()
             is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("fast_mode", True)
+            
+            # Broadcast immediate live telemetry that capture has commenced
+            state.latest_telemetry.setdefault("capture_telemetry", {})
+            state.latest_telemetry["capture_telemetry"]["status"] = "capturing"
+            state.latest_telemetry["capture_telemetry"]["started_at"] = datetime.now().isoformat()
+            state.latest_telemetry["status_message"] = "DAG Node 3: Capturing external display frame..."
+            await state.ws_manager.broadcast({
+                "type": "dag_updated",
+                "dag": state.dag_state,
+                "node_id": "frame_acquire",
+                "telemetry": state.latest_telemetry
+            })
+
             if cfg.get("full_viewport_fix", False):
                 await auto_fix_viewport(active_serial)
-            elif cfg.get("guard_keyboard", False) or (not is_fast and cfg.get("guard_keyboard", True)):
+            elif not is_fast and cfg.get("guard_keyboard", False):
                 if await is_ime_visible(active_serial):
                     await ensure_adb_keyboard_closed(active_serial)
 
-            default_settle = 50 if is_fast else 200
-            settle_ms = float(cfg.get("settle_delay_ms", default_settle)) / 1000.0
+            default_settle = 30 if is_fast else 50
+            settle_cfg = float(cfg.get("settle_delay_ms", default_settle))
+            settle_ms = (min(settle_cfg, 50) if is_fast else settle_cfg) / 1000.0
             if settle_ms > 0:
                 await asyncio.sleep(settle_ms)
 
-            snap = await capture_external_screenshot(active_serial)
+            snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.35)
+            t_cap_end = time.time()
+            latency_ms = max(1, int((t_cap_end - t_cap_start) * 1000))
+
             if not snap or len(snap) < 2000 or not snap.startswith(b"\x89PNG\r\n\x1a\n"):
                 node.update({
                     "status": "error",
                     "error": "Screen capture failed: no valid image received from device display"
+                })
+                state.latest_telemetry["capture_telemetry"].update({
+                    "status": "error",
+                    "error": "Capture failed: invalid image stream",
+                    "last_latency_ms": latency_ms
                 })
                 state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture failed - no image from display"
                 await state.ws_manager.broadcast({
@@ -628,6 +662,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "message": "Screen capture failed: no valid image received from external display. Please verify device connection and display stream."
                 }
 
+            # Unpack dimensions from PNG IHDR chunk (bytes 16..24)
+            w_px, h_px = 1920, 1080
+            if len(snap) >= 24:
+                try:
+                    import struct
+                    w_px, h_px = struct.unpack(">II", snap[16:24])
+                except Exception:
+                    pass
+
+            disp_map = await detect_surfaceflinger_displays(active_serial)
+            known_did = disp_map.get("desktop", "default")
+            disp_title = "MB16AMTR" if ("mb16amtr" in str(known_did).lower() or len(str(known_did)) > 10) else f"Display #{known_did}"
+
             temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
             with open(temp_calib, "wb") as f:
                 f.write(snap)
@@ -639,22 +686,42 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             with open(raw_path, "wb") as f:
                 f.write(snap)
 
+            total_caps = state.latest_telemetry.get("capture_telemetry", {}).get("total_captures", 0) + 1
+            state.latest_telemetry["capture_telemetry"] = {
+                "status": "completed",
+                "last_latency_ms": latency_ms,
+                "last_capture_time": datetime.now().isoformat(),
+                "display_id": str(known_did),
+                "display_name": disp_title,
+                "resolution": f"{w_px}x{h_px}",
+                "frame_bytes": len(snap),
+                "cache_hit": latency_ms < 60,
+                "settle_delay_ms": int(settle_ms * 1000),
+                "total_captures": total_caps,
+                "page": pidx,
+                "error": None
+            }
+
             node.update({
                 "status": "completed",
                 "page": pidx,
                 "raw_image_path": str(temp_calib),
                 "raw_filename": raw_fn,
                 "file_size": len(snap),
+                "duration_ms": latency_ms,
+                "resolution": f"{w_px}x{h_px}",
                 "error": None
             })
 
-            state.latest_telemetry["status_message"] = f"DAG Node 3: Acquired frame ({len(snap):,} bytes) ✔ Ready for OCR"
+            cache_tag = "⚡ Cache Hit" if latency_ms < 60 else f"{latency_ms}ms HW Grab"
+            state.latest_telemetry["status_message"] = f"DAG Node 3: Acquired frame ({len(snap):,} bytes, {cache_tag}) ✔ Ready for OCR"
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
                 "dag": state.dag_state,
                 "node_id": "frame_acquire",
                 "page": pidx,
                 "file_size": len(snap),
+                "duration_ms": latency_ms,
                 "telemetry": state.latest_telemetry
             })
             return {
@@ -662,7 +729,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "node_id": "frame_acquire",
                 "page": pidx,
                 "file_size": len(snap),
-                "message": f"Screen capture complete ({len(snap):,} bytes) ✔ Ready for OCR extraction."
+                "duration_ms": latency_ms,
+                "resolution": f"{w_px}x{h_px}",
+                "telemetry": state.latest_telemetry.get("capture_telemetry"),
+                "message": f"Screen capture complete ({len(snap):,} bytes in {latency_ms}ms) ✔ Ready for OCR extraction."
             }
 
         elif target_key in {"local_ai_ocr", "node_3b", "frame_local_ai_ocr"}:
@@ -857,6 +927,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             with open(temp_calib, "rb") as f:
                 snap = f.read()
 
+            # Fetch active density/DPI from the phone right before running OCR to normalize search bounding boxes
+            dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial)
+            state.latest_telemetry.setdefault("capture_telemetry", {})
+            state.latest_telemetry["capture_telemetry"].update({"active_dpi": active_dpi, "dpi_factor": dpi_factor})
+
             is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("async_worker", True)
             prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 31}))
             lpp = prof.get("lines_per_page", 31)
@@ -867,10 +942,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": [], "bounding_boxes": {}}
                 lines_detected = []
             else:
-                scan_res = await state.scan_image_in_process(temp_calib)
-                raw_top = scan_res.get("top_line", 0) or 0
-                raw_bot = scan_res.get("bottom_line", 0) or 0
-                lines_detected = scan_res.get("lines", [])
+                # Fast path: DPI-scaled gutter extraction
+                t_gut, b_gut = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+                raw_top, raw_bot = t_gut, b_gut
+                lines_detected = []
+
+                if raw_top <= 0 or raw_bot <= 0:
+                    scan_res = await state.scan_image_in_process(temp_calib)
+                    if raw_top <= 0: raw_top = scan_res.get("top_line", 0) or 0
+                    if raw_bot <= 0: raw_bot = scan_res.get("bottom_line", 0) or 0
+                    lines_detected = scan_res.get("lines", [])
+                else:
+                    scan_res = {"top_line": raw_top, "bottom_line": raw_bot, "lines": []}
 
                 if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
                     node.update({
@@ -1414,8 +1497,9 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         }
         capture_group["status"] = "idle"
         state.dag_state["current_active_group"] = "capture_entire_markdown"
-        state.dag_state["current_active_node"] = "frame_acquire"
+        state.dag_state["current_active_node"] = None
         state.dag_state["nodes"]["frame_acquire"]["status"] = "idle"
+        state.dag_state["nodes"]["frame_acquire"]["is_active"] = False
         state.latest_telemetry["current_top_line"] = 1
         state.latest_telemetry["current_page"] = 1
         state.latest_telemetry["target_total_lines"] = total_lines

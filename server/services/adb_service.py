@@ -1,7 +1,7 @@
 import asyncio, json, os, re, subprocess, time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import cv2
 import numpy as np
 
@@ -287,11 +287,46 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                     return int(m.group(1))
     return 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
+async def fetch_current_display_dpi_factor(serial: Optional[str] = None, display_id: Optional[int] = None) -> Tuple[float, int]:
+    """
+    Fetches the active density/DPI of the external display directly from the phone via ADB right before OCR.
+    Parses 'wm density -d <displayId>' output:
+      Physical density: 193
+      Override density: 120
+    Returns:
+        (dpi_factor, active_dpi)
+    Where:
+        dpi_factor = active_dpi / 160.0 (normalized against baseline Android MDPI 160 DPI)
+    Example:
+        At 120 DPI -> dpi_factor is 0.75
+        At 160 DPI -> dpi_factor is 1.0
+        At 240 DPI -> dpi_factor is 1.5
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return 1.0, 160
+
+    did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    res = await run_adb_shell(f"wm density -d {did}", ser, timeout=1.8)
+    out = res.get("stdout", "") if res.get("status") == "ok" else ""
+
+    active_dpi = 160
+    if out:
+        if m_ovr := re.search(r'Override density:\s*(\d+)', out):
+            active_dpi = int(m_ovr.group(1))
+        elif m_phys := re.search(r'Physical density:\s*(\d+)', out):
+            val = int(m_phys.group(1))
+            if val > 0:
+                active_dpi = val
+
+    factor = max(0.4, min(3.0, round(active_dpi / 160.0, 3)))
+    return factor, active_dpi
+
 
 async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_refresh: bool = False) -> Dict[str, str]:
     global _display_map_cache, _display_map_cache_ts
     now = time.time()
-    if not force_refresh and (now - _display_map_cache_ts < 5.0) and _display_map_cache:
+    if not force_refresh and (now - _display_map_cache_ts < 120.0) and _display_map_cache:
         return _display_map_cache
 
     ser = await get_active_adb_serial(serial)
@@ -340,41 +375,86 @@ async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_ref
 async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Optional[str]:
     return (await detect_surfaceflinger_displays(serial)).get("desktop")
 
-async def capture_external_screenshot(serial: Optional[str] = None) -> Optional[bytes]:
+def _update_frame_cache_desktop(png_bytes: bytes):
+    try:
+        jpg = _png_to_jpeg(png_bytes, quality=75, max_dim=1280)
+        _frame_cache["desktop"] = {"bytes": jpg, "raw_png": png_bytes, "ts": time.time()}
+    except Exception:
+        pass
+
+async def capture_external_screenshot(serial: Optional[str] = None, max_cache_age_s: float = 0.35, bypass_lock: bool = False) -> Optional[bytes]:
     ser = await get_active_adb_serial(serial)
     if not ser:
         return None
 
-    disp_map = await detect_surfaceflinger_displays(ser)
-    known_id = disp_map.get("desktop")
+    now = time.time()
+    cached = _frame_cache.get("desktop")
+    if cached and cached.get("raw_png") and (now - cached.get("ts", 0.0) < max_cache_age_s):
+        return cached["raw_png"]
 
-    # 1. Try detected external display via 64-bit SurfaceFlinger ID
-    if known_id and len(str(known_id)) > 4:
-        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
-        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
+    acquired_lock = False
+    if not bypass_lock:
+        try:
+            await asyncio.wait_for(_screencap_lock.acquire(), timeout=3.0)
+            acquired_lock = True
+            cached = _frame_cache.get("desktop")
+            if cached and cached.get("raw_png") and (time.time() - cached.get("ts", 0.0) < max_cache_age_s):
+                return cached["raw_png"]
+        except asyncio.TimeoutError:
+            if cached and cached.get("raw_png"):
+                return cached["raw_png"]
+
+    try:
+        disp_map = await detect_surfaceflinger_displays(ser)
+        known_id = disp_map.get("desktop")
+
+        # 1. Try detected external display via known SurfaceFlinger or display ID
+        if known_id and str(known_id) not in ("0", "phone"):
+            cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
+            cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
+            if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                _update_frame_cache_desktop(png_bytes)
+                return png_bytes
+            else:
+                # If cached ID failed, refresh display mapping once
+                global _display_map_cache_ts
+                _display_map_cache_ts = 0.0
+                disp_map = await detect_surfaceflinger_displays(ser, force_refresh=True)
+                known_id = disp_map.get("desktop")
+                if known_id and str(known_id) not in ("0", "phone"):
+                    cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
+                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
+                    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                        _update_frame_cache_desktop(png_bytes)
+                        return png_bytes
+
+        # 2. Check other active SurfaceFlinger displays if any
+        res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 2.5)
+        if res.returncode == 0 and res.stdout:
+            all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
+            phone_id = disp_map.get("phone", "0")
+            for did in all_ids:
+                if did != phone_id and did != known_id:
+                    cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
+                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
+                    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                        disp_map["desktop"] = str(did)
+                        _update_frame_cache_desktop(png_bytes)
+                        return png_bytes
+
+        # 3. Fallback: default active screencap (works on Pixel 8 and Pixel 10)
+        cmd = ["-s", ser, "exec-out", "screencap", "-p"]
+        cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.5)
         if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+            _update_frame_cache_desktop(png_bytes)
             return png_bytes
 
-    # 2. Check other active SurfaceFlinger displays
-    res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 2.5)
-    if res.returncode == 0 and res.stdout:
-        all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
-        phone_id = disp_map.get("phone")
-        for did in all_ids:
-            if did != phone_id and did != known_id and len(did) > 4:
-                cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
-                cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
-                if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
-                    disp_map["desktop"] = str(did)
-                    return png_bytes
-
-    # 3. Fallback: default active screencap (works on Pixel 8 and Pixel 10 regardless of display topology)
-    cmd = ["-s", ser, "exec-out", "screencap", "-p"]
-    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
-    if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
-        return png_bytes
-
-    return None
+        if cached and cached.get("raw_png"):
+            return cached["raw_png"]
+        return None
+    finally:
+        if acquired_lock:
+            _screencap_lock.release()
 
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
     now = time.time()
@@ -407,7 +487,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             return cached["bytes"]
 
         if mode == "desktop":
-            raw_bytes = await capture_external_screenshot(ser)
+            raw_bytes = await capture_external_screenshot(ser, bypass_lock=True)
             if raw_bytes:
                 jpg = _png_to_jpeg(raw_bytes, quality, max_dim)
                 if jpg:
@@ -479,7 +559,13 @@ async def mjpeg_stream_generator(mode: str = "desktop", serial: Optional[str] = 
     except (asyncio.CancelledError, GeneratorExit):
         pass
 
-async def is_ime_visible(serial: Optional[str] = None) -> bool:
+_ime_visible_cache: Dict[str, Any] = {"val": False, "ts": 0.0}
+
+async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False) -> bool:
+    global _ime_visible_cache
+    now = time.time()
+    if not force_check and (now - _ime_visible_cache["ts"] < 4.0):
+        return _ime_visible_cache["val"]
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
@@ -495,13 +581,18 @@ async def is_ime_visible(serial: Optional[str] = None) -> bool:
                     has_visible_window = True
                     break
         if has_visible_window:
+            _ime_visible_cache = {"val": True, "ts": now}
             return True
         # If no visible IME window flag was found, check if hard keyboard suppression is on
         supp_chk = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", ser)
         if (supp_chk.get("stdout") or "").strip() == "0":
+            _ime_visible_cache = {"val": False, "ts": now}
             return False
-        return "mInputShown=true" in out
-    except Exception: return False
+        res = "mInputShown=true" in out
+        _ime_visible_cache = {"val": res, "ts": now}
+        return res
+    except Exception:
+        return False
 
 async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
     """

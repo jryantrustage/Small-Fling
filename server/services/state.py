@@ -105,21 +105,21 @@ ws_manager = WebSocketManager()
 ocr_executor = ThreadPoolExecutor(max_workers=2)
 
 
-async def detect_gutter_bounds_in_process(image_path: Path) -> Tuple[int, int]:
+async def detect_gutter_bounds_in_process(image_path: Path, dpi_factor: float = 1.0) -> Tuple[int, int]:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(ocr_executor, worker_detect_gutter_bounds, str(image_path))
+    return await loop.run_in_executor(ocr_executor, worker_detect_gutter_bounds, str(image_path), dpi_factor)
 
-async def detect_last_line_in_process(image_path: Path) -> int:
+async def detect_last_line_in_process(image_path: Path, dpi_factor: float = 1.0) -> int:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(ocr_executor, worker_detect_last_line, str(image_path))
+    return await loop.run_in_executor(ocr_executor, worker_detect_last_line, str(image_path), dpi_factor)
 
-async def verify_first_line_in_process(image_path: Path) -> Tuple[bool, int]:
+async def verify_first_line_in_process(image_path: Path, dpi_factor: float = 1.0) -> Tuple[bool, int]:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(ocr_executor, worker_verify_first_line, str(image_path))
+    return await loop.run_in_executor(ocr_executor, worker_verify_first_line, str(image_path), dpi_factor)
 
-async def detect_top_line_in_process(image_path: Path) -> int:
+async def detect_top_line_in_process(image_path: Path, dpi_factor: float = 1.0) -> int:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path))
+    return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path), dpi_factor)
 
 async def scan_image_in_process(image_path: Path) -> Dict[str, Any]:
     loop = asyncio.get_running_loop()
@@ -190,7 +190,20 @@ latest_telemetry: Dict[str, Any] = {
     "device_id": "idle", "is_pacing": False, "current_page": 0, "current_top_line": 0, "current_bottom_line": 0,
     "target_total_lines": config.TARGET_TOTAL_LINES, "dwell_countdown_ms": 0, "phase": "IDLE", "status_message": "Matrix Capture Studio ready",
     "last_heartbeat": None,
-    "pacer_calibration": {"auto_tune_factor": config.PACER_AUTO_TUNE_FACTOR, "line_pitch_px": config.PACER_LINE_PITCH_PX, "bottom_to_top_error": 0, "wrapped_lines_detected": 0}
+    "pacer_calibration": {"auto_tune_factor": config.PACER_AUTO_TUNE_FACTOR, "line_pitch_px": config.PACER_LINE_PITCH_PX, "bottom_to_top_error": 0, "wrapped_lines_detected": 0},
+    "capture_telemetry": {
+        "status": "idle",
+        "last_latency_ms": 0,
+        "last_capture_time": None,
+        "display_id": None,
+        "display_name": None,
+        "resolution": "1920x1080",
+        "frame_bytes": 0,
+        "cache_hit": False,
+        "settle_delay_ms": 40,
+        "total_captures": 0,
+        "error": None
+    }
 }
 
 latest_alignment_status: Dict[str, Any] = {
@@ -283,8 +296,9 @@ dag_state: Dict[str, Any] = {
             "is_active": False,
             "config": {
                 "mode": "desktop",
-                "guard_keyboard": True,
-                "settle_delay_ms": 300,
+                "guard_keyboard": False,
+                "fast_mode": True,
+                "settle_delay_ms": 40,
                 "save_frame": True
             }
         },
