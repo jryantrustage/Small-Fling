@@ -212,7 +212,7 @@ async def get_dag_status():
         "current_top_line": state.latest_telemetry.get("current_top_line", 1),
         "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 31),
         "current_page": state.latest_telemetry.get("current_page", 1),
-        "active_node": state.dag_state.get("current_active_node", "init_end"),
+        "active_node": state.dag_state.get("current_active_node"),
         "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {})
     }
 
@@ -262,6 +262,66 @@ async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
     await state.ws_manager.broadcast({"type": "dag_node_configured", "node_id": target_key, "config": cfg, "trigger_decision": decision, "dag": state.dag_state})
     return {"status": "success", "node_id": target_key, "config": cfg, "trigger_decision": decision}
 
+# ─── SINGLE-NODE CONCURRENCY & PREEMPTION MANAGER ─────────────────────────
+_current_running_node_task: Optional[asyncio.Task] = None
+_current_running_node_id: Optional[str] = None
+
+async def abort_running_node(target_node_id: Optional[str] = None, reason: str = "Operation aborted") -> Optional[str]:
+    global _current_running_node_task, _current_running_node_id, capture_loop_task
+    aborted_node = None
+    curr_task = asyncio.current_task()
+
+    # Cancel background capture loop if running externally
+    if getattr(state, "capture_loop_running", False):
+        state.capture_loop_running = False
+        state.latest_telemetry["is_pacing"] = False
+        if capture_loop_task and capture_loop_task is not curr_task and not capture_loop_task.done():
+            capture_loop_task.cancel()
+
+    task_to_cancel = _current_running_node_task
+    if task_to_cancel and task_to_cancel is not curr_task and not task_to_cancel.done():
+        running_id = _current_running_node_id
+        if target_node_id is None or target_node_id == running_id:
+            aborted_node = running_id
+            print(f"[DAG Concurrency] Aborting active node '{running_id}' (Reason: {reason})")
+            task_to_cancel.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(task_to_cancel), timeout=0.15)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+            _current_running_node_task = None
+            _current_running_node_id = None
+
+    now_str = datetime.now().strftime("%H:%M:%S")
+    for nid, nval in state.dag_state.get("nodes", {}).items():
+        if target_node_id is None or nid == target_node_id or nid == aborted_node:
+            if nval.get("status") == "active" or nval.get("is_active"):
+                nval["status"] = "aborted"
+                nval["is_active"] = False
+                nval["error"] = reason
+                nval["finished_at"] = now_str
+                aborted_node = aborted_node or nid
+        elif nval.get("status") == "active" or nval.get("is_active"):
+            nval["status"] = "aborted"
+            nval["is_active"] = False
+            nval["error"] = reason
+            nval["finished_at"] = now_str
+            aborted_node = aborted_node or nid
+
+    if state.dag_state.get("current_active_node") == aborted_node:
+        state.dag_state["current_active_node"] = None
+
+    if aborted_node:
+        await state.ws_manager.broadcast({
+            "type": "dag_node_aborted",
+            "node_id": aborted_node,
+            "reason": reason,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+
+    return aborted_node
+
 @router.post("/api/dag/nodes/{node_id}/run")
 async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = None):
     target_key = NODE_ALIAS_MAP.get(node_id, node_id)
@@ -272,6 +332,22 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     active_serial = await get_active_adb_serial(payload.get("serial"))
     cfg = node.get("config", {})
 
+    global _current_running_node_task, _current_running_node_id
+    curr_task = asyncio.current_task()
+
+    # If any other node is currently running, ABORT IT IMMEDIATELY
+    if _current_running_node_task and _current_running_node_task is not curr_task and not _current_running_node_task.done():
+        prev_id = _current_running_node_id or "previous"
+        await abort_running_node(reason=f"Operation aborted: Preempted by Node {target_key}")
+
+    # Enforce strictly 1 running node at a time across DAG state
+    for k, v in state.dag_state.get("nodes", {}).items():
+        if k != target_key:
+            v["is_active"] = False
+            if v.get("status") == "active":
+                v["status"] = "aborted"
+                v["error"] = f"Preempted by Node {target_key}"
+
     start_time = datetime.now()
     started_at_str = start_time.strftime("%H:%M:%S")
     node["started_at"] = started_at_str
@@ -280,8 +356,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     node["duration_ms"] = None
     node["is_active"] = True
     node["status"] = "active"
+    node["error"] = None
 
     state.dag_state["current_active_node"] = target_key
+    _current_running_node_task = curr_task
+    _current_running_node_id = target_key
+
     await state.ws_manager.broadcast({
         "type": "dag_updated",
         "dag": state.dag_state,
@@ -567,9 +647,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "file_size": len(snap),
                 "error": None
             })
-            if "frame_ocr" in state.dag_state["nodes"]:
-                state.dag_state["nodes"]["frame_ocr"]["status"] = "active"
-                state.dag_state["current_active_node"] = "frame_ocr"
 
             state.latest_telemetry["status_message"] = f"DAG Node 3: Acquired frame ({len(snap):,} bytes) ✔ Ready for OCR"
             await state.ws_manager.broadcast({
@@ -672,8 +749,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "model_used": "MiniCPM-V (Async Worker)",
                     "error": None
                 })
-                if "frame_ocr" in state.dag_state["nodes"]:
-                    state.dag_state["current_active_node"] = "frame_ocr"
                 state.latest_telemetry["status_message"] = "DAG Node 3b: MiniCPM-V vision dispatched in background ⚡ Next: Gutter OCR"
                 await state.ws_manager.broadcast({
                     "type": "dag_updated",
@@ -728,8 +803,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "model_used": engine_name,
                 "error": None
             })
-            if "frame_ocr" in state.dag_state["nodes"]:
-                state.dag_state["current_active_node"] = "frame_ocr"
 
             state.latest_telemetry["status_message"] = f"DAG Node 3b: {engine_name} extracted {lines_count} lines ({char_count} chars) ✔"
             await state.ws_manager.broadcast({
@@ -945,13 +1018,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             target_top = bot_ln + 1
             if "arrow_down" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["arrow_down"].update({
-                    "status": "active",
                     "target_top_line": target_top,
                     "target_top": target_top,
                     "prev_bottom": bot_ln,
                     "arrow_count": max(1, target_top - top_ln)
                 })
-                state.dag_state["current_active_node"] = "arrow_down"
             if "verification_trigger" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["verification_trigger"].update({
                     "target_top_line": target_top,
@@ -1028,12 +1099,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             })
             if "verification_trigger" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["verification_trigger"].update({
-                    "status": "active",
                     "target_top_line": target_top,
                     "target_top": target_top,
                     "expected_top": target_top
                 })
-                state.dag_state["current_active_node"] = "verification_trigger"
 
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
@@ -1135,28 +1204,69 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             }
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported node {target_key}")
+    except asyncio.CancelledError:
+        end_time = datetime.now()
+        finished_at_str = end_time.strftime("%H:%M:%S")
+        dur_ms = int((end_time - start_time).total_seconds() * 1000)
+        node["status"] = "aborted"
+        node["is_active"] = False
+        node["finished_at"] = finished_at_str
+        node["finished_at_iso"] = end_time.isoformat()
+        node["duration_ms"] = dur_ms
+        if not node.get("error"):
+            node["error"] = "Operation aborted: preempted by another node"
+        if state.dag_state.get("current_active_node") == target_key:
+            state.dag_state["current_active_node"] = None
+        await state.ws_manager.broadcast({
+            "type": "dag_node_aborted",
+            "node_id": target_key,
+            "dag": state.dag_state,
+            "error": node["error"],
+            "telemetry": state.latest_telemetry
+        })
+        raise
     except Exception as e:
         node["status"] = "error"
+        node["error"] = str(e)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         end_time = datetime.now()
         finished_at_str = end_time.strftime("%H:%M:%S")
         dur_ms = int((end_time - start_time).total_seconds() * 1000)
-        node["finished_at"] = finished_at_str
-        node["finished_at_iso"] = end_time.isoformat()
-        node["duration_ms"] = dur_ms
+        node["finished_at"] = node.get("finished_at") or finished_at_str
+        node["finished_at_iso"] = node.get("finished_at_iso") or end_time.isoformat()
+        node["duration_ms"] = node.get("duration_ms") or dur_ms
         node["is_active"] = False
+        if node.get("status") == "active":
+            node["status"] = "completed"
+        if state.dag_state.get("current_active_node") == target_key:
+            state.dag_state["current_active_node"] = None
+        if _current_running_node_task is curr_task:
+            _current_running_node_task = None
+            _current_running_node_id = None
         await state.ws_manager.broadcast({
             "type": "dag_updated",
             "dag": state.dag_state,
             "node_id": target_key,
             "timing": {
                 "started_at": node.get("started_at"),
-                "finished_at": finished_at_str,
-                "duration_ms": dur_ms,
+                "finished_at": node["finished_at"],
+                "duration_ms": node["duration_ms"],
                 "is_active": False
             }
         })
+
+@router.post("/api/dag/nodes/abort")
+@router.post("/api/dag/nodes/{node_id}/abort")
+async def abort_dag_node_endpoint(node_id: Optional[str] = None):
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id) if node_id else None
+    aborted_id = await abort_running_node(target_node_id=target_key, reason="Operation aborted by user request")
+    return {
+        "status": "success",
+        "aborted_node": aborted_id,
+        "message": f"Node '{aborted_id}' operation aborted successfully." if aborted_id else "No active node was running to abort."
+    }
+
 
 @router.post("/api/dag/nodes/node_5/evaluate")
 @router.post("/api/dag/nodes/node_6/evaluate")

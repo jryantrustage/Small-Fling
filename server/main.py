@@ -213,7 +213,7 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
         state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "extracted_line_count": 0})
         state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
         state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
-    state.dag_state["current_active_node"] = "init_end"
+    state.dag_state["current_active_node"] = None
     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
 
     state.save_persisted_state()
