@@ -436,7 +436,7 @@ dag_state: Dict[str, Any] = {
         {"from": "verification_trigger", "to": "document_assemble"},
         {"from": "document_assemble", "to": "frame_acquire", "is_loopback": True}
     ],
-    "current_active_node": "init_end"
+    "current_active_node": None
 }
 
 capture_loop_running: bool = False

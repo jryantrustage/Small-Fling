@@ -115,4 +115,63 @@ def test_dag_group_segmentation_and_runner():
         client.delete(f"/api/projects/{proj_id}")
 
 
+def test_single_node_concurrency_and_preemption():
+    import asyncio
+    from services import state
+    import routers.orchestration as orch
 
+    # 1. Reset DAG state
+    client.post("/api/reset-state")
+    status_res = client.get("/api/dag/status")
+    assert status_res.status_code == 200
+    assert status_res.json()["dag"]["current_active_node"] is None
+
+    # 2. Simulate Node 7 (verification_trigger) running as an async background task
+    async def simulate_preemption():
+        async def mock_long_node_7():
+            try:
+                state.dag_state["nodes"]["verification_trigger"]["status"] = "active"
+                state.dag_state["nodes"]["verification_trigger"]["is_active"] = True
+                state.dag_state["current_active_node"] = "verification_trigger"
+                await asyncio.sleep(5.0)
+            except asyncio.CancelledError:
+                state.dag_state["nodes"]["verification_trigger"]["status"] = "aborted"
+                state.dag_state["nodes"]["verification_trigger"]["is_active"] = False
+                state.dag_state["nodes"]["verification_trigger"]["error"] = "Operation aborted: Preempted"
+                raise
+
+        node7_task = asyncio.create_task(mock_long_node_7())
+        await asyncio.sleep(0.05)
+
+        orch._current_running_node_task = node7_task
+        orch._current_running_node_id = "verification_trigger"
+
+        # Verify Node 7 is currently active
+        assert state.dag_state["nodes"]["verification_trigger"]["status"] == "active"
+        assert state.dag_state["nodes"]["verification_trigger"]["is_active"] is True
+        assert state.dag_state["current_active_node"] == "verification_trigger"
+
+        # Now start Node 6: Node 7 MUST abort!
+        aborted = await orch.abort_running_node(reason="Operation aborted: Preempted by Node arrow_down")
+        assert aborted == "verification_trigger"
+
+        # Verify Node 7 is aborted and not active
+        assert state.dag_state["nodes"]["verification_trigger"]["status"] == "aborted"
+        assert state.dag_state["nodes"]["verification_trigger"]["is_active"] is False
+
+        # Run Node 6 via run_single_dag_node
+        res = await orch.run_single_dag_node("arrow_down", {"serial": "mock:9999"})
+        assert res["status"] in ("success", "completed")
+
+        # After Node 6 finishes, verify only 1 node was active, and Node 7 was NOT set to active!
+        assert state.dag_state["nodes"]["arrow_down"]["status"] == "completed"
+        assert state.dag_state["nodes"]["arrow_down"]["is_active"] is False
+        assert state.dag_state["nodes"]["verification_trigger"]["status"] != "active"
+        assert state.dag_state["current_active_node"] is None
+
+    asyncio.run(simulate_preemption())
+
+    # 3. Test abort endpoints
+    abort_res = client.post("/api/dag/nodes/abort")
+    assert abort_res.status_code == 200
+    assert "status" in abort_res.json()

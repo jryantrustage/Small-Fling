@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Activity, RefreshCw, Layers, Lock, Settings, ShieldCheck, ShieldAlert,
   ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
-  FileText, Move, Clock, Minus, Maximize2, Minimize2, Zap
+  FileText, Move, Clock, Minus, Maximize2, Minimize2, Zap, Square
 } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
@@ -414,7 +414,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const node6 = dagStatus.dag?.nodes?.verification_trigger || {};
   const node8 = dagStatus.dag?.nodes?.document_assemble || {};
 
-  const currentActiveNode = dagStatus.dag?.current_active_node || dagStatus.active_node;
+  const currentActiveNode = dagStatus.dag?.current_active_node || dagStatus.active_node || null;
+  const activeRunningId = runningNodeId || currentActiveNode || null;
 
   const parsedBottom = node4.bottom_line || effectiveBottom;
   const nextTargetTop = (parsedBottom && parsedBottom > 0)
@@ -439,6 +440,25 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       onRefresh?.();
     } catch (err: any) {
       setNodeFeedback({ id: 'loop', message: `Loop control error: ${err.message}`, isError: true });
+    }
+  };
+
+  const handleAbortNode = async (nodeId?: string) => {
+    try {
+      const url = nodeId ? `${apiBase}/api/dag/nodes/${nodeId}/abort` : `${apiBase}/api/dag/nodes/abort`;
+      const res = await fetch(url, { method: 'POST' });
+      const data = await res.json();
+      setRunningNodeId(null);
+      setNodeFeedback({ id: nodeId || 'abort', message: data.message || 'Operation aborted ⏹' });
+      const statusRes = await fetch(`${apiBase}/api/dag/status`);
+      if (statusRes.ok) {
+        const d = await statusRes.json();
+        setDagStatus(prev => ({ ...prev, ...d }));
+      }
+      onRefresh?.();
+      setTimeout(() => setNodeFeedback(null), 4000);
+    } catch (err: any) {
+      setNodeFeedback({ id: nodeId || 'abort', message: `Abort error: ${err.message}`, isError: true });
     }
   };
 
@@ -573,13 +593,13 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const initGroup = dagStatus.dag?.groups?.initialize || {};
   const captureGroup = dagStatus.dag?.groups?.capture_entire_markdown || {};
 
-  // Accurate node metrics & statuses
-  const isNode1Running = runningNodeId === 'init_end' || node1.status === 'active';
+  // Accurate node metrics & statuses (Strict Single-Node Concurrency)
+  const isNode1Running = activeRunningId === 'init_end';
   const isNode1Error = node1.status === 'error' || Boolean(node1.error);
   const isNode1Calibrated = !isNode1Error && node1.status === 'completed' && (node1.total_lines || 0) > 0;
   const node1TotalLines = isNode1Calibrated ? (node1.total_lines || 0) : 0;
 
-  const isNode2Running = runningNodeId === 'reset_home' || node2.status === 'active';
+  const isNode2Running = activeRunningId === 'reset_home';
   const isNode2Verified = node2.status === 'completed' && Boolean(node2.verified);
   const isNode2Error = node2.status === 'error' || (node2.status === 'completed' && !node2.verified);
 
@@ -587,24 +607,24 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isInitGroupCompleted = !isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified) || projectInitProgress?.status === 'completed');
   const isInitGroupError = !isInitGroupRunning && (initGroup.status === 'error' || isNode1Error || projectInitProgress?.status === 'error');
 
-  const isNode3Running = runningNodeId === 'frame_acquire' || node3.status === 'active' || isOrchestrating;
+  const isNode3Running = activeRunningId === 'frame_acquire';
   const isNode3Error = node3.status === 'error' || Boolean(node3.error);
   const isNode3Done = !isNode3Error && node3.status === 'completed';
 
-  const isNode4Running = runningNodeId === 'frame_ocr' || node4.status === 'active';
+  const isNode4Running = activeRunningId === 'frame_ocr';
   const isNode4Error = node4.status === 'error' || Boolean(node4.error);
   const isNode4Done = !isNode4Error && node4.status === 'completed';
 
-  const isNode3bRunning = runningNodeId === 'local_ai_ocr' || node3b.status === 'active';
+  const isNode3bRunning = activeRunningId === 'local_ai_ocr';
   const isNode3bError = node3b.status === 'error' || Boolean(node3b.error);
   const isNode3bDone = !isNode3bError && (node3b.status === 'completed' || Boolean(node3b.extracted_text) || isNode4Done);
 
-  const isNode5Running = runningNodeId === 'arrow_down' || node5.status === 'active';
+  const isNode5Running = activeRunningId === 'arrow_down';
   const isNode5Done = node5.status === 'completed';
 
-  const isNode6Running = runningNodeId === 'verification_trigger' || isEvaluating || node6.status === 'active';
+  const isNode6Running = activeRunningId === 'verification_trigger';
 
-  const isNode8Running = runningNodeId === 'document_assemble' || node8.status === 'active';
+  const isNode8Running = activeRunningId === 'document_assemble';
   const isNode8Done = node8.status === 'completed';
 
   const isCaptureGroupRunning = runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isLoopRunning || isNode3Running || isNode3bRunning || isNode4Running || isNode5Running || isNode6Running || isNode8Running || isOrchestrating;
@@ -621,11 +641,27 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     const startedAt = nodeData.started_at || null;
     const finishedAt = nodeData.finished_at || null;
     const durationMs = typeof nodeData.duration_ms === 'number' ? nodeData.duration_ms : null;
-    const isExplicitlyActive = Boolean(nodeData.is_active) || (currentActiveNode === id);
+    const isThisActive = activeRunningId === id;
+
+    if (nodeData.status === 'aborted') {
+      return {
+        isRunning: false,
+        isActive: false,
+        isError: true,
+        isAborted: true,
+        isDone: false,
+        statusLabel: 'ABORTED',
+        metricLabel: nodeData.error ? 'Aborted ⏹' : 'Aborted',
+        color: '#e3b341',
+        startedAt,
+        finishedAt,
+        durationMs
+      };
+    }
 
     switch (id) {
       case 'init_end': {
-        const isRunning = isExplicitlyActive || isNode1Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -640,7 +676,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'reset_home': {
-        const isRunning = isExplicitlyActive || isNode2Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -655,7 +691,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'frame_acquire': {
-        const isRunning = isExplicitlyActive || isNode3Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -670,7 +706,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'local_ai_ocr': {
-        const isRunning = isExplicitlyActive || isNode3bRunning;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -685,7 +721,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'frame_ocr': {
-        const isRunning = isExplicitlyActive || isNode4Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -700,7 +736,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'arrow_down': {
-        const isRunning = isExplicitlyActive || isNode5Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
@@ -715,22 +751,22 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         };
       }
       case 'verification_trigger': {
-        const isRunning = isExplicitlyActive || isNode6Running;
+        const isRunning = isThisActive;
         return {
           isRunning,
           isActive: isRunning,
           isError: triggerDecision.prevented,
           isDone: isTriggerFired,
-          statusLabel: isTriggerFired ? 'FIRED' : (triggerDecision.prevented ? 'PREVENTED' : 'PENDING'),
-          metricLabel: isTriggerFired ? '100% Captured' : (triggerDecision.prevented ? 'Blocked ⛔' : `Ln ${nextTargetTop}`),
-          color: isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff'),
+          statusLabel: isRunning ? 'VERIFYING' : (isTriggerFired ? 'FIRED' : (triggerDecision.prevented ? 'PREVENTED' : 'PENDING')),
+          metricLabel: isRunning ? 'Evaluating...' : (isTriggerFired ? '100% Captured' : (triggerDecision.prevented ? 'Blocked ⛔' : `Ln ${nextTargetTop}`)),
+          color: isRunning ? '#ffa657' : (isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff')),
           startedAt,
           finishedAt,
           durationMs
         };
       }
       case 'document_assemble': {
-        const isRunning = isExplicitlyActive || isNode8Running;
+        const isRunning = isThisActive;
         const isComplete = Boolean(node8.is_complete);
         return {
           isRunning,
@@ -801,8 +837,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   // Helper for arrow connection status
   const isNodeActive = (id: string) => {
-    const status = getNodeLiveStatus(id);
-    return status.isActive || status.isRunning || (currentActiveNode === id);
+    return activeRunningId === id;
   };
 
   const isConnectionActive = (nodeAId: string, nodeBId: string) => {
@@ -888,7 +923,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     const isSelected = activeSelectedNodeId === node.id;
     const isPinned = pinnedHoverNodeId === node.id;
     const status = getNodeLiveStatus(node.id);
-    const isPulsingSwirl = status.isActive || status.isRunning || (currentActiveNode === node.id);
+    const isPulsingSwirl = activeRunningId === node.id;
 
     return (
       <div
@@ -1464,20 +1499,37 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => handleRunNode(activeHoverNode.id)}
-                  disabled={runningNodeId !== null}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px',
-                    borderRadius: '5px', border: `1px solid ${activeHoverNode.accentColor}`,
-                    background: `${activeHoverNode.accentColor}25`, color: activeHoverNode.accentColor,
-                    fontSize: '10px', fontWeight: 800, cursor: runningNodeId !== null ? 'wait' : 'pointer'
-                  }}
-                >
-                  {runningNodeId === activeHoverNode.id ? <RefreshCw size={11} className="spin" /> : <Play size={11} />}
-                  <span>{runningNodeId === activeHoverNode.id ? 'Running...' : `Run Node ${activeHoverNode.step}`}</span>
-                </button>
+                {activeRunningId === activeHoverNode.id ? (
+                  <button
+                    type="button"
+                    onClick={() => handleAbortNode(activeHoverNode.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px',
+                      borderRadius: '5px', border: '1px solid #f85149',
+                      background: 'rgba(248, 81, 73, 0.2)', color: '#ff7b72',
+                      fontSize: '10px', fontWeight: 800, cursor: 'pointer'
+                    }}
+                    title="Abort this node's running operation"
+                  >
+                    <Square size={11} fill="#ff7b72" />
+                    <span>Abort Node {activeHoverNode.step}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleRunNode(activeHoverNode.id)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px',
+                      borderRadius: '5px', border: `1px solid ${activeHoverNode.accentColor}`,
+                      background: `${activeHoverNode.accentColor}25`, color: activeHoverNode.accentColor,
+                      fontSize: '10px', fontWeight: 800, cursor: 'pointer'
+                    }}
+                    title={activeRunningId ? `Run Node ${activeHoverNode.step} (aborts running Node ${activeRunningId})` : `Run Node ${activeHoverNode.step}`}
+                  >
+                    <Play size={11} />
+                    <span>{activeRunningId ? `Run Node ${activeHoverNode.step} (Preempt)` : `Run Node ${activeHoverNode.step}`}</span>
+                  </button>
+                )}
                 {activeHoverNode.hasConfig && (
                   <button
                     type="button"
@@ -1633,19 +1685,35 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   <RefreshCw size={10} className={isEvaluating ? 'spin' : ''} />
                   <span>Re-Test Qualifiers</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleRunNode('verification_trigger')}
-                  disabled={runningNodeId !== null}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
-                    background: '#21262d', border: '1px solid #30363d', color: '#ffa657',
-                    padding: '4px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
-                  }}
-                >
-                  <Play size={10} />
-                  <span>Force Trigger</span>
-                </button>
+                {activeRunningId === 'verification_trigger' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleAbortNode('verification_trigger')}
+                    style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                      background: 'rgba(248, 81, 73, 0.2)', border: '1px solid #f85149', color: '#ff7b72',
+                      padding: '4px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                    title="Abort Node 7 operation"
+                  >
+                    <Square size={10} fill="#ff7b72" />
+                    <span>Abort Node 7</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleRunNode('verification_trigger')}
+                    style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                      background: '#21262d', border: '1px solid #30363d', color: '#ffa657',
+                      padding: '4px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                    title={activeRunningId ? `Run Node 7 (aborts running Node ${activeRunningId})` : 'Force Trigger'}
+                  >
+                    <Play size={10} />
+                    <span>{activeRunningId ? 'Run Node 7 (Preempt)' : 'Force Trigger'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsConfigModalOpen(true)}
@@ -1692,24 +1760,45 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {/* Quick Action Button for Selected Node */}
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={() => handleRunNode(selectedNodeMeta.id)}
-                disabled={runningNodeId !== null}
-                style={{
-                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  gap: '6px', padding: '7px 12px', borderRadius: '6px',
-                  border: `1px solid ${selectedNodeMeta.accentColor}66`,
-                  background: `${selectedNodeMeta.accentColor}18`,
-                  color: selectedNodeMeta.accentColor,
-                  fontSize: '11px', fontWeight: 800,
-                  cursor: runningNodeId !== null ? 'wait' : 'pointer',
-                  fontFamily: 'inherit'
-                }}
-              >
-                {runningNodeId === selectedNodeMeta.id ? <RefreshCw size={12} className="spin" /> : <Play size={12} />}
-                <span>{runningNodeId === selectedNodeMeta.id ? `Running Step ${selectedNodeMeta.step}...` : `Run Node ${selectedNodeMeta.step}`}</span>
-              </button>
+              {activeRunningId === selectedNodeMeta.id ? (
+                <button
+                  type="button"
+                  onClick={() => handleAbortNode(selectedNodeMeta.id)}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    gap: '6px', padding: '7px 12px', borderRadius: '6px',
+                    border: '1px solid #f85149',
+                    background: 'rgba(248, 81, 73, 0.2)',
+                    color: '#ff7b72',
+                    fontSize: '11px', fontWeight: 800,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit'
+                  }}
+                  title="Abort this node's execution"
+                >
+                  <Square size={12} fill="#ff7b72" />
+                  <span>Abort Node {selectedNodeMeta.step}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleRunNode(selectedNodeMeta.id)}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    gap: '6px', padding: '7px 12px', borderRadius: '6px',
+                    border: `1px solid ${selectedNodeMeta.accentColor}66`,
+                    background: `${selectedNodeMeta.accentColor}18`,
+                    color: selectedNodeMeta.accentColor,
+                    fontSize: '11px', fontWeight: 800,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit'
+                  }}
+                  title={activeRunningId ? `Run Node ${selectedNodeMeta.step} (aborts currently running Node ${activeRunningId})` : `Run Node ${selectedNodeMeta.step}`}
+                >
+                  <Play size={12} />
+                  <span>{activeRunningId ? `Run Node ${selectedNodeMeta.step} (Preempt)` : `Run Node ${selectedNodeMeta.step}`}</span>
+                </button>
+              )}
 
               {selectedNodeMeta.id === 'local_ai_ocr' && node3b.extracted_text && (
                 <button
