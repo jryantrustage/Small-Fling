@@ -566,29 +566,37 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Send Ctrl+Home (taps editor body then sends keycombination 113 122)
+                # Ensure viewport is clean and soft keyboard is suppressed before sending Ctrl+Home
+                await auto_fix_viewport(active_serial, disp_id)
+                await asyncio.sleep(0.15)
+
+                # Send Ctrl+Home (keycode 113 122) directly to external display keyboard
                 await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
-                await asyncio.sleep(0.4)
 
                 # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
                 dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
                 state.latest_telemetry.setdefault("capture_telemetry", {})
                 state.latest_telemetry["capture_telemetry"].update({"active_dpi": active_dpi, "dpi_factor": dpi_factor})
 
-                snap = await capture_external_screenshot(active_serial)
-                if snap:
-                    with open(calib, "wb") as f: f.write(snap)
-                    is_verified, detected_first = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
-                    if not is_verified:
-                        top_detected = await state.detect_top_line_in_process(calib, dpi_factor=dpi_factor)
-                        if top_detected == 1 or (0 < top_detected <= 2):
-                            is_verified, detected_first = True, 1
+                # Allow document scroll to converge to Line 1 (large documents take 0.4s - 1.5s to scroll from EOF)
+                for sample_idx in range(6):
+                    await asyncio.sleep(0.35)
+                    snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                    if snap:
+                        with open(calib, "wb") as f: f.write(snap)
+                        is_verified, detected_first = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
+                        if not is_verified:
+                            top_detected = await state.detect_top_line_in_process(calib, dpi_factor=dpi_factor)
+                            if top_detected == 1 or (0 < top_detected <= 2):
+                                is_verified, detected_first = True, 1
+                        if is_verified:
+                            break
 
                 if is_verified:
-                    # Once Line 1 is reached, auto-fix viewport to dismiss keyboard and restore full area
+                    # Once Line 1 is reached, auto-fix viewport to ensure clean full 1920x1080 display
                     await auto_fix_viewport(active_serial, disp_id)
-                    await asyncio.sleep(0.2)
-                    snap_fixed = await capture_external_screenshot(active_serial)
+                    await asyncio.sleep(0.15)
+                    snap_fixed = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                     if snap_fixed:
                         with open(calib, "wb") as f: f.write(snap_fixed)
                         is_v2, d2 = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
@@ -596,9 +604,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             detected_first = d2 or 1
                     break
 
-                print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), refocusing editor...")
-                await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
-                await asyncio.sleep(0.2)
+                print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), bringing editor to front...")
+                # Re-activate Teams FilePreviewActivity on external display and ensure focus
+                await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", active_serial)
+                await auto_fix_viewport(active_serial, disp_id)
+                await asyncio.sleep(0.3)
 
             node.update({"status": "completed" if is_verified else "error", "verified": is_verified, "first_line": detected_first})
             state.latest_telemetry["current_top_line"] = detected_first or 1
