@@ -1062,6 +1062,69 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   max-height: calc(100vh - 360px);
 }
 
+.live-screen-viewport.size-full {
+  flex: 1;
+  min-height: 480px;
+  height: 100%;
+  max-height: calc(100vh - 200px);
+}
+
+.inspector-view-container.live-mode {
+  padding: 0 !important;
+  background: #04070c;
+}
+
+.live-responsive-viewport-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  background: #04070c;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.live-responsive-viewport-container.fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 999999 !important;
+  background: #000 !important;
+}
+
+.live-viewport-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: width 0.1s ease, height 0.1s ease;
+}
+
+.live-viewport-floating-controls button {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.live-viewport-floating-controls button:hover {
+  background: rgba(30, 41, 59, 0.95) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+.live-bounding-box-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .studio-gutter-stats-card {
   padding: 12px 14px;
   background: #161b22;

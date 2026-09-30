@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Smartphone, ChevronDown, Check, Loader2, Monitor, Keyboard, ArrowRight, Expand, Shrink, Eye, EyeOff } from 'lucide-react';
 import { Modal } from '../ConfirmModal';
 import type { DeviceInfoData, AlignmentData } from '../types';
-import { renderBoundingBoxesOverlay } from './BoundingBoxesOverlay';
+import { LiveResponsiveViewport } from './LiveResponsiveViewport';
 
 interface Props {
   isOpen: boolean;
@@ -125,14 +125,16 @@ export const GotoLineModal: React.FC<Props> = ({
         </div>
       </div>
 
-      <div className={`live-screen-viewport ${mode === 'phone' ? 'phone-mode' : ''}`} style={{ borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '14px', minHeight: expanded ? (mode === 'phone' ? '540px' : '420px') : '230px', maxHeight: expanded ? (mode === 'phone' ? '660px' : '520px') : '320px', transition: 'all 0.2s ease' }}>
-        <img key={`goto-stream-${mode}-${streamKey}`} className="live-screen-img" src={`${apiBase}/api/device/stream?mode=${mode}&t=${streamKey}`} alt={`Live ${mode} screen`} onError={(e) => { (e.target as HTMLImageElement).src = `${apiBase}/api/device/screen?mode=${mode}&t=${Date.now()}`; }} />
-        {showBoundingBoxes && mode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
-        <div className="live-screen-overlay-badge">
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
-          <span>REALTIME • {mode.toUpperCase()} VIEW</span>
-        </div>
-        <div className="live-screen-overlay-info">{deviceInfo?.active_model || 'DEVICE'} ({deviceInfo?.active_serial || 'CONNECTED'})</div>
+      <div className={`live-screen-viewport ${mode === 'phone' ? 'phone-mode' : ''}`} style={{ borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '14px', minHeight: expanded ? (mode === 'phone' ? '540px' : '420px') : '230px', maxHeight: expanded ? (mode === 'phone' ? '660px' : '520px') : '320px', transition: 'all 0.2s ease', overflow: 'hidden' }}>
+        <LiveResponsiveViewport
+          streamUrl={`${apiBase}/api/device/stream?mode=${mode}&t=${streamKey}`}
+          fallbackUrl={`${apiBase}/api/device/screen?mode=${mode}&t=${streamKey}`}
+          liveMode={mode}
+          alignmentData={alignmentData}
+          showBoundingBoxes={showBoundingBoxes}
+          deviceInfo={deviceInfo}
+          metaResolution={alignmentData?.resolution}
+        />
       </div>
 
       <div className="modal-form-group">

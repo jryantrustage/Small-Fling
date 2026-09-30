@@ -11,7 +11,7 @@ import type {
 } from '../types';
 import type { TelemetryData, TelemetryEvent } from '../TelemetryToaster';
 import { useAgoTimer } from '../hooks/useAgoTimer';
-import { renderBoundingBoxesOverlay } from './BoundingBoxesOverlay';
+import { LiveResponsiveViewport } from './LiveResponsiveViewport';
 
 export interface DeviceStudioDrawerProps {
   isOpen: boolean;
@@ -133,7 +133,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   const [internalMaximized, setInternalMaximized] = useState(false);
   const isMaximized = controlledMaximized !== undefined ? controlledMaximized : internalMaximized;
   const toggleMaximize = onToggleMaximize || (() => setInternalMaximized(p => !p));
-  const [viewportSize, setViewportSize] = useState<'sm' | 'md' | 'lg' | 'fit'>('fit');
+  const [viewportSize, setViewportSize] = useState<'sm' | 'md' | 'lg' | 'fit' | 'full'>('fit');
 
   // Kiosk state
   const [kioskLoading, setKioskLoading] = useState(false);
@@ -578,7 +578,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                   )}
 
                   <div className="live-size-pill-group">
-                    {(['sm', 'md', 'lg', 'fit'] as const).map(s => (
+                    {(['sm', 'md', 'lg', 'fit', 'full'] as const).map(s => (
                       <button
                         key={s}
                         type="button"
@@ -635,23 +635,16 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
 
               {/* Screen Feed Viewport */}
               <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''} size-${viewportSize}`}>
-                <img
-                  key={`studio-stream-${liveMode}-${streamKey}`}
-                  className="live-screen-img"
-                  src={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
-                  alt={`Live ${liveMode} mode screen`}
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = `${apiBase}/api/device/screen?mode=${liveMode}&t=${Date.now()}`;
-                  }}
+                <LiveResponsiveViewport
+                  streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
+                  fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
+                  liveMode={liveMode}
+                  alignmentData={alignmentData}
+                  showBoundingBoxes={showBoundingBoxes}
+                  deviceInfo={deviceInfo}
+                  metaResolution={meta?.display?.resolution || alignmentData?.resolution}
+                  onRefreshStream={onRefreshStream}
                 />
-                {showBoundingBoxes && liveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
-                <div className="live-screen-overlay-badge">
-                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} />
-                  <span>LIVE • {liveMode.toUpperCase()}</span>
-                </div>
-                <div className="live-screen-overlay-info">
-                  {meta?.display?.resolution || '1920×1080'} • {deviceInfo?.active_serial || 'ADB'}
-                </div>
               </div>
 
               {/* Real-Time Gutter Stats & Viewport Alignment Bar */}
