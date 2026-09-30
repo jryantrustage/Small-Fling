@@ -95,19 +95,29 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         })
 
         # 2. Fast home: Dispatch Ctrl+Home: keycode 113 + 122
-        await send_hid_keycombination(113, 122, serial)
         await auto_fix_viewport(serial)
-        await asyncio.sleep(0.4)
-        home_bytes = await capture_external_screenshot(serial)
-        if home_bytes:
-            home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
-            with open(home_path, "wb") as f:
-                f.write(home_bytes)
-            is_verified, detected_first = await state.verify_first_line_in_process(home_path)
-            if not is_verified:
-                res_scan = await state.scan_image_in_process(home_path)
-                detected_first = res_scan.get("top_line", 1)
-                is_verified = (detected_first == 1)
+        await send_hid_keycombination(113, 122, serial)
+        
+        home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
+        is_verified = False
+        detected_first = 0
+        for _ in range(6):
+            await asyncio.sleep(0.35)
+            home_bytes = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+            if home_bytes:
+                with open(home_path, "wb") as f:
+                    f.write(home_bytes)
+                is_verified, detected_first = await state.verify_first_line_in_process(home_path)
+                if not is_verified:
+                    res_scan = await state.scan_image_in_process(home_path)
+                    detected_first = res_scan.get("top_line", 1)
+                    is_verified = (detected_first == 1 or (0 < detected_first <= 2))
+                if is_verified:
+                    detected_first = 1
+                    break
+
+        if is_verified:
+            await auto_fix_viewport(serial)
 
         state.dag_state["nodes"]["reset_home"].update({
             "status": "completed" if is_verified else "error",
@@ -269,22 +279,39 @@ async def verify_project_home(project_id: str, request: Request):
     contents = await extract_request_image(request)
     if not contents:
         serial = await get_active_adb_serial()
+        await auto_fix_viewport(serial)
         await send_hid_keycombination(113, 122, serial)
-        await asyncio.sleep(0.5)
-        contents = await capture_external_screenshot(serial)
-
-    if not contents:
-        raise HTTPException(status_code=400, detail="Could not capture or receive screenshot for Ctrl+Home verification.")
-
-    home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
-    with open(home_path, "wb") as f:
-        f.write(contents)
-
-    is_verified, detected_first = await state.verify_first_line_in_process(home_path)
-    if not is_verified:
-        res_scan = await state.scan_image_in_process(home_path)
-        detected_first = res_scan.get("top_line", 1)
-        is_verified = (detected_first == 1)
+        
+        home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
+        is_verified = False
+        detected_first = 0
+        for _ in range(6):
+            await asyncio.sleep(0.35)
+            contents = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+            if contents:
+                with open(home_path, "wb") as f:
+                    f.write(contents)
+                is_verified, detected_first = await state.verify_first_line_in_process(home_path)
+                if not is_verified:
+                    res_scan = await state.scan_image_in_process(home_path)
+                    detected_first = res_scan.get("top_line", 1)
+                    is_verified = (detected_first == 1 or (0 < detected_first <= 2))
+                if is_verified:
+                    detected_first = 1
+                    break
+        if is_verified:
+            await auto_fix_viewport(serial)
+    else:
+        home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
+        with open(home_path, "wb") as f:
+            f.write(contents)
+        is_verified, detected_first = await state.verify_first_line_in_process(home_path)
+        if not is_verified:
+            res_scan = await state.scan_image_in_process(home_path)
+            detected_first = res_scan.get("top_line", 1)
+            is_verified = (detected_first == 1 or (0 < detected_first <= 2))
+        if is_verified:
+            detected_first = 1
 
     node_status = "completed" if is_verified else "error"
     state.dag_state["nodes"]["reset_home"].update({

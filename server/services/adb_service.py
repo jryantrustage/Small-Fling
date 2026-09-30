@@ -616,6 +616,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
         f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
+        f"am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1; "
         f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then "
         f"input -d {display_id} keyevent 4; input -d {display_id} keyevent 111; input -d 0 keyevent 111; fi"
     )
@@ -707,10 +708,10 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Focus editor text area and dispatch physical keyboard combination in one atomic shell call
+        # Ensure soft keyboard is closed and dispatch hardware keycombination directly to external display
         cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
-            f"input {disp_pfx}tap 500 500",
+            "am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1",
             f"input keyboard {disp_pfx}keycombination {key1} {key2}"
         ]
 
