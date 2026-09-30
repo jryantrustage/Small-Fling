@@ -3,7 +3,7 @@ import { Smartphone, ChevronDown, Check, Loader2, Monitor, RefreshCw, Maximize2,
 import type { DeviceInfoData, AlignmentData } from '../types';
 import { LiveMetaInfoPopover } from './LiveMetaInfoPopover';
 import { useAgoTimer } from '../hooks/useAgoTimer';
-import { renderBoundingBoxesOverlay } from './BoundingBoxesOverlay';
+import { LiveResponsiveViewport } from './LiveResponsiveViewport';
 
 interface Props {
   isOpen: boolean;
@@ -187,11 +187,17 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
         </div>
       )}
 
-      <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`}>
-        <img key={`stream-${liveMode}-${streamKey}`} className="live-screen-img" src={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`} alt={`Live ${liveMode} mode screen`} onError={(e) => { (e.target as HTMLImageElement).src = `${apiBase}/api/device/screen?mode=${liveMode}&t=${Date.now()}`; }} />
-        {showBoundingBoxes && liveMode === 'desktop' && renderBoundingBoxesOverlay(alignmentData)}
-        <div className="live-screen-overlay-badge"><span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', animation: 'pulse-dot 1.5s infinite' }} /><span>LIVE • {liveMode.toUpperCase()}</span></div>
-        <div className="live-screen-overlay-info">{isDrawerMaximized ? 'MAXIMIZED' : `${drawerWidth}×${drawerHeight}`} • {deviceInfo?.active_serial || 'ADB'}</div>
+      <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`} style={{ flex: 1, minHeight: '300px' }}>
+        <LiveResponsiveViewport
+          streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
+          fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
+          liveMode={liveMode}
+          alignmentData={alignmentData}
+          showBoundingBoxes={showBoundingBoxes}
+          deviceInfo={deviceInfo}
+          metaResolution={alignmentData?.resolution}
+          onRefreshStream={onRefreshStream}
+        />
       </div>
 
       {showInfo && (

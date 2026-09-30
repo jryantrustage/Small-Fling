@@ -136,6 +136,9 @@ export interface AlignmentData {
   file_name?: string;
   boxes?: Record<string, AlignmentBox>;
   resolution?: { width: number; height: number };
+  orientation?: 'landscape' | 'portrait';
+  aspect_ratio?: number;
+  dpi_factor?: number;
   timestamp?: string | null;
   classifiers?: ClassifierReport;
   classifier_issues?: ClassifierIssue[];

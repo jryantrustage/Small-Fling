@@ -748,7 +748,8 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
             if jpg:
                 _frame_cache["desktop"] = {"bytes": jpg, "raw_png": snap_bytes, "ts": time.time()}
 
-            res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes)
+            dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial)
+            res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes, None, dpi_factor)
             res["device_connected"] = True
             res["timestamp"] = datetime.now().isoformat()
             try:

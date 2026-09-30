@@ -15,7 +15,7 @@ import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModa
 import { DeviceStudioDrawer } from './components/DeviceStudioDrawer';
 import { GotoLineModal } from './components/GotoLineModal';
 import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
-import { renderBoundingBoxesOverlay } from './components/BoundingBoxesOverlay';
+import { LiveResponsiveViewport } from './components/LiveResponsiveViewport';
 import { useAgoTimer } from './hooks/useAgoTimer';
 
 const env = import.meta.env;
@@ -1370,12 +1370,36 @@ function AppContent() {
                         </button>
                       </div>
                     </div>
-                    <div className="gutter-line-callout top"><span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">TOP GUTTER:</span><span className="gutter-callout-value">{alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}</span></div>
-                    <div className="source-image-wrapper fit" style={{ position: 'relative', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <img key={`main-desktop-stream-${streamKey}`} src={`${API_BASE}/api/device/stream?mode=desktop&t=${streamKey}`} alt="Live Desktop" style={{ maxWidth: '100%', maxHeight: 'calc(100vh - 165px)', objectFit: 'contain' }} onError={(e) => { (e.target as HTMLImageElement).src = `${API_BASE}/api/device/screen?mode=desktop&t=${Date.now()}`; }} />
-                      {showBoundingBoxes && renderBoundingBoxesOverlay(alignmentData)}
+                    <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                      <LiveResponsiveViewport
+                        streamUrl={`${API_BASE}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
+                        fallbackUrl={`${API_BASE}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
+                        liveMode={liveMode}
+                        alignmentData={alignmentData}
+                        showBoundingBoxes={showBoundingBoxes}
+                        deviceInfo={deviceInfo}
+                        metaResolution={alignmentData?.resolution}
+                        onRefreshStream={() => setStreamKey(Date.now())}
+                        topCallout={
+                          <div className="gutter-line-callout top">
+                            <span className="gutter-callout-icon">▲</span>
+                            <span className="gutter-callout-label">TOP GUTTER:</span>
+                            <span className="gutter-callout-value">
+                              {alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}
+                            </span>
+                          </div>
+                        }
+                        bottomCallout={
+                          <div className="gutter-line-callout bottom">
+                            <span className="gutter-callout-icon">▼</span>
+                            <span className="gutter-callout-label">BOTTOM GUTTER:</span>
+                            <span className="gutter-callout-value">
+                              {alignmentData.last_line_number || telemetry.current_bottom_line ? `Line #${alignmentData.last_line_number || telemetry.current_bottom_line}` : 'Detecting...'}
+                            </span>
+                          </div>
+                        }
+                      />
                     </div>
-                    <div className="gutter-line-callout bottom"><span className="gutter-callout-icon">▼</span><span className="gutter-callout-label">BOTTOM GUTTER:</span><span className="gutter-callout-value">{alignmentData.last_line_number || telemetry.current_bottom_line ? `Line #${alignmentData.last_line_number || telemetry.current_bottom_line}` : 'Detecting...'}</span></div>
                   </div>
                 ) : inspectorMode === 'spliced' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>

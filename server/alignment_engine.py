@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 from ocr_engine import get_rapid_ocr
 
-def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarray], expected_doc_name: Optional[str] = None) -> Dict[str, Any]:
+def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarray], expected_doc_name: Optional[str] = None, dpi_factor: float = 1.0) -> Dict[str, Any]:
     """
     Analyzes an external display capture of the Teams Markdown editor.
     Returns alignment status, boolean is_aligned, missing reasons, and bounding box coordinates for each area.
@@ -397,6 +397,9 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         "file_name": file_name,
         "boxes": boxes,
         "resolution": {"width": w, "height": h},
+        "orientation": "portrait" if h > w else "landscape",
+        "aspect_ratio": round(float(w) / float(h), 4) if h > 0 else 1.7778,
+        "dpi_factor": float(dpi_factor),
         "dismissed": list(dismissed_set)
     }
 
