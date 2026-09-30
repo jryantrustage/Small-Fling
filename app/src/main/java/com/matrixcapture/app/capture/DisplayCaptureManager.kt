@@ -8,11 +8,13 @@ import android.hardware.display.VirtualDisplay
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import android.view.WindowManager
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,9 +66,21 @@ class DisplayCaptureManager(
             d.displayId != Display.DEFAULT_DISPLAY && (d.flags and Display.FLAG_PRESENTATION != 0 || isExternalType(d) || d.name.contains("HDMI", true))
         } ?: displays.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY } ?: displays.first()
 
-        val m = DisplayMetrics()
-        @Suppress("DEPRECATION") ext.getRealMetrics(m)
-        val info = ExternalDisplayInfo(ext.displayId, ext.name, m.widthPixels, m.heightPixels, m.densityDpi, ext.refreshRate, ext.displayId != Display.DEFAULT_DISPLAY)
+        // Avoid global device metrics (e.g., Resources.getSystem()) which default to the primary phone screen.
+        // On Android 11+ (API 30+), resolve WindowMetrics via a DisplayContext tied strictly to the target external display.
+        val (widthPx, heightPx, densityDpi) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val displayContext = if (ext.displayId != Display.DEFAULT_DISPLAY) context.createDisplayContext(ext) else context
+            val wm = displayContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            val bounds = wm?.currentWindowMetrics?.bounds
+            val density = displayContext.resources.configuration.densityDpi
+            Triple(bounds?.width() ?: 1920, bounds?.height() ?: 1080, density)
+        } else {
+            val m = DisplayMetrics()
+            @Suppress("DEPRECATION") ext.getRealMetrics(m)
+            Triple(m.widthPixels, m.heightPixels, m.densityDpi)
+        }
+
+        val info = ExternalDisplayInfo(ext.displayId, ext.name, widthPx, heightPx, densityDpi, ext.refreshRate, ext.displayId != Display.DEFAULT_DISPLAY)
         _displayInfoState.value = info
         return info
     }

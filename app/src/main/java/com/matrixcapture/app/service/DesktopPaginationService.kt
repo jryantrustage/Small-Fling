@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -193,11 +194,22 @@ class DesktopPaginationService : AccessibilityService() {
 
     fun getDisplayOrWindowBounds(displayId: Int): Rect {
         val bounds = Rect()
+        // 1. Inspect on-screen bounds of the target Teams editor window directly
         findTargetWindow(displayId)?.getBoundsInScreen(bounds)
         if (bounds.isEmpty || bounds.width() < 200 || bounds.height() < 200) {
             val dm = getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
             val display = dm?.getDisplay(displayId)
             if (display != null) {
+                // Avoid global device metrics which default to the primary phone screen.
+                // On Android 11+ (API 30+), resolve WindowMetrics via a DisplayContext tied to target displayId.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val displayCtx = createDisplayContext(display)
+                    val wm = displayCtx.getSystemService(WindowManager::class.java)
+                    val wmBounds = wm?.currentWindowMetrics?.bounds
+                    if (wmBounds != null && wmBounds.width() > 0 && wmBounds.height() > 0) {
+                        return Rect(wmBounds)
+                    }
+                }
                 val metrics = DisplayMetrics()
                 @Suppress("DEPRECATION") display.getRealMetrics(metrics)
                 bounds.set(0, 0, metrics.widthPixels, metrics.heightPixels)

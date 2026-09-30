@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, ChevronDown, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Eye } from 'lucide-react';
+import { Activity, ChevronDown, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Eye, Play, Camera } from 'lucide-react';
 
 export interface TelemetryEvent {
   id: string;
@@ -8,6 +8,21 @@ export interface TelemetryEvent {
   message: string;
   data?: any;
   dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
+}
+
+export interface CaptureTelemetry {
+  status?: 'idle' | 'capturing' | 'completed' | 'error';
+  last_latency_ms?: number;
+  last_capture_time?: string | null;
+  display_id?: string | null;
+  display_name?: string | null;
+  resolution?: string | null;
+  frame_bytes?: number;
+  cache_hit?: boolean;
+  settle_delay_ms?: number;
+  total_captures?: number;
+  page?: number;
+  error?: string | null;
 }
 
 const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'capture_entire_markdown'): boolean => {
@@ -83,6 +98,7 @@ export interface TelemetryData {
   phase?: string;
   status_message?: string;
   last_heartbeat?: string | null;
+  capture_telemetry?: CaptureTelemetry;
   pacer_calibration?: {
     auto_tune_factor?: number;
     line_pitch_px?: number;
@@ -134,17 +150,45 @@ export interface TelemetryToasterProps {
   onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
+  apiBase?: string;
+  onRefresh?: () => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
-  selectedNodeId, onSelectNodeId
+  selectedNodeId, onSelectNodeId, apiBase, onRefresh
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
   const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
+  const [isGrabbingNode3, setIsGrabbingNode3] = useState(false);
+  const [node3TriggerFeedback, setNode3TriggerFeedback] = useState<string | null>(null);
+
+  const handleTriggerNode3 = async () => {
+    setIsGrabbingNode3(true);
+    setNode3TriggerFeedback('Capturing external display frame...');
+    try {
+      const res = await fetch(`${apiBase || ''}/api/dag/nodes/frame_acquire/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fast_loop: true })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNode3TriggerFeedback(data.message || `Acquired in ${data.duration_ms}ms ✔`);
+        onRefresh?.();
+      } else {
+        setNode3TriggerFeedback(`Error: ${data.message || data.detail || 'Capture failed'}`);
+      }
+    } catch (err: any) {
+      setNode3TriggerFeedback(`Failed: ${err.message}`);
+    } finally {
+      setIsGrabbingNode3(false);
+      setTimeout(() => setNode3TriggerFeedback(null), 4000);
+    }
+  };
 
   useEffect(() => {
     if (selectedDag) {
@@ -377,8 +421,11 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
             {(['overview', 'pacer', 'tokens', 'events'] as const).map(tab => {
               const icons = { overview: Activity, pacer: Radio, tokens: Coins, events: Terminal };
               const Icon = icons[tab];
+              const isTracingNode3 = (selectedNodeId === 'frame_acquire' && isNodeTracingActive);
               const labels = {
-                overview: currentDag === 'initialize' ? 'DAG 1 Overview' : (currentDag === 'capture_entire_markdown' ? 'DAG 2 Overview' : 'Overview'),
+                overview: isTracingNode3
+                  ? 'Node 3 Telemetry'
+                  : (currentDag === 'initialize' ? 'DAG 1 Overview' : (currentDag === 'capture_entire_markdown' ? 'DAG 2 Overview' : 'Overview')),
                 pacer: 'Device',
                 tokens: 'Tokens & Cost',
                 events: filteredEventsLog.length > 0 ? `Log (${filteredEventsLog.length})` : 'Log'
@@ -394,7 +441,89 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
           <div className="toaster-body">
             {activeTab === 'overview' && (
               <div className="toaster-tab-content">
-                {currentDag === 'initialize' ? (
+                {(selectedNodeId === 'frame_acquire' && isNodeTracingActive) ? (
+                  <div className="telemetry-section-card" style={{ borderColor: 'rgba(0, 255, 157, 0.45)', background: 'linear-gradient(180deg, rgba(0, 255, 157, 0.05) 0%, rgba(13, 17, 23, 0.95) 100%)' }}>
+                    <div className="section-card-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: (telemetry.capture_telemetry?.status === 'capturing' || isGrabbingNode3) ? '#ffa657' : '#00ff9d', boxShadow: `0 0 8px ${(telemetry.capture_telemetry?.status === 'capturing' || isGrabbingNode3) ? '#ffa657' : '#00ff9d'}` }} />
+                        <span style={{ color: '#00ff9d', fontWeight: 800 }}>NODE 3: SCREEN CAPTURE TELEMETRY</span>
+                      </div>
+                      <span className="progress-percent" style={{
+                        color: (telemetry.capture_telemetry?.status === 'capturing' || isGrabbingNode3) ? '#ffa657' : (telemetry.capture_telemetry?.status === 'error' ? '#ff7b72' : '#00ff9d'),
+                        fontSize: '10px',
+                        fontWeight: 800
+                      }}>
+                        {(telemetry.capture_telemetry?.status === 'capturing' || isGrabbingNode3) ? 'CAPTURING ⚡' : (telemetry.capture_telemetry?.last_latency_ms ? `ACQUIRED (${telemetry.capture_telemetry.last_latency_ms}ms)` : 'READY ✔')}
+                      </span>
+                    </div>
+
+                    {/* Primary 4-grid metrics */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', marginTop: '8px' }}>
+                      <div style={{ background: '#0d1117', padding: '6px 8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '9px', color: '#8b949e', fontWeight: 700 }}>ACQUISITION RTT (LATENCY)</div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, marginTop: '2px', color: (telemetry.capture_telemetry?.last_latency_ms || 0) < 150 ? '#00ff9d' : ((telemetry.capture_telemetry?.last_latency_ms || 0) < 1500 ? '#58a6ff' : '#ffa657') }}>
+                          {telemetry.capture_telemetry?.last_latency_ms ? `${telemetry.capture_telemetry.last_latency_ms}ms` : 'Ready'}
+                          {telemetry.capture_telemetry?.cache_hit && <span style={{ fontSize: '9px', color: '#00ff9d', marginLeft: '5px', fontWeight: 600 }}>⚡ Hot Cache</span>}
+                        </div>
+                      </div>
+                      <div style={{ background: '#0d1117', padding: '6px 8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '9px', color: '#8b949e', fontWeight: 700 }}>FRAME PAYLOAD & RES</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: '#f0f6fc', marginTop: '2px' }}>
+                          {telemetry.capture_telemetry?.frame_bytes ? `${(telemetry.capture_telemetry.frame_bytes / 1024).toFixed(1)} KB` : 'Pending'}
+                          <span style={{ fontSize: '9.5px', color: '#8b949e', marginLeft: '4px' }}>({telemetry.capture_telemetry?.resolution || '1080p'})</span>
+                        </div>
+                      </div>
+                      <div style={{ background: '#0d1117', padding: '6px 8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '9px', color: '#8b949e', fontWeight: 700 }}>TARGET DISPLAY PIPELINE</div>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: '#a371f7', marginTop: '3px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={telemetry.capture_telemetry?.display_id || ''}>
+                          {telemetry.capture_telemetry?.display_name || 'MB16AMTR'} <span style={{ color: '#6e7681', fontSize: '9.5px' }}>#{String(telemetry.capture_telemetry?.display_id || '').slice(-6)}</span>
+                        </div>
+                      </div>
+                      <div style={{ background: '#0d1117', padding: '6px 8px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                        <div style={{ fontSize: '9px', color: '#8b949e', fontWeight: 700 }}>CAPTURE SETTLE & SYNC</div>
+                        <div style={{ fontSize: '12px', fontWeight: 700, color: '#388bfd', marginTop: '3px' }}>
+                          {telemetry.capture_telemetry?.settle_delay_ms ?? 40}ms <span style={{ color: '#8b949e', fontSize: '9.5px' }}>(Fast Settle)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Controls row */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div style={{ fontSize: '9px', color: '#8b949e', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>Frame #{telemetry.capture_telemetry?.page || telemetry.current_page || 1}</span>
+                        <span>•</span>
+                        <span>{telemetry.capture_telemetry?.total_captures || 0} grabs</span>
+                        {node3TriggerFeedback && (
+                          <span style={{ color: node3TriggerFeedback.startsWith('Error') || node3TriggerFeedback.startsWith('Failed') ? '#ff7b72' : '#00ff9d', fontWeight: 700, marginLeft: '4px' }}>
+                            {node3TriggerFeedback}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTriggerNode3}
+                        disabled={isGrabbingNode3}
+                        style={{
+                          background: isGrabbingNode3 ? 'rgba(255, 107, 37, 0.25)' : 'rgba(0, 255, 157, 0.15)',
+                          border: `1px solid ${isGrabbingNode3 ? '#ff6b25' : '#00ff9d'}`,
+                          color: isGrabbingNode3 ? '#ffa657' : '#00ff9d',
+                          padding: '3px 9px',
+                          borderRadius: '4px',
+                          fontSize: '9.5px',
+                          fontWeight: 700,
+                          cursor: isGrabbingNode3 ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                        title="Execute high-speed screen capture on external display and stream telemetry"
+                      >
+                        <Play size={9} />
+                        <span>{isGrabbingNode3 ? 'Capturing...' : '⚡ Test Capture (Node 3)'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : currentDag === 'initialize' ? (
                   <div className="telemetry-section-card" style={{ borderColor: 'rgba(88, 166, 255, 0.4)' }}>
                     <div className="section-card-header">
                       <span style={{ color: '#58a6ff' }}>DAG 1 INITIALIZATION TELEMETRY</span>
@@ -426,6 +555,29 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                     <div className="section-card-header"><span>DOCUMENT CAPTURE PROGRESS</span><span className="progress-percent">{targetLines > 0 ? `${progressPercent}%` : '—'}</span></div>
                     <div className="telemetry-progress-bar-bg"><div className="telemetry-progress-bar-fill" style={{ width: targetLines > 0 ? `${progressPercent}%` : '0%' }} /></div>
                     <div className="telemetry-progress-sub"><span>{targetLines > 0 ? `Line ${currentBottom} of ${targetLines} target lines` : 'Awaiting calibration (Ctrl+End)'}</span><span>{documentSummary.total_frames} frames captured</span></div>
+                    
+                    {/* Compact Node 3 telemetry sub-strip in DAG 2 Overview */}
+                    <div style={{ marginTop: '8px', padding: '5px 8px', borderRadius: '5px', background: 'rgba(0, 255, 157, 0.06)', border: '1px solid rgba(0, 255, 157, 0.22)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <Camera size={11} color="#00ff9d" />
+                        <span style={{ fontWeight: 700, color: '#00ff9d' }}>Node 3 Screen Grab:</span>
+                        <span style={{ color: (telemetry.capture_telemetry?.last_latency_ms || 0) < 150 ? '#00ff9d' : '#ffa657', fontWeight: 800 }}>
+                          {telemetry.capture_telemetry?.last_latency_ms ? `${telemetry.capture_telemetry.last_latency_ms}ms` : 'Ready'}
+                        </span>
+                        {telemetry.capture_telemetry?.cache_hit && <span style={{ fontSize: '8.5px', color: '#00ff9d', background: 'rgba(0,255,157,0.15)', padding: '0 3px', borderRadius: '3px' }}>⚡ Cache</span>}
+                        {telemetry.capture_telemetry?.frame_bytes ? <span style={{ color: '#8b949e' }}>• {(telemetry.capture_telemetry.frame_bytes / 1024).toFixed(0)} KB</span> : null}
+                        <span style={{ color: '#8b949e' }}>• {telemetry.capture_telemetry?.display_name || 'MB16AMTR'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleTriggerNode3}
+                        disabled={isGrabbingNode3}
+                        style={{ background: 'transparent', border: 'none', color: '#00ff9d', fontWeight: 700, cursor: isGrabbingNode3 ? 'wait' : 'pointer', display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 4px' }}
+                      >
+                        <Play size={9} />
+                        <span>{isGrabbingNode3 ? 'Grabbing...' : 'Grab'}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
                 <div className="telemetry-tiles-grid">
@@ -455,6 +607,28 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   ].map(([lbl, val, cls]) => (
                     <div key={lbl} className="pacer-detail-row"><span className="lbl">{lbl}</span><span className={cls}>{val}</span></div>
                   ))}
+                </div>
+
+                {/* Dedicated Node 3 Capture Subsystem Diagnostics */}
+                <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #30363d' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 800, color: '#00ff9d', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <Camera size={11} color="#00ff9d" />
+                    <span>NODE 3 SCREEN CAPTURE SUBSYSTEM</span>
+                  </div>
+                  <div className="telemetry-pacer-grid">
+                    {[
+                      ['Capture Engine:', 'Direct SurfaceFlinger / ADB screencap', 'val font-mono'],
+                      ['Last Screen Grab RTT:', `${telemetry.capture_telemetry?.last_latency_ms || 0}ms`, 'val highlight font-mono'],
+                      ['Target Display ID:', String(telemetry.capture_telemetry?.display_id || 'External Desktop'), 'val font-mono'],
+                      ['Display Friendly Name:', telemetry.capture_telemetry?.display_name || 'MB16AMTR', 'val'],
+                      ['Frame Payload Size:', telemetry.capture_telemetry?.frame_bytes ? `${(telemetry.capture_telemetry.frame_bytes / 1024).toFixed(1)} KB` : '0 KB', 'val font-mono'],
+                      ['Frame Resolution:', telemetry.capture_telemetry?.resolution || '1920x1080', 'val font-mono'],
+                      ['Hot Cache Reused:', telemetry.capture_telemetry?.cache_hit ? 'Yes (⚡ <60ms)' : 'No (Fresh HW Grab)', 'val font-mono'],
+                      ['Total Node 3 Captures:', String(telemetry.capture_telemetry?.total_captures || 0), 'val font-mono'],
+                    ].map(([lbl, val, cls]) => (
+                      <div key={lbl} className="pacer-detail-row"><span className="lbl">{lbl}</span><span className={cls}>{val}</span></div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

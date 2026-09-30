@@ -118,8 +118,18 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val upd = {
             val ext = dm.displays.firstOrNull { it.displayId != android.view.Display.DEFAULT_DISPLAY }
             if (ext != null) {
-                val m = android.util.DisplayMetrics(); @Suppress("DEPRECATION") ext.getRealMetrics(m)
-                _uiState.update { it.copy(targetDisplay = DisplayCaptureManager.ExternalDisplayInfo(ext.displayId, ext.name, m.widthPixels, m.heightPixels, m.densityDpi, ext.refreshRate, true)) }
+                val (w, h, dpi) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    val displayCtx = context.createDisplayContext(ext)
+                    val wm = displayCtx.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+                    val bounds = wm?.currentWindowMetrics?.bounds
+                    val density = displayCtx.resources.configuration.densityDpi
+                    Triple(bounds?.width() ?: 1920, bounds?.height() ?: 1080, density)
+                } else {
+                    val m = android.util.DisplayMetrics()
+                    @Suppress("DEPRECATION") ext.getRealMetrics(m)
+                    Triple(m.widthPixels, m.heightPixels, m.densityDpi)
+                }
+                _uiState.update { it.copy(targetDisplay = DisplayCaptureManager.ExternalDisplayInfo(ext.displayId, ext.name, w, h, dpi, ext.refreshRate, true)) }
             } else _uiState.update { it.copy(targetDisplay = null) }
         }
         upd()

@@ -1725,6 +1725,8 @@ function AppContent() {
         onSelectDag={setSelectedDag}
         selectedNodeId={selectedNodeId}
         onSelectNodeId={setSelectedNodeId}
+        apiBase={API_BASE}
+        onRefresh={fetchData}
       />
     </div>
   );

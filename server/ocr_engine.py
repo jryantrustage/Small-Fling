@@ -44,13 +44,24 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
     nums.sort(key=lambda x: x[0])
     return [n for _, n in nums]
 
-def fast_detect_gutter_bounds(img: np.ndarray) -> Tuple[int, int]:
-    """Rapidly extracts top line and bottom line from targeted top/bottom gutter slices in parallel."""
+def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[int, int]:
+    """
+    Rapidly extracts top line and bottom line from targeted top/bottom gutter slices in parallel.
+    Multiplies base 1080p search bounding boxes by dpi_factor and resolution scaling factor.
+    """
     if img is None: return 0, 0
     h, w = img.shape[:2]
-    # 1. Primary: standard fullscreen gutter (width ~160px)
-    top_crop = img[int(h * 0.10):int(h * 0.40), :160]
-    bot_crop = img[int(h * 0.70):int(h * 0.95), :160]
+    scale_x = w / 1920.0
+    # Combined normalization multiplier: scales box width & offsets according to active DPI and resolution
+    norm_multiplier = max(0.4, scale_x * dpi_factor)
+
+    # 1. Primary: standard fullscreen gutter (scaled dynamically)
+    # At 160 DPI 1080p: ~180px
+    # At 120 DPI 1080p: ~135px (0.75x)
+    # At 240 DPI 1080p: ~270px (1.5x)
+    gutter_w = int(max(130.0, 180.0 * norm_multiplier))
+    top_crop = img[int(h * 0.10):int(h * 0.42), :gutter_w]
+    bot_crop = img[int(h * 0.65):int(h * 0.96), :gutter_w]
 
     f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop)
     f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
@@ -58,39 +69,49 @@ def fast_detect_gutter_bounds(img: np.ndarray) -> Tuple[int, int]:
     if top_nums and bot_nums:
         return top_nums[0], bot_nums[-1]
 
-    # 2. Secondary: sidebar open (gutter around x ~ 300)
-    top_crop2 = img[int(h * 0.10):int(h * 0.40), 260:430]
-    bot_crop2 = img[int(h * 0.70):int(h * 0.95), 260:430]
-    f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop2)
-    f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
-    top_nums2, bot_nums2 = f_top2.result(), f_bot2.result()
-    if top_nums2 and bot_nums2:
-        return top_nums2[0], bot_nums2[-1]
+    # 2. Secondary: sidebar open (gutter around x ~ 300 scaled by norm_multiplier)
+    sidebar_x1 = int(240.0 * norm_multiplier)
+    sidebar_x2 = sidebar_x1 + gutter_w
+    if sidebar_x2 < w:
+        top_crop2 = img[int(h * 0.10):int(h * 0.42), sidebar_x1:sidebar_x2]
+        bot_crop2 = img[int(h * 0.65):int(h * 0.96), sidebar_x1:sidebar_x2]
+        f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop2)
+        f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
+        top_nums2, bot_nums2 = f_top2.result(), f_bot2.result()
+        if top_nums2 and bot_nums2:
+            return top_nums2[0], bot_nums2[-1]
 
     # Return partial if either top or bot detected
     t = (top_nums or top_nums2 or [0])[0]
     b = (bot_nums or bot_nums2 or [0])[-1]
     return t, b
 
-def fast_verify_first_line(img: np.ndarray) -> Tuple[bool, int]:
-    """Rapidly checks whether Line 1 (or <= 15) is visible at top gutter slice."""
+def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bool, int]:
+    """Rapidly checks whether Line 1 (or <= 15) is visible at top gutter slice using normalized DPI scaling."""
     if img is None: return False, 0
     h, w = img.shape[:2]
-    top_crop = img[int(h * 0.10):int(h * 0.40), :160]
+    scale_x = w / 1920.0
+    norm_multiplier = max(0.4, scale_x * dpi_factor)
+    gutter_w = int(max(130.0, 180.0 * norm_multiplier))
+
+    top_crop = img[int(h * 0.10):int(h * 0.42), :gutter_w]
     top_nums = extract_numbers_from_slice(top_crop)
     if not top_nums:
-        top_crop2 = img[int(h * 0.10):int(h * 0.40), 260:430]
-        top_nums = extract_numbers_from_slice(top_crop2)
+        sidebar_x1 = int(240.0 * norm_multiplier)
+        sidebar_x2 = sidebar_x1 + gutter_w
+        if sidebar_x2 < w:
+            top_crop2 = img[int(h * 0.10):int(h * 0.42), sidebar_x1:sidebar_x2]
+            top_nums = extract_numbers_from_slice(top_crop2)
     if not top_nums: return False, 0
     first_ln = top_nums[0]
     is_at_home = any(ln == 1 for ln in top_nums[:4]) or first_ln <= 15
     return is_at_home, (1 if is_at_home else first_ln)
 
-def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
+def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> List[Tuple[int, int]]:
     """
     Finds the vertical gutter column of line numbers in an editor image.
-    Self-adapts whether the editor is fullscreen (x ~ 18) or has a sidebar open (x ~ 301).
-    Returns list of (y_pos, line_num) sorted by Y.
+    Self-adapts whether the editor is fullscreen or has a sidebar open.
+    Applies dpi_factor to scale scan slices and X-clustering tolerance.
     """
     if img is None: return []
     h, w = img.shape[:2]
@@ -99,9 +120,14 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
     ocr = get_rapid_ocr()
     if ocr is None: return []
 
-    # Fast check: scan targeted gutter width first
+    scale_x = w / 1920.0
+    norm_multiplier = max(0.4, scale_x * dpi_factor)
+
+    # Fast check: scan targeted gutter width scaled by norm_multiplier
     candidates = []
-    for sub_w in [int(w * 0.12), int(w * 0.35)]:
+    sub_w1 = int(min(w, max(180, int(w * 0.12 * norm_multiplier))))
+    sub_w2 = int(min(w, max(360, int(w * 0.35 * norm_multiplier))))
+    for sub_w in [sub_w1, sub_w2]:
         sub = img[top_y:bot_y, :sub_w]
         try:
             results, _ = ocr(sub)
@@ -129,12 +155,13 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
 
     if not candidates: return []
     
-    # Cluster candidates by X-coordinate (within 24px tolerance)
+    # Cluster candidates by X-coordinate (scaled tolerance by DPI multiplier)
+    x_tol = max(18, int(24.0 * norm_multiplier))
     clusters = {}
     for x, y, num in candidates:
         matched_k = None
         for k in clusters:
-            if abs(k - x) <= 24:
+            if abs(k - x) <= x_tol:
                 matched_k = k
                 break
         if matched_k is None:
@@ -156,54 +183,54 @@ def find_gutter_numbers_cluster(img: np.ndarray) -> List[Tuple[int, int]]:
             valid.append((y_pos, valid[-1][1] + 1))
     return valid if valid else best_gutter
 
-def worker_detect_gutter_bounds(image_path: str) -> Tuple[int, int]:
+def worker_detect_gutter_bounds(image_path: str, dpi_factor: float = 1.0) -> Tuple[int, int]:
     """Worker function to rapidly detect both top line and last line in a single OCR pass."""
     img = cv2.imread(image_path)
     if img is None: return 0, 0
     # Fast path: check top and bottom slices in parallel
-    top, bot = fast_detect_gutter_bounds(img)
+    top, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
     if top > 0 and bot > 0:
         return top, bot
     # Fallback to column clustering
-    gutter = find_gutter_numbers_cluster(img)
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if gutter:
         return gutter[0][1], gutter[-1][1]
     return top or 0, bot or 0
 
-def worker_detect_last_line(image_path: str) -> int:
+def worker_detect_last_line(image_path: str, dpi_factor: float = 1.0) -> int:
     """Worker function to rapidly and accurately detect the last line number on screen (used after Ctrl+End)."""
     img = cv2.imread(image_path)
     if img is None: return 0
-    _, bot = fast_detect_gutter_bounds(img)
+    _, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
     if bot > 0:
         return bot
-    gutter = find_gutter_numbers_cluster(img)
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if gutter:
         return gutter[-1][1]
     return 0
 
-def worker_verify_first_line(image_path: str) -> Tuple[bool, int]:
+def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[bool, int]:
     """Worker function to verify that line 1 is visible at top of gutter (used after Ctrl+Home)."""
     img = cv2.imread(image_path)
     if img is None: return False, 0
-    is_at_home, ln = fast_verify_first_line(img)
+    is_at_home, ln = fast_verify_first_line(img, dpi_factor=dpi_factor)
     if is_at_home:
         return is_at_home, ln
-    gutter = find_gutter_numbers_cluster(img)
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if not gutter: return False, 0
     first_ln = gutter[0][1]
     has_line_1 = any(ln == 1 for _, ln in gutter[:4])
-    is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < 300)
+    is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < int(300 * max(0.4, dpi_factor)))
     return is_at_home, (1 if is_at_home else first_ln)
 
-def worker_detect_top_line(image_path: str) -> int:
+def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0) -> int:
     """Worker function to detect the line number displayed at the top of the left side gutter."""
     img = cv2.imread(image_path)
     if img is None: return 0
-    top, _ = fast_detect_gutter_bounds(img)
+    top, _ = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
     if top > 0:
         return top
-    gutter = find_gutter_numbers_cluster(img)
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if gutter:
         return gutter[0][1]
     return 0
