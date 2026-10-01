@@ -283,11 +283,13 @@ function AppContent() {
       const res = await api('/api/device/select', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serial }) });
       if (res.ok) {
         const d = await res.json();
-        setDeviceInfo(d.device_info);
-        if (d.device_info?.active_model) {
-          const m = d.device_info.active_model.toLowerCase();
+        const info = d.device_info || d;
+        setDeviceInfo(info);
+        if (info?.active_model) {
+          const m = info.active_model.toLowerCase();
           setDeviceModel(m.includes('pixel_8') ? 'pixel_8' : 'pixel_10');
         }
+        setStreamKey(Date.now());
       }
     } catch {}
   };
@@ -317,6 +319,7 @@ function AppContent() {
       });
       const info = await apiJson<DeviceInfoData>('/api/device/info');
       if (info) setDeviceInfo(info);
+      setStreamKey(Date.now());
     } catch {}
   };
 
@@ -600,7 +603,17 @@ function AppContent() {
               if (docObj.token_stats) setTokenStats(docObj.token_stats);
             }
           } else if (msg.type === 'device_selected') {
-            apiJson<DeviceInfoData>('/api/device/info').then(info => { if (info) setDeviceInfo(info); });
+            const newInfo = msg.device_info || msg.data;
+            if (newInfo?.active_serial) {
+              setDeviceInfo(newInfo);
+              if (newInfo.active_model) {
+                const m = newInfo.active_model.toLowerCase();
+                setDeviceModel(m.includes('pixel_8') ? 'pixel_8' : 'pixel_10');
+              }
+            } else {
+              apiJson<DeviceInfoData>('/api/device/info').then(info => { if (info) setDeviceInfo(info); });
+            }
+            setStreamKey(Date.now());
           } else if (msg.type === 'telemetry_updated' && msg.data) {
             setTelemetry(p => ({ ...p, ...msg.data }));
           } else if (msg.type === 'orchestration_event' && msg.telemetry) {
@@ -1372,8 +1385,8 @@ function AppContent() {
                     </div>
                     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                       <LiveResponsiveViewport
-                        streamUrl={`${API_BASE}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
-                        fallbackUrl={`${API_BASE}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
+                        streamUrl={`${API_BASE}/api/device/stream?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
+                        fallbackUrl={`${API_BASE}/api/device/screen?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
                         liveMode={liveMode}
                         alignmentData={alignmentData}
                         showBoundingBoxes={showBoundingBoxes}

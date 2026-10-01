@@ -189,8 +189,8 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
 
       <div className={`live-screen-viewport ${liveMode === 'phone' ? 'phone-mode' : ''}`} style={{ flex: 1, minHeight: '300px' }}>
         <LiveResponsiveViewport
-          streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
-          fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
+          streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
+          fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
           liveMode={liveMode}
           alignmentData={alignmentData}
           showBoundingBoxes={showBoundingBoxes}

@@ -73,6 +73,13 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  // Ensure DOM element resets to new stream URL when device/mode/streamKey updates
+  useEffect(() => {
+    if (imgRef.current && streamUrl) {
+      imgRef.current.src = streamUrl;
+    }
+  }, [streamUrl]);
+
   // Image load handler to capture true stream aspect ratio and resolution
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     const img = e.currentTarget;
