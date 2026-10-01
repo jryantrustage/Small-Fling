@@ -95,7 +95,7 @@
                     ],
                     "background": {
                         "activeOnStart": true,
-                        "beginsPattern": ".*Starting MatrixCapture FastAPI backend.*",
+                        "beginsPattern": ".*(Uvicorn running|Started server process|Waiting for application startup|Starting MatrixCapture).*",
                         "endsPattern": ".*Application startup complete.*"
                     }
                 }
