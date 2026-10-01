@@ -571,26 +571,20 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         if not ser: return False
         chk = await run_adb_shell("dumpsys input_method", ser)
         out = chk.get("stdout", "")
-        # Check actual window visibility from dumpsys
         has_visible_window = False
-        for line in out.splitlines():
-            line_str = line.strip()
-            if "mImeWindowVis=" in line_str:
-                val_part = line_str.split("mImeWindowVis=")[1].split()[0]
-                if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
-                    has_visible_window = True
-                    break
-        if has_visible_window:
-            _ime_visible_cache = {"val": True, "ts": now}
-            return True
-        # If no visible IME window flag was found, check if hard keyboard suppression is on
-        supp_chk = await run_adb_shell("settings get secure show_ime_with_hard_keyboard", ser)
-        if (supp_chk.get("stdout") or "").strip() == "0":
-            _ime_visible_cache = {"val": False, "ts": now}
-            return False
-        res = "mInputShown=true" in out
-        _ime_visible_cache = {"val": res, "ts": now}
-        return res
+        if "mInputShown=true" in out:
+            has_visible_window = True
+        else:
+            for line in out.splitlines():
+                line_str = line.strip()
+                if "mImeWindowVis=" in line_str:
+                    val_part = line_str.split("mImeWindowVis=")[1].split()[0]
+                    if any(v in val_part for v in ["1", "2", "3", "0x1", "0x2", "0x3"]):
+                        has_visible_window = True
+                        break
+
+        _ime_visible_cache = {"val": has_visible_window, "ts": now}
+        return has_visible_window
     except Exception:
         return False
 
@@ -617,15 +611,15 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
         f"am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1; "
-        f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then "
-        f"input -d {display_id} keyevent 111; input -d 0 keyevent 111; fi"
+        f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true' > /dev/null; then "
+        f"input -d {display_id} keyevent 4; input -d 0 keyevent 4; fi"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
 
-    is_open = await is_ime_visible(ser)
+    is_open = await is_ime_visible(ser, force_check=True)
     if is_open:
-        await run_adb_shell(f"input -d {display_id} keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser, timeout=2.0)
-        is_open = await is_ime_visible(ser)
+        await run_adb_shell(f"input -d {display_id} keyevent 4; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser, timeout=2.0)
+        is_open = await is_ime_visible(ser, force_check=True)
 
     try:
         from services import state
@@ -712,6 +706,7 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             "am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1",
+            f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true' > /dev/null; then input -d {target_d} keyevent 4; sleep 0.1; fi",
             f"input keyboard {disp_pfx}keycombination {key1} {key2}"
         ]
 
