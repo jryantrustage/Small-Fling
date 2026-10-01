@@ -129,6 +129,7 @@ async def close_keyboard_endpoint(serial: Optional[str] = None):
     return {"status": "ok", "keyboard_closed": closed}
 
 @router.post("/api/device/autofix-viewport")
+@router.post("/api/device/alignment/fix-viewport")
 async def autofix_viewport_endpoint(req: Optional[Dict[str, Any]] = None):
     req = req or {}
     ser = await adb.get_active_adb_serial(req.get("serial"))

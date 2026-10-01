@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
 
 import hashlib
+import re
+import subprocess
 import config, db
 from models import TelemetryUpdateRequest, OrchestrationRequest, PipelineModeRequest, OcrSelectionRequest
 from services import state
@@ -1163,12 +1165,57 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             step_count = int(cfg.get("step_count") or needed_steps)
             disp_id = await detect_external_display_id(active_serial)
 
-            # Ensure editor text body focus before sending navigation keys
-            await run_adb_shell(f"input -d {disp_id} tap 500 500", active_serial)
-            await asyncio.sleep(0.04)
+            # 1. Pre-Scroll Assertion: Before dispatching an arrow-down or page-down keystroke, check the frame.
+            from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
+            markdown_open, reason, details = await assert_markdown_open(active_serial)
 
-            # Dispatch down arrows in a single high-speed atomic command
-            keys_arg = " ".join(["20"] * step_count)
+            # If markdown_open evaluates to False, divert to a recovery node rather than firing additional navigation commands
+            if not markdown_open:
+                state.latest_telemetry["status_message"] = f"Pre-Scroll Assertion: markdown_open is False ({reason}). Diverting to recovery node..."
+                state.dag_state["current_active_node"] = "editor_recovery"
+                recovery_res = await run_editor_recovery_node(active_serial, disp_id)
+
+                if recovery_res.get("success"):
+                    print("[arrow_down] Pre-Scroll Recovery succeeded [OK] Editor restored. Resuming navigation.")
+                    state.latest_telemetry["status_message"] = "Recovery node restored markdown editor [OK] Resuming navigation..."
+                    markdown_open = True
+                else:
+                    node.update({
+                        "status": "diverted",
+                        "error": f"Pre-Scroll Assertion failed ({reason}). Diverted to recovery node; keystrokes prevented.",
+                        "details": details,
+                        "recovery_result": recovery_res
+                    })
+                    state.latest_telemetry["status_message"] = f"Navigation blocked: {reason} ⛔ Diverted to recovery node."
+                    await state.ws_manager.broadcast({
+                        "type": "dag_updated",
+                        "dag": state.dag_state,
+                        "node_id": "arrow_down",
+                        "status": "diverted",
+                        "diverted_to": "editor_recovery",
+                        "error": reason,
+                        "recovery_result": recovery_res,
+                        "telemetry": state.latest_telemetry
+                    })
+                    return {
+                        "status": "diverted",
+                        "node_id": "arrow_down",
+                        "diverted_to": "editor_recovery",
+                        "reason": reason,
+                        "details": details,
+                        "recovery_result": recovery_res,
+                        "message": f"Pre-Scroll Assertion failed ({reason}). Diverted to recovery node; keystrokes prevented."
+                    }
+
+            # 2. Ensure soft keyboard suppression without tapping screen
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+
+            # 3. Constrained Key Bounds: Scope HID scroller to strictly emit PageDown (93) or DownArrow (20) scancodes,
+            # omitting mobile virtual keyboard toggle gestures entirely to prevent rogue modal events
+            scroll_key = int(cfg.get("keycode", 20))
+            if scroll_key not in (20, 93):
+                scroll_key = 20
+            keys_arg = " ".join([str(scroll_key)] * step_count)
             cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
             await run_adb_shell(cmd, active_serial)
 
@@ -1212,7 +1259,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "step_count": step_count,
                 "target_top_line": target_top,
                 "new_top_line": final_top,
-                "message": f"Stepped {step_count} down arrows: Target top Ln {target_top} (Current: Ln {final_top}) ✔"
+                "message": f"Stepped {step_count} down arrows: Target top Ln {target_top} (Current: Ln {final_top}) [OK]"
             }
 
         elif target_key == "verification_trigger":
@@ -1576,9 +1623,10 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
 
     n6_res = await run_single_dag_node("arrow_down", opts)
-    if n6_res.get("status") == "error":
-        capture_group["status"] = "error"
-        return {"status": "error", "node_id": "arrow_down", "result": n6_res}
+    if n6_res.get("status") in ("error", "prevented"):
+        st = n6_res.get("status", "error")
+        capture_group["status"] = st
+        return {"status": st, "node_id": "arrow_down", "result": n6_res}
 
     n7_res = await run_single_dag_node("verification_trigger", opts)
     n8_res = await run_single_dag_node("document_assemble", opts)
@@ -1605,8 +1653,8 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     try:
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)
-            if res.get("status") == "error":
-                state.latest_telemetry["status_message"] = f"Loop stopped on error: {res.get('node_id')}"
+            if res.get("status") in ("error", "prevented"):
+                state.latest_telemetry["status_message"] = f"Loop stopped: {res.get('node_id')} ({res.get('status')})"
                 break
 
             n8 = res.get("node8", {})

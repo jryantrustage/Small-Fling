@@ -92,16 +92,41 @@ class TeamsMarkdownVisibleClassifier(BaseClassifier):
         except Exception:
             pass
 
+        # Use Visual State classifier to differentiate directory list vs viewer
+        viewport_state = "unknown"
+        if not has_header_or_gutter and img is not None:
+            try:
+                from services.visual_state_service import classify_editor_viewport
+                snap_bytes = context.image_bytes
+                if not snap_bytes and img is not None:
+                    _, enc = cv2.imencode(".png", img)
+                    snap_bytes = enc.tobytes()
+                if snap_bytes:
+                    vqa_res = classify_editor_viewport(snap_bytes)
+                    viewport_state = vqa_res.get("state", "unknown")
+                    if vqa_res.get("is_viewer_active"):
+                        has_header_or_gutter = True
+            except Exception:
+                pass
+
         if is_standby or not has_header_or_gutter or not is_teams_focused:
-            reason = "Standby canvas active; Teams markdown editor is not visible" if is_standby else "Teams header, document tab, and gutter not detected in display stream"
+            if is_standby:
+                reason = "Standby canvas active; Teams markdown editor is not visible"
+            elif viewport_state in ("directory", "list"):
+                reason = "Teams has navigated away to a file list or directory; markdown editor is not open"
+            else:
+                reason = "Teams header, document tab, and gutter not detected in display stream"
+
             if not is_teams_focused and not is_standby:
                 reason += " (Teams is not the focused window on external display)"
+
+            fix_action = "Open markdown file from directory list" if viewport_state in ("directory", "list") else self.fix_description
 
             return ClassificationResult(
                 classifier_id=self.id,
                 issue_detected=True,
                 issue_name=self.issue_description,
-                fix_name=self.fix_description,
+                fix_name=fix_action,
                 severity=self.severity,
                 details=reason,
                 target_coordinates=(int(w * 0.5), int(h * 0.5)),
@@ -109,6 +134,7 @@ class TeamsMarkdownVisibleClassifier(BaseClassifier):
                     "is_standby": is_standby,
                     "has_header_or_gutter": has_header_or_gutter,
                     "is_teams_focused": is_teams_focused,
+                    "viewport_state": viewport_state,
                     "display_id": disp_id
                 }
             )
@@ -165,11 +191,30 @@ class TeamsMarkdownVisibleClassifier(BaseClassifier):
         await _tap_coords(serial, disp_id, tap_coords, delay=0.4)
         actions.append(f"Tapped external display at {tap_coords} to focus Teams window")
 
-        # 4. Ensure soft keyboard is closed
+        # 4. If Teams is currently displaying a file list / directory, scan hierarchy for .md file and tap it
+        try:
+            dump_res = await run_adb_shell("uiautomator dump /dev/stdout", serial, timeout=3.5)
+            stdout = dump_res.get("stdout", "")
+            matches = re.finditer(r'text="([^"]+\.md)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', stdout, re.IGNORECASE)
+            opened_file = False
+            for m in matches:
+                fname = m.group(1)
+                x1, y1, x2, y2 = int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
+                cx = (x1 + x2) // 2
+                cy = (y1 + y2) // 2
+                # Tap file to open it
+                await _tap_coords(serial, disp_id, (cx, cy), delay=1.0)
+                actions.append(f"Tapped '{fname}' at ({cx}, {cy}) to reopen document")
+                opened_file = True
+                break
+        except Exception as e:
+            actions.append(f"Directory scan note: {e}")
+
+        # 5. Ensure soft keyboard is closed
         await ensure_adb_keyboard_closed(serial)
         actions.append("Suppressed on-screen keyboard")
 
-        # 5. Allow settle and recheck
+        # 6. Allow settle and recheck
         await asyncio.sleep(0.8)
         re_detect = await _recheck_classifier(self, serial, disp_id)
         success = bool(re_detect and not re_detect.issue_detected)
@@ -310,25 +355,22 @@ class KeyboardOpenClassifier(BaseClassifier):
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
         await ensure_adb_keyboard_closed(serial)
-        await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", serial)
-        if disp_id > 0:
-            await run_adb_shell(f"input -d {disp_id} keyevent 4", serial)
-        await run_adb_shell("input -d 0 keyevent 4", serial)
-        await run_adb_shell("input keyevent 4", serial)
-        await asyncio.sleep(0.25)
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
+        await asyncio.sleep(0.2)
 
         still_open = await is_ime_visible(serial)
         if still_open:
+            # Use KEYCODE_ESCAPE (111) to dismiss popup/IME without exiting the activity (never send KEYCODE_BACK / keyevent 4)
             if disp_id > 0:
                 await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
             await run_adb_shell("input keyevent 111", serial)
-            await run_adb_shell("input keyevent 4", serial)
+            await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
             await asyncio.sleep(0.2)
             still_open = await is_ime_visible(serial)
 
         return FixResult(classifier_id=self.id, success=not still_open,
-                         message="Keyboard closed successfully ✔" if not still_open else "Dispatched keyboard dismiss commands",
-                         actions_taken=["Dispatched ensure_adb_keyboard_closed & BACK keyevents"],
+                         message="Keyboard closed successfully ✔" if not still_open else "Dispatched keyboard dismiss broadcast",
+                         actions_taken=["Dispatched ACTION_CLOSE_KEYBOARD broadcast & ESC keyevents"],
                          metadata={"ime_still_visible": still_open})
 
 

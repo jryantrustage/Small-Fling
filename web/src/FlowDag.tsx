@@ -320,7 +320,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const handleAutoFixKeyboardAndUnblock = async () => {
     setIsFixingQualifier(true);
     try {
-      await fetch(`${apiBase}/api/device/alignment/fix-viewport`, { method: 'POST' });
+      await fetch(`${apiBase}/api/device/autofix-viewport`, { method: 'POST' });
       await fetch(`${apiBase}/api/classifiers/fix/keyboard_open`, { method: 'POST' });
       const res = await fetch(`${apiBase}/api/dag/nodes/verification_trigger/evaluate`, { method: 'POST' });
       if (res.ok) {

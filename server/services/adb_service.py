@@ -618,13 +618,13 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         f"settings put secure show_ime_with_hard_keyboard 0; "
         f"am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1; "
         f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then "
-        f"input -d {display_id} keyevent 4; input -d {display_id} keyevent 111; input -d 0 keyevent 111; fi"
+        f"input -d {display_id} keyevent 111; input -d 0 keyevent 111; fi"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
 
     is_open = await is_ime_visible(ser)
     if is_open:
-        await run_adb_shell(f"input -d {display_id} keyevent 111; input -d {display_id} keyevent 4; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD", ser, timeout=2.0)
+        await run_adb_shell(f"input -d {display_id} keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser, timeout=2.0)
         is_open = await is_ime_visible(ser)
 
     try:
