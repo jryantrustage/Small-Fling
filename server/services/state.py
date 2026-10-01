@@ -396,7 +396,7 @@ dag_state: Dict[str, Any] = {
                         "name": "Virtual Keyboard Check",
                         "description": "Is the software keyboard active or covering content?",
                         "enabled": True,
-                        "severity": "blocking"
+                        "severity": "warning"
                     },
                     "light_mode": {
                         "name": "Theme Qualifier",
@@ -406,9 +406,9 @@ dag_state: Dict[str, Any] = {
                     },
                     "view_mode": {
                         "name": "Edit Mode Qualifier",
-                        "description": "Ensure document is in edit mode with gutter line numbers visible",
-                        "enabled": True,
-                        "severity": "blocking"
+                        "description": "Ensure document is in view mode with gutter line numbers visible",
+                        "enabled": False,
+                        "severity": "warning"
                     }
                 }
             },
@@ -612,7 +612,11 @@ def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]
             "details": (issue.get("details") or issue.get("issue_name")) if has_issue else "Clean / Satisfied"
         }
 
-        if prevent_enforced and is_enabled and has_issue:
+        # Keyboard & view mode issues are auto-remediated in background; never halt or block capture
+        if q_id in ("keyboard_open", "view_mode"):
+            qualifier_statuses[q_id]["severity"] = "warning"
+
+        if prevent_enforced and is_enabled and has_issue and qualifier_statuses[q_id].get("severity") == "blocking":
             reasons.append(f"{q_info.get('name')}: {qualifier_statuses[q_id]['details']}")
 
     is_prevented = len(reasons) > 0

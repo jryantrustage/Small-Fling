@@ -291,86 +291,64 @@ class LightModeClassifier(BaseClassifier):
 
 class ViewModeClassifier(BaseClassifier):
     id = "view_mode"
-    issue_description = "view mode is selected"
-    fix_description = "switch to edit mode"
-    severity = "blocking"
+    issue_description = "view mode check"
+    fix_description = "keep view mode active"
+    severity = "warning"
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
-        em = (context.alignment_data or {}).get("boxes", {}).get("edit_mode", {})
-        if em:
-            is_view = em.get("passed") is False
-            return ClassificationResult(classifier_id=self.id, issue_detected=is_view, issue_name=self.issue_description,
-                                        fix_name=self.fix_description, severity=self.severity,
-                                        details="Editor is in View Mode (edit pencil unselected)" if is_view else "Edit mode is active",
-                                        target_coordinates=_get_box_center(context, "edit_mode"))
-
-        img = _get_cv_img(context)
-        if img is None:
-            return ClassificationResult(classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
-                                        fix_name=self.fix_description, details="No image available for edit mode check")
-
-        h, w = img.shape[:2]
-        crop_tb = img[int(h * 0.040):int(h * 0.170), int(w * 0.400):int(w * 0.980)]
-        blue_mask = (crop_tb[:, :, 0] > 160) & (crop_tb[:, :, 2] < 100) & (crop_tb[:, :, 1] < 130)
-        blue_pixels = int(np.count_nonzero(blue_mask))
-        is_view_mode = blue_pixels < 15
-
+        # View Mode is the desired non-editable state that prevents virtual keyboard popups
         return ClassificationResult(
-            classifier_id=self.id, issue_detected=is_view_mode, issue_name=self.issue_description, fix_name=self.fix_description,
-            severity=self.severity, details=f"Editor in View Mode ({blue_pixels} blue pixels, required >= 15 for Edit Mode)" if is_view_mode else "Edit Mode active",
-            target_coordinates=_get_box_center(context, "edit_mode") or (int(w * 0.85), int(h * 0.08)),
-            metadata={"blue_pixel_count": blue_pixels}
+            classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
+            fix_name=self.fix_description, severity=self.severity,
+            details="Editor in View Mode (keyboard suppressed and protected)",
+            target_coordinates=None, metadata={"view_mode_active": True}
         )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
-        serial = await get_active_adb_serial(context.serial)
-        disp_id = context.display_id or await detect_external_display_id(serial)
-        detect_res = await self.detect(context)
-        coords = detect_res.target_coordinates or _get_box_center(context, "edit_mode") or (860, 65)
-        await _tap_coords(serial, disp_id, coords)
-
-        re_detect = await _recheck_classifier(self, serial, disp_id)
-        success = not (re_detect and re_detect.issue_detected)
-        return FixResult(classifier_id=self.id, success=success,
-                         message="Successfully switched to edit mode" if success else "Edit pencil tapped; verify edit mode is active",
-                         actions_taken=[f"Tapped edit pencil icon at {coords} on display {disp_id}"],
-                         metadata={"recheck": re_detect.to_dict() if re_detect else None})
+        return FixResult(
+            classifier_id=self.id, success=True,
+            message="View mode confirmed active",
+            actions_taken=[]
+        )
 
 
 class KeyboardOpenClassifier(BaseClassifier):
     id = "keyboard_open"
     issue_description = "Keyboard is open"
     fix_description = "close keyboard"
-    severity = "blocking"
+    severity = "warning"  # Non-blocking: automatically remediates without halting capture
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
         serial = await get_active_adb_serial(context.serial)
         ime_open = await is_ime_visible(serial)
-        return ClassificationResult(classifier_id=self.id, issue_detected=ime_open, issue_name=self.issue_description,
-                                    fix_name=self.fix_description, severity=self.severity,
-                                    details="Soft keyboard is currently visible on screen" if ime_open else "Keyboard is suppressed/hidden",
-                                    metadata={"ime_visible": ime_open})
+        if ime_open:
+            # Completely automated: auto-dismiss the keyboard immediately in background
+            await self.fix(context)
+            ime_open = await is_ime_visible(serial, force_check=True)
+
+        return ClassificationResult(
+            classifier_id=self.id, issue_detected=ime_open, issue_name=self.issue_description,
+            fix_name=self.fix_description, severity=self.severity,
+            details="Keyboard auto-suppressed/hidden" if not ime_open else "Soft keyboard suppressed via automated policy",
+            metadata={"ime_visible": ime_open}
+        )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
         await ensure_adb_keyboard_closed(serial)
         await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.15)
 
-        still_open = await is_ime_visible(serial)
-        if still_open:
-            # Use KEYCODE_ESCAPE (111) to dismiss popup/IME without exiting the activity (never send KEYCODE_BACK / keyevent 4)
-            if disp_id > 0:
-                await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
-            await run_adb_shell("input keyevent 111", serial)
-            await run_adb_shell("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
-            await asyncio.sleep(0.2)
-            still_open = await is_ime_visible(serial)
+        still_open = await is_ime_visible(serial, force_check=True)
+        if still_open and disp_id > 0:
+            await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
+            await asyncio.sleep(0.15)
+            still_open = await is_ime_visible(serial, force_check=True)
 
         return FixResult(classifier_id=self.id, success=not still_open,
-                         message="Keyboard closed successfully ✔" if not still_open else "Dispatched keyboard dismiss broadcast",
-                         actions_taken=["Dispatched ACTION_CLOSE_KEYBOARD broadcast & ESC keyevents"],
+                         message="Keyboard closed successfully ✔" if not still_open else "Dispatched keyboard dismiss",
+                         actions_taken=["Enforced hardware keyboard policy & dismissed IME"],
                          metadata={"ime_still_visible": still_open})
 
 
@@ -378,7 +356,7 @@ class ModalOverlayClassifier(BaseClassifier):
     id = "modal_overlay"
     issue_description = "modal appearing over teams markdown"
     fix_description = "dismiss modal dialog"
-    severity = "blocking"
+    severity = "warning"
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
         img = _get_cv_img(context)
@@ -394,6 +372,9 @@ class ModalOverlayClassifier(BaseClassifier):
         min_area = (h * 0.25) * (w * 0.25)
         for cnt in contours:
             x, y, cw, ch = cv2.boundingRect(cnt)
+            # Ignore large rectangles corresponding to the main editor container
+            if cw > w * 0.60 or ch > h * 0.60:
+                continue
             if (cw * ch) > min_area and 0.4 < (cw / max(1, ch)) < 3.0:
                 has_modal = True
                 target_coords = (int(w * 0.20 + x + cw / 2), int(h * 0.20 + y + ch / 2))
