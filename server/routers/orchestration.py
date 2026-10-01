@@ -51,6 +51,11 @@ async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Op
         importlib.reload(editor_classifiers)
         classifier_registry.register(editor_classifiers.KeyboardOpenClassifier())
 
+        # Proactively ensure soft keyboard is suppressed before qualifier evaluation
+        active_serial = await get_active_adb_serial(serial)
+        if active_serial and await is_ime_visible(active_serial):
+            await ensure_adb_keyboard_closed(active_serial)
+
         cfg = state.dag_state["nodes"].get("verification_trigger", {}).get("config", {})
         qualifiers_cfg = cfg.get("qualifiers", {})
         target_ids = [k for k, v in qualifiers_cfg.items() if v.get("enabled", True)] if qualifiers_cfg else None
@@ -636,7 +641,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             if cfg.get("full_viewport_fix", False):
                 await auto_fix_viewport(active_serial)
-            elif not is_fast and cfg.get("guard_keyboard", False):
+            else:
+                # Fully automated keyboard prevention: silently ensure keyboard is closed before capture
                 if await is_ime_visible(active_serial):
                     await ensure_adb_keyboard_closed(active_serial)
 
