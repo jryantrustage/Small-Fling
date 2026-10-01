@@ -1081,10 +1081,18 @@ function AppContent() {
               <aside
                 className="window-minimized-rail"
                 onClick={() => setFramesMinimized(false)}
-                title="Click to restore Captured Frames panel"
+                title={`Click to restore Captured Frames panel (${frames.length} frames)`}
               >
-                <Camera size={14} color="#00ff9d" />
-                <span className="minimized-rail-label">CAPTURED FRAMES ({frames.length})</span>
+                <Camera size={15} color="#00ff9d" />
+                {frames.length > 0 && (
+                  <span style={{
+                    fontSize: '9px', fontWeight: 800, color: '#00ff9d',
+                    background: 'rgba(0, 255, 157, 0.15)', border: '1px solid rgba(0, 255, 157, 0.3)',
+                    borderRadius: '10px', padding: '2px 4px', lineHeight: 1
+                  }}>
+                    {frames.length}
+                  </span>
+                )}
                 <Maximize2 size={12} style={{ marginTop: 'auto' }} />
               </aside>
             ) : !inspectorMaximized ? (
