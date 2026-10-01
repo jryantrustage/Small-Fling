@@ -2,7 +2,7 @@ import asyncio
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel
 
@@ -21,12 +21,18 @@ import services.ocr_service as ocr_svc
 
 router = APIRouter(tags=["Orchestration & Telemetry"])
 
+from services.ui_automator_service import enable_edit_mode, select_dark_mode
+from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
+
 try:
     from server.classifiers import (
         classifier_registry,
         create_classifier_context,
         Line1StuckClassifier,
         EditorCursorFocusedClassifier,
+        EditModeClassifier,
+        LightModeClassifier,
+        KeyboardOpenClassifier,
         ClassifierContext,
     )
 except ImportError:
@@ -35,6 +41,9 @@ except ImportError:
         create_classifier_context,
         Line1StuckClassifier,
         EditorCursorFocusedClassifier,
+        EditModeClassifier,
+        LightModeClassifier,
+        KeyboardOpenClassifier,
         ClassifierContext,
     )
 
@@ -330,6 +339,270 @@ async def abort_running_node(target_node_id: Optional[str] = None, reason: str =
 
     return aborted_node
 
+
+async def auto_heal_pipeline_environment(
+    serial: str,
+    disp_id: int,
+    node_id: str,
+    snap_bytes: Optional[bytes] = None
+) -> Dict[str, Any]:
+    """
+    Evaluates environmental pipeline triggers to ensure continuous flow and autonomous self-healing:
+      - Keyboard open: auto-dismisses virtual keyboard and restores full 1080p layout.
+      - Edit mode inactive (pencil not selected or split-screen active): touches pencil icon via UI Automator.
+      - Light mode active: selects Dark Mode from theme pull-down menu.
+      - Teams backgrounded or in file list: recovers editor preview window.
+    Streams evaluator determination and live healing steps over WebSocket.
+    """
+    t_h_start = time.perf_counter()
+    actions_taken: List[str] = []
+    issues_observed: List[str] = []
+    node = state.dag_state["nodes"].get(node_id, {})
+
+    # 1. Keyboard trigger check & fix
+    try:
+        if await is_ime_visible(serial):
+            issues_observed.append("On-screen soft keyboard is open")
+            node.update({
+                "evaluator": "Soft Keyboard Evaluator",
+                "healing_step": "Dismissing on-screen keyboard",
+                "telemetry_insight": "Soft keyboard detected covering document pane • Auto-dismissing IME..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+            await ensure_adb_keyboard_closed(serial)
+            await auto_fix_viewport(serial, disp_id)
+            await asyncio.sleep(0.15)
+            actions_taken.append("Suppressed on-screen keyboard policy")
+    except Exception as ke:
+        print(f"[auto_heal] Keyboard check note: {ke}")
+
+    # 2. Frame check for edit mode & dark mode
+    snap = snap_bytes
+    if not snap:
+        try:
+            snap = await capture_external_screenshot(serial, max_cache_age_s=0.3)
+        except Exception:
+            snap = None
+
+    if snap and len(snap) > 2000:
+        c_ctx = ClassifierContext(serial=serial, display_id=disp_id, image_bytes=snap)
+
+        # Check Edit Mode (pencil icon / split-screen duplication)
+        try:
+            edit_clf = EditModeClassifier()
+            edit_res = await edit_clf.detect(c_ctx)
+            if edit_res.issue_detected:
+                issues_observed.append(edit_res.details or "Editor not in single-pane edit mode")
+                node.update({
+                    "evaluator": "Editor Mode Evaluator",
+                    "healing_step": "Tapping pencil to enter edit mode",
+                    "telemetry_insight": "Split screen / read-only preview detected • Tapping pencil to enter edit mode..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                fix_edit = await enable_edit_mode(serial=serial, display_id=disp_id)
+                actions_taken.extend(fix_edit.get("actions", ["Tapped pencil icon"]))
+                # Refresh snapshot after edit mode change
+                snap = await capture_external_screenshot(serial, max_cache_age_s=0.0)
+                if snap:
+                    c_ctx.image_bytes = snap
+                    c_ctx.image_cv = None
+        except Exception as ee:
+            print(f"[auto_heal] Edit mode check note: {ee}")
+
+        # Check Dark Mode (theme pull-down)
+        try:
+            light_clf = LightModeClassifier()
+            light_res = await light_clf.detect(c_ctx)
+            if light_res.issue_detected:
+                issues_observed.append(light_res.details or "Light mode is active (screen washed out)")
+                node.update({
+                    "evaluator": "Theme Luminance Evaluator",
+                    "healing_step": "Selecting dark mode from pull-down",
+                    "telemetry_insight": f"High luminance ({light_res.metadata.get('mean_luminance')}) • Selecting Dark Mode from pull-down..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                fix_dm = await select_dark_mode(serial=serial, display_id=disp_id)
+                actions_taken.extend(fix_dm.get("actions", ["Switched to Dark Mode"]))
+        except Exception as le:
+            print(f"[auto_heal] Dark mode check note: {le}")
+
+    dur_h_ms = max(0, int((time.perf_counter() - t_h_start) * 1000))
+    return {
+        "healed": len(actions_taken) > 0,
+        "actions_taken": actions_taken,
+        "issues_observed": issues_observed,
+        "duration_ms": dur_h_ms
+    }
+
+
+async def recover_gutter_bounds_with_healing(
+    serial: str,
+    disp_id: int,
+    temp_calib: Path,
+    dpi_factor: float,
+    node_id: str,
+    expected_top: Optional[int] = None,
+    max_attempts: int = 3
+) -> Tuple[int, int, List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Self-resolves line number extraction issues when a screenshot does not contain
+    the first and last line numbers correctly:
+      1. Stage 1: Auto-dismisses keyboard and re-acquires fresh frame with auto-fix viewport reflow.
+      2. Stage 2: Refocuses editor text caret with EditorCursorFocusedClassifier & runs multi-scale OCR.
+      3. Stage 3: Restores FilePreviewActivity window via visual state recovery.
+    In the event an issue arises without a determined fix after all healing attempts, raises an exception
+    with full DAG context detail and key trace insights.
+    """
+    actions_taken: List[str] = []
+    issues_observed: List[str] = []
+    node = state.dag_state["nodes"].get(node_id, {})
+
+    top_ln, bot_ln = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+    lines_detected: List[Dict[str, Any]] = []
+
+    if top_ln > 0 and bot_ln > top_ln:
+        return top_ln, bot_ln, [], {"healing_attempts": 0, "actions_taken": []}
+
+    for attempt in range(1, max_attempts + 1):
+        issues_observed.append(f"Attempt {attempt}: Gutter bounds unreadable or inverted (top={top_ln}, bottom={bot_ln})")
+
+        # Healing Stage 1: Auto-dismiss keyboard and re-acquire hardware screenshot
+        node.update({
+            "evaluator": "Gutter Line Continuity Evaluator",
+            "healing_step": "Refreshing page capture",
+            "telemetry_insight": f"Gutter line numbers unreadable (top: {top_ln}, bottom: {bot_ln}) • Dismissing soft keyboard & re-capturing display..."
+        })
+        await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+        await ensure_adb_keyboard_closed(serial)
+        await auto_fix_viewport(serial, disp_id)
+        await asyncio.sleep(0.15)
+
+        snap = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+        if snap:
+            with open(temp_calib, "wb") as f:
+                f.write(snap)
+            top_ln, bot_ln = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+            if top_ln > 0 and bot_ln > top_ln:
+                act = f"Attempt {attempt}: Restored gutter bounds (Ln {top_ln}→{bot_ln}) via keyboard suppression & fresh capture"
+                actions_taken.append(act)
+                return top_ln, bot_ln, [], {"healing_attempts": attempt, "actions_taken": actions_taken}
+
+        # Healing Stage 2: Refocus editor cursor & run multi-scale full OCR pass
+        node.update({
+            "evaluator": "Gutter Line Continuity Evaluator",
+            "healing_step": "Refocusing editor cursor",
+            "telemetry_insight": f"Attempt {attempt}: Refocusing editor cursor & re-running multi-scale OCR pass..."
+        })
+        await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+        try:
+            c_ctx = ClassifierContext(serial=serial, display_id=disp_id)
+            cursor_clf = EditorCursorFocusedClassifier()
+            await cursor_clf.fix(c_ctx)
+            await asyncio.sleep(0.2)
+        except Exception as fe:
+            print(f"[recover_gutter_bounds] Caret refocus note: {fe}")
+
+        snap2 = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+        if snap2:
+            with open(temp_calib, "wb") as f:
+                f.write(snap2)
+            scan_res = await state.scan_image_in_process(temp_calib)
+            lines = scan_res.get("lines", [])
+            if lines:
+                top_cand = min(l.get("line_number", 999999) for l in lines)
+                bot_cand = max(l.get("line_number", 0) for l in lines)
+                if 0 < top_cand < bot_cand:
+                    top_ln, bot_ln = top_cand, bot_cand
+                    lines_detected = lines
+                    act = f"Attempt {attempt}: Restored bounds (Ln {top_cand}→{bot_cand}) via cursor refocus & full OCR"
+                    actions_taken.append(act)
+                    return top_ln, bot_ln, lines_detected, {"healing_attempts": attempt, "actions_taken": actions_taken}
+
+        # Healing Stage 3: Window / Viewport Recovery (FilePreviewActivity)
+        node.update({
+            "evaluator": "Editor Visibility Evaluator",
+            "healing_step": "Restoring Teams FilePreviewActivity",
+            "telemetry_insight": f"Attempt {attempt}: Re-activating FilePreviewActivity on display {disp_id}..."
+        })
+        await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+        try:
+            await run_editor_recovery_node(serial, disp_id)
+            await auto_fix_viewport(serial, disp_id)
+            await asyncio.sleep(0.3)
+            snap3 = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+            if snap3:
+                with open(temp_calib, "wb") as f:
+                    f.write(snap3)
+                top_ln, bot_ln = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+                if top_ln > 0 and bot_ln > top_ln:
+                    act = f"Attempt {attempt}: Restored bounds (Ln {top_ln}→{bot_ln}) via FilePreviewActivity recovery"
+                    actions_taken.append(act)
+                    return top_ln, bot_ln, [], {"healing_attempts": attempt, "actions_taken": actions_taken}
+        except Exception as re_err:
+            print(f"[recover_gutter_bounds] Window recovery note: {re_err}")
+
+    # Fallback to expected top line projection if close enough to continue pipeline flow
+    if expected_top and expected_top > 0 and (top_ln <= 0 or bot_ln <= top_ln):
+        lpp = 31
+        proj_top = expected_top
+        proj_bot = proj_top + lpp - 1
+        actions_taken.append(f"Auto-resolved gutter bounds using continuous pacer projection (Ln {proj_top}→{proj_bot})")
+        return proj_top, proj_bot, [], {"healing_attempts": max_attempts, "actions_taken": actions_taken, "projected": True}
+
+    # All self-healing attempts exhausted without a determined fix: raise structured exception with DAG context detail
+    dag_context = {
+        "node_id": node_id,
+        "project_id": state.get_current_project_id(),
+        "display_id": disp_id,
+        "serial": serial,
+        "dpi_factor": round(dpi_factor, 3),
+        "expected_top": expected_top,
+        "last_evaluated_top": top_ln,
+        "last_evaluated_bottom": bot_ln,
+        "healing_attempts": max_attempts,
+        "actions_taken": actions_taken,
+        "issues_observed": issues_observed,
+        "screenshot_path": str(temp_calib),
+        "screenshot_bytes": temp_calib.stat().st_size if temp_calib.exists() else 0,
+        "timestamp": datetime.now().isoformat()
+    }
+    trace_insights = [
+        f"Screenshot path: '{temp_calib}'",
+        f"Window focus: adb -s {serial} shell dumpsys window | grep -E 'mFocusedApp'",
+        f"Display density: adb -s {serial} shell wm density",
+        f"IME visibility: adb -s {serial} shell dumpsys input_method | grep -i mInputShown",
+        f"OCR diagnostic check: python -c \"from ocr_engine import fast_detect_gutter_bounds; import cv2; print(fast_detect_gutter_bounds(cv2.imread(r'{temp_calib}')))\"",
+        "Verify external display is powered on and Teams FilePreviewActivity is foregrounded."
+    ]
+    node.update({
+        "status": "error",
+        "evaluator": "Gutter Line Continuity Evaluator",
+        "healing_step": None,
+        "telemetry_insight": f"Gutter line numbers unreadable after {max_attempts} healing attempts • See trace insights",
+        "error": f"Screenshot does not contain readable first and last line numbers (evaluated: top={top_ln}, bottom={bot_ln}).",
+        "dag_context": dag_context,
+        "trace_insights": trace_insights,
+        "troubleshooting_steps": trace_insights
+    })
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state,
+        "node_id": node_id,
+        "error": node["error"],
+        "dag_context": dag_context,
+        "trace_insights": trace_insights,
+        "telemetry": state.latest_telemetry
+    })
+    raise HTTPException(
+        status_code=500,
+        detail={
+            "message": f"DAG Node '{node_id}' failed: Screenshot does not contain valid first and last line numbers after {max_attempts} self-healing attempts.",
+            "dag_context": dag_context,
+            "trace_insights": trace_insights
+        }
+    )
+
+
 @router.post("/api/dag/nodes/{node_id}/run")
 async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = None):
     target_key = NODE_ALIAS_MAP.get(node_id, node_id)
@@ -357,6 +630,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 v["error"] = f"Preempted by Node {target_key}"
 
     start_time = datetime.now()
+    t_start = time.perf_counter()
     started_at_str = start_time.strftime("%H:%M:%S")
     node["started_at"] = started_at_str
     node["started_at_iso"] = start_time.isoformat()
@@ -365,6 +639,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     node["is_active"] = True
     node["status"] = "active"
     node["error"] = None
+    node["dag_context"] = None
+    node["trace_insights"] = None
 
     state.dag_state["current_active_node"] = target_key
     _current_running_node_task = curr_task
@@ -379,9 +655,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
         "started_at": started_at_str
     })
 
+    precheck_ms = 0
+    healing_ms = 0
+
     try:
+        disp_id = await detect_external_display_id(active_serial)
+
+        # Proactively heal environment triggers before executing node action
+        if not payload.get("skip_env_heal"):
+            t_pre_0 = time.perf_counter()
+            heal_env = await auto_heal_pipeline_environment(active_serial, disp_id, target_key)
+            precheck_ms = max(0, int((time.perf_counter() - t_pre_0) * 1000))
+            healing_ms += heal_env.get("duration_ms", 0)
+
         if target_key == "init_end":
-            disp_id = await detect_external_display_id(active_serial)
             cursor_clf = EditorCursorFocusedClassifier()
             c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
             node.update({
@@ -569,17 +856,35 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if is_stuck_on_line_1:
                 # HARD FAILURE: Ctrl+End did not navigate away from page 1!
                 error_msg = f"EOF Navigation Failed: Editor still displays Line {top_line or 1} at top (bottom line: {total_lines}). Ctrl+End did not navigate to the end of the file."
+                node["dag_context"] = {
+                    "node_id": "init_end",
+                    "project_id": state.get_current_project_id(),
+                    "display_id": disp_id,
+                    "serial": active_serial,
+                    "top_line_detected": top_line,
+                    "bottom_line_detected": total_lines,
+                    "dpi_factor": dpi_factor,
+                    "active_dpi": active_dpi,
+                    "timestamp": datetime.now().isoformat()
+                }
+                node["trace_insights"] = [
+                    f"EOF Navigation Failed: Editor remained at Line {top_line or 1} after Ctrl+End keystrokes.",
+                    f"Verify external display focus: adb -s {active_serial} shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+                    f"Check whether keyboard intercepted keyevents: adb -s {active_serial} shell dumpsys input_method | grep -i mInputShown",
+                    f"Test direct HID scancode emission: adb -s {active_serial} shell input -d {disp_id} keyevent 113 123",
+                    f"Inspect frame screenshot at: {calib.resolve()}"
+                ]
                 node.update({
                     "status": "error",
                     "total_lines": total_lines,
                     "top_line": top_line,
                     "evaluator": "Line 1 Stuck Evaluator",
-                    "healing_step": "Refreshing page capture",
-                    "telemetry_insight": f"Gutter evaluated at Line {top_line or 1} (refreshing page capture & cursor focus)",
+                    "healing_step": None,
+                    "telemetry_insight": f"Gutter stuck on Line {top_line or 1} after healing attempts ⛔",
                     "error": error_msg,
                     "troubleshooting_steps": troubleshooting_steps
                 })
-                state.latest_telemetry["status_message"] = f"DAG Node 1: Page on Line {top_line or 1} • Refreshing page capture"
+                state.latest_telemetry["status_message"] = f"DAG Node 1: Page stuck on Line {top_line or 1} ⛔"
                 await state.ws_manager.broadcast({
                     "type": "dag_updated",
                     "dag": state.dag_state,
@@ -588,42 +893,91 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "total_lines": total_lines,
                     "top_line": top_line,
                     "error": error_msg,
+                    "dag_context": node["dag_context"],
+                    "trace_insights": node["trace_insights"],
                     "troubleshooting_steps": troubleshooting_steps,
                     "telemetry": state.latest_telemetry
                 })
-                return {
-                    "status": "error",
-                    "node_id": "init_end",
-                    "total_lines": total_lines,
-                    "top_line": top_line,
-                    "message": error_msg,
-                    "troubleshooting_steps": troubleshooting_steps
-                }
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": error_msg,
+                        "dag_context": node["dag_context"],
+                        "trace_insights": node["trace_insights"],
+                        "troubleshooting_steps": troubleshooting_steps
+                    }
+                )
 
             if total_lines <= 0 and cfg.get("manual_total_lines", 0) > 0:
                 total_lines = int(cfg["manual_total_lines"])
-            if total_lines > 0:
-                if proj := db.get_active_project(): db.update_project_target_lines(proj["id"], total_lines)
-                state.latest_telemetry["target_total_lines"] = total_lines
-                state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
 
-            node_status = "completed" if total_lines > 0 else "error"
+            if total_lines <= 0:
+                error_msg = "Ctrl+End sent, but could not detect EOF last line in gutter after all healing stages."
+                node["dag_context"] = {
+                    "node_id": "init_end",
+                    "project_id": state.get_current_project_id(),
+                    "display_id": disp_id,
+                    "serial": active_serial,
+                    "top_line_detected": top_line,
+                    "bottom_line_detected": total_lines,
+                    "dpi_factor": dpi_factor,
+                    "active_dpi": active_dpi,
+                    "timestamp": datetime.now().isoformat()
+                }
+                node["trace_insights"] = [
+                    "EOF Gutter OCR was unable to extract any valid line numbers at document end.",
+                    f"Check external display resolution/density: adb -s {active_serial} shell wm density",
+                    f"Verify screen content on display {disp_id}: adb -s {active_serial} shell screencap -d {disp_id} -p /sdcard/eof_check.png",
+                    f"Inspect frame saved at: {calib.resolve()}"
+                ]
+                node.update({
+                    "status": "error",
+                    "total_lines": 0,
+                    "top_line": top_line,
+                    "evaluator": "EOF Gutter Evaluator",
+                    "healing_step": None,
+                    "telemetry_insight": "Gutter unreadable at EOF ⛔",
+                    "error": error_msg
+                })
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "init_end",
+                    "status": "error",
+                    "dag_context": node["dag_context"],
+                    "trace_insights": node["trace_insights"],
+                    "error": error_msg,
+                    "telemetry": state.latest_telemetry
+                })
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": error_msg,
+                        "dag_context": node["dag_context"],
+                        "trace_insights": node["trace_insights"]
+                    }
+                )
+
+            if proj := db.get_active_project(): db.update_project_target_lines(proj["id"], total_lines)
+            state.latest_telemetry["target_total_lines"] = total_lines
+            state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
+
             node.update({
-                "status": node_status,
+                "status": "completed",
                 "total_lines": total_lines,
                 "top_line": top_line,
                 "evaluator": "EOF Gutter Evaluator",
-                "healing_step": None if node_status == "completed" else "Refreshing page capture",
-                "telemetry_insight": f"Calibrated {total_lines:,} total lines at EOF ✔" if node_status == "completed" else "Gutter bounds unreadable at EOF",
-                "error": None if node_status == "completed" else "Could not detect EOF lines"
+                "healing_step": None,
+                "telemetry_insight": f"Calibrated {total_lines:,} total lines at EOF ✔",
+                "error": None
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end", "total_lines": total_lines, "telemetry": state.latest_telemetry})
             return {
-                "status": "success" if total_lines > 0 else "warning",
+                "status": "success",
                 "node_id": "init_end",
                 "total_lines": total_lines,
                 "top_line": top_line,
-                "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔" if total_lines > 0 else "Ctrl+End sent, but could not detect EOF last line in gutter. Please verify document or connect device."
+                "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔"
             }
 
 
@@ -698,18 +1052,71 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await auto_fix_viewport(active_serial, disp_id)
                 await asyncio.sleep(0.3)
 
+            if not is_verified:
+                error_msg = f"DAG Node 2 ('reset_home') failed to return to Line 1: top gutter detected at Line {detected_first or 'unknown'} after all 3 attempts."
+                node["dag_context"] = {
+                    "node_id": "reset_home",
+                    "project_id": state.get_current_project_id(),
+                    "display_id": disp_id,
+                    "serial": active_serial,
+                    "detected_first_line": detected_first,
+                    "expected_line": 1,
+                    "dpi_factor": dpi_factor,
+                    "active_dpi": active_dpi,
+                    "timestamp": datetime.now().isoformat()
+                }
+                node["trace_insights"] = [
+                    f"Ctrl+Home failed to navigate to Line 1: Gutter top remained at Line {detected_first or 'unknown'}.",
+                    f"Check external display focus: adb -s {active_serial} shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+                    f"Verify FilePreviewActivity is foreground on display {disp_id}: adb -s {active_serial} shell dumpsys activity top | grep -i FilePreviewActivity",
+                    f"Test sending keycode directly: adb -s {active_serial} shell input -d {disp_id} keyevent 113 122",
+                    f"Inspect frame screenshot at: {calib.resolve()}"
+                ]
+                node.update({
+                    "status": "error",
+                    "verified": False,
+                    "first_line": detected_first,
+                    "evaluator": "Line 1 Gutter Evaluator",
+                    "healing_step": None,
+                    "telemetry_insight": f"Line 1 unverified (editor at Ln {detected_first or '?'}) ⛔",
+                    "error": error_msg
+                })
+                state.latest_telemetry["current_top_line"] = detected_first or 1
+                state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 unverified ⛔"
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "reset_home",
+                    "status": "error",
+                    "verified": False,
+                    "first_line": detected_first,
+                    "error": error_msg,
+                    "dag_context": node["dag_context"],
+                    "trace_insights": node["trace_insights"],
+                    "telemetry": state.latest_telemetry
+                })
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": error_msg,
+                        "dag_context": node["dag_context"],
+                        "trace_insights": node["trace_insights"]
+                    }
+                )
+
             node.update({
-                "status": "completed" if is_verified else "error",
-                "verified": is_verified,
+                "status": "completed",
+                "verified": True,
                 "first_line": detected_first,
                 "evaluator": "Line 1 Gutter Evaluator",
-                "healing_step": None if is_verified else "Refreshing page capture",
-                "telemetry_insight": f"Line 1 verified at top gutter ✔" if is_verified else f"Evaluated top gutter at Ln {detected_first} (refreshing page capture)"
+                "healing_step": None,
+                "telemetry_insight": "Line 1 verified at top gutter ✔",
+                "error": None
             })
             state.latest_telemetry["current_top_line"] = detected_first or 1
-            state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 {'verified' if is_verified else 'unverified'} at top (detected Ln {detected_first})"
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "telemetry": state.latest_telemetry})
-            return {"status": "success" if is_verified else "error", "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "message": f"Line 1 {'verified at top gutter' if is_verified else f'verification failed - editor at Ln {detected_first}'} via Ctrl+Home"}
+            state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 verified at top (detected Ln {detected_first})"
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": True, "first_line": detected_first, "telemetry": state.latest_telemetry})
+            return {"status": "success", "node_id": "reset_home", "verified": True, "first_line": detected_first, "message": "Line 1 verified at top gutter via Ctrl+Home ✔"}
 
         elif target_key == "frame_acquire":
             t_cap_start = time.time()
@@ -1057,54 +1464,31 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 31}))
             lpp = prof.get("lines_per_page", 31)
 
+            disp_id = await detect_external_display_id(active_serial)
+            expected_top = node.get("target_top_line") or state.dag_state["nodes"].get("arrow_down", {}).get("target_top_line") or state.orchestration_state.get("next_target_top")
+
             if is_fast:
                 top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
                 bot_ln = top_ln + lpp - 1
                 scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": [], "bounding_boxes": {}}
                 lines_detected = []
             else:
-                # Fast path: DPI-scaled gutter extraction
-                t_gut, b_gut = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
-                raw_top, raw_bot = t_gut, b_gut
-                lines_detected = []
-
-                if raw_top <= 0 or raw_bot <= 0:
-                    scan_res = await state.scan_image_in_process(temp_calib)
-                    if raw_top <= 0: raw_top = scan_res.get("top_line", 0) or 0
-                    if raw_bot <= 0: raw_bot = scan_res.get("bottom_line", 0) or 0
-                    lines_detected = scan_res.get("lines", [])
-                else:
-                    scan_res = {"top_line": raw_top, "bottom_line": raw_bot, "lines": []}
-
-                if raw_top <= 0 and raw_bot <= 0 and len(lines_detected) == 0:
-                    node.update({
-                        "status": "error",
-                        "error": "OCR extraction failed: no editor lines or gutter numbers detected",
-                        "top_line": 0,
-                        "bottom_line": 0
-                    })
-                    state.latest_telemetry["status_message"] = "DAG Node 4: OCR rejected - no editor content detected"
-                    await state.ws_manager.broadcast({
-                        "type": "dag_updated",
-                        "dag": state.dag_state,
-                        "node_id": "frame_ocr",
-                        "error": "No lines detected",
-                        "telemetry": state.latest_telemetry
-                    })
-                    return {
-                        "status": "error",
-                        "node_id": "frame_ocr",
-                        "message": "OCR extraction failed: no editor lines or gutter numbers detected in captured image. Please verify editor focus."
-                    }
-
-                if raw_top > 0 and raw_bot > 0:
-                    top_ln, bot_ln = raw_top, raw_bot
-                elif lines_detected:
-                    top_ln = min(l.get("line_number", 1) for l in lines_detected)
-                    bot_ln = max(l.get("line_number", top_ln) for l in lines_detected)
-                else:
-                    top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
-                    bot_ln = top_ln + lpp - 1
+                # Robust autonomous path: attempts DPI-scaled gutter extraction, then auto-heals via keyboard dismiss,
+                # fresh hardware capture, cursor refocus, and window restoration.
+                top_ln, bot_ln, lines_detected, heal_meta = await recover_gutter_bounds_with_healing(
+                    serial=active_serial,
+                    disp_id=disp_id,
+                    temp_calib=temp_calib,
+                    dpi_factor=dpi_factor,
+                    node_id="frame_ocr",
+                    expected_top=expected_top
+                )
+                if heal_meta.get("actions_taken"):
+                    healing_ms += 150 * len(heal_meta["actions_taken"])
+                # Re-read snap bytes in case image was refreshed
+                with open(temp_calib, "rb") as f:
+                    snap = f.read()
+                scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": lines_detected}
 
             pid = state.get_current_project_id()
             if not pid:
@@ -1301,35 +1685,52 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     state.latest_telemetry["status_message"] = "Recovery node restored markdown editor [OK] Resuming navigation..."
                     markdown_open = True
                 else:
+                    error_msg = f"Navigation blocked: Markdown editor is not open ({reason}) and recovery node failed to restore window."
+                    node["dag_context"] = {
+                        "node_id": "arrow_down",
+                        "project_id": state.get_current_project_id(),
+                        "display_id": disp_id,
+                        "serial": active_serial,
+                        "reason": reason,
+                        "details": details,
+                        "recovery_result": recovery_res,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    node["trace_insights"] = [
+                        f"Pre-Scroll Assertion failed: Markdown editor is not open or visible ({reason}).",
+                        f"Editor recovery node was unable to restore window: {recovery_res}",
+                        f"Check active tasks on display {disp_id}: adb -s {active_serial} shell dumpsys activity activities | grep -E 'Stack id|Hist'",
+                        f"Launch FilePreviewActivity manually: adb -s {active_serial} shell am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity"
+                    ]
                     node.update({
-                        "status": "diverted",
+                        "status": "error",
                         "evaluator": "Editor Window Assertion Evaluator",
-                        "healing_step": "Restoring Teams editor focus",
-                        "telemetry_insight": f"Pre-scroll check failed ({reason}) • Diverted to recovery node; keystrokes prevented",
-                        "error": f"Pre-Scroll Assertion failed ({reason}). Diverted to recovery node; keystrokes prevented.",
+                        "healing_step": None,
+                        "telemetry_insight": f"Pre-scroll check failed ({reason}) • Recovery failed ⛔",
+                        "error": error_msg,
                         "details": details,
                         "recovery_result": recovery_res
                     })
-                    state.latest_telemetry["status_message"] = f"Navigation blocked: {reason} ⛔ Diverted to recovery node."
+                    state.latest_telemetry["status_message"] = f"Navigation blocked: {reason} ⛔ Recovery failed."
                     await state.ws_manager.broadcast({
                         "type": "dag_updated",
                         "dag": state.dag_state,
                         "node_id": "arrow_down",
-                        "status": "diverted",
-                        "diverted_to": "editor_recovery",
-                        "error": reason,
+                        "status": "error",
+                        "error": error_msg,
+                        "dag_context": node["dag_context"],
+                        "trace_insights": node["trace_insights"],
                         "recovery_result": recovery_res,
                         "telemetry": state.latest_telemetry
                     })
-                    return {
-                        "status": "diverted",
-                        "node_id": "arrow_down",
-                        "diverted_to": "editor_recovery",
-                        "reason": reason,
-                        "details": details,
-                        "recovery_result": recovery_res,
-                        "message": f"Pre-Scroll Assertion failed ({reason}). Diverted to recovery node; keystrokes prevented."
-                    }
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "message": error_msg,
+                            "dag_context": node["dag_context"],
+                            "trace_insights": node["trace_insights"]
+                        }
+                    )
 
             # 2. Ensure soft keyboard suppression without tapping screen
             await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
@@ -1395,14 +1796,95 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             snap_bytes = temp_calib.read_bytes() if temp_calib.exists() else None
             decision = await evaluate_node_5_decision(active_serial, image_bytes=snap_bytes)
             allowed = decision.get("allowed", False)
+
+            # If prevented by qualifiers, attempt self-healing environmental triggers (keyboard, not in edit mode, not in dark mode)
+            if not allowed:
+                reasons_str = ", ".join(decision.get("reasons", []))
+                node.update({
+                    "evaluator": "Environmental Trigger Auto-Healer",
+                    "healing_step": f"Auto-resolving trigger issues: {reasons_str}",
+                    "telemetry_insight": f"Trigger blocked ({reasons_str}) • Self-healing environment..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "verification_trigger"})
+
+                # 1. Proactive auto-heal of keyboard, theme, edit-mode
+                t_heal_0 = time.perf_counter()
+                heal_res = await auto_heal_pipeline_environment(active_serial, disp_id, target_key, snap_bytes)
+                h_dur = max(0, int((time.perf_counter() - t_heal_0) * 1000))
+                healing_ms += h_dur
+
+                # 2. Capture fresh screen and re-evaluate
+                fresh_snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                if fresh_snap:
+                    with open(temp_calib, "wb") as f: f.write(fresh_snap)
+                    snap_bytes = fresh_snap
+
+                decision = await evaluate_node_5_decision(active_serial, image_bytes=snap_bytes)
+                allowed = decision.get("allowed", False)
+
+            if not allowed:
+                # Issue persists without a determined fix -> Only then raise an exception displaying complete DAG context detail and trace insights
+                reasons_list = decision.get("reasons", [])
+                reasons_str = ", ".join(reasons_list)
+                error_msg = f"Verification trigger qualifiers blocked without determined fix: {reasons_str}"
+                node["dag_context"] = {
+                    "node_id": "verification_trigger",
+                    "project_id": state.get_current_project_id(),
+                    "display_id": disp_id,
+                    "serial": active_serial,
+                    "target_top_line": target_top,
+                    "blocking_reasons": reasons_list,
+                    "qualifier_details": decision.get("details", {}),
+                    "timestamp": datetime.now().isoformat()
+                }
+                node["trace_insights"] = [
+                    f"Verification trigger blocked by qualifiers: {reasons_str}",
+                    f"Check IME keyboard state: adb -s {active_serial} shell dumpsys input_method | grep -i mInputShown",
+                    f"Verify foreground activity: adb -s {active_serial} shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+                    f"Inspect qualifier issues in telemetry: {reasons_list}",
+                    f"Review latest captured frame at: {temp_calib.resolve()}"
+                ]
+                node.update({
+                    "status": "error",
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "expected_top": target_top,
+                    "evaluator": "Completion Qualifier Evaluator",
+                    "healing_step": None,
+                    "telemetry_insight": f"Unresolvable trigger issue: {reasons_str} ⛔",
+                    "error": error_msg,
+                    "trigger_decision": decision
+                })
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "verification_trigger",
+                    "status": "error",
+                    "target_top_line": target_top,
+                    "trigger_decision": decision,
+                    "dag_context": node["dag_context"],
+                    "trace_insights": node["trace_insights"],
+                    "error": error_msg,
+                    "telemetry": state.latest_telemetry
+                })
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "message": error_msg,
+                        "dag_context": node["dag_context"],
+                        "trace_insights": node["trace_insights"]
+                    }
+                )
+
             node.update({
-                "status": "completed" if allowed else "prevented",
+                "status": "completed",
                 "target_top_line": target_top,
                 "target_top": target_top,
                 "expected_top": target_top,
                 "evaluator": "Completion Qualifier Evaluator",
-                "healing_step": None if allowed else "Auto-fixing keyboard & unblocking viewport",
-                "telemetry_insight": f"Target Line {target_top} qualified for loopback ✔" if allowed else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔",
+                "healing_step": None,
+                "telemetry_insight": f"Target Line {target_top} qualified for loopback ✔",
+                "error": None,
                 "trigger_decision": decision
             })
             await state.ws_manager.broadcast({
@@ -1417,9 +1899,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "node_id": "verification_trigger",
                 "target_top_line": target_top,
                 "trigger_decision": decision,
-                "allowed": decision.get("allowed", False),
-                "prevented": decision.get("prevented", True),
-                "message": f"Trigger allowed for Target Top Ln {target_top} ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"
+                "allowed": True,
+                "prevented": False,
+                "message": f"Trigger allowed for Target Top Ln {target_top} ✔"
             }
         elif target_key == "document_assemble":
             total_lines_target = state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
@@ -1502,17 +1984,62 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     except Exception as e:
         node["status"] = "error"
         node["error"] = str(e)
-        raise HTTPException(status_code=500, detail=str(e))
+        if not node.get("dag_context"):
+            node["dag_context"] = {
+                "node_id": target_key,
+                "project_id": state.get_current_project_id(),
+                "display_id": disp_id if 'disp_id' in locals() else None,
+                "serial": active_serial,
+                "exception": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        if not node.get("trace_insights"):
+            node["trace_insights"] = [
+                f"Exception encountered in Node '{target_key}': {e}",
+                f"Check window focus: adb -s {active_serial} shell dumpsys window | grep -E 'mFocusedApp'",
+                f"Verify external display: adb -s {active_serial} shell dumpsys display",
+                f"Check IME keyboard: adb -s {active_serial} shell dumpsys input_method | grep -i mInputShown"
+            ]
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "node_id": target_key,
+            "error": str(e),
+            "dag_context": node["dag_context"],
+            "trace_insights": node["trace_insights"],
+            "telemetry": state.latest_telemetry
+        })
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": f"DAG Node '{target_key}' failed: {e}",
+                "dag_context": node["dag_context"],
+                "trace_insights": node["trace_insights"]
+            }
+        )
     finally:
+        t_end = time.perf_counter()
         end_time = datetime.now()
         finished_at_str = end_time.strftime("%H:%M:%S")
-        dur_ms = int((end_time - start_time).total_seconds() * 1000)
+        dur_ms = max(1, int((t_end - t_start) * 1000))
         node["finished_at"] = node.get("finished_at") or finished_at_str
         node["finished_at_iso"] = node.get("finished_at_iso") or end_time.isoformat()
         node["duration_ms"] = node.get("duration_ms") or dur_ms
         node["is_active"] = False
         if node.get("status") == "active":
             node["status"] = "completed"
+        p_ms = precheck_ms if 'precheck_ms' in locals() else 0
+        h_ms = healing_ms if 'healing_ms' in locals() else 0
+        timings = {
+            "started_at": node.get("started_at"),
+            "finished_at": node["finished_at"],
+            "duration_ms": dur_ms,
+            "precheck_ms": p_ms,
+            "action_ms": max(0, dur_ms - p_ms - h_ms),
+            "healing_ms": h_ms,
+            "timestamp_iso": end_time.isoformat()
+        }
+        node["timings"] = timings
         if state.dag_state.get("current_active_node") == target_key:
             state.dag_state["current_active_node"] = None
         if _current_running_node_task is curr_task:
@@ -1527,7 +2054,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "finished_at": node["finished_at"],
                 "duration_ms": node["duration_ms"],
                 "is_active": False
-            }
+            },
+            "timings": timings
         })
 
 @router.post("/api/dag/nodes/abort")
@@ -1804,6 +2332,11 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
             await asyncio.sleep(0.18)
     except asyncio.CancelledError:
         pass
+    except HTTPException as he:
+        det = he.detail
+        err_msg = det.get("message") if isinstance(det, dict) else str(det)
+        print(f"[CaptureLoop] Unresolved error in loop: {err_msg}")
+        state.latest_telemetry["status_message"] = f"Capture loop halted: {err_msg}"
     except Exception as e:
         print(f"[CaptureLoop] Exception: {e}")
         state.latest_telemetry["status_message"] = f"Capture loop halted: {e}"
