@@ -306,8 +306,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       matrix_app_overlay: { name: 'Matrix App Capture Check', description: 'Is the mobile app matrix capture appearing over teams markdown?', enabled: true, severity: 'blocking' },
       ocr_degraded: { name: 'OCR Quality Degradation Check', description: 'Has previous ocr capture degraded?', enabled: true, severity: 'blocking' },
       keyboard_open: { name: 'Virtual Keyboard Check', description: 'Is software keyboard active or covering content?', enabled: true, severity: 'warning' },
-      light_mode: { name: 'Theme Qualifier', description: 'Ensure editor is in dark mode', enabled: false, severity: 'warning' },
-      view_mode: { name: 'Edit Mode Qualifier', description: 'Ensure document in view mode with gutter lines visible', enabled: false, severity: 'warning' }
+      edit_mode: { name: 'Edit Mode Qualifier', description: 'Ensure editor is in single-pane edit mode (avoid split screen duplicated text)', enabled: true, severity: 'blocking' },
+      light_mode: { name: 'Theme Qualifier', description: 'Ensure editor is in dark mode', enabled: true, severity: 'blocking' },
+      view_mode: { name: 'Legacy View Qualifier', description: 'Ensure document in single edit pane with gutter lines visible', enabled: false, severity: 'warning' }
     }
   });
 

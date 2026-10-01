@@ -289,27 +289,126 @@ class LightModeClassifier(BaseClassifier):
                          metadata={"recheck": re_detect.to_dict() if re_detect else None})
 
 
-class ViewModeClassifier(BaseClassifier):
-    id = "view_mode"
-    issue_description = "view mode check"
-    fix_description = "keep view mode active"
-    severity = "warning"
+class EditModeClassifier(BaseClassifier):
+    id = "edit_mode"
+    issue_description = "Editor is not in edit mode (pencil not selected; split screen duplicate text active)"
+    fix_description = "Tap edit button (pencil icon) to enter single-pane edit mode & suppress keyboard"
+    severity = "blocking"
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
-        # View Mode is the desired non-editable state that prevents virtual keyboard popups
+        em = (context.alignment_data or {}).get("boxes", {}).get("edit_mode", {})
+        if em.get("dismissed"):
+            return ClassificationResult(
+                classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
+                fix_name=self.fix_description, details="Edit mode check dismissed by user (false positive ignored)"
+            )
+
+        img = _get_cv_img(context)
+        split_screen_detected = bool(em.get("split_screen_detected", False))
+        edit_mode_active = em.get("passed") is True
+
+        target_coords = _get_box_center(context, "edit_mode")
+        w_t = 1920
+        h_t = 1080
+        if img is not None:
+            h_t, w_t = img.shape[:2]
+            # Check center strip for vertical split-screen boundary (text duplicated across two panes)
+            center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
+            if center_strip.size > 0:
+                cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
+                sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
+                sobel_abs = cv2.convertScaleAbs(sobel_x)
+                if np.max(np.mean(sobel_abs, axis=0)) > 28.0:
+                    split_screen_detected = True
+                    edit_mode_active = False
+
+        if not target_coords:
+            target_coords = (int(w_t * 0.69), int(h_t * 0.08))
+
+        if not edit_mode_active or split_screen_detected:
+            reason = "Split screen with duplicated text detected across panes (pencil inactive)" if split_screen_detected else "Edit button (pencil icon) not selected; editor in read-only / split preview"
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details=reason,
+                target_coordinates=target_coords,
+                metadata={
+                    "edit_mode_active": edit_mode_active,
+                    "split_screen_detected": split_screen_detected,
+                    "target_coords": target_coords
+                }
+            )
+
         return ClassificationResult(
-            classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
-            fix_name=self.fix_description, severity=self.severity,
-            details="Editor in View Mode (keyboard suppressed and protected)",
-            target_coordinates=None, metadata={"view_mode_active": True}
+            classifier_id=self.id,
+            issue_detected=False,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details="Editor is in active single-pane edit mode (pencil selected, no split screen)",
+            target_coordinates=target_coords,
+            metadata={"edit_mode_active": True, "split_screen_detected": False}
         )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return FixResult(classifier_id=self.id, success=False, message="No Android device connected via ADB", actions_taken=[])
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        actions = []
+
+        # 1. Determine edit button (pencil) coordinates
+        target_coords = context.target_coordinates or _get_box_center(context, "edit_mode")
+        
+        # Try inspecting UI hierarchy to find the exact edit action button if not already resolved
+        if not target_coords or target_coords == (0, 0):
+            try:
+                dump_res = await run_adb_shell("uiautomator dump /dev/stdout", serial, timeout=3.0)
+                stdout = dump_res.get("stdout", "")
+                m = re.search(r'(content-desc="Edit"|text="Edit"|resource-id="[^"]*edit[^"]*")[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', stdout, re.IGNORECASE)
+                if m:
+                    x1, y1, x2, y2 = int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
+                    target_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
+                    actions.append(f"Located edit button in UI dump at {target_coords}")
+            except Exception:
+                pass
+
+        if not target_coords:
+            target_coords = (1325, 80)
+
+        # 2. Tap the edit / pencil button
+        await _tap_coords(serial, disp_id, target_coords, delay=0.5)
+        actions.append(f"Tapped edit button (pencil icon) at {target_coords} on display {disp_id}")
+
+        # 3. CRITICAL: Suppress soft keyboard immediately so it does not cover the document
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
+        await ensure_adb_keyboard_closed(serial)
+        actions.append("Suppressed on-screen keyboard following edit mode activation")
+
+        # 4. Settle and recheck
+        await asyncio.sleep(0.6)
+        re_detect = await _recheck_classifier(self, serial, disp_id)
+        success = not (re_detect and re_detect.issue_detected)
+
         return FixResult(
-            classifier_id=self.id, success=True,
-            message="View mode confirmed active",
-            actions_taken=[]
+            classifier_id=self.id,
+            success=success,
+            message="Successfully switched Teams to single-pane edit mode (split screen eliminated) ✔" if success else "Tapped edit button; verify edit mode is active",
+            actions_taken=actions,
+            metadata={"recheck": re_detect.to_dict() if re_detect else None}
         )
+
+
+class ViewModeClassifier(EditModeClassifier):
+    """Legacy alias for EditModeClassifier ensuring single-pane edit mode without split-screen duplicate text."""
+    id = "view_mode"
+    issue_description = "Editor is not in edit mode (split screen duplicate text active)"
+    fix_description = "Select edit button (pencil icon) to enter single-pane edit mode"
+    severity = "blocking"
 
 
 class KeyboardOpenClassifier(BaseClassifier):

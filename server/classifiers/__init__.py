@@ -6,6 +6,7 @@ from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixRe
 from .registry import ClassifierRegistry, classifier_registry
 from .editor_classifiers import (
     LightModeClassifier,
+    EditModeClassifier,
     ViewModeClassifier,
     KeyboardOpenClassifier,
     Line1StuckClassifier,
@@ -22,6 +23,7 @@ __all__ = [
     "ClassifierRegistry",
     "classifier_registry",
     "LightModeClassifier",
+    "EditModeClassifier",
     "ViewModeClassifier",
     "KeyboardOpenClassifier",
     "Line1StuckClassifier",

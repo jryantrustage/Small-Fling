@@ -165,6 +165,62 @@ def classify_editor_viewport(image_bytes: bytes, model: Optional[str] = None) ->
     }
 
 
+def classify_editor_modes_vlm(image_bytes: bytes, model: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Evaluates whether the Teams markdown editor is in:
+    1. Dark Mode (dark background vs light mode / white background).
+    2. Edit Mode (pencil icon selected / single editor pane vs split-screen preview with duplicated text).
+    """
+    prompt = (
+        "Analyze this Microsoft Teams Markdown document screen capture:\n"
+        "1. Is the interface in Dark Mode (dark theme / background) or Light Mode (white / bright background)?\n"
+        "2. Is the editor in Edit Mode (pencil icon active, single pane) or is it in split-screen / preview mode "
+        "where text is duplicated side-by-side in two panes?\n"
+        "Answer with a single JSON object:\n"
+        "{\"dark_mode\": true|false, \"edit_mode\": true|false, \"split_screen_detected\": true|false, \"reason\": \"short description\"}"
+    )
+    raw = query_visual_model(image_bytes, prompt, model=model, max_tokens=100, format_type="json")
+    parsed: Dict[str, Any] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, re.DOTALL)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                except Exception:
+                    pass
+
+    dark_mode = parsed.get("dark_mode")
+    edit_mode = parsed.get("edit_mode")
+    split_screen = parsed.get("split_screen_detected")
+
+    if dark_mode is None and raw:
+        r_low = raw.lower()
+        if "dark_mode\": true" in r_low or "dark theme" in r_low or "dark mode" in r_low:
+            dark_mode = True
+        elif "light" in r_low:
+            dark_mode = False
+
+    if edit_mode is None and raw:
+        r_low = raw.lower()
+        if "split" in r_low or "duplicate" in r_low:
+            split_screen = True
+            edit_mode = False
+        elif "edit_mode\": true" in r_low or "pencil active" in r_low or "edit active" in r_low:
+            edit_mode = True
+
+    return {
+        "status": "success" if raw else "timeout",
+        "dark_mode": dark_mode,
+        "edit_mode": edit_mode,
+        "split_screen_detected": bool(split_screen),
+        "raw_response": raw,
+        "parsed": parsed
+    }
+
+
 async def verify_viewport_before_keystroke(serial: Optional[str] = None, image_bytes: Optional[bytes] = None) -> Tuple[bool, str, Dict[str, Any]]:
     """
     Lightweight visual check invoked before issuing scroll keystrokes (e.g. down arrows).
