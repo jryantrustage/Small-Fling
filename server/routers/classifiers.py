@@ -58,6 +58,7 @@ async def get_classifiers_status(serial: Optional[str] = None):
 
 
 @router.post("/fix/{classifier_id}")
+@router.post("/{classifier_id}/fix")
 async def fix_single_classifier(classifier_id: str, serial: Optional[str] = None):
     """
     Executes the fix action for a specific classifier (e.g. 'light_mode', 'view_mode', 'keyboard_open').

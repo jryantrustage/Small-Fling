@@ -277,16 +277,22 @@ class LightModeClassifier(BaseClassifier):
     async def fix(self, context: ClassifierContext) -> FixResult:
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
-        detect_res = await self.detect(context)
-        coords = detect_res.target_coordinates or _get_box_center(context, "dark_mode") or (960, 65)
-        await _tap_coords(serial, disp_id, coords)
+        from services.ui_automator_service import select_dark_mode
+
+        res = await select_dark_mode(serial=serial, display_id=disp_id)
+        success = res.get("success", False)
 
         re_detect = await _recheck_classifier(self, serial, disp_id)
-        success = not (re_detect and re_detect.issue_detected)
-        return FixResult(classifier_id=self.id, success=success,
-                         message="Successfully switched to dark mode" if success else "Theme toggle tapped; verify dark mode is active",
-                         actions_taken=[f"Tapped theme toggle icon at {coords} on display {disp_id}"],
-                         metadata={"recheck": re_detect.to_dict() if re_detect else None})
+        if re_detect and not re_detect.issue_detected:
+            success = True
+
+        return FixResult(
+            classifier_id=self.id,
+            success=success,
+            message="Successfully switched to Dark Mode from theme pull-down menu ✔" if success else res.get("message", "Theme pull-down menu tapped; verify dark mode"),
+            actions_taken=res.get("actions", []),
+            metadata={"recheck": re_detect.to_dict() if re_detect else None, "luminance": res.get("luminance")}
+        )
 
 
 class EditModeClassifier(BaseClassifier):
@@ -359,46 +365,20 @@ class EditModeClassifier(BaseClassifier):
             return FixResult(classifier_id=self.id, success=False, message="No Android device connected via ADB", actions_taken=[])
 
         disp_id = context.display_id or await detect_external_display_id(serial)
-        actions = []
+        from services.ui_automator_service import enable_edit_mode
 
-        # 1. Determine edit button (pencil) coordinates
-        target_coords = context.target_coordinates or _get_box_center(context, "edit_mode")
-        
-        # Try inspecting UI hierarchy to find the exact edit action button if not already resolved
-        if not target_coords or target_coords == (0, 0):
-            try:
-                dump_res = await run_adb_shell("uiautomator dump /dev/stdout", serial, timeout=3.0)
-                stdout = dump_res.get("stdout", "")
-                m = re.search(r'(content-desc="Edit"|text="Edit"|resource-id="[^"]*edit[^"]*")[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', stdout, re.IGNORECASE)
-                if m:
-                    x1, y1, x2, y2 = int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
-                    target_coords = ((x1 + x2) // 2, (y1 + y2) // 2)
-                    actions.append(f"Located edit button in UI dump at {target_coords}")
-            except Exception:
-                pass
+        res = await enable_edit_mode(serial=serial, display_id=disp_id)
+        success = res.get("success", False)
 
-        if not target_coords:
-            target_coords = (1325, 80)
-
-        # 2. Tap the edit / pencil button
-        await _tap_coords(serial, disp_id, target_coords, delay=0.5)
-        actions.append(f"Tapped edit button (pencil icon) at {target_coords} on display {disp_id}")
-
-        # 3. CRITICAL: Suppress soft keyboard immediately so it does not cover the document
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", serial)
-        await ensure_adb_keyboard_closed(serial)
-        actions.append("Suppressed on-screen keyboard following edit mode activation")
-
-        # 4. Settle and recheck
-        await asyncio.sleep(0.6)
         re_detect = await _recheck_classifier(self, serial, disp_id)
-        success = not (re_detect and re_detect.issue_detected)
+        if re_detect and not re_detect.issue_detected:
+            success = True
 
         return FixResult(
             classifier_id=self.id,
             success=success,
-            message="Successfully switched Teams to single-pane edit mode (split screen eliminated) ✔" if success else "Tapped edit button; verify edit mode is active",
-            actions_taken=actions,
+            message="Successfully switched Teams to single-pane edit mode (split screen eliminated) ✔" if success else res.get("message", "Tapped edit button; verify edit mode is active"),
+            actions_taken=res.get("actions", []),
             metadata={"recheck": re_detect.to_dict() if re_detect else None}
         )
 
