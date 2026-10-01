@@ -31,17 +31,21 @@ async def select_device_api(req: DeviceSelectRequest):
     if req.serial is not None:
         adb.target_adb_serial = req.serial.strip() if req.serial.strip() else None
 
-    if adb.target_adb_serial and not req.device_model:
+    # Reset active serial cache so new selection immediately activates
+    adb._active_serial_cache = None
+    adb._active_serial_cache_ts = 0.0
+
+    if adb.target_adb_serial:
         devs_res = await adb.list_adb_devices()
         matched = next((d for d in devs_res.get("devices", []) if d["serial"] == adb.target_adb_serial), None)
         if matched:
             m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
-            if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]):
+            if any(k in m for k in ["pixel_8", "husky", "shiba"]):
                 adb.current_device_model = "pixel_8"
-            elif any(k in m for k in ["pixel_10", "mustang", "frankel", "10"]):
+            elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
                 adb.current_device_model = "pixel_10"
 
-    active_ser = await adb.get_active_adb_serial(adb.target_adb_serial)
+    active_ser = await adb.get_active_adb_serial(adb.target_adb_serial, force_refresh=True)
     if active_ser:
         adb.target_adb_serial = active_ser
         try:
@@ -68,8 +72,10 @@ async def select_device_api(req: DeviceSelectRequest):
     await adb.ensure_adb_keyboard_closed(adb.target_adb_serial)
 
     latest_telemetry["status_message"] = f"Switched to {info.get('active_model')} ({lpp} Lines/Page) ✔"
-    await ws_manager.broadcast({"type": "device_selected", "data": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
-    return info
+    await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    res_dict = dict(info)
+    res_dict["device_info"] = info
+    return res_dict
 
 @router.get("/api/adb/devices")
 async def get_adb_devices():
