@@ -64,8 +64,15 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         is_stuck_on_line_1 = (0 < top_line <= 2)
         if is_stuck_on_line_1:
             err_msg = f"EOF Navigation Failed: Editor remained on Line {top_line or 1} at top (bottom: {total_lines})."
-            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0, "error": err_msg})
-            state.latest_telemetry["status_message"] = err_msg
+            state.dag_state["nodes"]["init_end"].update({
+                "status": "error",
+                "total_lines": 0,
+                "evaluator": "Line 1 Stuck Evaluator",
+                "healing_step": "Refreshing page capture",
+                "telemetry_insight": f"Gutter evaluated at Ln {top_line or 1} • Refreshing page capture & cursor focus",
+                "error": err_msg
+            })
+            state.latest_telemetry["status_message"] = f"DAG Node 1: Page on Line {top_line or 1} • Refreshing page capture"
             await state.ws_manager.broadcast({
                 "type": "dag_updated",
                 "dag": state.dag_state,
@@ -79,11 +86,30 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
             db.update_project_target_lines(project_id, total_lines)
             state.latest_telemetry["target_total_lines"] = total_lines
             state.latest_telemetry["status_message"] = f"Total lines calibrated: {total_lines} via Ctrl+End"
-            state.dag_state["nodes"]["init_end"].update({"status": "completed", "total_lines": total_lines, "error": None})
-            state.dag_state["nodes"]["reset_home"].update({"status": "active"})
+            state.dag_state["nodes"]["init_end"].update({
+                "status": "completed",
+                "total_lines": total_lines,
+                "evaluator": "EOF Gutter Evaluator",
+                "healing_step": None,
+                "telemetry_insight": f"Calibrated {total_lines:,} total lines at EOF ✔",
+                "error": None
+            })
+            state.dag_state["nodes"]["reset_home"].update({
+                "status": "active",
+                "evaluator": "Line 1 Gutter Evaluator",
+                "healing_step": "Refreshing page capture",
+                "telemetry_insight": "Dispatching Ctrl+Home to return to Line 1..."
+            })
             state.dag_state["current_active_node"] = "reset_home"
         else:
-            state.dag_state["nodes"]["init_end"].update({"status": "error", "total_lines": 0, "error": "No lines detected at EOF"})
+            state.dag_state["nodes"]["init_end"].update({
+                "status": "error",
+                "total_lines": 0,
+                "evaluator": "EOF Gutter Evaluator",
+                "healing_step": "Refreshing page capture",
+                "telemetry_insight": "No lines detected at EOF • Refreshing page capture",
+                "error": "No lines detected at EOF"
+            })
             state.latest_telemetry["status_message"] = "Calibration failed: No lines detected at EOF."
 
 
@@ -122,10 +148,20 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         state.dag_state["nodes"]["reset_home"].update({
             "status": "completed" if is_verified else "error",
             "verified": is_verified,
-            "first_line": detected_first
+            "first_line": detected_first,
+            "evaluator": "Line 1 Gutter Evaluator",
+            "healing_step": None if is_verified else "Refreshing page capture",
+            "telemetry_insight": f"Line 1 verified at top gutter ✔" if is_verified else f"Evaluated top gutter at Ln {detected_first} (refreshing page capture)"
         })
         if is_verified:
-            state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1, "is_active": False})
+            state.dag_state["nodes"]["frame_acquire"].update({
+                "status": "idle",
+                "page": 1,
+                "is_active": False,
+                "evaluator": "Display Frame Evaluator",
+                "healing_step": None,
+                "telemetry_insight": "Frame acquisition ready for page 1"
+            })
             state.dag_state["current_active_node"] = None
             state.latest_telemetry["current_top_line"] = 1
             state.latest_telemetry["current_page"] = 1

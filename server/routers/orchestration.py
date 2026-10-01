@@ -384,6 +384,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             disp_id = await detect_external_display_id(active_serial)
             cursor_clf = EditorCursorFocusedClassifier()
             c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
+            node.update({
+                "evaluator": "Editor Cursor Evaluator",
+                "healing_step": "Refocusing editor cursor",
+                "telemetry_insight": "Verifying text body focus and caret presence on external display..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
+
             if not payload.get("skip_precheck"):
                 try:
                     c_res = await cursor_clf.detect(c_ctx)
@@ -403,6 +410,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             except Exception as fe:
                 print(f"[init_end] Focus check note: {fe}")
 
+            node.update({
+                "evaluator": "EOF Navigation Evaluator",
+                "healing_step": "Dispatching Ctrl+End",
+                "telemetry_insight": "Sending Ctrl+End keystroke to jump to document end..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
+
             # 1. Send Ctrl+End with focus
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
             settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
@@ -421,6 +435,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             calib = state.FRAMES_DIR / "dag_node1_end.png"
 
             for sample_idx in range(6):
+                node.update({
+                    "evaluator": "Scroll Convergence Evaluator",
+                    "healing_step": "Refreshing page capture",
+                    "telemetry_insight": f"Sampling gutter bounds (bottom: Ln {total_lines or 'detecting'})..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 snap = await capture_external_screenshot(active_serial)
                 if snap:
                     with open(calib, "wb") as f: f.write(snap)
@@ -447,6 +467,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await asyncio.sleep(0.35)
 
             # 3. Auto-fix viewport immediately after scroll has fully landed: close soft keyboard and reflow desktop layout
+            node.update({
+                "evaluator": "Viewport Reflow Evaluator",
+                "healing_step": "Refreshing page capture",
+                "telemetry_insight": "Suppressing soft keyboard & reflowing desktop viewport..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
             await auto_fix_viewport(active_serial, disp_id)
             await asyncio.sleep(0.2)
             # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full height
@@ -476,11 +502,23 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # If initial attempt left page on Line 1, dynamically adjust on the fly: refocus & retry Ctrl+End
             if is_stuck_on_line_1:
+                node.update({
+                    "evaluator": "Line 1 Stuck Evaluator",
+                    "healing_step": "Refreshing page capture",
+                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Refocusing cursor & retrying EOF jump..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 try:
                     await cursor_clf.fix(c_ctx)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
                     await asyncio.sleep(0.6)
+                    node.update({
+                        "evaluator": "Scroll Convergence Evaluator",
+                        "healing_step": "Refreshing page capture",
+                        "telemetry_insight": "Refreshing page capture after retry EOF jump..."
+                    })
+                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                     snap_retry = await capture_external_screenshot(active_serial)
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
@@ -535,10 +573,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "status": "error",
                     "total_lines": total_lines,
                     "top_line": top_line,
+                    "evaluator": "Line 1 Stuck Evaluator",
+                    "healing_step": "Refreshing page capture",
+                    "telemetry_insight": f"Gutter evaluated at Line {top_line or 1} (refreshing page capture & cursor focus)",
                     "error": error_msg,
                     "troubleshooting_steps": troubleshooting_steps
                 })
-                state.latest_telemetry["status_message"] = f"DAG Node 1 Failed: Page still on Line {top_line or 1} (EOF jump failed)"
+                state.latest_telemetry["status_message"] = f"DAG Node 1: Page on Line {top_line or 1} • Refreshing page capture"
                 await state.ws_manager.broadcast({
                     "type": "dag_updated",
                     "dag": state.dag_state,
@@ -567,7 +608,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 state.latest_telemetry["status_message"] = f"DAG Node 1: Total lines calibrated to {total_lines} via Ctrl+End"
 
             node_status = "completed" if total_lines > 0 else "error"
-            node.update({"status": node_status, "total_lines": total_lines, "top_line": top_line, "error": None if node_status == "completed" else "Could not detect EOF lines"})
+            node.update({
+                "status": node_status,
+                "total_lines": total_lines,
+                "top_line": top_line,
+                "evaluator": "EOF Gutter Evaluator",
+                "healing_step": None if node_status == "completed" else "Refreshing page capture",
+                "telemetry_insight": f"Calibrated {total_lines:,} total lines at EOF ✔" if node_status == "completed" else "Gutter bounds unreadable at EOF",
+                "error": None if node_status == "completed" else "Could not detect EOF lines"
+            })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end", "total_lines": total_lines, "telemetry": state.latest_telemetry})
             return {
                 "status": "success" if total_lines > 0 else "warning",
@@ -583,6 +632,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             calib = state.FRAMES_DIR / "dag_node2_home.png"
             is_verified = False
             detected_first = 0
+
+            node.update({
+                "evaluator": "Line 1 Gutter Evaluator",
+                "healing_step": "Refreshing page capture",
+                "telemetry_insight": "Dispatching Ctrl+Home to return to Line 1..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
@@ -609,6 +665,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             top_detected = await state.detect_top_line_in_process(calib, dpi_factor=dpi_factor)
                             if top_detected == 1 or (0 < top_detected <= 2):
                                 is_verified, detected_first = True, 1
+                        node.update({
+                            "evaluator": "Line 1 Gutter Evaluator",
+                            "healing_step": "Refreshing page capture",
+                            "telemetry_insight": f"Sampling gutter top (detected Ln {detected_first or 'verifying'})..."
+                        })
+                        await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
                         if is_verified:
                             break
 
@@ -625,12 +687,25 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     break
 
                 print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), bringing editor to front...")
+                node.update({
+                    "evaluator": "Line 1 Gutter Evaluator",
+                    "healing_step": "Refreshing page capture",
+                    "telemetry_insight": f"Top line at Ln {detected_first} • Re-activating FilePreviewActivity & auto-fixing viewport..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
                 # Re-activate Teams FilePreviewActivity on external display and ensure focus
                 await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", active_serial)
                 await auto_fix_viewport(active_serial, disp_id)
                 await asyncio.sleep(0.3)
 
-            node.update({"status": "completed" if is_verified else "error", "verified": is_verified, "first_line": detected_first})
+            node.update({
+                "status": "completed" if is_verified else "error",
+                "verified": is_verified,
+                "first_line": detected_first,
+                "evaluator": "Line 1 Gutter Evaluator",
+                "healing_step": None if is_verified else "Refreshing page capture",
+                "telemetry_insight": f"Line 1 verified at top gutter ✔" if is_verified else f"Evaluated top gutter at Ln {detected_first} (refreshing page capture)"
+            })
             state.latest_telemetry["current_top_line"] = detected_first or 1
             state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 {'verified' if is_verified else 'unverified'} at top (detected Ln {detected_first})"
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": is_verified, "first_line": detected_first, "telemetry": state.latest_telemetry})
@@ -672,6 +747,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if not snap or len(snap) < 2000 or not snap.startswith(b"\x89PNG\r\n\x1a\n"):
                 node.update({
                     "status": "error",
+                    "evaluator": "Display Frame Evaluator",
+                    "healing_step": "Refreshing page capture",
+                    "telemetry_insight": "Screen capture stream invalid (refreshing page capture)",
                     "error": "Screen capture failed: no valid image received from device display"
                 })
                 state.latest_telemetry["capture_telemetry"].update({
@@ -679,7 +757,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "error": "Capture failed: invalid image stream",
                     "last_latency_ms": latency_ms
                 })
-                state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture failed - no image from display"
+                state.latest_telemetry["status_message"] = "DAG Node 3: Screen capture failed - refreshing page capture..."
                 await state.ws_manager.broadcast({
                     "type": "dag_updated",
                     "dag": state.dag_state,
@@ -741,6 +819,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "file_size": len(snap),
                 "duration_ms": latency_ms,
                 "resolution": f"{w_px}x{h_px}",
+                "evaluator": "Display Frame Evaluator",
+                "healing_step": None,
+                "telemetry_insight": f"Frame #{pidx} captured ({w_px}x{h_px}, {latency_ms}ms) ✔ Ready for OCR",
                 "error": None
             })
 
@@ -779,6 +860,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 else:
                     node.update({
                         "status": "error",
+                        "evaluator": "Multimodal Vision Evaluator",
+                        "healing_step": "Refreshing page capture",
+                        "telemetry_insight": "No captured frame available • Refreshing page capture",
                         "error": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
                     })
                     await state.ws_manager.broadcast({
@@ -823,6 +907,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "lines_count": l_cnt,
                         "char_count": c_cnt,
                         "model_used": eng_name,
+                        "evaluator": "Multimodal Vision Evaluator",
+                        "healing_step": None,
+                        "telemetry_insight": f"Extracted {l_cnt} lines ({c_cnt} chars) verbatim via {eng_name}",
                         "error": None
                     })
                     await state.ws_manager.broadcast({
@@ -848,6 +935,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "lines_count": node.get("lines_count") or 0,
                     "char_count": node.get("char_count") or 0,
                     "model_used": "MiniCPM-V (Async Worker)",
+                    "evaluator": "Multimodal Vision Evaluator",
+                    "healing_step": None,
+                    "telemetry_insight": "MiniCPM-V vision worker processing verbatim markdown in background ⚡",
                     "error": None
                 })
                 state.latest_telemetry["status_message"] = "DAG Node 3b: MiniCPM-V vision dispatched in background ⚡ Next: Gutter OCR"
@@ -1109,6 +1199,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "bottom_line": bot_ln,
                 "extracted_line_count": len(lines_detected) if lines_detected else lpp,
                 "frame_id": fid,
+                "evaluator": "Gutter Bounds Evaluator",
+                "healing_step": None,
+                "telemetry_insight": f"Gutter bounds: Ln {top_ln} → {bot_ln} ({len(lines_detected) if lines_detected else lpp} lines visible)",
                 "error": None
             })
             if "local_ai_ocr" in state.dag_state["nodes"]:
@@ -1127,7 +1220,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
                         "lines_count": len(lines_detected) if lines_detected else lpp,
                         "char_count": len(ext_txt),
-                        "model_used": "RapidOCR (Fast Stream)"
+                        "model_used": "RapidOCR (Fast Stream)",
+                        "evaluator": "RapidOCR Stream Evaluator",
+                        "healing_step": None,
+                        "telemetry_insight": f"Stream extracted {len(lines_detected) if lines_detected else lpp} lines"
                     })
             target_top = bot_ln + 1
             if "arrow_down" in state.dag_state["nodes"]:
@@ -1192,6 +1288,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if not markdown_open:
                 state.latest_telemetry["status_message"] = f"Pre-Scroll Assertion: markdown_open is False ({reason}). Diverting to recovery node..."
                 state.dag_state["current_active_node"] = "editor_recovery"
+                node.update({
+                    "evaluator": "Editor Window Assertion Evaluator",
+                    "healing_step": "Restoring Teams editor focus",
+                    "telemetry_insight": f"Pre-scroll check failed ({reason}) • Diverting to editor recovery"
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "arrow_down"})
                 recovery_res = await run_editor_recovery_node(active_serial, disp_id)
 
                 if recovery_res.get("success"):
@@ -1201,6 +1303,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 else:
                     node.update({
                         "status": "diverted",
+                        "evaluator": "Editor Window Assertion Evaluator",
+                        "healing_step": "Restoring Teams editor focus",
+                        "telemetry_insight": f"Pre-scroll check failed ({reason}) • Diverted to recovery node; keystrokes prevented",
                         "error": f"Pre-Scroll Assertion failed ({reason}). Diverted to recovery node; keystrokes prevented.",
                         "details": details,
                         "recovery_result": recovery_res
@@ -1254,7 +1359,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "arrow_count": step_count,
                 "target_top_line": target_top,
                 "target_top": target_top,
-                "new_top_line": final_top
+                "new_top_line": final_top,
+                "evaluator": "Pacing & Alignment Evaluator",
+                "healing_step": None,
+                "telemetry_insight": f"Stepped {step_count} down arrows to target Line {target_top} (current Ln {final_top})"
             })
             if "verification_trigger" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["verification_trigger"].update({
@@ -1286,11 +1394,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
             snap_bytes = temp_calib.read_bytes() if temp_calib.exists() else None
             decision = await evaluate_node_5_decision(active_serial, image_bytes=snap_bytes)
+            allowed = decision.get("allowed", False)
             node.update({
-                "status": "completed" if decision.get("allowed") else "prevented",
+                "status": "completed" if allowed else "prevented",
                 "target_top_line": target_top,
                 "target_top": target_top,
                 "expected_top": target_top,
+                "evaluator": "Completion Qualifier Evaluator",
+                "healing_step": None if allowed else "Auto-fixing keyboard & unblocking viewport",
+                "telemetry_insight": f"Target Line {target_top} qualified for loopback ✔" if allowed else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔",
                 "trigger_decision": decision
             })
             await state.ws_manager.broadcast({
@@ -1334,6 +1446,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "is_complete": is_complete,
                 "loop_iteration": loop_iter,
                 "reconstructed_length": len(full_markdown),
+                "evaluator": "Document Integrity Evaluator",
+                "healing_step": None if is_complete else "Capturing next page slice",
+                "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + (" • 100% COMPLETE ✔" if is_complete else ""),
                 "error": None
             })
 
