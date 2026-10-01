@@ -56,16 +56,22 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
     # 1. Primary: standard fullscreen gutter (scaled dynamically)
-    # At 160 DPI 1080p: ~180px
-    # At 120 DPI 1080p: ~135px (0.75x)
-    # At 240 DPI 1080p: ~270px (1.5x)
-    gutter_w = int(max(130.0, 180.0 * norm_multiplier))
-    top_crop = img[int(h * 0.10):int(h * 0.42), :gutter_w]
-    bot_crop = img[int(h * 0.65):int(h * 0.96), :gutter_w]
+    # At 160 DPI 1080p: ~130-150px
+    # At 120 DPI 1080p: ~90-110px (prevents overflowing into markdown header text)
+    gutter_w = int(max(90.0, min(160.0, 130.0 * norm_multiplier)))
+    top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
+    top_crop = img[top_y1:int(h * 0.45), :gutter_w]
+    bot_crop = img[int(h * 0.65):int(h * 0.98), :gutter_w]
 
-    f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop)
+    top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled)
     f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
     top_nums, bot_nums = f_top.result(), f_bot.result()
+
+    if top_nums and top_nums[0] > 1 and len(top_nums) >= 2:
+        if top_nums[0] <= 12:
+            top_nums.insert(0, 1)
+
     if top_nums and bot_nums:
         return top_nums[0], bot_nums[-1]
 
@@ -73,17 +79,21 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     sidebar_x1 = int(240.0 * norm_multiplier)
     sidebar_x2 = sidebar_x1 + gutter_w
     if sidebar_x2 < w:
-        top_crop2 = img[int(h * 0.10):int(h * 0.42), sidebar_x1:sidebar_x2]
-        bot_crop2 = img[int(h * 0.65):int(h * 0.96), sidebar_x1:sidebar_x2]
-        f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top_crop2)
+        top_crop2 = img[top_y1:int(h * 0.45), sidebar_x1:sidebar_x2]
+        bot_crop2 = img[int(h * 0.65):int(h * 0.98), sidebar_x1:sidebar_x2]
+        top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+        f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
         f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
         top_nums2, bot_nums2 = f_top2.result(), f_bot2.result()
+        if top_nums2 and top_nums2[0] > 1 and len(top_nums2) >= 2:
+            if top_nums2[0] <= 12:
+                top_nums2.insert(0, 1)
         if top_nums2 and bot_nums2:
             return top_nums2[0], bot_nums2[-1]
 
     # Return partial if either top or bot detected
-    t = (top_nums or top_nums2 or [0])[0]
-    b = (bot_nums or bot_nums2 or [0])[-1]
+    t = (top_nums or (top_nums2 if 'top_nums2' in locals() else []) or [0])[0]
+    b = (bot_nums or (bot_nums2 if 'bot_nums2' in locals() else []) or [0])[-1]
     return t, b
 
 def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bool, int]:
@@ -92,16 +102,19 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
-    gutter_w = int(max(130.0, 180.0 * norm_multiplier))
+    gutter_w = int(max(90.0, min(160.0, 130.0 * norm_multiplier)))
+    top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
 
-    top_crop = img[int(h * 0.10):int(h * 0.42), :gutter_w]
-    top_nums = extract_numbers_from_slice(top_crop)
+    top_crop = img[top_y1:int(h * 0.45), :gutter_w]
+    top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    top_nums = extract_numbers_from_slice(top_scaled)
     if not top_nums:
         sidebar_x1 = int(240.0 * norm_multiplier)
         sidebar_x2 = sidebar_x1 + gutter_w
         if sidebar_x2 < w:
-            top_crop2 = img[int(h * 0.10):int(h * 0.42), sidebar_x1:sidebar_x2]
-            top_nums = extract_numbers_from_slice(top_crop2)
+            top_crop2 = img[top_y1:int(h * 0.45), sidebar_x1:sidebar_x2]
+            top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+            top_nums = extract_numbers_from_slice(top2_scaled)
     if not top_nums: return False, 0
     first_ln = top_nums[0]
     is_at_home = any(ln == 1 for ln in top_nums[:4]) or first_ln <= 15
