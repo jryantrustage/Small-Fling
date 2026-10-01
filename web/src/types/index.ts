@@ -284,3 +284,12 @@ export interface KioskTelemetry {
     prevent_sleep: boolean;
   };
 }
+
+export interface TelemetryEvent {
+  id: string;
+  timestamp: string;
+  category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
+  message: string;
+  data?: any;
+  dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
+}

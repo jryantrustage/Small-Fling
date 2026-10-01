@@ -704,12 +704,14 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Ensure soft keyboard is closed and dispatch hardware keycombination directly to external display
+        # Ensure soft keyboard is closed, focus window on external display, and dispatch hardware keycombination directly
         cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             "am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1",
             f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true' > /dev/null; then input -d {target_d} keyevent 4; sleep 0.1; fi",
-            f"input keyboard {disp_pfx}keycombination {key1} {key2}"
+            f"input -d {target_d} tap 960 540",
+            "sleep 0.15",
+            f"input -d {target_d} keycombination {key1} {key2}"
         ]
 
         await run_adb_shell("; ".join(cmds), ser, timeout=5.0)

@@ -3,7 +3,7 @@ import {
   Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle,
   RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, EyeOff, Sliders,
   Key, Cpu, Zap, Activity, Clock, Layers, Keyboard, CheckCircle2, Copy, Trash2,
-  Maximize2, Minimize2, Minus
+  Maximize2, Minimize2, Minus, ArrowDownCircle
 } from 'lucide-react';
 import type {
   ConnectedDisplay, KioskTelemetry, DeviceInfoData, AlignmentData,
@@ -12,6 +12,7 @@ import type {
 import type { TelemetryData, TelemetryEvent } from '../TelemetryToaster';
 import { useAgoTimer } from '../hooks/useAgoTimer';
 import { LiveResponsiveViewport } from './LiveResponsiveViewport';
+import { StructuredLogEntry } from './StructuredLogEntry';
 
 export interface DeviceStudioDrawerProps {
   isOpen: boolean;
@@ -224,12 +225,27 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
     }
   }, [isOpen, streamKey, fetchKioskStatus, fetchLiveMeta]);
 
-  // Auto-scroll log if telemetry tab is active
+  // Auto-scroll log if telemetry tab is active and user has not scrolled up
+  const studioLogContainerRef = useRef<HTMLDivElement>(null);
+  const [isStudioUserScrolledUp, setIsStudioUserScrolledUp] = useState(false);
+
+  const handleStudioLogScroll = () => {
+    const el = studioLogContainerRef.current;
+    if (!el) return;
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 45;
+    setIsStudioUserScrolledUp(!isNearBottom);
+  };
+
+  const scrollToStudioLatest = () => {
+    setIsStudioUserScrolledUp(false);
+    studioLogContainerRef.current?.scrollTo({ top: studioLogContainerRef.current.scrollHeight, behavior: 'smooth' });
+  };
+
   useEffect(() => {
-    if (isOpen && activeTab === 'telemetry') {
-      logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isOpen && activeTab === 'telemetry' && !isStudioUserScrolledUp) {
+      studioLogContainerRef.current?.scrollTo({ top: studioLogContainerRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [eventsLog, isOpen, activeTab]);
+  }, [eventsLog, isOpen, activeTab, isStudioUserScrolledUp]);
 
   // Execute Lock
   const handleExecuteLock = async () => {
@@ -436,19 +452,63 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
       <div className={`device-studio-drawer ${isIntegrated ? 'integrated' : ''} ${isMaximized ? 'maximized' : ''}`}>
         {/* Top Header */}
         <div className="device-studio-header">
-          <div className="studio-header-title-group">
-            <div className="studio-icon-badge">
-              <Shield size={16} color="#00ff9d" />
-            </div>
-            <div>
-              <div className="studio-title-row">
-                <h3>DEVICE & KIOSK STUDIO</h3>
-                <span className="studio-version-tag">HARDWARE & TELEMETRY</span>
+          {/* Row 1: Title & Sticky Window Actions */}
+          <div className="studio-header-top-row">
+            <div className="studio-header-title-group">
+              <div className="studio-icon-badge">
+                <Shield size={16} color="#00ff9d" />
               </div>
-              <p>Desktop Isolation, Live Viewport, Gutter Alignment & Hardware Control</p>
+              <div className="studio-title-text-wrap">
+                <div className="studio-title-row">
+                  <h3>DEVICE & KIOSK STUDIO</h3>
+                  <span className="studio-version-tag">HARDWARE & TELEMETRY</span>
+                </div>
+                {!isIntegrated && <p>Desktop Isolation, Live Viewport, Gutter Alignment & Hardware Control</p>}
+              </div>
+            </div>
+
+            <div className="studio-header-window-actions">
+              <div className="live-refreshed-badge">
+                <span className="dot" />
+                <span>{streamSecondsAgo <= 1 ? 'LIVE' : `${streamSecondsAgo}s ago`}</span>
+              </div>
+              <button
+                type="button"
+                className="studio-action-icon-btn"
+                onClick={() => { onRefreshStream(); fetchKioskStatus(); fetchLiveMeta(); }}
+                title="Refresh Stream & Telemetry"
+                disabled={kioskLoading || metaLoading}
+              >
+                <RefreshCw size={13} className={kioskLoading || metaLoading ? 'spin' : ''} />
+              </button>
+              <button
+                type="button"
+                className="studio-action-icon-btn"
+                onClick={onToggleMinimize}
+                title={isMinimized ? 'Restore Drawer' : 'Minimize Drawer'}
+              >
+                <Minus size={13} />
+              </button>
+              <button
+                type="button"
+                className="studio-action-icon-btn"
+                onClick={toggleMaximize}
+                title={isMaximized ? 'Restore View' : 'Maximize Studio'}
+              >
+                {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              </button>
+              <button
+                type="button"
+                className="studio-action-icon-btn studio-close-btn"
+                onClick={onClose}
+                title="Close Studio"
+              >
+                <X size={15} />
+              </button>
             </div>
           </div>
 
+          {/* Row 2: Center Quick Bar (Wraps cleanly without pushing or overlapping window actions) */}
           <div className="studio-header-center-bar">
             {/* Quick Device Indicator */}
             <button
@@ -504,46 +564,6 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
             >
               <RefreshCw size={11} className={isRefreshingViewport ? 'spin' : ''} />
               <span>AUTO-FIX VIEWPORT</span>
-            </button>
-          </div>
-
-          <div className="studio-header-window-actions">
-            <div className="live-refreshed-badge">
-              <span className="dot" />
-              <span>{streamSecondsAgo <= 1 ? 'LIVE' : `${streamSecondsAgo}s ago`}</span>
-            </div>
-            <button
-              type="button"
-              className="studio-action-icon-btn"
-              onClick={() => { onRefreshStream(); fetchKioskStatus(); fetchLiveMeta(); }}
-              title="Refresh Stream & Telemetry"
-              disabled={kioskLoading || metaLoading}
-            >
-              <RefreshCw size={13} className={kioskLoading || metaLoading ? 'spin' : ''} />
-            </button>
-            <button
-              type="button"
-              className="studio-action-icon-btn"
-              onClick={onToggleMinimize}
-              title={isMinimized ? 'Restore Drawer' : 'Minimize Drawer'}
-            >
-              <Minus size={13} />
-            </button>
-            <button
-              type="button"
-              className="studio-action-icon-btn"
-              onClick={toggleMaximize}
-              title={isMaximized ? 'Restore View' : 'Maximize Studio'}
-            >
-              {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            </button>
-            <button
-              type="button"
-              className="studio-action-icon-btn studio-close-btn"
-              onClick={onClose}
-              title="Close Studio"
-            >
-              <X size={15} />
             </button>
           </div>
         </div>
@@ -1584,19 +1604,32 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                       </div>
                     </div>
 
-                    <div className="studio-events-log-container">
+                    <div
+                      className="studio-events-log-container"
+                      ref={studioLogContainerRef}
+                      onScroll={handleStudioLogScroll}
+                      style={{ position: 'relative' }}
+                    >
                       {eventsLog.length > 0 ? eventsLog.slice(-35).map((evt) => (
-                        <div key={evt.id} className="studio-event-row">
-                          <span className="studio-event-time">{evt.timestamp}</span>
-                          <span className={`studio-event-category cat-${evt.category.toLowerCase()}`}>{evt.category}</span>
-                          <span className="studio-event-msg">{evt.message}</span>
-                        </div>
+                        <StructuredLogEntry key={evt.id} ev={evt} compact />
                       )) : (
                         <div style={{ padding: '16px', color: '#8b949e', fontSize: '11px', textAlign: 'center' }}>
                           No recent telemetry events logged.
                         </div>
                       )}
                       <div ref={logEndRef} />
+
+                      {isStudioUserScrolledUp && (
+                        <button
+                          type="button"
+                          className="events-scroll-latest-pill"
+                          onClick={scrollToStudioLatest}
+                          title="Jump to latest telemetry events"
+                        >
+                          <ArrowDownCircle size={12} />
+                          <span>Scroll to latest ({eventsLog.length})</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

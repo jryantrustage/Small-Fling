@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, ChevronDown, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Eye, Play, Camera } from 'lucide-react';
+import { Activity, ChevronDown, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Play, Camera, ArrowDownCircle } from 'lucide-react';
+import { StructuredLogEntry } from './components/StructuredLogEntry';
 
 export interface TelemetryEvent {
   id: string;
@@ -216,6 +217,20 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
   const logEndRef = useRef<HTMLDivElement>(null);
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+
+  const handleLogScroll = () => {
+    const el = logContainerRef.current;
+    if (!el) return;
+    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 45;
+    setIsUserScrolledUp(!isNearBottom);
+  };
+
+  const scrollToLatest = () => {
+    setIsUserScrolledUp(false);
+    logContainerRef.current?.scrollTo({ top: logContainerRef.current.scrollHeight, behavior: 'smooth' });
+  };
 
   const filteredEventsLog = (selectedNodeId && isNodeTracingActive)
     ? eventsLog.filter(ev => isEventForNode(ev, selectedNodeId))
@@ -234,9 +249,12 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     return () => clearInterval(t);
   }, []);
 
+  // Only auto-scroll down if user has not scrolled up to inspect earlier logs/errors
   useEffect(() => {
-    if (isExpanded && activeTab === 'events') logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [filteredEventsLog, isExpanded, activeTab]);
+    if (isExpanded && activeTab === 'events' && !isUserScrolledUp) {
+      logContainerRef.current?.scrollTo({ top: logContainerRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [filteredEventsLog, isExpanded, activeTab, isUserScrolledUp]);
 
   const handleCopySnapshot = () => {
     navigator.clipboard.writeText(JSON.stringify({ timestamp: new Date().toISOString(), selectedDag: currentDag, selectedNodeId, telemetry, tokenStats, documentSummary, latencyMs, wsConnected, pipelineMode, deviceModel, recentEvents: filteredEventsLog.slice(-10) }, null, 2));
@@ -657,32 +675,36 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                   </span>
                   {onClearEvents && <button className="events-clear-btn" onClick={onClearEvents}>Clear</button>}
                 </div>
-                <div className="events-log-container">
+                <div
+                  className="events-log-container"
+                  ref={logContainerRef}
+                  onScroll={handleLogScroll}
+                  style={{ position: 'relative' }}
+                >
                   {filteredEventsLog.length === 0 ? (
                     <div className="events-empty">
                       {currentDag !== 'all' ? `No telemetry events for ${currentDag === 'initialize' ? 'DAG 1 (Initialize)' : 'DAG 2 (Capture)'} yet.` : 'No telemetry events recorded yet.'}
                     </div>
-                  ) : filteredEventsLog.map((ev) => {
-                    const isAlignmentEv = ev.message.toLowerCase().includes('not aligned') || ev.message.toLowerCase().includes('alignment');
-                    return (
-                      <div key={ev.id} className="event-log-entry" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span className="event-time">{ev.timestamp}</span>
-                        <span className={`event-cat-tag ${ev.category.toLowerCase()}`}>{ev.category}</span>
-                        {ev.dag && ev.dag !== 'all' && (
-                          <span style={{ fontSize: '9px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px', background: ev.dag === 'initialize' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)', color: ev.dag === 'initialize' ? '#58a6ff' : '#00ff9d' }}>
-                            {ev.dag === 'initialize' ? 'DAG 1' : 'DAG 2'}
-                          </span>
-                        )}
-                        <span className="event-msg" style={{ flex: 1 }}>{ev.message}</span>
-                        {isAlignmentEv && onReturnAlignmentOverlay && (
-                          <button type="button" className="toaster-event-return-btn" onClick={(e) => { e.stopPropagation(); onReturnAlignmentOverlay(); }} title="Return Alignment Alert Overlay">
-                            <Eye size={11} /><span>Show Overlay</span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                  ) : filteredEventsLog.map((ev) => (
+                    <StructuredLogEntry
+                      key={ev.id}
+                      ev={ev}
+                      onReturnAlignmentOverlay={onReturnAlignmentOverlay}
+                    />
+                  ))}
                   <div ref={logEndRef} />
+
+                  {isUserScrolledUp && (
+                    <button
+                      type="button"
+                      className="events-scroll-latest-pill"
+                      onClick={scrollToLatest}
+                      title="Jump to latest telemetry events"
+                    >
+                      <ArrowDownCircle size={12} />
+                      <span>Scroll to latest ({filteredEventsLog.length})</span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}

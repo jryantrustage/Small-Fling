@@ -368,3 +368,5 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
     </div>
   );
 };
+
+export default LiveResponsiveViewport;

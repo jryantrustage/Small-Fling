@@ -705,14 +705,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
 
-            if not payload.get("skip_precheck"):
-                try:
-                    c_res = await cursor_clf.detect(c_ctx)
-                    if c_res.issue_detected:
-                        await cursor_clf.fix(c_ctx)
-                        await asyncio.sleep(0.2)
-                except Exception as ce:
-                    print(f"[init_end] Cursor classifier check note: {ce}")
+            # Always ensure the external display and document body have active cursor focus before sending keycombination
+            try:
+                await cursor_clf.fix(c_ctx)
+                await asyncio.sleep(0.2)
+            except Exception as ce:
+                print(f"[init_end] Cursor classifier check note: {ce}")
             await ensure_adb_keyboard_closed(active_serial)
 
             node.update({
@@ -2273,10 +2271,22 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     except Exception as e:
         init_group["status"] = "error"
         err = str(e)
-        init_group["progress"] = {"percent": 50, "stage": f"Initialization failed: {err}", "status": "error", "error": err}
+        clean_stage = err
+        try:
+            import re
+            m = re.search(r"['\"]message['\"]\s*:\s*['\"]([^'\"]+)['\"]", err)
+            if m:
+                clean_stage = m.group(1)
+            elif "500:" in clean_stage:
+                clean_stage = clean_stage.split("500:", 1)[-1].strip()
+        except Exception:
+            clean_stage = err
+        if len(clean_stage) > 120:
+            clean_stage = clean_stage[:117] + "..."
+        init_group["progress"] = {"percent": 50, "stage": f"Initialization failed: {clean_stage}", "status": "error", "error": err}
         await state.ws_manager.broadcast({
             "type": "project_init_progress",
-            "stage": f"Initialization failed: {err}",
+            "stage": f"Initialization failed: {clean_stage}",
             "percent": 50,
             "status": "error",
             "error": err,
