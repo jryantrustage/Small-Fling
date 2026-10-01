@@ -757,8 +757,17 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 from classifiers.registry import classifier_registry
                 from classifiers.base import ClassifierContext
                 disp_id = await detect_external_display_id(active_serial)
-                await classifier_registry.evaluate_all(ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_bytes, alignment_data=res))
+                classifier_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_bytes, alignment_data=res)
+                await classifier_registry.evaluate_all(classifier_ctx)
                 c_report = classifier_registry.get_status_report()
+                if c_report.get("has_issues") and getattr(classifier_registry, "_auto_fix_enabled", False):
+                    try:
+                        await classifier_registry.fix_all(classifier_ctx)
+                        # Re-evaluate after auto-fix
+                        await classifier_registry.evaluate_all(classifier_ctx)
+                        c_report = classifier_registry.get_status_report()
+                    except Exception as fe:
+                        print(f"[check_and_update_alignment] Auto-fix error: {fe}")
                 res["classifiers"], res["classifier_issues"] = c_report, c_report.get("issues", [])
                 if c_report.get("has_issues"): state.latest_telemetry["classifier_issues"] = c_report.get("issues", [])
             except Exception as ce: print(f"[check_and_update_alignment] Classifier error: {ce}")

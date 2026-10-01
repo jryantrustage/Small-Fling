@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any
 from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
 from .editor_classifiers import (
     LightModeClassifier,
+    EditModeClassifier,
     ViewModeClassifier,
     KeyboardOpenClassifier,
     ModalOverlayClassifier,
@@ -27,6 +28,7 @@ class ClassifierRegistry:
 
         # Register default general-purpose classifiers
         self.register(KeyboardOpenClassifier())
+        self.register(EditModeClassifier())
         self.register(ViewModeClassifier())
         self.register(LightModeClassifier())
         self.register(ModalOverlayClassifier())
@@ -116,8 +118,8 @@ class ClassifierRegistry:
         """Execute fix actions for all detected issues in priority order."""
         eval_results = await self.evaluate_all(context)
         fix_results: List[FixResult] = []
-        # Priority order: close keyboard first so toolbar is unobstructed, then view mode, then light mode
-        priority = ["keyboard_open", "view_mode", "light_mode"]
+        # Priority order: close keyboard first so toolbar is unobstructed, then edit mode, then view mode, then light mode
+        priority = ["keyboard_open", "edit_mode", "view_mode", "light_mode"]
         sorted_detected = sorted(
             [r for r in eval_results if r.issue_detected],
             key=lambda r: priority.index(r.classifier_id) if r.classifier_id in priority else 99,

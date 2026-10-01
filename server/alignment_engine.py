@@ -167,6 +167,22 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                             edit_box = [x1_tb + bx1 - 6, y1_tb + by1 - 6, (bx2 - bx1) + 12, (by2 - by1) + 12]
                             break
 
+    # Check for split-screen mode: when edit mode is not selected, Teams displays a split
+    # screen with duplicated text side-by-side across two columns/panes, which must be avoided.
+    split_screen_detected = False
+    center_strip = img[int(h * 0.20):int(h * 0.80), int(w * 0.46):int(w * 0.54)]
+    if center_strip.size > 0:
+        cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
+        sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
+        sobel_abs = cv2.convertScaleAbs(sobel_x)
+        col_means = np.mean(sobel_abs, axis=0)
+        if np.max(col_means) > 28.0:
+            split_screen_detected = True
+
+    if split_screen_detected:
+        # Split screen indicates edit mode (pencil) is not selected and text is duplicated
+        edit_mode_active = False
+
     # ---------------------------------------------------------
     # 4. WHITE BOX 2: Dark Mode ("Moon Icon" & Dark Luminance)
     # ---------------------------------------------------------
@@ -307,10 +323,11 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "hex": "#f8fafc",
             "passed": bool(edit_mode_active),
             "status": "PASSED" if edit_mode_active else "FAILED",
-            "detected_value": f"{blue_pixel_count} blue pixels" if blue_pixel_count > 0 else ("Active via toolbar text" if edit_mode_active else "Inactive (0 blue px)"),
-            "expected": "Blue active pencil icon or Edit mode active",
-            "details": "Editor in active edit mode" if edit_mode_active else f"Edit mode inactive (found {blue_pixel_count} blue px, required >= 15)",
+            "detected_value": f"{blue_pixel_count} blue pixels" if edit_mode_active else ("Split screen with duplicated text detected" if split_screen_detected else "Pencil icon inactive (0 blue px)"),
+            "expected": "Blue active pencil icon, single edit pane (no split screen / duplicated text)",
+            "details": "Editor in active edit mode (single pane)" if edit_mode_active else ("Split screen with duplicated text detected; tap pencil icon to switch to edit mode" if split_screen_detected else f"Edit mode inactive (found {blue_pixel_count} blue px, required >= 15)"),
             "icon": "pencil",
+            "split_screen_detected": split_screen_detected,
             "box_px": to_clean_box(edit_box),
             "box_norm": to_norm(edit_box)
         },
@@ -375,7 +392,8 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     if not file_detected and "file_name" not in dismissed_set:
         missing_reasons.append("Markdown filename tab not detected")
     if not edit_mode_active and "edit_mode" not in dismissed_set:
-        missing_reasons.append("Editor not in edit mode (pencil icon inactive)")
+        reason_txt = "Split screen with duplicated text detected (tap pencil icon to enter single-pane edit mode)" if split_screen_detected else "Editor not in edit mode (pencil icon inactive - tap to enter edit mode)"
+        missing_reasons.append(reason_txt)
     if not dark_mode_active and "dark_mode" not in dismissed_set:
         missing_reasons.append("Editor in Light Mode (sun icon displayed) - click to toggle Dark Mode (moon icon)")
     if not first_line_detected and "first_line" not in dismissed_set:
