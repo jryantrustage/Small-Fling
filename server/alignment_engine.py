@@ -209,35 +209,56 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 5. GREEN BOX: First Line Number (Current Page Top)
     # ---------------------------------------------------------
-    # Left gutter region in editor body (y: 18%..45%, x: 0%..6.5%)
-    y1_g, y2_g = int(h * 0.180), int(h * 0.450)
-    x1_g, x2_g = 0, int(w * 0.065)
+    # Left gutter region in editor body (DPI-aware vertical starting boundary)
+    # At lower DPI (e.g. 120 DPI, dpi_factor <= 0.85), toolbar ends higher (y ~ 135-150px)
+    # and line 1 is located at y ~ 160-175px. At 160+ DPI, toolbar ends around y ~ 170-190px.
+    gutter_top_pct = 0.130 if dpi_factor < 0.9 else 0.150
+    y1_g, y2_g = max(130, int(h * gutter_top_pct)), int(h * 0.450)
+    x1_g, x2_g = 0, int(max(60.0, min(120.0, 90.0 * max(0.4, dpi_factor))))
     crop_green = img[y1_g:y2_g, x1_g:x2_g]
     first_line_num = 0
     first_line_box = [x1_g, y1_g, int(w * 0.035), int(h * 0.030)]
 
     if ocr and crop_green.size > 0:
-        crop_g_scaled = cv2.resize(crop_green, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-        res_g, _ = ocr(crop_g_scaled)
-        if res_g:
-            nums = []
-            for b, t, s in res_g:
-                clean_num = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-                if m := re.search(r'^\s*(\d+)', clean_num):
-                    try:
-                        n_val = int(m.group(1))
-                        pts = np.array(b) / 2.0
-                        bx1 = int(pts[:, 0].min())
-                        by1 = int(pts[:, 1].min())
-                        bx2 = int(pts[:, 0].max())
-                        by2 = int(pts[:, 1].max())
-                        tight_box = [max(0, x1_g + bx1 - 3), max(0, y1_g + by1 - 3), (bx2 - bx1) + 6, (by2 - by1) + 6]
-                        nums.append((by1, n_val, tight_box))
-                    except ValueError: pass
-            if nums:
-                nums.sort(key=lambda x: x[0])
-                first_line_num = nums[0][1]
-                first_line_box = nums[0][2]
+        nums = []
+        for fx in [1.5, 2.0]:
+            crop_scaled = cv2.resize(crop_green, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
+            res_g, _ = ocr(crop_scaled)
+            if res_g:
+                for b, t, s in res_g:
+                    clean_num = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
+                    if m := re.search(r'^\s*(\d+)', clean_num):
+                        try:
+                            n_val = int(m.group(1))
+                            pts = np.array(b) / fx
+                            bx1 = int(pts[:, 0].min())
+                            by1 = int(pts[:, 1].min())
+                            bx2 = int(pts[:, 0].max())
+                            by2 = int(pts[:, 1].max())
+                            box_w = min(int(w * 0.035), max(18, (bx2 - bx1) + 6))
+                            tight_box = [max(0, x1_g + bx1 - 3), max(0, y1_g + by1 - 3), box_w, (by2 - by1) + 6]
+                            nums.append((y1_g + by1, n_val, tight_box))
+                        except ValueError: pass
+            if any(n == 1 for _, n, _ in nums):
+                break
+
+        if nums:
+            nums.sort(key=lambda x: (x[0], x[1]))
+            top_y, top_val, top_box = nums[0]
+            # If top detected line > 1, check whether line 1 is visible above it using vertical gutter pitch
+            if top_val > 1 and len(nums) >= 2:
+                pitches = [nums[i+1][0] - nums[i][0] for i in range(min(4, len(nums)-1)) if nums[i+1][1] > nums[i][1]]
+                avg_pitch = (sum(pitches) / len(pitches)) if pitches else 15.0
+                est_l1_y = top_y - int((top_val - 1) * avg_pitch)
+                if est_l1_y >= y1_g - 5:
+                    first_line_num = 1
+                    first_line_box = [top_box[0], max(y1_g, est_l1_y), top_box[2], top_box[3]]
+                else:
+                    first_line_num = top_val
+                    first_line_box = top_box
+            else:
+                first_line_num = top_val
+                first_line_box = top_box
 
     first_line_detected = (first_line_num > 0)
 

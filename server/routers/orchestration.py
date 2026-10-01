@@ -382,9 +382,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     try:
         if target_key == "init_end":
             disp_id = await detect_external_display_id(active_serial)
+            cursor_clf = EditorCursorFocusedClassifier()
+            c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
             if not payload.get("skip_precheck"):
-                cursor_clf = EditorCursorFocusedClassifier()
-                c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
                 try:
                     c_res = await cursor_clf.detect(c_ctx)
                     if c_res.issue_detected:
@@ -392,6 +392,16 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         await asyncio.sleep(0.15)
                 except Exception as ce:
                     print(f"[init_end] Cursor classifier check note: {ce}")
+            else:
+                # Ensure soft keyboard is closed so hardware key combinations reach Teams WebView directly
+                await ensure_adb_keyboard_closed(active_serial)
+
+            # Ensure editor text body has active focus before sending Ctrl+End
+            try:
+                await cursor_clf.fix(c_ctx)
+                await asyncio.sleep(0.15)
+            except Exception as fe:
+                print(f"[init_end] Focus check note: {fe}")
 
             # 1. Send Ctrl+End with focus
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
@@ -451,6 +461,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             is_stuck_on_line_1 = False
             if 0 < top_line <= 5:
                 is_stuck_on_line_1 = True
+            elif top_line <= 12 and total_lines <= 65:
+                # At lower DPI (120 DPI), if top is 1..12 and total on screen is <= 65, editor is still on page 1
+                is_stuck_on_line_1 = True
             elif top_line == 0 and total_lines <= 50:
                 try:
                     l1_clf = Line1StuckClassifier()
@@ -476,7 +489,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
-                        if top_line > 5 or total_lines > 50:
+                        if top_line > 12 or total_lines > 65:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
                         else:

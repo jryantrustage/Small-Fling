@@ -568,22 +568,27 @@ class Line1StuckClassifier(BaseClassifier):
         top_line = 0
         gutter = []
         try:
-            from ocr_engine import find_gutter_numbers_cluster
-            gutter = find_gutter_numbers_cluster(img)
-            if gutter:
+            from ocr_engine import find_gutter_numbers_cluster, fast_detect_gutter_bounds
+            t, _ = fast_detect_gutter_bounds(img, dpi_factor=0.75)
+            if t > 0:
+                top_line = t
+            gutter = find_gutter_numbers_cluster(img, dpi_factor=0.75)
+            if not top_line and gutter:
                 top_line = gutter[0][1]
         except Exception as e:
             top_line = 0
 
-        # Check if line 1 or top line <= 2 is visible in gutter
+        # Check if line 1 or top line <= 5 is visible in gutter
         is_stuck = False
-        if gutter:
-            has_line_1 = any(ln <= 2 for _, ln in gutter[:3])
-            is_stuck = has_line_1 or (0 < top_line <= 2)
+        if 0 < top_line <= 5:
+            is_stuck = True
+        elif gutter:
+            has_line_1 = any(ln <= 5 for _, ln in gutter[:3])
+            is_stuck = has_line_1
         elif context.alignment_data:
             # Fallback check against alignment data top line
             at = context.alignment_data.get("top_line", 0)
-            if 0 < at <= 2:
+            if 0 < at <= 5:
                 is_stuck = True
                 top_line = at
 
