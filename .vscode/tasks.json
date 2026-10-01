@@ -8,6 +8,12 @@
             "problemMatcher": []
         },
         {
+            "label": "ports: clean web",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File scripts/free_ports.ps1 -Ports 5173",
+            "problemMatcher": []
+        },
+        {
             "label": "adb: connect wifi",
             "type": "shell",
             "command": "adb connect 192.168.86.81:44605",
@@ -103,7 +109,7 @@
                 "cwd": "${workspaceFolder}/web"
             },
             "dependsOn": [
-                "ports: clean"
+                "ports: clean web"
             ],
             "isBackground": true,
             "problemMatcher": [
