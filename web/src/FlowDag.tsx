@@ -350,6 +350,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [dismissedNode7Diagnostic, setDismissedNode7Diagnostic] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
 
+  // Suppress floating popovers/hover cards when any modal dialog is active
+  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isConfigModalOpen || isTextModalOpen || isNode3ConfigOpen || isNode4ConfigOpen;
+
   const handleAutoFixKeyboardAndUnblock = async () => {
     setIsFixingQualifier(true);
     try {
@@ -1274,6 +1277,8 @@ After applying the fixes, verify that:
   };
 
   const openPromptModal = async (nodeId: string) => {
+    setPinnedHoverNodeId(null);
+    setHoveredNodeId(null);
     setPromptModalNodeId(nodeId);
     setIsPromptModalOpen(true);
     setPromptActiveTab('formatted');
@@ -2013,6 +2018,8 @@ After applying the fixes, verify that:
 
       {/* DYNAMIC HOVER / POPOVER REVEALED ON DOUBLE CLICKING ANY DAG NODE */}
       {(() => {
+        if (isAnyModalOpen) return null;
+
         const activeHoverNode = pinnedHoverNodeId
           ? NODES_METADATA.find(n => n.id === pinnedHoverNodeId)
           : (hoveredNodeId ? NODES_METADATA.find(n => n.id === hoveredNodeId) : null);
@@ -2036,7 +2043,7 @@ After applying the fixes, verify that:
               borderRadius: '10px',
               boxShadow: `0 16px 40px rgba(0, 0, 0, 0.9), 0 0 24px ${activeHoverNode.accentColor}33`,
               padding: '10px 14px',
-              zIndex: 1100,
+              zIndex: 900,
               display: 'flex',
               flexDirection: 'column',
               gap: '8px'
@@ -2165,6 +2172,8 @@ After applying the fixes, verify that:
                   <button
                     type="button"
                     onClick={() => {
+                      setPinnedHoverNodeId(null);
+                      setHoveredNodeId(null);
                       if (activeHoverNode.id === 'frame_acquire') setIsNode3ConfigOpen(true);
                       else if (activeHoverNode.id === 'frame_ocr') setIsNode4ConfigOpen(true);
                       else if (activeHoverNode.id === 'verification_trigger') setIsConfigModalOpen(true);
@@ -2193,7 +2202,11 @@ After applying the fixes, verify that:
                 </button>
                 <button
                   type="button"
-                  onClick={() => openPromptModal(activeHoverNode.id)}
+                  onClick={() => {
+                    setPinnedHoverNodeId(null);
+                    setHoveredNodeId(null);
+                    openPromptModal(activeHoverNode.id);
+                  }}
                   style={{
                     background: 'rgba(255, 166, 87, 0.15)',
                     border: '1px solid rgba(255, 166, 87, 0.4)',
@@ -2210,7 +2223,12 @@ After applying the fixes, verify that:
               </div>
               <button
                 type="button"
-                onClick={() => { handleSelectNode(activeHoverNode.id); setIsInspectorModalOpen(true); }}
+                onClick={() => {
+                  handleSelectNode(activeHoverNode.id);
+                  setPinnedHoverNodeId(null);
+                  setHoveredNodeId(null);
+                  setIsInspectorModalOpen(true);
+                }}
                 style={{ background: '#21262d', border: '1px solid #30363d', color: '#8b949e', padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', fontWeight: 700 }}
               >
                 <Activity size={11} />
@@ -2243,7 +2261,7 @@ After applying the fixes, verify that:
       })()}
 
       {/* AUTO-OPENING DIAGNOSTIC HOVER BOX FOR DAG 7 (VERIFICATION TRIGGER BLOCKED) */}
-      {triggerDecision.prevented && !dismissedNode7Diagnostic && (
+      {triggerDecision.prevented && !dismissedNode7Diagnostic && !isAnyModalOpen && (
         <div
           className="dag-blocked-diagnostic-box"
           style={{
@@ -2257,7 +2275,7 @@ After applying the fixes, verify that:
             borderRadius: '10px',
             boxShadow: '0 12px 36px rgba(0, 0, 0, 0.9), 0 0 24px rgba(248, 81, 73, 0.35)',
             padding: '12px 14px',
-            zIndex: 1050,
+            zIndex: 900,
             display: 'flex',
             flexDirection: 'column',
             gap: '8px'
