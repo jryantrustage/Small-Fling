@@ -757,11 +757,14 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         disp_id = context.display_id or await detect_external_display_id(serial)
         actions = []
 
-        # 1. Bring Teams FilePreviewActivity to front on external display
+        # 1. Bring Teams FilePreviewActivity to front on external display (only if not already focused)
         try:
-            if disp_id > 0:
-                await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", serial)
-                actions.append(f"Ensured Teams FilePreviewActivity is active on display {disp_id}")
+            win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", serial, timeout=1.5)
+            if "FilePreviewActivity" not in (win_chk.get("stdout") or ""):
+                if disp_id > 0:
+                    await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", serial)
+                    actions.append(f"Ensured Teams FilePreviewActivity is active on display {disp_id}")
+                    await asyncio.sleep(0.5)
         except Exception:
             pass
 
@@ -774,6 +777,10 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         coords = getattr(context, "target_coordinates", None) or (500, 500)
         await _tap_coords(serial, disp_id, coords, delay=0.3)
         actions.append(f"Tapped Teams editor content area at {coords} on display {disp_id}")
+
+        # Tapping an editable content area can summon the on-screen soft keyboard.
+        # Immediately dismiss it so subsequent key combinations reach Teams WebView directly.
+        await ensure_adb_keyboard_closed(serial)
 
         # 4. Re-verify focus
         re_detect = await _recheck_classifier(self, serial, disp_id)

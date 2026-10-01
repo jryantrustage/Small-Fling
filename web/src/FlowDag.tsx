@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Activity, RefreshCw, Layers, Lock, Settings, ShieldCheck, ShieldAlert,
   ToggleLeft, ToggleRight, Check, X, Play, AlertTriangle,
-  FileText, Move, Clock, Minus, Maximize2, Minimize2, Zap, Square
+  FileText, Move, Clock, Minus, Maximize2, Minimize2, Zap, Square, Copy,
+  ExternalLink, Download, Sparkles
 } from 'lucide-react';
 import { Modal } from './ConfirmModal';
 
@@ -57,6 +58,29 @@ export interface TriggerDecisionState {
   reasons: string[];
   evaluated_at?: string | null;
   qualifier_statuses?: Record<string, any>;
+}
+
+export interface PerformanceDiagnosis {
+  nodeId: string;
+  title: string;
+  category: 'HEALTHY' | 'AUTO_HEALING_CHURN' | 'OCR_BOTTLENECK' | 'ADB_SCREENSHOT_OVERHEAD' | 'PRECHECK_BLOCKING' | 'VIEWPORT_SCROLL_LAG' | 'UNRESOLVED_ERROR';
+  severity: 'healthy' | 'warning' | 'critical';
+  summary: string;
+  evidence: string[];
+  remediations: string[];
+  metrics: {
+    duration_ms: number;
+    precheck_ms: number;
+    action_ms: number;
+    healing_ms: number;
+    ocr_latency_ms: number;
+    capture_rtt_ms: number;
+    precheck_pct: number;
+    action_pct: number;
+    healing_pct: number;
+  };
+  markdown_prompt: string;
+  promptDataUri: string;
 }
 
 export interface FlowDagProps {
@@ -282,6 +306,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
+  const [copiedNodeId, setCopiedNodeId] = useState<string | null>(null);
+
+  // Performance Diagnostics & AI Resolution Prompt State
+  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  const [promptModalNodeId, setPromptModalNodeId] = useState<string>('init_end');
+  const [promptActiveTab, setPromptActiveTab] = useState<'formatted' | 'raw'>('formatted');
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const [serverDiagnosisCache, setServerDiagnosisCache] = useState<Record<string, PerformanceDiagnosis>>({});
 
   const [node3Config, setNode3Config] = useState({
     settle_delay_ms: 300,
@@ -888,6 +920,422 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     return attachMeta(getRawStatus());
   };
 
+  // Copy comprehensive node diagnostics and trace information in Markdown format for AI
+  const copyNodeDetailsForAi = async (nodeId: string) => {
+    const nodeMeta = NODES_METADATA.find(n => n.id === nodeId) || NODES_METADATA[0];
+    const nodeData = dagStatus.dag?.nodes?.[nodeId] || {};
+    const liveStatus = getNodeLiveStatus(nodeId);
+    const timings = liveStatus.timings || nodeData.timings;
+    const dagContext = liveStatus.dagContext || nodeData.dag_context;
+    const traceInsights = liveStatus.traceInsights || nodeData.trace_insights;
+    const troubleshootingSteps = nodeData.troubleshooting_steps || (dagStatus.dag?.nodes?.[nodeId]?.troubleshooting_steps);
+    const nodeError = liveStatus.nodeError || nodeData.error;
+    const nodeEvents = eventsLog.filter(ev => filterNodeTelemetry(nodeId, ev));
+
+    const statusStr = liveStatus.isAborted
+      ? '⏹ ABORTED'
+      : (liveStatus.isError
+        ? '⛔ ERROR'
+        : (liveStatus.isDone
+          ? '✔ COMPLETED'
+          : (liveStatus.isRunning ? '⚡ ACTIVE / RUNNING' : 'IDLE')));
+
+    const lines: string[] = [];
+    lines.push(`### 🧩 DAG Node Trace & Diagnostics: Node ${nodeMeta.step} — ${nodeMeta.fullName}`);
+    lines.push('');
+    lines.push(`- **Node ID:** \`${nodeMeta.id}\``);
+    lines.push(`- **Short Name:** ${nodeMeta.shortName}`);
+    lines.push(`- **Group:** ${nodeMeta.group === 'initialize' ? 'Initialize (DAG 1)' : 'Capture Entire Markdown (DAG 2)'}`);
+    lines.push(`- **Status:** ${statusStr}`);
+    lines.push(`- **Current Metric:** ${liveStatus.metricLabel || 'N/A'}`);
+    lines.push(`- **Evaluator:** ${liveStatus.evaluator || 'N/A'}`);
+    lines.push(`- **Healing Action:** ${liveStatus.healingStep || 'None (Optimal)'}`);
+    lines.push(`- **Telemetry Insight:** ${liveStatus.telemetryInsight || 'N/A'}`);
+    lines.push(`- **Description:** ${nodeMeta.desc}`);
+    lines.push('');
+
+    lines.push('#### ⏱ Execution Timings');
+    lines.push(`- **Started At:** ${liveStatus.startedAt || 'N/A'}`);
+    lines.push(`- **Finished At:** ${liveStatus.finishedAt || 'N/A'}`);
+    lines.push(`- **Elapsed Duration:** ${liveStatus.durationMs !== null ? `${(liveStatus.durationMs / 1000).toFixed(2)}s (${liveStatus.durationMs}ms)` : (liveStatus.isActive ? 'Active...' : 'N/A')}`);
+    if (timings) {
+      lines.push('- **Detailed Timings Breakdown:**');
+      lines.push(`  - Total Duration: ${timings.duration_ms ?? 'N/A'}ms`);
+      lines.push(`  - Precheck Phase: ${timings.precheck_ms ?? 'N/A'}ms`);
+      lines.push(`  - Node Action: ${timings.action_ms ?? 'N/A'}ms`);
+      lines.push(`  - Auto-Healing: ${timings.healing_ms ?? 'N/A'}ms`);
+    }
+    lines.push('');
+
+    if (nodeError) {
+      lines.push('#### ❌ Error Details');
+      lines.push(`> **Message:** ${nodeError}`);
+      lines.push('');
+    }
+
+    if (traceInsights && traceInsights.length > 0) {
+      lines.push('#### 🔍 Key Trace Insights & Remediation Commands');
+      traceInsights.forEach((insight: string) => {
+        if (insight.startsWith('adb') || insight.startsWith('input') || insight.startsWith('cmd') || insight.startsWith('settings')) {
+          lines.push(`- **Command:**\n  \`\`\`bash\n  ${insight}\n  \`\`\``);
+        } else {
+          lines.push(`- ${insight}`);
+        }
+      });
+      lines.push('');
+    }
+
+    if (troubleshootingSteps && troubleshootingSteps.length > 0) {
+      lines.push('#### 🛠 Recommended Troubleshooting Steps');
+      troubleshootingSteps.forEach((step: any, idx: number) => {
+        lines.push(`${idx + 1}. **${step.title || 'Step ' + (step.step || idx + 1)}**: ${step.description || ''}${step.action_label ? ` *(Action: \`${step.action_label}\`)*` : ''}`);
+      });
+      lines.push('');
+    }
+
+    if (dagContext) {
+      lines.push('#### 🌐 DAG Context & Environmental State');
+      lines.push('```json');
+      lines.push(JSON.stringify(dagContext, null, 2));
+      lines.push('```');
+      lines.push('');
+    }
+
+    lines.push('#### 📊 Live Node Telemetry & Environment');
+    lines.push(`- **Active Project ID:** \`${activeProjectId || 'None'}\``);
+    lines.push(`- **Active ADB Device Serial:** \`${activeDeviceSerial || 'Default'}\``);
+    lines.push(`- **Target Total Lines:** ${dagStatus.target_total_lines || 0}`);
+    lines.push(`- **Current Top Line:** ${dagStatus.current_top_line || 0}`);
+    lines.push(`- **Current Bottom Line:** ${dagStatus.current_bottom_line || 0}`);
+    lines.push(`- **Current Page:** ${dagStatus.current_page || 1}`);
+    lines.push(`- **Soft Keyboard Closed / Guarded:** ${dagStatus.is_keyboard_guarded ? 'Yes' : 'No'}`);
+
+    if (nodeId === 'init_end') {
+      lines.push(`- **Calibrated Total Lines:** ${node1TotalLines > 0 ? node1TotalLines : 'Not Calibrated'}`);
+      lines.push(`- **Status State:** ${isNode1Calibrated ? 'Calibrated' : (isNode1Error ? 'Error' : 'Not Run')}`);
+    } else if (nodeId === 'reset_home') {
+      lines.push(`- **Line 1 Verified:** ${isNode2Verified ? 'Yes' : 'No'}`);
+    } else if (nodeId === 'local_ai_ocr') {
+      lines.push(`- **OCR Worker Active:** ${dagStatus.ocr_worker_active ? 'Yes' : 'No'}`);
+      lines.push(`- **OCR Latency:** ${dagStatus.ocr_latency_ms}ms`);
+      if (node3b.extracted_text) {
+        lines.push(`- **Extracted Text Preview (${node3b.extracted_text.length} chars):**\n\`\`\`markdown\n${node3b.extracted_text.slice(0, 300)}...\n\`\`\``);
+      }
+    } else if (nodeId === 'line_qualifier') {
+      const activeIssues = Object.values(node5Config.qualifiers || {}).filter(q => q.issue_detected);
+      lines.push(`- **Active Qualifier Issues:** ${activeIssues.length > 0 ? activeIssues.map(q => `${q.name} (${q.severity})`).join(', ') : 'None detected'}`);
+    } else if (nodeId === 'verification_trigger') {
+      lines.push(`- **Verification Trigger Fired:** ${dagStatus.verification_trigger_fired ? 'Yes' : 'No'}`);
+      lines.push(`- **Trigger Allowed:** ${dagStatus.trigger_decision?.allowed ? 'Yes' : 'No'}`);
+      lines.push(`- **Prevented Reasons:** ${dagStatus.trigger_decision?.reasons?.join(', ') || 'None'}`);
+    } else if (nodeId === 'viewport_actuator') {
+      lines.push(`- **Arrow Step Count:** ${dagStatus.arrow_step_count}`);
+    }
+
+    lines.push('');
+    lines.push(`#### 📜 Filtered Telemetry Events (${nodeEvents.length} recorded)`);
+    if (nodeEvents.length === 0) {
+      lines.push('_No specific events logged for this node yet._');
+    } else {
+      nodeEvents.slice(-8).forEach(ev => {
+        lines.push(`- \`[${ev.timestamp}]\` **[${ev.category}]** ${ev.message}`);
+      });
+    }
+
+    const markdownText = lines.join('\n');
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(markdownText);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = markdownText;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch {}
+    }
+
+    setCopiedNodeId(nodeId);
+    setTimeout(() => {
+      setCopiedNodeId(prev => prev === nodeId ? null : prev);
+    }, 2500);
+  };
+
+  // Discern root cause of performance degradation and generate AI resolution prompt
+  const discernNodePerformance = (nodeId: string): PerformanceDiagnosis => {
+    if (serverDiagnosisCache[nodeId]) {
+      return serverDiagnosisCache[nodeId];
+    }
+
+    const nodeMeta = NODES_METADATA.find(n => n.id === nodeId) || NODES_METADATA[0];
+    const nodeData = dagStatus.dag?.nodes?.[nodeId] || {};
+    const liveStatus = getNodeLiveStatus(nodeId);
+    const timings = liveStatus.timings || nodeData.timings || {};
+    const nodeError = liveStatus.nodeError || nodeData.error;
+    const isError = liveStatus.isError || Boolean(nodeError);
+
+    const duration_ms = timings.duration_ms ?? liveStatus.durationMs ?? nodeData.duration_ms ?? 0;
+    const precheck_ms = timings.precheck_ms ?? 0;
+    const action_ms = timings.action_ms ?? 0;
+    const healing_ms = timings.healing_ms ?? 0;
+    const ocr_latency_ms = dagStatus.ocr_latency_ms || 45;
+    const capture_rtt_ms = (dagStatus as any).capture_telemetry?.last_latency_ms || 0;
+
+    const total = duration_ms || (precheck_ms + action_ms + healing_ms) || 1;
+    const precheck_pct = Math.round((precheck_ms / total) * 100);
+    const action_pct = Math.round((action_ms / total) * 100);
+    const healing_pct = Math.round((healing_ms / total) * 100);
+
+    const evidence: string[] = [];
+    const remediations: string[] = [];
+    let category: PerformanceDiagnosis['category'] = 'HEALTHY';
+    let title = 'Pipeline Execution Healthy & Nominal';
+    let severity: PerformanceDiagnosis['severity'] = 'healthy';
+    let summary = `Node '${nodeMeta.shortName}' executed within nominal operational boundaries (${duration_ms || total}ms).`;
+
+    if (isError) {
+      category = 'UNRESOLVED_ERROR';
+      severity = 'critical';
+      title = `Hard Failure in Node '${nodeMeta.shortName}'`;
+      summary = `Node encountered a blocking failure: ${nodeError || 'Execution failed'}`;
+      evidence.push(`Node error state: ${nodeError || 'Unknown error'}`);
+      if (liveStatus.traceInsights) {
+        liveStatus.traceInsights.forEach((t: string) => evidence.push(t));
+      }
+      remediations.push('Inspect trace insights and execute recommended ADB remediation commands.');
+      remediations.push('Ensure soft keyboard is suppressed with dumpsys input_method check.');
+      remediations.push('Verify target window has focus before firing input actions.');
+    } else if (healing_ms > 2500 || (total > 1500 && healing_pct > 35)) {
+      category = 'AUTO_HEALING_CHURN';
+      severity = healing_ms > 5000 ? 'critical' : 'warning';
+      title = 'Auto-Healing Recovery Churn & Focus Interception';
+      summary = `Auto-healing consumed ${healing_ms}ms (${healing_pct}% of node duration), indicating repeated focus or keyboard recovery.`;
+      evidence.push(`Auto-healing took ${healing_ms}ms out of ${total}ms total execution time (${healing_pct}%).`);
+      evidence.push(`Current Evaluator: ${liveStatus.evaluator || 'Standard Gutter Evaluator'}`);
+      if (liveStatus.healingStep) {
+        evidence.push(`Last Healing Action: ${liveStatus.healingStep}`);
+      }
+      if (!dagStatus.is_keyboard_guarded || isKeyboardOpen) {
+        evidence.push('Soft keyboard (IME) was active or required dismissal.');
+      }
+      remediations.push('Enforce persistent soft keyboard suppression (settings put secure show_ime_with_hard_keyboard 0).');
+      remediations.push('Prevent activity re-creation: avoid unconditional am start when window is already focused.');
+      remediations.push('Check dumpsys input_method to ensure InputMethodManager window does not retain active focus.');
+    } else if (((nodeId === 'local_ai_ocr' || nodeId === 'frame_ocr') && (action_ms > 2500 || ocr_latency_ms > 1500)) || ocr_latency_ms > 2500) {
+      category = 'OCR_BOTTLENECK';
+      severity = (ocr_latency_ms > 3500 || action_ms > 4000) ? 'critical' : 'warning';
+      title = 'OCR / Multimodal Vision Inference Latency Spike';
+      summary = `OCR inference took ${ocr_latency_ms || action_ms}ms per frame, creating an upstream throughput bottleneck.`;
+      evidence.push(`OCR inference latency measured at ${ocr_latency_ms || action_ms}ms (nominal baseline: < 350ms).`);
+      evidence.push(`Worker status: ${dagStatus.ocr_worker_active ? 'Active' : 'Idle'}`);
+      remediations.push('Crop inference region strictly to numeric line gutter (x: 0-250px) rather than scanning full frame.');
+      remediations.push('Verify Ollama model concurrency and check CPU/GPU offload thread count.');
+      remediations.push('Use lightweight ONNX RapidOCR for gutter lines and reserve Vision LLM for verbatim text.');
+    } else if ((nodeId === 'frame_acquire' && (action_ms > 800 || capture_rtt_ms > 350)) || capture_rtt_ms > 500) {
+      category = 'ADB_SCREENSHOT_OVERHEAD';
+      severity = 'warning';
+      title = 'ADB Transport & Screencap RTT Latency';
+      summary = `ADB screenshot capture took ${capture_rtt_ms || action_ms}ms per frame (nominal: < 80ms over USB, < 150ms over Wi-Fi).`;
+      evidence.push(`Screencap round-trip time: ${capture_rtt_ms || action_ms}ms.`);
+      remediations.push('Cache SurfaceFlinger display IDs to eliminate sequential dumpsys SurfaceFlinger queries.');
+      remediations.push('Ensure ADB over USB (5000000 baud) or switch Wi-Fi to 5GHz low-latency band.');
+      remediations.push('Enable hot frame memory cache reuse when viewport has not moved.');
+    } else if (precheck_ms > 3000 || (total > 2000 && precheck_pct > 40)) {
+      category = 'PRECHECK_BLOCKING';
+      severity = 'warning';
+      title = 'Sequential Environment Precheck Blocking';
+      summary = `Prechecks required ${precheck_ms}ms (${precheck_pct}% of total execution) before node action began.`;
+      evidence.push(`Precheck phase duration: ${precheck_ms}ms.`);
+      remediations.push('Run independent environment classifiers concurrently via asyncio.gather().');
+      remediations.push('Skip environment healing (skip_env_heal=True) after first successful cycle.');
+    } else if (nodeId === 'arrow_down' && duration_ms > 2000) {
+      category = 'VIEWPORT_SCROLL_LAG';
+      severity = 'warning';
+      title = 'Viewport Scroll & Animation Settle Latency';
+      summary = `Pacer dwell and viewport settling took ${duration_ms}ms.`;
+      evidence.push(`Arrow step count: ${dagStatus.arrow_step_count}`);
+      remediations.push('Tune settle delay: lower default settle delay from 300ms to 150ms.');
+      remediations.push('Detect scroll velocity stop via 2-frame optical difference rather than fixed timers.');
+    }
+
+    if (evidence.length === 0) {
+      evidence.push(`Total node runtime: ${duration_ms || total}ms.`);
+      evidence.push(`Precheck: ${precheck_ms}ms (${precheck_pct}%), Action: ${action_ms}ms (${action_pct}%), Healing: ${healing_ms}ms (${healing_pct}%).`);
+      evidence.push(`OCR latency: ${ocr_latency_ms}ms, Screen grab latency: ${capture_rtt_ms}ms.`);
+    }
+
+    if (remediations.length === 0) {
+      remediations.push('Maintain existing calibration parameters and continue monitoring loop timings.');
+    }
+
+    const evidenceList = evidence.map(e => `- ${e}`).join('\n');
+    const remediationList = remediations.map((r, i) => `${i + 1}. ${r}`).join('\n');
+
+    const prompt = `# 🛠️ System Performance Degradation Resolution Prompt
+
+## Objective
+Analyze the root cause of latency and performance degradation in the Small-Fling pagination & markdown extraction DAG pipeline, and implement code/configuration optimizations to resolve the bottleneck.
+
+---
+
+## 📌 Executive Summary
+- **Target Node:** ${nodeMeta.fullName} (\`${nodeMeta.id}\`)
+- **Group:** ${nodeMeta.group}
+- **Primary Root Cause Category:** \`${category}\`
+- **Diagnosis:** ${title}
+- **Severity Level:** \`${severity.toUpperCase()}\`
+- **Execution Duration:** ${duration_ms || total}ms (${((duration_ms || total) / 1000).toFixed(2)}s)
+- **Status:** \`${(liveStatus.statusLabel || 'IDLE').toUpperCase()}\`
+
+### Summary
+> ${summary}
+
+---
+
+## ⏱️ Detailed Latency & Phase Breakdown
+| Phase | Duration | Percentage of Node Time | Target Baseline | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Total Duration** | ${duration_ms || total}ms | 100% | < 1,500ms | ${(duration_ms || total) > 1500 ? '⚠️ Degraded' : '✔ Normal'} |
+| **Environment Precheck** | ${precheck_ms}ms | ${precheck_pct}% | < 200ms | ${precheck_ms > 800 ? '⚠️ High' : '✔ Normal'} |
+| **Primary Node Action** | ${action_ms}ms | ${action_pct}% | < 800ms | ${action_ms > 1200 ? '⚠️ High' : '✔ Normal'} |
+| **Auto-Healing Recovery** | ${healing_ms}ms | ${healing_pct}% | 0ms | ${healing_ms > 2000 ? '⛔ Excessive' : (healing_ms > 0 ? '⚠️ Present' : '✔ None')} |
+| **OCR Vision Latency** | ${ocr_latency_ms}ms | — | < 350ms | ${ocr_latency_ms > 1000 ? '⚠️ Sluggish' : '✔ Normal'} |
+| **ADB Screencap RTT** | ${capture_rtt_ms}ms | — | < 120ms | ${capture_rtt_ms > 300 ? '⚠️ High RTT' : '✔ Normal'} |
+
+---
+
+## 🔍 Root Cause Analysis & Diagnostic Evidence
+${evidenceList}
+
+### Environmental & Device Context
+- **Active Device Serial:** \`${activeDeviceSerial || 'Connected ADB Device'}\`
+- **Target Display ID:** \`${(liveStatus.dagContext?.display_id ?? 'External Desktop')}\`
+- **Active Density / DPI:** \`${(liveStatus.dagContext?.active_dpi ?? 120)} DPI\`
+- **Keyboard Suppressed / Guarded:** \`${dagStatus.is_keyboard_guarded}\`
+- **Current Top Line:** \`Ln ${dagStatus.current_top_line}\`
+- **Current Bottom Line:** \`Ln ${dagStatus.current_bottom_line}\`
+- **Target Total Lines:** \`${effectiveTotal}\`
+
+---
+
+## 💻 Relevant Source Files & Code Architecture
+- **Pipeline Orchestration & Timing:** [\`server/routers/orchestration.py\`](file:///c:/Projects/Small-Fling/server/routers/orchestration.py)
+- **ADB & Display Subsystem:** [\`server/services/adb_service.py\`](file:///c:/Projects/Small-Fling/server/services/adb_service.py)
+- **Classifiers & Viewport Healing:** [\`server/classifiers/editor_classifiers.py\`](file:///c:/Projects/Small-Fling/server/classifiers/editor_classifiers.py)
+- **Local OCR & Vision Inference:** [\`server/services/ocr_service.py\`](file:///c:/Projects/Small-Fling/server/services/ocr_service.py)
+- **Frontend DAG State & Diagnostics:** [\`web/src/FlowDag.tsx\`](file:///c:/Projects/Small-Fling/web/src/FlowDag.tsx)
+
+---
+
+## 🎯 Recommended Action Plan for AI
+Please examine the evidence above and apply the following targeted remediations:
+${remediationList}
+
+### Expected Outcome
+After applying the fixes, verify that:
+1. Node \`${nodeMeta.id}\` execution time drops below 1,500ms.
+2. Auto-healing churn is eliminated during steady-state loops.
+3. OCR inference and screencap round-trips meet target baselines.
+`;
+
+    const promptDataUri = 'data:text/markdown;charset=utf-8,' + encodeURIComponent(prompt.trim());
+
+    return {
+      nodeId,
+      title,
+      category,
+      severity,
+      summary,
+      evidence,
+      remediations,
+      metrics: {
+        duration_ms: duration_ms || total,
+        precheck_ms,
+        action_ms,
+        healing_ms,
+        ocr_latency_ms,
+        capture_rtt_ms,
+        precheck_pct,
+        action_pct,
+        healing_pct
+      },
+      markdown_prompt: prompt.trim(),
+      promptDataUri
+    };
+  };
+
+  const openPromptModal = async (nodeId: string) => {
+    setPromptModalNodeId(nodeId);
+    setIsPromptModalOpen(true);
+    setPromptActiveTab('formatted');
+    setCopiedPrompt(false);
+
+    try {
+      const res = await fetch(`${apiBase}/api/dag/nodes/${nodeId}/root-cause`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success') {
+          const prompt = data.markdown_prompt || '';
+          setServerDiagnosisCache(prev => ({
+            ...prev,
+            [nodeId]: {
+              ...data,
+              promptDataUri: 'data:text/markdown;charset=utf-8,' + encodeURIComponent(prompt)
+            }
+          }));
+        }
+      }
+    } catch {}
+  };
+
+  const copyPromptToClipboard = async (promptText: string) => {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(promptText);
+        ok = true;
+      }
+    } catch {}
+    if (!ok) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = promptText;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        ok = true;
+      } catch {}
+    }
+    setCopiedPrompt(true);
+    setTimeout(() => setCopiedPrompt(false), 2500);
+  };
+
+  const downloadPromptFile = (nodeId: string, promptText: string) => {
+    try {
+      const blob = new Blob([promptText], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ai-performance-resolution-prompt-${nodeId}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {}
+  };
+
   if (isMinimized) {
     return (
       <div style={{ background: '#0d1117', border: '1.5px solid #00ff9d55', borderRadius: '10px', padding: '8px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#e6edf3', fontFamily: 'var(--font-mono, monospace)' }}>
@@ -1084,15 +1532,69 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{status.metricLabel || status.statusLabel}</span>
         </div>
 
-        {/* Bottom: Timing */}
+        {/* Bottom: Timing & Quick Copy for AI */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '7.5px', color: isPulsingSwirl ? '#ffa657' : '#8b949e', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '1px' }}>
-          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60%' }}>
             {isPulsingSwirl
               ? (status.startedAt ? `${status.startedAt} (active)` : 'Active...')
               : (status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : (status.startedAt || 'Idle'))}
           </span>
-          {isSelected && <span style={{ color: node.accentColor, fontSize: '7px', fontWeight: 800 }}>SEL</span>}
-          {isPinned && <span style={{ color: '#58a6ff', fontSize: '7px', fontWeight: 800 }}>OPEN</span>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                copyNodeDetailsForAi(node.id);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                padding: '0px 3px',
+                borderRadius: '3px',
+                border: copiedNodeId === node.id ? '1px solid #00ff9d' : '1px solid rgba(88, 166, 255, 0.4)',
+                background: copiedNodeId === node.id ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.15)',
+                color: copiedNodeId === node.id ? '#00ff9d' : '#58a6ff',
+                fontSize: '7px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                lineHeight: '11px',
+                height: '13px'
+              }}
+              title="Copy details for AI in Markdown format"
+            >
+              {copiedNodeId === node.id ? <Check size={7} /> : <Copy size={7} />}
+              <span>{copiedNodeId === node.id ? 'COPIED' : 'AI'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                openPromptModal(node.id);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '2px',
+                padding: '0px 3px',
+                borderRadius: '3px',
+                border: '1px solid rgba(255, 166, 87, 0.4)',
+                background: 'rgba(255, 166, 87, 0.15)',
+                color: '#ffa657',
+                fontSize: '7px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                lineHeight: '11px',
+                height: '13px'
+              }}
+              title="View Markdown Resolution Prompt for AI"
+            >
+              <Sparkles size={7} />
+              <span>PROMPT</span>
+            </button>
+            {isSelected && <span style={{ color: node.accentColor, fontSize: '7px', fontWeight: 800 }}>SEL</span>}
+            {isPinned && <span style={{ color: '#58a6ff', fontSize: '7px', fontWeight: 800 }}>OPEN</span>}
+          </div>
         </div>
       </div>
     );
@@ -1673,6 +2175,38 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     <span>Settings</span>
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => copyNodeDetailsForAi(activeHoverNode.id)}
+                  style={{
+                    background: copiedNodeId === activeHoverNode.id ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.15)',
+                    border: `1px solid ${copiedNodeId === activeHoverNode.id ? '#00ff9d' : '#58a6ff66'}`,
+                    color: copiedNodeId === activeHoverNode.id ? '#00ff9d' : '#58a6ff',
+                    padding: '4px 8px', borderRadius: '5px', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    fontSize: '10px', fontWeight: 800
+                  }}
+                  title="Copy details for AI in Markdown format"
+                >
+                  {copiedNodeId === activeHoverNode.id ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                  <span>{copiedNodeId === activeHoverNode.id ? 'Copied Details!' : 'Copy details for AI'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openPromptModal(activeHoverNode.id)}
+                  style={{
+                    background: 'rgba(255, 166, 87, 0.15)',
+                    border: '1px solid rgba(255, 166, 87, 0.4)',
+                    color: '#ffa657',
+                    padding: '4px 8px', borderRadius: '5px', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '4px',
+                    fontSize: '10px', fontWeight: 800
+                  }}
+                  title="View and copy AI resolution prompt in Markdown"
+                >
+                  <Sparkles size={11} color="#ffa657" />
+                  <span>AI Prompt ↗</span>
+                </button>
               </div>
               <button
                 type="button"
@@ -1943,6 +2477,44 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   <span>Full Text</span>
                 </button>
               )}
+
+              <button
+                type="button"
+                onClick={() => copyNodeDetailsForAi(selectedNodeMeta.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 11px',
+                  borderRadius: '6px',
+                  border: `1px solid ${copiedNodeId === selectedNodeMeta.id ? '#00ff9d' : '#58a6ff66'}`,
+                  background: copiedNodeId === selectedNodeMeta.id ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.15)',
+                  color: copiedNodeId === selectedNodeMeta.id ? '#00ff9d' : '#58a6ff',
+                  fontSize: '11px', fontWeight: 800,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit'
+                }}
+                title="Copy complete trace, timing, errors, and context in Markdown format for AI"
+              >
+                {copiedNodeId === selectedNodeMeta.id ? <Check size={12} color="#00ff9d" /> : <Copy size={12} />}
+                <span>{copiedNodeId === selectedNodeMeta.id ? 'Copied Details for AI!' : 'Copy details for AI'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openPromptModal(selectedNodeMeta.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 11px',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 166, 87, 0.5)',
+                  background: 'rgba(255, 166, 87, 0.15)',
+                  color: '#ffa657',
+                  fontSize: '11px', fontWeight: 800,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit'
+                }}
+                title="View interactive Markdown Resolution Prompt for AI"
+              >
+                <Sparkles size={12} color="#ffa657" />
+                <span>View AI Prompt ↗</span>
+              </button>
             </div>
 
             {/* Real-time Execution Timings & Node Active State */}
@@ -2036,6 +2608,148 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     </div>
                   )}
 
+                  {/* Real-time Root Cause & Performance Diagnostics */}
+                  {(() => {
+                    const diag = discernNodePerformance(selectedNodeMeta.id);
+                    const severityColor = diag.severity === 'critical' ? '#f85149' : (diag.severity === 'warning' ? '#ffa657' : '#00ff9d');
+                    const severityBg = diag.severity === 'critical' ? 'rgba(248, 81, 73, 0.15)' : (diag.severity === 'warning' ? 'rgba(255, 166, 87, 0.15)' : 'rgba(0, 255, 157, 0.12)');
+                    const severityBorder = diag.severity === 'critical' ? '#f85149' : (diag.severity === 'warning' ? '#ffa65788' : '#00ff9d44');
+
+                    return (
+                      <div style={{
+                        background: '#0d1117',
+                        border: `1.5px solid ${severityBorder}`,
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
+                        {/* Card Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10.5px', fontWeight: 800, color: severityColor, letterSpacing: '0.4px' }}>
+                            <Sparkles size={12} color={severityColor} />
+                            <span>ROOT CAUSE & PERFORMANCE DIAGNOSTICS</span>
+                          </div>
+                          <span style={{
+                            fontSize: '9px', fontWeight: 800, padding: '2px 7px', borderRadius: '4px',
+                            background: severityBg, color: severityColor, border: `1px solid ${severityBorder}`
+                          }}>
+                            {diag.category.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+
+                        {/* Summary Callout */}
+                        <div style={{
+                          background: '#161b22',
+                          borderLeft: `3px solid ${severityColor}`,
+                          borderRadius: '4px',
+                          padding: '6px 10px',
+                          fontSize: '10px',
+                          color: '#c9d1d9',
+                          lineHeight: 1.4
+                        }}>
+                          <div style={{ fontWeight: 800, color: severityColor, marginBottom: '2px' }}>{diag.title}</div>
+                          <div>{diag.summary}</div>
+                        </div>
+
+                        {/* Latency & Phase Breakdown Progress Bar */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>
+                            <span>LATENCY PHASE DISTRIBUTION</span>
+                            <span>Total: {diag.metrics.duration_ms}ms</span>
+                          </div>
+                          <div style={{
+                            display: 'flex', height: '8px', borderRadius: '4px', overflow: 'hidden',
+                            background: '#21262d', border: '1px solid #30363d'
+                          }}>
+                            <div style={{ width: `${diag.metrics.precheck_pct}%`, background: '#a371f7' }} title={`Precheck: ${diag.metrics.precheck_ms}ms (${diag.metrics.precheck_pct}%)`} />
+                            <div style={{ width: `${diag.metrics.action_pct}%`, background: '#00ff9d' }} title={`Action: ${diag.metrics.action_ms}ms (${diag.metrics.action_pct}%)`} />
+                            <div style={{ width: `${diag.metrics.healing_pct}%`, background: diag.metrics.healing_ms > 2000 ? '#f85149' : '#ffa657' }} title={`Auto-Healing: ${diag.metrics.healing_ms}ms (${diag.metrics.healing_pct}%)`} />
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '8px', color: '#6e7681', marginTop: '1px' }}>
+                            <span style={{ color: '#a371f7' }}>● Precheck ({diag.metrics.precheck_ms}ms)</span>
+                            <span style={{ color: '#00ff9d' }}>● Action ({diag.metrics.action_ms}ms)</span>
+                            <span style={{ color: diag.metrics.healing_ms > 0 ? '#ffa657' : '#6e7681' }}>● Healing ({diag.metrics.healing_ms}ms)</span>
+                            <span style={{ color: '#58a6ff' }}>OCR: {diag.metrics.ocr_latency_ms}ms</span>
+                          </div>
+                        </div>
+
+                        {/* Evidence Checklist */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '9px' }}>
+                          <div style={{ color: '#8b949e', fontWeight: 700, fontSize: '8.5px' }}>DIAGNOSTIC EVIDENCE:</div>
+                          {diag.evidence.slice(0, 3).map((ev, idx) => (
+                            <div key={idx} style={{ display: 'flex', alignItems: 'flex-start', gap: '5px', color: '#f0f6fc' }}>
+                              <span style={{ color: severityColor, flexShrink: 0 }}>•</span>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ev}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Actions & Links Toolbar */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', paddingTop: '6px', borderTop: '1px solid #21262d' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => openPromptModal(selectedNodeMeta.id)}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '4px',
+                                background: 'rgba(255, 166, 87, 0.2)',
+                                border: '1px solid #ffa657',
+                                borderRadius: '5px',
+                                padding: '4px 9px',
+                                color: '#ffa657',
+                                fontSize: '9.5px', fontWeight: 800,
+                                cursor: 'pointer'
+                              }}
+                              title="Open interactive AI resolution prompt modal"
+                            >
+                              <Sparkles size={11} color="#ffa657" />
+                              <span>View AI Resolution Prompt ↗</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => copyPromptToClipboard(diag.markdown_prompt)}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '4px',
+                                background: copiedPrompt ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
+                                border: `1px solid ${copiedPrompt ? '#00ff9d' : '#30363d'}`,
+                                borderRadius: '5px',
+                                padding: '4px 8px',
+                                color: copiedPrompt ? '#00ff9d' : '#c9d1d9',
+                                fontSize: '9.5px', fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                              title="Copy Markdown Prompt for AI"
+                            >
+                              {copiedPrompt ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                              <span>{copiedPrompt ? 'Copied Prompt!' : 'Copy Prompt'}</span>
+                            </button>
+                          </div>
+
+                          {/* Direct Markdown View Prompt Link */}
+                          <a
+                            href={diag.promptDataUri}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download={`ai-performance-resolution-prompt-${selectedNodeMeta.id}.md`}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '3px',
+                              color: '#58a6ff', fontSize: '9px', fontWeight: 700,
+                              textDecoration: 'none', padding: '3px 6px', borderRadius: '4px',
+                              background: 'rgba(88, 166, 255, 0.1)', border: '1px solid rgba(88, 166, 255, 0.3)'
+                            }}
+                            title="Direct link to view raw markdown prompt or save file"
+                          >
+                            <ExternalLink size={10} />
+                            <span>Markdown View Prompt ↗</span>
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* UNRESOLVED PIPELINE ISSUE - TRACE & DIAGNOSTICS CARD */}
                   {(liveStatus.traceInsights || liveStatus.dagContext) && (
                     <div style={{
@@ -2052,11 +2766,47 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                           <AlertTriangle size={14} color="#ff7b72" />
                           <span>UNRESOLVED PIPELINE ISSUE — TRACE & DIAGNOSTICS</span>
                         </div>
-                        {liveStatus.dagContext && (
-                          <span style={{ fontSize: '8.5px', color: '#8b949e', background: '#0d1117', padding: '2px 6px', borderRadius: '4px', border: '1px solid #30363d' }}>
-                            Display: {liveStatus.dagContext.display_id ?? 'default'} • Serial: {liveStatus.dagContext.serial || 'active'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            type="button"
+                            onClick={() => copyNodeDetailsForAi(selectedNodeMeta.id)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '4px',
+                              background: copiedNodeId === selectedNodeMeta.id ? 'rgba(0, 255, 157, 0.2)' : 'rgba(248, 81, 73, 0.25)',
+                              border: `1px solid ${copiedNodeId === selectedNodeMeta.id ? '#00ff9d' : '#f85149'}`,
+                              borderRadius: '4px',
+                              padding: '2px 7px',
+                              color: copiedNodeId === selectedNodeMeta.id ? '#00ff9d' : '#f0f6fc',
+                              fontSize: '9px', fontWeight: 800, cursor: 'pointer'
+                            }}
+                            title="Copy unresolved issue trace and diagnostics in Markdown for AI"
+                          >
+                            {copiedNodeId === selectedNodeMeta.id ? <Check size={10} color="#00ff9d" /> : <Copy size={10} />}
+                            <span>{copiedNodeId === selectedNodeMeta.id ? 'Copied Details!' : 'Copy details for AI'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openPromptModal(selectedNodeMeta.id)}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '4px',
+                              background: 'rgba(255, 166, 87, 0.25)',
+                              border: '1px solid #ffa657',
+                              borderRadius: '4px',
+                              padding: '2px 7px',
+                              color: '#ffa657',
+                              fontSize: '9px', fontWeight: 800, cursor: 'pointer'
+                            }}
+                            title="View AI Resolution Prompt in Markdown"
+                          >
+                            <Sparkles size={10} color="#ffa657" />
+                            <span>AI Prompt ↗</span>
+                          </button>
+                          {liveStatus.dagContext && (
+                            <span style={{ fontSize: '8.5px', color: '#8b949e', background: '#0d1117', padding: '2px 6px', borderRadius: '4px', border: '1px solid #30363d' }}>
+                              Display: {liveStatus.dagContext.display_id ?? 'default'} • Serial: {liveStatus.dagContext.serial || 'active'}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {liveStatus.traceInsights && liveStatus.traceInsights.length > 0 && (
@@ -2391,6 +3141,228 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
         </Modal>
       )}
+
+      {/* MODAL 5: AI Resolution Prompt & Performance Diagnostics Modal */}
+      {isPromptModalOpen && (() => {
+        const diag = discernNodePerformance(promptModalNodeId);
+        const nodeMeta = NODES_METADATA.find(n => n.id === promptModalNodeId) || NODES_METADATA[0];
+        const severityColor = diag.severity === 'critical' ? '#f85149' : (diag.severity === 'warning' ? '#ffa657' : '#00ff9d');
+
+        return (
+          <Modal
+            isOpen={isPromptModalOpen}
+            onClose={() => setIsPromptModalOpen(false)}
+            title={
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Sparkles size={18} color="#ffa657" />
+                <span>AI Prompt: System Performance Resolution (Node {nodeMeta.step} — {nodeMeta.fullName})</span>
+              </div>
+            }
+            subtitle="Take this markdown prompt and feed it directly into an AI (Claude, ChatGPT, Gemini, Copilot) to resolve performance degradation"
+            maxWidth="850px"
+            cancelText="Close"
+            confirmText={copiedPrompt ? "Copied Prompt!" : "Copy Prompt for AI"}
+            confirmIcon={copiedPrompt ? Check : Copy}
+            onConfirm={() => copyPromptToClipboard(diag.markdown_prompt)}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Toolbar & Tabs */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #30363d', paddingBottom: '8px' }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setPromptActiveTab('formatted')}
+                    style={{
+                      background: promptActiveTab === 'formatted' ? 'rgba(88, 166, 255, 0.2)' : 'transparent',
+                      border: `1px solid ${promptActiveTab === 'formatted' ? '#58a6ff' : 'transparent'}`,
+                      color: promptActiveTab === 'formatted' ? '#58a6ff' : '#8b949e',
+                      padding: '4px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    Formatted View
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPromptActiveTab('raw')}
+                    style={{
+                      background: promptActiveTab === 'raw' ? 'rgba(88, 166, 255, 0.2)' : 'transparent',
+                      border: `1px solid ${promptActiveTab === 'raw' ? '#58a6ff' : 'transparent'}`,
+                      color: promptActiveTab === 'raw' ? '#58a6ff' : '#8b949e',
+                      padding: '4px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    Raw Markdown
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    fontSize: '9.5px', fontWeight: 800, padding: '2px 8px', borderRadius: '4px',
+                    background: `${severityColor}22`, color: severityColor, border: `1px solid ${severityColor}55`
+                  }}>
+                    {diag.category.replace(/_/g, ' ')} • {diag.severity.toUpperCase()}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => downloadPromptFile(promptModalNodeId, diag.markdown_prompt)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      background: '#161b22', border: '1px solid #30363d', color: '#c9d1d9',
+                      padding: '4px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                    title="Download .md prompt file"
+                  >
+                    <Download size={12} />
+                    <span>Download .md</span>
+                  </button>
+
+                  <a
+                    href={diag.promptDataUri}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    download={`ai-performance-resolution-prompt-${promptModalNodeId}.md`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '4px',
+                      background: 'rgba(88, 166, 255, 0.15)', border: '1px solid #58a6ff66',
+                      color: '#58a6ff', padding: '4px 8px', borderRadius: '5px',
+                      fontSize: '10.5px', fontWeight: 700, textDecoration: 'none'
+                    }}
+                    title="Open or download raw markdown prompt link"
+                  >
+                    <ExternalLink size={12} />
+                    <span>Markdown Link ↗</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Tab 1: Formatted View */}
+              {promptActiveTab === 'formatted' ? (
+                <div style={{
+                  maxHeight: '420px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px',
+                  background: '#0d1117', border: '1px solid #30363d', borderRadius: '8px', padding: '14px', fontSize: '11px', color: '#e6edf3'
+                }}>
+                  {/* Executive Summary */}
+                  <div style={{ background: '#161b22', borderLeft: `3px solid ${severityColor}`, padding: '8px 12px', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '12px', color: severityColor }}>{diag.title}</div>
+                    <div style={{ marginTop: '4px', color: '#c9d1d9' }}>{diag.summary}</div>
+                  </div>
+
+                  {/* Timing Table */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ fontWeight: 800, color: '#58a6ff', fontSize: '11px' }}>⏱️ Latency & Phase Breakdown</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', background: '#161b22', borderRadius: '6px', overflow: 'hidden' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #30363d', color: '#8b949e', textAlign: 'left' }}>
+                          <th style={{ padding: '6px 8px' }}>Phase</th>
+                          <th style={{ padding: '6px 8px' }}>Duration</th>
+                          <th style={{ padding: '6px 8px' }}>Percentage</th>
+                          <th style={{ padding: '6px 8px' }}>Baseline</th>
+                          <th style={{ padding: '6px 8px' }}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid #21262d' }}>
+                          <td style={{ padding: '6px 8px', fontWeight: 700 }}>Total Duration</td>
+                          <td style={{ padding: '6px 8px', color: '#58a6ff' }}>{diag.metrics.duration_ms}ms</td>
+                          <td style={{ padding: '6px 8px' }}>100%</td>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>&lt; 1,500ms</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.duration_ms > 1500 ? '#ffa657' : '#00ff9d' }}>{diag.metrics.duration_ms > 1500 ? '⚠️ Degraded' : '✔ Normal'}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #21262d' }}>
+                          <td style={{ padding: '6px 8px' }}>Environment Precheck</td>
+                          <td style={{ padding: '6px 8px', color: '#a371f7' }}>{diag.metrics.precheck_ms}ms</td>
+                          <td style={{ padding: '6px 8px' }}>{diag.metrics.precheck_pct}%</td>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>&lt; 200ms</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.precheck_ms > 800 ? '#ffa657' : '#00ff9d' }}>{diag.metrics.precheck_ms > 800 ? '⚠️ High' : '✔ Normal'}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #21262d' }}>
+                          <td style={{ padding: '6px 8px' }}>Primary Node Action</td>
+                          <td style={{ padding: '6px 8px', color: '#00ff9d' }}>{diag.metrics.action_ms}ms</td>
+                          <td style={{ padding: '6px 8px' }}>{diag.metrics.action_pct}%</td>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>&lt; 800ms</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.action_ms > 1200 ? '#ffa657' : '#00ff9d' }}>{diag.metrics.action_ms > 1200 ? '⚠️ High' : '✔ Normal'}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #21262d' }}>
+                          <td style={{ padding: '6px 8px' }}>Auto-Healing Recovery</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.healing_ms > 0 ? '#ffa657' : '#8b949e' }}>{diag.metrics.healing_ms}ms</td>
+                          <td style={{ padding: '6px 8px' }}>{diag.metrics.healing_pct}%</td>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>0ms</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.healing_ms > 2000 ? '#f85149' : (diag.metrics.healing_ms > 0 ? '#ffa657' : '#00ff9d') }}>{diag.metrics.healing_ms > 2000 ? '⛔ Excessive' : (diag.metrics.healing_ms > 0 ? '⚠️ Present' : '✔ None')}</td>
+                        </tr>
+                        <tr>
+                          <td style={{ padding: '6px 8px' }}>OCR Inference Latency</td>
+                          <td style={{ padding: '6px 8px', color: '#ffa657' }}>{diag.metrics.ocr_latency_ms}ms</td>
+                          <td style={{ padding: '6px 8px' }}>—</td>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>&lt; 350ms</td>
+                          <td style={{ padding: '6px 8px', color: diag.metrics.ocr_latency_ms > 1000 ? '#ffa657' : '#00ff9d' }}>{diag.metrics.ocr_latency_ms > 1000 ? '⚠️ Sluggish' : '✔ Normal'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Diagnostic Evidence */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ fontWeight: 800, color: '#58a6ff', fontSize: '11px' }}>🔍 Root Cause Diagnostic Evidence</div>
+                    <div style={{ background: '#161b22', padding: '8px 12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {diag.evidence.map((ev, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                          <span style={{ color: severityColor }}>•</span>
+                          <span>{ev}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Remediation Plan */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ fontWeight: 800, color: '#00ff9d', fontSize: '11px' }}>🎯 Recommended Action Plan for AI</div>
+                    <div style={{ background: '#161b22', padding: '8px 12px', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {diag.remediations.map((rem, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                          <span style={{ color: '#00ff9d', fontWeight: 800 }}>{i + 1}.</span>
+                          <span>{rem}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Relevant Source Files */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <div style={{ fontWeight: 800, color: '#8b949e', fontSize: '10px' }}>📁 Relevant Source Code Files</div>
+                    <div style={{ background: '#161b22', padding: '6px 10px', borderRadius: '6px', fontSize: '10px', fontFamily: 'var(--font-mono, monospace)', color: '#58a6ff' }}>
+                      <div>• server/routers/orchestration.py</div>
+                      <div>• server/services/adb_service.py</div>
+                      <div>• server/classifiers/editor_classifiers.py</div>
+                      <div>• server/services/ocr_service.py</div>
+                      <div>• web/src/FlowDag.tsx</div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* Tab 2: Raw Markdown View */
+                <pre style={{
+                  background: '#0d1117',
+                  border: '1px solid #30363d',
+                  borderRadius: '8px',
+                  padding: '12px',
+                  maxHeight: '420px',
+                  overflowY: 'auto',
+                  fontFamily: 'var(--font-mono, monospace)',
+                  fontSize: '11px',
+                  color: '#7ee787',
+                  lineHeight: 1.45,
+                  whiteSpace: 'pre-wrap',
+                  margin: 0,
+                  userSelect: 'text'
+                }}>
+                  {diag.markdown_prompt}
+                </pre>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
 
     </div>
   );

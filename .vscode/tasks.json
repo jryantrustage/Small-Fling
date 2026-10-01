@@ -14,6 +14,12 @@
             "problemMatcher": []
         },
         {
+            "label": "ports: clean server",
+            "type": "shell",
+            "command": "powershell -ExecutionPolicy Bypass -File scripts/free_ports.ps1 -Ports 8000",
+            "problemMatcher": []
+        },
+        {
             "label": "adb: connect wifi",
             "type": "shell",
             "command": "adb connect 192.168.86.81:44605",
@@ -73,6 +79,9 @@
             "label": "server: run fastapi",
             "type": "shell",
             "command": "python server/main.py",
+            "dependsOn": [
+                "ports: clean server"
+            ],
             "isBackground": true,
             "problemMatcher": [
                 {
@@ -138,6 +147,14 @@
                 "cwd": "${workspaceFolder}/web"
             },
             "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "dev: all",
+            "dependsOn": [
+                "server: run fastapi",
+                "web: dev"
+            ],
             "problemMatcher": []
         }
     ]

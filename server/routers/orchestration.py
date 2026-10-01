@@ -251,6 +251,33 @@ async def get_dag_node_config(node_id: str):
     if not node: raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
     return {"status": "success", "node_id": target_key, "title": node.get("title", ""), "config": node.get("config", {}), "status_code": node.get("status", "idle"), "trigger_decision": node.get("trigger_decision", {}) if target_key == "verification_trigger" else None}
 
+@router.get("/api/dag/nodes/{node_id}/root-cause")
+async def get_dag_node_root_cause(node_id: str):
+    from services.performance_analyzer import analyze_node_performance, generate_ai_resolution_prompt
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
+    analysis = analyze_node_performance(target_key, state.dag_state, state.latest_telemetry)
+    prompt = generate_ai_resolution_prompt(analysis, state.dag_state, state.latest_telemetry)
+    analysis["markdown_prompt"] = prompt
+    return {"status": "success", **analysis}
+
+@router.get("/api/dag/performance/prompt")
+async def get_dag_performance_prompt(node_id: Optional[str] = None):
+    from services.performance_analyzer import analyze_node_performance, generate_ai_resolution_prompt
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id) if node_id else (state.dag_state.get("current_active_node") or "init_end")
+    analysis = analyze_node_performance(target_key, state.dag_state, state.latest_telemetry)
+    prompt = generate_ai_resolution_prompt(analysis, state.dag_state, state.latest_telemetry)
+    return {
+        "status": "success",
+        "node_id": target_key,
+        "category": analysis.get("category"),
+        "title": analysis.get("title"),
+        "severity": analysis.get("severity"),
+        "markdown_prompt": prompt
+    }
+
 @router.post("/api/dag/nodes/{node_id}/config")
 async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
     target_key = NODE_ALIAS_MAP.get(node_id, node_id)
@@ -683,19 +710,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     c_res = await cursor_clf.detect(c_ctx)
                     if c_res.issue_detected:
                         await cursor_clf.fix(c_ctx)
-                        await asyncio.sleep(0.15)
+                        await asyncio.sleep(0.2)
                 except Exception as ce:
                     print(f"[init_end] Cursor classifier check note: {ce}")
-            else:
-                # Ensure soft keyboard is closed so hardware key combinations reach Teams WebView directly
-                await ensure_adb_keyboard_closed(active_serial)
-
-            # Ensure editor text body has active focus before sending Ctrl+End
-            try:
-                await cursor_clf.fix(c_ctx)
-                await asyncio.sleep(0.15)
-            except Exception as fe:
-                print(f"[init_end] Focus check note: {fe}")
+            await ensure_adb_keyboard_closed(active_serial)
 
             node.update({
                 "evaluator": "EOF Navigation Evaluator",
@@ -796,9 +814,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 try:
+                    await ensure_adb_keyboard_closed(active_serial)
                     await cursor_clf.fix(c_ctx)
+                    await ensure_adb_keyboard_closed(active_serial)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
+                    await run_adb_shell(f"input -d {disp_id} keyevent 113 123", active_serial)
                     await asyncio.sleep(0.6)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
@@ -811,14 +832,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
                         with open(calib, "wb") as f: f.write(snap_retry)
                         r_top, r_total = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
+                        if r_total <= 0:
+                            scan_res = await state.scan_image_in_process(calib)
+                            r_total = scan_res.get("bottom_line", 0)
+                            if r_top <= 0: r_top = scan_res.get("top_line", 0)
                         if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
                         if top_line > 12 or total_lines > 65:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
-                        else:
+                        elif 0 < top_line <= 5 or (0 < total_lines <= 65):
                             is_stuck_on_line_1 = True
+                        else:
+                            is_stuck_on_line_1 = False
                 except Exception as re_err:
                     print(f"[init_end] Dynamic EOF adjustment error: {re_err}")
 
