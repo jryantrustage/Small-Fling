@@ -650,27 +650,41 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     const healingStep = nodeData.healing_step || null;
     const evaluator = nodeData.evaluator || null;
     const telemetryInsight = nodeData.telemetry_insight || null;
+    const timings = nodeData.timings || null;
+    const dagContext = nodeData.dag_context || null;
+    const traceInsights = Array.isArray(nodeData.trace_insights) ? nodeData.trace_insights : null;
+    const nodeError = nodeData.error || null;
 
-    if (nodeData.status === 'aborted') {
-      return {
-        isRunning: false,
-        isActive: false,
-        isError: true,
-        isAborted: true,
-        isDone: false,
-        statusLabel: 'ABORTED',
-        metricLabel: nodeData.error ? 'Aborted ⏹' : 'Aborted',
-        evaluator: evaluator || 'Abort Evaluator',
-        healingStep: null,
-        telemetryInsight: 'Execution aborted by user',
-        color: '#e3b341',
-        startedAt,
-        finishedAt,
-        durationMs
-      };
-    }
+    const attachMeta = <T extends Record<string, any>>(obj: T) => ({
+      ...obj,
+      timings,
+      dagContext,
+      traceInsights,
+      nodeError,
+      isError: obj.isError || Boolean(nodeData.status === 'error' || nodeData.error)
+    });
 
-    switch (id) {
+    const getRawStatus = () => {
+      if (nodeData.status === 'aborted') {
+        return {
+          isRunning: false,
+          isActive: false,
+          isError: true,
+          isAborted: true,
+          isDone: false,
+          statusLabel: 'ABORTED',
+          metricLabel: nodeData.error ? 'Aborted ⏹' : 'Aborted',
+          evaluator: evaluator || 'Abort Evaluator',
+          healingStep: null,
+          telemetryInsight: 'Execution aborted by user',
+          color: '#e3b341',
+          startedAt,
+          finishedAt,
+          durationMs
+        };
+      }
+
+      switch (id) {
       case 'init_end': {
         const isRunning = isThisActive;
         let metricLabel = 'Auto Detect';
@@ -868,7 +882,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           statusLabel: 'IDLE', metricLabel: '', evaluator: null, healingStep: null, telemetryInsight: null, color: '#8b949e',
           startedAt: null, finishedAt: null, durationMs: null
         };
-    }
+      }
+    };
+
+    return attachMeta(getRawStatus());
   };
 
   if (isMinimized) {
@@ -1578,26 +1595,35 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </span>
             </div>
 
-            {/* Live Evaluator & Healing Telemetry Insight */}
-            <div style={{ background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: '#8b949e', fontWeight: 700 }}>EVALUATOR DETERMINED:</span>
-                <span style={{ color: '#58a6ff', fontWeight: 800 }}>{liveStatus.evaluator || 'Standard Gutter Evaluator'}</span>
+            {/* Detailed Timing Breakdown if available */}
+            {liveStatus.timings && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', fontSize: '8.5px', background: 'rgba(0,0,0,0.3)', padding: '5px 7px', borderRadius: '5px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div><span style={{ color: '#8b949e', fontSize: '7.5px' }}>TOTAL</span><div style={{ color: '#58a6ff', fontWeight: 800 }}>{liveStatus.timings.duration_ms}ms</div></div>
+                <div><span style={{ color: '#8b949e', fontSize: '7.5px' }}>PRECHECK</span><div style={{ color: '#a371f7', fontWeight: 800 }}>{liveStatus.timings.precheck_ms}ms</div></div>
+                <div><span style={{ color: '#8b949e', fontSize: '7.5px' }}>ACTION</span><div style={{ color: '#00ff9d', fontWeight: 800 }}>{liveStatus.timings.action_ms}ms</div></div>
+                <div><span style={{ color: '#8b949e', fontSize: '7.5px' }}>HEALING</span><div style={{ color: liveStatus.timings.healing_ms > 0 ? '#ffa657' : '#8b949e', fontWeight: 800 }}>{liveStatus.timings.healing_ms}ms</div></div>
               </div>
-              {liveStatus.healingStep && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: '#ffa657', fontWeight: 700 }}>HEALING ACTION:</span>
-                  <span style={{ color: '#ffa657', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <RefreshCw size={8} className="spin" /> {liveStatus.healingStep}
-                  </span>
+            )}
+
+            {/* Unresolved Pipeline Issue - Trace Insights & Remediation */}
+            {(liveStatus.traceInsights || liveStatus.dagContext) && (
+              <div style={{ background: 'rgba(248, 81, 73, 0.12)', border: '1px solid #f8514988', borderRadius: '6px', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '5px', fontSize: '9px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#ff7b72', fontWeight: 800 }}>
+                    <AlertTriangle size={11} color="#ff7b72" />
+                    <span>UNRESOLVED TRACE INSIGHTS</span>
+                  </div>
+                  {liveStatus.dagContext && (
+                    <span style={{ color: '#8b949e', fontSize: '8px' }}>Disp: {liveStatus.dagContext.display_id ?? 'default'}</span>
+                  )}
                 </div>
-              )}
-              {liveStatus.telemetryInsight && (
-                <div style={{ color: '#c9d1d9', fontSize: '9px', fontStyle: 'italic', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '3px' }}>
-                  💡 {liveStatus.telemetryInsight}
-                </div>
-              )}
-            </div>
+                {liveStatus.traceInsights?.slice(0, 3).map((insight: string, idx: number) => (
+                  <div key={idx} style={{ color: insight.startsWith('adb') ? '#58a6ff' : '#f0f6fc', fontFamily: 'var(--font-mono, monospace)', fontSize: '8.5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    • {insight}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
@@ -1985,10 +2011,112 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                       </div>
                     </div>
                   </div>
-                  {liveStatus.telemetryInsight && (
-                    <div style={{ background: 'rgba(88, 166, 255, 0.08)', border: '1px solid rgba(88, 166, 255, 0.2)', padding: '6px 8px', borderRadius: '5px', fontSize: '10px', color: '#e6edf3' }}>
-                      <span style={{ fontWeight: 800, color: '#58a6ff', marginRight: '5px' }}>TELEMETRY INSIGHT:</span>
-                      <span>{liveStatus.telemetryInsight}</span>
+                  {/* Detailed Timings Breakdown */}
+                  {liveStatus.timings && (
+                    <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ fontSize: '8.5px', color: '#58a6ff', fontWeight: 800, letterSpacing: '0.4px' }}>DETAILED EVENT TIMINGS BREAKDOWN</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', fontSize: '9.5px' }}>
+                        <div>
+                          <div style={{ color: '#8b949e', fontSize: '8px' }}>TOTAL</div>
+                          <div style={{ fontWeight: 800, color: '#58a6ff' }}>{liveStatus.timings.duration_ms}ms</div>
+                        </div>
+                        <div>
+                          <div style={{ color: '#8b949e', fontSize: '8px' }}>PRECHECK</div>
+                          <div style={{ fontWeight: 800, color: '#a371f7' }}>{liveStatus.timings.precheck_ms}ms</div>
+                        </div>
+                        <div>
+                          <div style={{ color: '#8b949e', fontSize: '8px' }}>NODE ACTION</div>
+                          <div style={{ fontWeight: 800, color: '#00ff9d' }}>{liveStatus.timings.action_ms}ms</div>
+                        </div>
+                        <div>
+                          <div style={{ color: '#8b949e', fontSize: '8px' }}>AUTO-HEALING</div>
+                          <div style={{ fontWeight: 800, color: liveStatus.timings.healing_ms > 0 ? '#ffa657' : '#8b949e' }}>{liveStatus.timings.healing_ms}ms</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* UNRESOLVED PIPELINE ISSUE - TRACE & DIAGNOSTICS CARD */}
+                  {(liveStatus.traceInsights || liveStatus.dagContext) && (
+                    <div style={{
+                      background: 'rgba(248, 81, 73, 0.12)',
+                      border: '1.5px solid #f85149',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ff7b72', fontWeight: 800, fontSize: '10.5px' }}>
+                          <AlertTriangle size={14} color="#ff7b72" />
+                          <span>UNRESOLVED PIPELINE ISSUE — TRACE & DIAGNOSTICS</span>
+                        </div>
+                        {liveStatus.dagContext && (
+                          <span style={{ fontSize: '8.5px', color: '#8b949e', background: '#0d1117', padding: '2px 6px', borderRadius: '4px', border: '1px solid #30363d' }}>
+                            Display: {liveStatus.dagContext.display_id ?? 'default'} • Serial: {liveStatus.dagContext.serial || 'active'}
+                          </span>
+                        )}
+                      </div>
+
+                      {liveStatus.traceInsights && liveStatus.traceInsights.length > 0 && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <span style={{ fontSize: '9px', color: '#8b949e', fontWeight: 700 }}>KEY TRACE INSIGHTS & REMEDIATION COMMANDS:</span>
+                          {liveStatus.traceInsights.map((insight: string, idx: number) => {
+                            const isCmd = insight.startsWith('adb');
+                            return (
+                              <div key={idx} style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: '#0d1117',
+                                border: '1px solid #30363d',
+                                borderRadius: '4px',
+                                padding: '4px 8px',
+                                fontSize: '9.5px',
+                                fontFamily: 'var(--font-mono, monospace)'
+                              }}>
+                                <span style={{ color: isCmd ? '#58a6ff' : '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '85%' }}>
+                                  {insight}
+                                </span>
+                                {isCmd && (
+                                  <button
+                                    type="button"
+                                    onClick={() => navigator.clipboard.writeText(insight)}
+                                    style={{
+                                      background: '#21262d', border: '1px solid #30363d', color: '#8b949e',
+                                      borderRadius: '3px', padding: '1px 6px', fontSize: '8.5px', cursor: 'pointer', fontWeight: 700
+                                    }}
+                                    title="Copy command to clipboard"
+                                  >
+                                    Copy
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {liveStatus.dagContext && (
+                        <details style={{ fontSize: '9px', color: '#8b949e' }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: 700, color: '#58a6ff' }}>View Complete DAG Context Detail</summary>
+                          <pre style={{
+                            background: '#0d1117',
+                            padding: '6px 8px',
+                            borderRadius: '4px',
+                            marginTop: '4px',
+                            overflowX: 'auto',
+                            maxHeight: '140px',
+                            color: '#c9d1d9',
+                            border: '1px solid #30363d',
+                            fontSize: '9px',
+                            fontFamily: 'var(--font-mono, monospace)'
+                          }}>
+                            {JSON.stringify(liveStatus.dagContext, null, 2)}
+                          </pre>
+                        </details>
+                      )}
                     </div>
                   )}
                 </div>
