@@ -389,7 +389,8 @@ function AppContent() {
         api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry'), api('/api/device/info'), api('/api/device/alignment')
       ]);
       setLatencyMs(Math.round(performance.now() - t0));
-      setBackendConnected(true);
+      const isConnected = projRes.ok || docRes.ok || framesRes.ok || cfgRes.ok || telRes.ok;
+      setBackendConnected(isConnected);
       if (projRes.ok) {
         try {
           const pList = await projRes.json();

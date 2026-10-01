@@ -233,12 +233,44 @@ app.include_router(kiosk.router)
 
 if __name__ == "__main__":
     import uvicorn
-    try:
-        # timeout_graceful_shutdown=1 ensures instant restart without hanging on WebSockets
-        uvicorn.run("main:app", host=config.SERVER_HOST, port=config.SERVER_PORT, reload=True, timeout_graceful_shutdown=1)
-    except OSError as e:
-        if getattr(e, 'winerror', None) in (10048, 10013) or getattr(e, 'errno', None) in (10048, 10013):
-            print(f"[ERROR] Port {config.SERVER_PORT} is in use or blocked by access permissions.")
-            sys.exit(1)
-        else:
-            raise
+    import time
+    import subprocess
+
+    is_debug = sys.gettrace() is not None or "debugpy" in sys.modules
+    # Disable uvicorn reloader subprocess when under debugger to prevent orphaned processes during VS Code restart
+    reload_enabled = not is_debug
+
+    uvicorn_kwargs = {
+        "host": config.SERVER_HOST,
+        "port": config.SERVER_PORT,
+        "timeout_graceful_shutdown": 1,
+    }
+    if reload_enabled:
+        uvicorn_kwargs["reload"] = True
+        uvicorn_kwargs["reload_dirs"] = [str(config.SERVER_DIR)]
+        uvicorn_kwargs["reload_excludes"] = ["*/storage/*", "storage/*", "storage/**", "*.json", "*.log", "__pycache__"]
+
+    max_retries = 4
+    for attempt in range(max_retries):
+        try:
+            uvicorn.run("main:app", **uvicorn_kwargs)
+            break
+        except OSError as e:
+            is_port_in_use = getattr(e, "winerror", None) in (10048, 10013) or getattr(e, "errno", None) in (10048, 10013)
+            if is_port_in_use and attempt < max_retries - 1:
+                print(f"[RETRY] Port {config.SERVER_PORT} busy or releasing during restart. Retrying in 1s (attempt {attempt + 1}/{max_retries})...")
+                try:
+                    subprocess.run(
+                        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(config.PROJECT_ROOT / "scripts" / "free_ports.ps1"), "-Ports", str(config.SERVER_PORT)],
+                        timeout=4,
+                        capture_output=True
+                    )
+                except Exception:
+                    pass
+                time.sleep(1)
+            else:
+                if is_port_in_use:
+                    print(f"[ERROR] Port {config.SERVER_PORT} is in use or blocked by access permissions.")
+                    sys.exit(1)
+                else:
+                    raise
