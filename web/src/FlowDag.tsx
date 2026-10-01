@@ -647,6 +647,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     const finishedAt = nodeData.finished_at || null;
     const durationMs = typeof nodeData.duration_ms === 'number' ? nodeData.duration_ms : null;
     const isThisActive = activeRunningId === id;
+    const healingStep = nodeData.healing_step || null;
+    const evaluator = nodeData.evaluator || null;
+    const telemetryInsight = nodeData.telemetry_insight || null;
 
     if (nodeData.status === 'aborted') {
       return {
@@ -657,6 +660,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         isDone: false,
         statusLabel: 'ABORTED',
         metricLabel: nodeData.error ? 'Aborted ⏹' : 'Aborted',
+        evaluator: evaluator || 'Abort Evaluator',
+        healingStep: null,
+        telemetryInsight: 'Execution aborted by user',
         color: '#e3b341',
         startedAt,
         finishedAt,
@@ -667,14 +673,32 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     switch (id) {
       case 'init_end': {
         const isRunning = isThisActive;
+        let metricLabel = 'Auto Detect';
+        if (isNode1Calibrated && node1TotalLines > 0) {
+          metricLabel = `${node1TotalLines.toLocaleString()} Lines`;
+        } else if (healingStep) {
+          metricLabel = healingStep;
+        } else if (isNode1Error) {
+          metricLabel = evaluator || 'Refreshing Capture';
+        } else if (isRunning) {
+          metricLabel = healingStep || 'Refreshing Capture';
+        }
+
+        const statusLabel = isRunning
+          ? (healingStep ? 'HEALING' : 'CALIBRATING')
+          : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? (healingStep ? 'HEALING' : 'EVALUATED') : 'NOT RUN'));
+
         return {
           isRunning,
           isActive: isRunning,
-          isError: isNode1Error,
+          isError: isNode1Error && !healingStep,
           isDone: isNode1Calibrated,
-          statusLabel: isRunning ? 'CALIBRATING' : (isNode1Calibrated ? 'CALIBRATED' : (isNode1Error ? 'FAILED' : 'NOT RUN')),
-          metricLabel: isNode1Calibrated && node1TotalLines > 0 ? `${node1TotalLines.toLocaleString()} Lines` : (isNode1Error ? 'Page Stuck' : 'Auto Detect'),
-          color: isNode1Error ? '#ff7b72' : (isNode1Calibrated ? '#00ff9d' : '#58a6ff'),
+          statusLabel,
+          metricLabel,
+          evaluator: evaluator || 'EOF Gutter Evaluator',
+          healingStep: healingStep || (isNode1Error ? 'Refreshing page capture' : null),
+          telemetryInsight: telemetryInsight || (isNode1Calibrated ? `EOF calibrated: ${node1TotalLines.toLocaleString()} lines` : (isNode1Error ? 'Refreshing page capture & retrying EOF jump' : 'Determining total lines via Ctrl+End')),
+          color: isNode1Error ? (healingStep ? '#ffa657' : '#ff7b72') : (isNode1Calibrated ? '#00ff9d' : '#58a6ff'),
           startedAt,
           finishedAt,
           durationMs
@@ -682,14 +706,32 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'reset_home': {
         const isRunning = isThisActive;
+        let metricLabel = 'Line 1 Check';
+        if (isNode2Verified) {
+          metricLabel = 'Ln 1 Verified';
+        } else if (healingStep) {
+          metricLabel = healingStep;
+        } else if (isNode2Error) {
+          metricLabel = evaluator || 'Refreshing Capture';
+        } else if (isRunning) {
+          metricLabel = healingStep || 'Verifying Ln 1';
+        }
+
+        const statusLabel = isRunning
+          ? (healingStep ? 'HEALING' : 'VERIFYING')
+          : (isNode2Verified ? 'VERIFIED' : (isNode2Error ? (healingStep ? 'HEALING' : 'EVALUATED') : 'READY'));
+
         return {
           isRunning,
           isActive: isRunning,
-          isError: isNode2Error,
+          isError: isNode2Error && !healingStep,
           isDone: isNode2Verified,
-          statusLabel: isRunning ? 'VERIFYING' : (isNode2Verified ? 'VERIFIED' : (isNode2Error ? 'UNVERIFIED' : 'READY')),
-          metricLabel: isNode2Verified ? 'Ln 1 at Top' : (isNode2Error ? 'Ln 1 Missing' : 'Line 1 Check'),
-          color: isNode2Error ? '#ff7b72' : (isNode2Verified ? '#00ff9d' : '#a371f7'),
+          statusLabel,
+          metricLabel,
+          evaluator: evaluator || 'Line 1 Gutter Evaluator',
+          healingStep: healingStep || (isNode2Error ? 'Refreshing page capture' : null),
+          telemetryInsight: telemetryInsight || (isNode2Verified ? 'Line 1 verified at top gutter' : (isNode2Error ? 'Top line unverified • refreshing capture' : 'Verifying line 1 position after Ctrl+Home')),
+          color: isNode2Error ? (healingStep ? '#ffa657' : '#ff7b72') : (isNode2Verified ? '#00ff9d' : '#a371f7'),
           startedAt,
           finishedAt,
           durationMs
@@ -697,14 +739,24 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'frame_acquire': {
         const isRunning = isThisActive;
+        let metricLabel = isNode3Done
+          ? (node3.duration_ms ? `Page ${node3.page || currentPage} (${node3.duration_ms}ms)` : `Page ${node3.page || currentPage}`)
+          : (healingStep || (isRunning ? 'Refreshing Capture' : 'Frame Grab'));
+        if (isNode3Error) {
+          metricLabel = healingStep || evaluator || 'Capture Retry';
+        }
+
         return {
           isRunning,
           isActive: isRunning,
-          isError: isNode3Error,
+          isError: isNode3Error && !healingStep,
           isDone: isNode3Done,
-          statusLabel: isRunning ? 'CAPTURING' : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY')),
-          metricLabel: isNode3Done ? (node3.duration_ms ? `Page ${node3.page || currentPage} (${node3.duration_ms}ms)` : `Page ${node3.page || currentPage}`) : 'Frame Grab',
-          color: isNode3Error ? '#ff7b72' : (isNode3Done ? '#00ff9d' : '#00ff9d'),
+          statusLabel: isRunning ? (healingStep ? 'HEALING' : 'CAPTURING') : (isNode3Error ? 'FAILED' : (isNode3Done ? 'CAPTURED' : 'READY')),
+          metricLabel,
+          evaluator: evaluator || 'Display Frame Evaluator',
+          healingStep: healingStep || (isNode3Error ? 'Refreshing page capture' : null),
+          telemetryInsight: telemetryInsight || (isNode3Done ? `Page ${node3.page || currentPage} frame acquired` : 'Capturing external display frame'),
+          color: isNode3Error ? (healingStep ? '#ffa657' : '#ff7b72') : (isNode3Done ? '#00ff9d' : '#00ff9d'),
           startedAt,
           finishedAt,
           durationMs
@@ -712,14 +764,20 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'local_ai_ocr': {
         const isRunning = isThisActive;
+        let metricLabel = node3b.lines_count ? `${node3b.lines_count} lines` : (healingStep || (isRunning ? 'Vision Extract' : 'MiniCPM-V'));
+        if (isNode3bError) metricLabel = healingStep || evaluator || 'Vision Retry';
+
         return {
           isRunning,
           isActive: isRunning,
-          isError: isNode3bError,
+          isError: isNode3bError && !healingStep,
           isDone: isNode3bDone,
           statusLabel: isRunning ? 'EXTRACTING' : (isNode3bError ? 'FAILED' : (isNode3bDone ? 'PARSED' : 'READY')),
-          metricLabel: node3b.lines_count ? `${node3b.lines_count} lines` : 'MiniCPM-V',
-          color: isNode3bError ? '#ff7b72' : (isNode3bDone ? '#00ff9d' : '#388bfd'),
+          metricLabel,
+          evaluator: evaluator || 'Vision Model Evaluator',
+          healingStep,
+          telemetryInsight: telemetryInsight || (isNode3bDone ? `Extracted ${node3b.lines_count} lines verbatim` : 'Multimodal code extraction via MiniCPM-V'),
+          color: isNode3bError ? (healingStep ? '#ffa657' : '#ff7b72') : (isNode3bDone ? '#00ff9d' : '#388bfd'),
           startedAt,
           finishedAt,
           durationMs
@@ -727,14 +785,20 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'frame_ocr': {
         const isRunning = isThisActive;
+        let metricLabel = node4.bottom_line ? `Ln ${node4.top_line || 1}→${node4.bottom_line}` : (healingStep || (isRunning ? 'Gutter OCR' : 'Gutter OCR'));
+        if (isNode4Error) metricLabel = healingStep || evaluator || 'OCR Retry';
+
         return {
           isRunning,
           isActive: isRunning,
-          isError: isNode4Error,
+          isError: isNode4Error && !healingStep,
           isDone: isNode4Done,
           statusLabel: isRunning ? 'READING' : (isNode4Error ? 'FAILED' : (isNode4Done ? 'PARSED' : 'READY')),
-          metricLabel: node4.bottom_line ? `Ln ${node4.top_line || 1}→${node4.bottom_line}` : 'Gutter OCR',
-          color: isNode4Error ? '#ff7b72' : (isNode4Done ? '#00ff9d' : '#8957e5'),
+          metricLabel,
+          evaluator: evaluator || 'RapidOCR Gutter Evaluator',
+          healingStep,
+          telemetryInsight: telemetryInsight || (isNode4Done ? `Gutter bounds: Ln ${node4.top_line || 1}→${node4.bottom_line}` : 'Extracting line numbers from gutter column'),
+          color: isNode4Error ? (healingStep ? '#ffa657' : '#ff7b72') : (isNode4Done ? '#00ff9d' : '#8957e5'),
           startedAt,
           finishedAt,
           durationMs
@@ -742,13 +806,17 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'arrow_down': {
         const isRunning = isThisActive;
+        const metricLabel = healingStep || `Target Ln ${nextTargetTop}`;
         return {
           isRunning,
           isActive: isRunning,
           isError: false,
           isDone: isNode5Done,
-          statusLabel: isRunning ? 'STEPPING' : (isNode5Done ? 'STEPPED' : 'READY'),
-          metricLabel: `Target Ln ${nextTargetTop}`,
+          statusLabel: isRunning ? (healingStep ? 'PACING' : 'STEPPING') : (isNode5Done ? 'STEPPED' : 'READY'),
+          metricLabel,
+          evaluator: evaluator || 'Pacing & Alignment Evaluator',
+          healingStep,
+          telemetryInsight: telemetryInsight || `Viewport stepped down to target Line ${nextTargetTop}`,
           color: '#ffa657',
           startedAt,
           finishedAt,
@@ -757,14 +825,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       }
       case 'verification_trigger': {
         const isRunning = isThisActive;
+        const metricLabel = isRunning ? (healingStep || 'Evaluating...') : (isTriggerFired ? '100% Captured' : (triggerDecision.prevented ? (healingStep || 'Blocked ⛔') : `Ln ${nextTargetTop}`));
         return {
           isRunning,
           isActive: isRunning,
-          isError: triggerDecision.prevented,
+          isError: triggerDecision.prevented && !healingStep,
           isDone: isTriggerFired,
           statusLabel: isRunning ? 'VERIFYING' : (isTriggerFired ? 'FIRED' : (triggerDecision.prevented ? 'PREVENTED' : 'PENDING')),
-          metricLabel: isRunning ? 'Evaluating...' : (isTriggerFired ? '100% Captured' : (triggerDecision.prevented ? 'Blocked ⛔' : `Ln ${nextTargetTop}`)),
-          color: isRunning ? '#ffa657' : (isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? '#ff7b72' : '#58a6ff')),
+          metricLabel,
+          evaluator: evaluator || 'Completion Qualifier Evaluator',
+          healingStep: healingStep || (triggerDecision.prevented ? 'Auto-fix keyboard & unblock' : null),
+          telemetryInsight: telemetryInsight || (isTriggerFired ? 'All document lines captured & verified' : (triggerDecision.prevented ? (triggerDecision.reasons?.[0] || 'Loop qualifiers prevented transition') : `Target line ${nextTargetTop} ready`)),
+          color: isRunning ? '#ffa657' : (isTriggerFired ? '#00ff9d' : (triggerDecision.prevented ? (healingStep ? '#ffa657' : '#ff7b72') : '#58a6ff')),
           startedAt,
           finishedAt,
           durationMs
@@ -773,13 +845,17 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       case 'document_assemble': {
         const isRunning = isThisActive;
         const isComplete = Boolean(node8.is_complete);
+        const metricLabel = isComplete ? '100% Verified' : (node8.total_captured_lines ? `${node8.total_captured_lines} lines` : (healingStep || 'Reconstruct'));
         return {
           isRunning,
           isActive: isRunning,
-          isError: Boolean(node8.error),
+          isError: Boolean(node8.error) && !healingStep,
           isDone: isNode8Done,
           statusLabel: isRunning ? 'ASSEMBLING' : (isComplete ? 'COMPLETE' : (isNode8Done ? 'ASSEMBLED' : 'READY')),
-          metricLabel: isComplete ? '100% Verified' : (node8.total_captured_lines ? `${node8.total_captured_lines} lines` : 'Reconstruct'),
+          metricLabel,
+          evaluator: evaluator || 'Document Integrity Evaluator',
+          healingStep,
+          telemetryInsight: telemetryInsight || (isComplete ? 'Complete markdown file assembled & saved' : `${node8.total_captured_lines || 0} lines stitched`),
           color: isComplete ? '#00ff9d' : (isNode8Done ? '#388bfd' : '#8b949e'),
           startedAt,
           finishedAt,
@@ -789,7 +865,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       default:
         return {
           isRunning: false, isActive: false, isError: false, isDone: false,
-          statusLabel: 'IDLE', metricLabel: '', color: '#8b949e',
+          statusLabel: 'IDLE', metricLabel: '', evaluator: null, healingStep: null, telemetryInsight: null, color: '#8b949e',
           startedAt: null, finishedAt: null, durationMs: null
         };
     }
@@ -963,7 +1039,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           transition: 'all 0.15s ease',
           boxSizing: 'border-box'
         }}
-        title={`Node ${node.step}: ${node.fullName}\n• Double-click to reveal dynamic details popover\n• Single-click to select`}
+        title={`Node ${node.step}: ${node.fullName}\n• Evaluator: ${status.evaluator || 'Standard Gutter'}\n${status.healingStep ? `• Healing Action: ${status.healingStep}\n` : ''}${status.telemetryInsight ? `• Insight: ${status.telemetryInsight}\n` : ''}• Double-click to reveal dynamic details popover\n• Single-click to select`}
       >
         {/* Top: Step badge + Short name + Status indicator */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '3px' }}>
@@ -985,9 +1061,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           )}
         </div>
 
-        {/* Middle: Metric badge */}
-        <div style={{ fontSize: '8.5px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {status.metricLabel || status.statusLabel}
+        {/* Middle: Metric badge with healing indicator */}
+        <div style={{ fontSize: '8.5px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '3px' }}>
+          {status.healingStep && (status.isRunning || status.isError) && <RefreshCw size={7.5} className="spin" style={{ flexShrink: 0 }} />}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{status.metricLabel || status.statusLabel}</span>
         </div>
 
         {/* Bottom: Timing */}
@@ -1501,6 +1578,27 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </span>
             </div>
 
+            {/* Live Evaluator & Healing Telemetry Insight */}
+            <div style={{ background: 'rgba(0,0,0,0.45)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '6px', padding: '6px 10px', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '9.5px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#8b949e', fontWeight: 700 }}>EVALUATOR DETERMINED:</span>
+                <span style={{ color: '#58a6ff', fontWeight: 800 }}>{liveStatus.evaluator || 'Standard Gutter Evaluator'}</span>
+              </div>
+              {liveStatus.healingStep && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#ffa657', fontWeight: 700 }}>HEALING ACTION:</span>
+                  <span style={{ color: '#ffa657', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={8} className="spin" /> {liveStatus.healingStep}
+                  </span>
+                </div>
+              )}
+              {liveStatus.telemetryInsight && (
+                <div style={{ color: '#c9d1d9', fontSize: '9px', fontStyle: 'italic', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '3px' }}>
+                  💡 {liveStatus.telemetryInsight}
+                </div>
+              )}
+            </div>
+
             {/* Action Buttons */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -1871,6 +1969,28 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {/* General Evaluator & Healing Telemetry Cards */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '10.5px' }}>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>GENERAL EVALUATOR</div>
+                      <div style={{ fontWeight: 800, color: '#58a6ff', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {liveStatus.evaluator || 'Standard Gutter Evaluator'}
+                      </div>
+                    </div>
+                    <div style={{ background: '#161b22', padding: '6px 8px', borderRadius: '5px', border: '1px solid #30363d' }}>
+                      <div style={{ fontSize: '8.5px', color: '#8b949e', fontWeight: 700 }}>HEALING ACTION</div>
+                      <div style={{ fontWeight: 800, color: liveStatus.healingStep ? '#ffa657' : '#00ff9d', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {liveStatus.healingStep ? <><RefreshCw size={9} className="spin" /> {liveStatus.healingStep}</> : '✔ Optimal / Ready'}
+                      </div>
+                    </div>
+                  </div>
+                  {liveStatus.telemetryInsight && (
+                    <div style={{ background: 'rgba(88, 166, 255, 0.08)', border: '1px solid rgba(88, 166, 255, 0.2)', padding: '6px 8px', borderRadius: '5px', fontSize: '10px', color: '#e6edf3' }}>
+                      <span style={{ fontWeight: 800, color: '#58a6ff', marginRight: '5px' }}>TELEMETRY INSIGHT:</span>
+                      <span>{liveStatus.telemetryInsight}</span>
+                    </div>
+                  )}
                 </div>
               );
             })()}
