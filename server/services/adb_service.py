@@ -700,19 +700,14 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Ensure soft keyboard is closed and dispatch navigation command directly
+        # Ensure soft keyboard is closed and dispatch navigation command directly with duration flag
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             "am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1",
-            f"input -d {target_d} keycombination {key1} {key2}"
         ]
-
-        if key2 == 123:
-            # EOF (Ctrl+End): Fast momentum fling downward ensures EOF is reached in Chromium/WebView
-            base_cmds.append(f"for i in 1 2 3 4 5 6 7 8; do input -d {target_d} swipe 500 920 500 220 35; done")
-        elif key2 == 122:
-            # HOME (Ctrl+Home): Fast momentum fling upward ensures Line 1 is reached
-            base_cmds.append(f"for i in 1 2 3 4 5 6 7 8; do input -d {target_d} swipe 500 220 500 920 35; done")
+        if target_d > 0:
+            base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
+        base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
         await run_adb_shell("; ".join(base_cmds), ser, timeout=8.0)
 
