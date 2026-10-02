@@ -587,23 +587,17 @@ class Line1StuckClassifier(BaseClassifier):
     async def fix(self, context: ClassifierContext) -> FixResult:
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
-        coords = context.target_coordinates or (500, 500)
-        # 1. Tap center of editor to focus
-        await _tap_coords(serial, disp_id, coords, delay=0.2)
-        # 2. Ensure keyboard closed
         await ensure_adb_keyboard_closed(serial)
-        # 3. Send Ctrl+End keycombination
-        from services.adb_service import send_hid_keycombination
-        await send_hid_keycombination(113, 123, serial)
-        await asyncio.sleep(0.8)
+        await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 950 960 150 40; done", serial)
+        await asyncio.sleep(0.6)
 
         re_detect = await _recheck_classifier(self, serial, disp_id)
         success = not (re_detect and re_detect.issue_detected)
         return FixResult(
             classifier_id=self.id,
             success=success,
-            message="Successfully navigated away from Line 1" if success else "Re-attempted EOF navigation; editor still displays Line 1",
-            actions_taken=[f"Focused editor at {coords} on display {disp_id} and re-sent Ctrl+End"],
+            message="Successfully navigated away from Line 1 using screen inertial flings" if success else "Re-attempted EOF navigation; editor still displays Line 1",
+            actions_taken=[f"Dispatched screen inertial flings on display {disp_id}"],
             metadata={"recheck": re_detect.to_dict() if re_detect else None}
         )
 

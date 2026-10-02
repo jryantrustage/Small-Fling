@@ -23,6 +23,10 @@ router = APIRouter(tags=["Orchestration & Telemetry"])
 
 from services.ui_automator_service import enable_edit_mode, select_dark_mode
 from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
+try:
+    from server.alignment_engine import detect_teams_markdown_alignment
+except ImportError:
+    from alignment_engine import detect_teams_markdown_alignment
 
 try:
     from server.classifiers import (
@@ -783,13 +787,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
         if target_key == "init_end":
             node.update({
                 "evaluator": "EOF Navigation Evaluator",
-                "healing_step": "Dispatching Ctrl+End",
-                "telemetry_insight": "Sending Ctrl+End keystroke to jump to document end..."
+                "healing_step": "Navigating to EOF via screen gesture",
+                "telemetry_insight": "Navigating to document end using screen inertial gestures..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
             await emit_dag_telemetry_event(
                 category="PACER",
-                message=f"DAG 1 • [Keystroke] Dispatching HID Ctrl+End ({cfg.get('key1', 113)}+{cfg.get('key2', 123)}) to jump to document end...",
+                message=f"DAG 1 • [Screen Actuator] Performing screen inertial flings on display {disp_id} to jump to document end...",
                 dag="initialize",
                 node_id="init_end",
                 serial=active_serial
@@ -798,9 +802,24 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Silently ensure virtual keyboard is closed without tapping or resizing
             await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
-            # 1. Send Ctrl+End directly without touching or tapping screen
-            await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
-            settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
+            # Pre-check and ensure Edit Mode and Dark Mode before navigating
+            initial_snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+            if initial_snap:
+                try:
+                    align_chk = detect_teams_markdown_alignment(initial_snap)
+                    boxes = align_chk.get("boxes", {})
+                    if boxes.get("edit_mode", {}).get("passed") is False:
+                        await enable_edit_mode(active_serial, disp_id)
+                        await asyncio.sleep(0.3)
+                    if boxes.get("dark_mode", {}).get("passed") is False:
+                        await select_dark_mode(active_serial, disp_id)
+                        await asyncio.sleep(0.3)
+                except Exception as chk_err:
+                    print(f"[init_end] Pre-check edit/dark mode error: {chk_err}")
+
+            # 1. Dispatch screen inertial touch flings to navigate to document end
+            await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 950 960 150 40; done", active_serial)
+            settle_s = float(cfg.get("settle_delay_ms", 400)) / 1000.0
             await asyncio.sleep(settle_s)
 
             # 2. Fetch current density/DPI from the phone right before running OCR to normalize gutter search bounding boxes
@@ -891,17 +910,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 except Exception as ce:
                     print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
 
-            # If initial attempt left page on Line 1, dynamically adjust on the fly: refocus & retry Ctrl+End
+            # If initial attempt left page on Line 1, dynamically adjust on the fly: refocus & retry screen flings
             if is_stuck_on_line_1:
                 node.update({
                     "evaluator": "Line 1 Stuck Evaluator",
                     "healing_step": "Refreshing page capture",
-                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Retrying EOF jump via Ctrl+End..."
+                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Retrying EOF jump via screen gestures..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 await emit_dag_telemetry_event(
                     category="SYSTEM",
-                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Retrying Ctrl+End jump...",
+                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Retrying screen inertial fling...",
                     dag="initialize",
                     node_id="init_end",
                     serial=active_serial
@@ -909,7 +928,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 try:
                     await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                     await asyncio.sleep(0.1)
-                    await send_hid_keycombination(113, 123, active_serial)
+                    await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 950 960 150 40; done", active_serial)
                     await asyncio.sleep(0.6)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
@@ -1119,7 +1138,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "node_id": "init_end",
                 "total_lines": total_lines,
                 "top_line": top_line,
-                "message": f"Successfully detected {total_lines} total lines at EOF via Ctrl+End ✔"
+                "message": f"Successfully detected {total_lines} total lines at EOF via screen inertial gesture ✔"
             }
 
 
@@ -1131,13 +1150,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             node.update({
                 "evaluator": "Line 1 Gutter Evaluator",
-                "healing_step": "Refreshing page capture",
-                "telemetry_insight": "Dispatching Ctrl+Home to return to Line 1..."
+                "healing_step": "Navigating to Line 1 via screen gesture",
+                "telemetry_insight": "Navigating to Line 1 using screen reverse gestures..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
             await emit_dag_telemetry_event(
                 category="PACER",
-                message=f"DAG 1 • [Keystroke] Dispatching HID Ctrl+Home ({cfg.get('key1', 113)}+{cfg.get('key2', 122)}) to return to Line 1...",
+                message=f"DAG 1 • [Screen Actuator] Dispatching reverse screen flings on display {disp_id} to return to Line 1...",
                 dag="initialize",
                 node_id="reset_home",
                 serial=active_serial
@@ -1145,12 +1164,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Silently ensure soft keyboard is suppressed before sending Ctrl+Home
+                # Silently ensure soft keyboard is suppressed before reverse flings
                 await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                 await asyncio.sleep(0.1)
 
-                # Send Ctrl+Home (keycode 113 122) directly to external display keyboard
-                await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
+                # Send reverse screen touch flings (starting below toolbar y=300 down to y=950)
+                await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 300 960 950 40; done", active_serial)
+                await asyncio.sleep(0.4)
 
                 # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
                 dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
@@ -1282,14 +1302,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": True, "first_line": detected_first, "telemetry": state.latest_telemetry})
             await emit_dag_telemetry_event(
                 category="SYSTEM",
-                message=f"DAG 1 • Line 1 verified at top gutter via Ctrl+Home ✔. Initialization complete.",
+                message=f"DAG 1 • Line 1 verified at top gutter via screen reverse gesture ✔. Initialization complete.",
                 dag="initialize",
                 node_id="reset_home",
                 level="success",
                 data={"first_line": 1, "verified": True},
                 serial=active_serial
             )
-            return {"status": "success", "node_id": "reset_home", "verified": True, "first_line": detected_first, "message": "Line 1 verified at top gutter via Ctrl+Home ✔"}
+            return {"status": "success", "node_id": "reset_home", "verified": True, "first_line": detected_first, "message": "Line 1 verified at top gutter via screen reverse gesture ✔"}
 
         elif target_key == "frame_acquire":
             t_cap_start = time.time()
