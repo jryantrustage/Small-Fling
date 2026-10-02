@@ -21,7 +21,7 @@ import services.ocr_service as ocr_svc
 
 router = APIRouter(tags=["Orchestration & Telemetry"])
 
-from services.ui_automator_service import enable_edit_mode, select_dark_mode
+from services.ui_automator_service import enable_edit_mode, select_dark_mode, get_display_dimensions
 from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
 try:
     from server.alignment_engine import detect_teams_markdown_alignment
@@ -802,24 +802,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Silently ensure virtual keyboard is closed without tapping or resizing
             await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
-            # Pre-check and ensure Edit Mode and Dark Mode before navigating
-            initial_snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-            if initial_snap:
-                try:
-                    align_chk = detect_teams_markdown_alignment(initial_snap)
-                    boxes = align_chk.get("boxes", {})
-                    if boxes.get("edit_mode", {}).get("passed") is False:
-                        await enable_edit_mode(active_serial, disp_id)
-                        await asyncio.sleep(0.3)
-                    if boxes.get("dark_mode", {}).get("passed") is False:
-                        await select_dark_mode(active_serial, disp_id)
-                        await asyncio.sleep(0.3)
-                except Exception as chk_err:
-                    print(f"[init_end] Pre-check edit/dark mode error: {chk_err}")
-
-            # 1. Dispatch screen inertial touch flings to navigate to document end
-            await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 950 960 150 40; done", active_serial)
-            settle_s = float(cfg.get("settle_delay_ms", 400)) / 1000.0
+            # 1. Ensure Teams FilePreviewActivity is focused on external display and dispatch dual navigation:
+            # Hardware Ctrl+End on focused window + Scrollbar Drag directly to EOF
+            disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
+            sb_x = max(100, disp_w - 5)
+            await run_adb_shell(
+                f"input -d {disp_id} tap {disp_w // 2} {disp_h // 2}; "
+                f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
+                f"input -d {disp_id} keycombination 113 123; "
+                f"input -d {disp_id} draganddrop {sb_x} 250 {sb_x} {disp_h - 80} 300",
+                active_serial
+            )
+            settle_s = float(cfg.get("settle_delay_ms", 800)) / 1000.0
             await asyncio.sleep(settle_s)
 
             # 2. Fetch current density/DPI from the phone right before running OCR to normalize gutter search bounding boxes
@@ -841,7 +835,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "telemetry_insight": f"Sampling gutter bounds (bottom: Ln {total_lines or 'detecting'})..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
-                snap = await capture_external_screenshot(active_serial)
+                snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                 if snap:
                     with open(calib, "wb") as f: f.write(snap)
                     t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
@@ -870,9 +864,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         serial=active_serial
                     )
 
-                    # When the bottom line stops increasing and stays stable, the scroll has fully landed at EOF!
-                    # If b_sample is <= 65, it is still on page 1 where document loaded, so allow further samples for scroll animation.
-                    if b_sample > 65 and b_sample == prev_bot:
+                    # Only stop early if bottom line is well past top section (>= 500 lines) and stable
+                    if b_sample >= 500 and b_sample == prev_bot:
                         stable_count += 1
                         if stable_count >= 2:
                             break
@@ -886,57 +879,53 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
             # Re-read gutter to capture any newly revealed bottom lines in full height
-            snap_fixed = await capture_external_screenshot(active_serial)
+            snap_fixed = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
             if snap_fixed:
                 with open(calib, "wb") as f: f.write(snap_fixed)
                 t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                 if b_fix > total_lines: total_lines = b_fix
                 if t_fix > 0 and top_line <= 0: top_line = t_fix
 
-            # Evaluate whether editor is still displaying line 1 (keystroke dropped or focus lost)
+            # Evaluate whether editor is still displaying line 1 or partial scroll (< 500 lines)
             is_stuck_on_line_1 = False
-            if 0 < top_line <= 5:
+            if 0 < top_line <= 15:
                 is_stuck_on_line_1 = True
-            elif top_line <= 12 and total_lines <= 65:
-                # At lower DPI (120 DPI), if top is 1..12 and total on screen is <= 65, editor is still on page 1
+            elif total_lines < 500:
                 is_stuck_on_line_1 = True
-            elif top_line == 0 and total_lines <= 50:
-                try:
-                    l1_clf = Line1StuckClassifier()
-                    clf_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_fixed or snap)
-                    clf_res = await l1_clf.detect(clf_ctx)
-                    if clf_res.issue_detected:
-                        is_stuck_on_line_1 = True
-                except Exception as ce:
-                    print(f"[init_end] Line1StuckClassifier evaluation error: {ce}")
 
-            # If initial attempt left page on Line 1, dynamically adjust on the fly: refocus & retry screen flings
+            # If initial attempt left page near Line 1 or partial scroll, refocus & re-dispatch EOF jump
             if is_stuck_on_line_1:
                 node.update({
                     "evaluator": "Line 1 Stuck Evaluator",
                     "healing_step": "Refreshing page capture",
-                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Retrying EOF jump via screen gestures..."
+                    "telemetry_insight": f"Gutter on Ln {top_line or 1} (total: {total_lines}) • Re-navigating to EOF..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 await emit_dag_telemetry_event(
                     category="SYSTEM",
-                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Retrying screen inertial fling...",
+                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Re-navigating to EOF...",
                     dag="initialize",
                     node_id="init_end",
                     serial=active_serial
                 )
                 try:
+                    await run_adb_shell(f"input -d {disp_id} tap 960 500", active_serial)
+                    await asyncio.sleep(0.2)
                     await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                     await asyncio.sleep(0.1)
-                    await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 950 960 150 40; done", active_serial)
-                    await asyncio.sleep(0.6)
+                    await run_adb_shell(
+                        f"input -d {disp_id} keycombination 113 123; "
+                        f"input -d {disp_id} draganddrop {sb_x} 250 {sb_x} {disp_h - 80} 300",
+                        active_serial
+                    )
+                    await asyncio.sleep(1.0)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
                         "healing_step": "Refreshing page capture",
                         "telemetry_insight": "Refreshing page capture after retry EOF jump..."
                     })
                     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
-                    snap_retry = await capture_external_screenshot(active_serial)
+                    snap_retry = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                     if snap_retry:
                         calib = state.FRAMES_DIR / "dag_node1_end.png"
                         with open(calib, "wb") as f: f.write(snap_retry)
@@ -948,13 +937,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
-                        if top_line > 12 or total_lines > 65:
+                        if total_lines >= 500:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
-                        elif 0 < top_line <= 5 or (0 < total_lines <= 65):
-                            is_stuck_on_line_1 = True
-                        else:
-                            is_stuck_on_line_1 = False
                 except Exception as re_err:
                     print(f"[init_end] Dynamic EOF adjustment error: {re_err}")
 
@@ -1162,14 +1147,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 serial=active_serial
             )
 
+            disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
+            sb_x = max(100, disp_w - 5)
+
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Silently ensure soft keyboard is suppressed before reverse flings
-                await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
-                await asyncio.sleep(0.1)
-
-                # Send reverse screen touch flings (starting below toolbar y=300 down to y=950)
-                await run_adb_shell(f"for i in 1 2 3 4 5 6 7 8 9 10; do input -d {disp_id} swipe 960 300 960 950 40; done", active_serial)
+                # Ensure window focus, suppress soft keyboard, and send Ctrl+Home + reverse scrollbar drag
+                await run_adb_shell(
+                    f"input -d {disp_id} tap {disp_w // 2} {disp_h // 2}; "
+                    f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
+                    f"input -d {disp_id} keycombination 113 122; "
+                    f"input -d {disp_id} draganddrop {sb_x} {disp_h - 80} {sb_x} 250 300",
+                    active_serial
+                )
                 await asyncio.sleep(0.4)
 
                 # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
@@ -1205,15 +1195,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             break
 
                 if is_verified:
-                    # Once Line 1 is reached, auto-fix viewport to ensure clean full 1920x1080 display
-                    await auto_fix_viewport(active_serial, disp_id)
-                    await asyncio.sleep(0.15)
-                    snap_fixed = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                    if snap_fixed:
-                        with open(calib, "wb") as f: f.write(snap_fixed)
-                        is_v2, d2 = await state.verify_first_line_in_process(calib, dpi_factor=dpi_factor)
-                        if is_v2:
-                            detected_first = d2 or 1
+                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                     break
 
                 print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), retrying Ctrl+Home...")
@@ -1478,7 +1460,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "message": "No captured frame found. Please run DAG Node 3 (Screen Capture) first."
                     }
 
-            is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("async_mode", True)
+            is_fast = bool(payload and payload.get("fast_loop"))
 
             async def _run_minicpm_background(target_calib: Path):
                 try:
@@ -1500,6 +1482,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             }
                     if l_det:
                         state.save_persisted_state()
+                        await state.ws_manager.broadcast({
+                            "type": "document_updated",
+                            "document": state.get_document_metrics(),
+                            "data": state.get_document_metrics()
+                        })
                     node.update({
                         "status": "completed",
                         "extracted_text": ext_text,
@@ -1584,6 +1571,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     }
             if lines_detected:
                 state.save_persisted_state()
+                await state.ws_manager.broadcast({
+                    "type": "document_updated",
+                    "document": state.get_document_metrics(),
+                    "data": state.get_document_metrics()
+                })
 
             node.update({
                 "status": "completed",
@@ -1653,7 +1645,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             state.latest_telemetry.setdefault("capture_telemetry", {})
             state.latest_telemetry["capture_telemetry"].update({"active_dpi": active_dpi, "dpi_factor": dpi_factor})
 
-            is_fast = bool(payload and payload.get("fast_loop")) or cfg.get("async_worker", True)
+            is_fast = bool(payload and payload.get("fast_loop"))
             prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 31}))
             lpp = prof.get("lines_per_page", 31)
 
@@ -1732,6 +1724,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             state.save_persisted_state()
             state.update_dag_after_frame(fid, top_ln, bot_ln)
+            await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
 
             # High-speed asynchronous OCR background processing
             if is_fast:
@@ -1933,7 +1926,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             scroll_key = int(cfg.get("keycode", 20))
             if scroll_key not in (20, 93):
                 scroll_key = 20
-            keys_arg = " ".join([str(scroll_key)] * step_count)
+            # If stepping a whole page (>= 20 lines) and keycode wasn't explicitly set to 20, use PageDown (93) for instant paging
+            if step_count >= 20 and cfg.get("keycode") is None:
+                scroll_key = 93
+                page_presses = max(1, step_count // 39)
+                keys_arg = " ".join(["93"] * page_presses)
+            else:
+                keys_arg = " ".join([str(scroll_key)] * min(step_count, 49))
             cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
             await run_adb_shell(cmd, active_serial)
 
@@ -2619,7 +2618,10 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
     if group_id in {"initialize", "init"}:
         return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"))
     elif group_id in {"capture_entire_markdown", "capture"}:
-        return await execute_dag_group_capture_markdown(serial=serial)
+        if payload.get("single_cycle"):
+            return await execute_dag_group_capture_markdown(serial=serial)
+        else:
+            return await start_dag_loop({"serial": serial})
     else:
         raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
 

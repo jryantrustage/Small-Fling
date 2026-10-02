@@ -238,14 +238,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
-  const handleRunGroup = async (groupId: string) => {
+  const handleRunGroup = async (groupId: string, extraPayload?: Record<string, any>) => {
     setRunningGroupId(groupId);
     setNodeFeedback(null);
     try {
       const res = await fetch(`${apiBase}/api/dag/groups/${groupId}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial: activeDeviceSerial, project_id: activeProjectId })
+        body: JSON.stringify({ serial: activeDeviceSerial, project_id: activeProjectId, ...(extraPayload || {}) })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.message || `Failed to run DAG group ${groupId}`);
@@ -767,20 +767,39 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   {isCaptureGroupRunning ? '♨️ THERMAL CAPTURING' : 'READY'}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown'); }}
-                disabled={runningGroupId !== null || runningNodeId !== null}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 5px',
-                  borderRadius: '3px', border: '1px solid rgba(0, 255, 157, 0.4)',
-                  background: 'rgba(0, 255, 157, 0.15)', color: '#00ff9d',
-                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
-                }}
-              >
-                {isCaptureGroupRunning ? <RefreshCw size={8} className="spin" /> : <Play size={8} />}
-                <span>1 Cycle</span>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleToggleLoop(); }}
+                  disabled={isInitGroupRunning}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 6px',
+                    borderRadius: '3px', border: `1px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
+                    background: isLoopRunning ? 'rgba(248, 81, 73, 0.25)' : 'rgba(0, 255, 157, 0.18)',
+                    color: isLoopRunning ? '#ff7b72' : '#00ff9d',
+                    fontSize: '8.5px', fontWeight: 800, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer'
+                  }}
+                  title={isLoopRunning ? 'Stop continuous loop' : 'Loop through all pages and concatenate all lines'}
+                >
+                  {isLoopRunning ? <Square size={8} fill="#ff7b72" /> : <Play size={8} fill="#00ff9d" />}
+                  <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown', { single_cycle: true }); }}
+                  disabled={runningGroupId !== null || runningNodeId !== null || isLoopRunning}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 5px',
+                    borderRadius: '3px', border: '1px solid rgba(0, 255, 157, 0.3)',
+                    background: 'rgba(0, 255, 157, 0.08)', color: '#00ff9d',
+                    fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+                  }}
+                  title="Run 1 single capture cycle"
+                >
+                  {isCaptureGroupRunning ? <RefreshCw size={8} className="spin" /> : <Play size={8} />}
+                  <span>1 Cycle</span>
+                </button>
+              </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px', width: '100%' }}>
