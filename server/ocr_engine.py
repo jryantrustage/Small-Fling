@@ -236,17 +236,83 @@ def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[
     is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < int(300 * max(0.4, dpi_factor)))
     return is_at_home, (1 if is_at_home else first_ln)
 
-def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0) -> int:
-    """Worker function to detect the line number displayed at the top of the left side gutter."""
+def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None, cursor_line: Optional[int] = None, dpi_factor: float = 1.0) -> Tuple[int, Dict[str, Any]]:
+    """
+    Accurately determines the line number on the very top of the editor document.
+    Calculates missing line numbers above the first visible gutter number due to word wrap/blank lines,
+    and cross-correlates with cursor caret position if visible.
+    """
+    if img is None:
+        return 0, {}
+    h, w = img.shape[:2]
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+    if not gutter:
+        t, b = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
+        return t or 0, {"source": "fast_bounds", "bottom": b}
+
+    doc_top_y = max(130, int(h * (0.135 if dpi_factor < 0.9 else 0.155)))
+
+    pitches = []
+    for i in range(len(gutter) - 1):
+        y_curr, n_curr = gutter[i]
+        y_next, n_next = gutter[i+1]
+        line_delta = n_next - n_curr
+        if line_delta == 1 and 10 <= (y_next - y_curr) <= 30:
+            pitches.append(float(y_next - y_curr))
+        elif line_delta > 1 and 10 <= (y_next - y_curr) <= 30 * line_delta:
+            pitches.append(float(y_next - y_curr) / float(line_delta))
+
+    avg_pitch = float(np.median(pitches)) if pitches else max(12.0, 15.0 * (h / 1080.0) * dpi_factor)
+
+    y_first, ln_first = gutter[0]
+    y_dist_above = max(0, y_first - doc_top_y)
+    missing_lines_above = int(round(y_dist_above / avg_pitch))
+
+    effective_top = max(1, ln_first - missing_lines_above)
+    if target_top and abs(effective_top - target_top) <= 1:
+        effective_top = target_top
+
+    caret_info = None
+    try:
+        doc_roi = img[int(h * 0.12):int(h * 0.50), int(w * 0.05):int(w * 0.45)]
+        if doc_roi.size > 0:
+            gray = cv2.cvtColor(doc_roi, cv2.COLOR_BGR2GRAY)
+            grad_x = cv2.Sobel(gray, cv2.CV_16S, 1, 0, ksize=3)
+            abs_grad_x = cv2.convertScaleAbs(grad_x)
+            _, thresh = cv2.threshold(abs_grad_x, 80, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                cx, cy, cw, ch = cv2.boundingRect(cnt)
+                if 1 <= cw <= 4 and 12 <= ch <= 35:
+                    caret_y = int(h * 0.12) + cy
+                    caret_row = int(round(max(0, caret_y - doc_top_y) / avg_pitch))
+                    caret_info = {"x": int(w * 0.05) + cx, "y": caret_y, "row_offset": caret_row}
+                    if cursor_line:
+                        derived_top = max(1, cursor_line - caret_row)
+                        if abs(derived_top - effective_top) <= 2:
+                            effective_top = derived_top
+                    break
+    except Exception:
+        pass
+
+    return effective_top, {
+        "first_gutter_line": ln_first,
+        "first_gutter_y": y_first,
+        "doc_top_y": doc_top_y,
+        "missing_lines_above": missing_lines_above,
+        "avg_pitch": avg_pitch,
+        "effective_top": effective_top,
+        "caret": caret_info,
+        "gutter_count": len(gutter),
+        "bottom_gutter_line": gutter[-1][1]
+    }
+
+def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top: Optional[int] = None) -> int:
+    """Worker function to detect the line number displayed at the top of the left side gutter, accounting for word wrap."""
     img = cv2.imread(image_path)
     if img is None: return 0
-    top, _ = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
-    if top > 0:
-        return top
-    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
-    if gutter:
-        return gutter[0][1]
-    return 0
+    top, _ = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
+    return top
 
 def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model: str = "", ollama_timeout: int = 15) -> Dict[str, Any]:
     """Top-level multi-process worker for full image OCR, gutter detection & bounding boxes."""
