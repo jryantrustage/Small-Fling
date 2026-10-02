@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from typing import Optional, Dict, Any
 from pathlib import Path
 import json
+import time
 
 from models import DeviceSelectRequest, AdbCommandRequest, AdbConnectRequest, AdbPairRequest
 from services import adb_service as adb
@@ -23,31 +24,53 @@ async def select_device_api(req: DeviceSelectRequest):
             adb.current_device_model = "pixel_8"
         elif "10" in dev:
             adb.current_device_model = "pixel_10"
-        
-        ser_for_model = await adb.connect_device_for_model(adb.current_device_model)
-        if ser_for_model:
-            adb.target_adb_serial = ser_for_model
-            
-    if req.serial is not None:
-        adb.target_adb_serial = req.serial.strip() if req.serial.strip() else None
 
     # Reset active serial cache so new selection immediately activates
     adb._active_serial_cache = None
     adb._active_serial_cache_ts = 0.0
 
-    if adb.target_adb_serial:
-        devs_res = await adb.list_adb_devices()
-        matched = next((d for d in devs_res.get("devices", []) if d["serial"] == adb.target_adb_serial), None)
-        if matched:
-            m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
-            if any(k in m for k in ["pixel_8", "husky", "shiba"]):
-                adb.current_device_model = "pixel_8"
-            elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
-                adb.current_device_model = "pixel_10"
+    devs_res = await adb.list_adb_devices()
+    connected_devs = devs_res.get("devices", [])
+
+    matched = None
+    # 1. If explicit serial provided and matches an active device
+    if req.serial and req.serial.strip():
+        ser_in = req.serial.strip()
+        matched = next((d for d in connected_devs if d["serial"] == ser_in or ser_in in d["serial"]), None)
+        # If port changed, match by IP prefix
+        if not matched and ":" in ser_in:
+            ip_pref = ser_in.split(":")[0]
+            matched = next((d for d in connected_devs if d["serial"].startswith(ip_pref)), None)
+
+    # 2. If no match yet, find connected device matching selected model
+    if not matched:
+        keys = ["pixel_10", "mustang", "frankel"] if adb.current_device_model == "pixel_10" else ["pixel_8", "husky", "shiba"]
+        matched = next((d for d in connected_devs if any(k in (d.get("model", "") + " " + d.get("displayName", "") + " " + d.get("raw", "")).lower() for k in keys)), None)
+
+    # 3. If still not matched, attempt wireless auto-connect for this model
+    if not matched:
+        ser_for_model = await adb.connect_device_for_model(adb.current_device_model)
+        if ser_for_model:
+            adb.target_adb_serial = ser_for_model
+
+    if matched:
+        adb.target_adb_serial = matched["serial"]
+        m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
+        if any(k in m for k in ["pixel_8", "husky", "shiba"]):
+            adb.current_device_model = "pixel_8"
+        elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
+            adb.current_device_model = "pixel_10"
 
     active_ser = await adb.get_active_adb_serial(adb.target_adb_serial, force_refresh=True)
     if active_ser:
         adb.target_adb_serial = active_ser
+        adb._active_serial_cache = active_ser
+        adb._active_serial_cache_ts = time.time()
+        try:
+            from services import state
+            state.active_device_serial = active_ser
+        except Exception:
+            pass
         try:
             cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
             cdata = {}

@@ -107,7 +107,7 @@ class DesktopPaginationService : AccessibilityService() {
 
     suspend fun ensureKeyboardClosed(targetDisplayId: Int? = null) = withContext(Dispatchers.Default) {
         setSoftKeyboardHidden(true)
-        val cmd = "if dumpsys input_method | grep -E 'mImeWindowVis=[123]' > /dev/null; then input keyevent 4; echo CLOSED; fi"
+        val cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1"
         executeShellCommand(cmd)
         delay(150)
     }

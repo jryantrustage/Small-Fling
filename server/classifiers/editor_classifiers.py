@@ -736,11 +736,13 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         try:
             win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", serial, timeout=1.5)
             stdout = win_chk.get("stdout") or ""
-            if "FilePreviewActivity" not in stdout and "com.microsoft.teams" not in stdout:
-                if disp_id > 0:
-                    await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.Launcher", serial)
-                    actions.append(f"Ensured Teams is active on display {disp_id}")
-                    await asyncio.sleep(0.5)
+            if "FilePreviewActivity" not in stdout:
+                task_res = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", serial, timeout=1.5)
+                m_t = re.search(r'#(\d+)\s+type=', task_res.get("stdout", ""))
+                if m_t:
+                    await run_adb_shell(f"cmd activity task to-front {m_t.group(1)}", serial)
+                    actions.append(f"Brought Teams task #{m_t.group(1)} to front")
+                    await asyncio.sleep(0.3)
         except Exception:
             pass
 

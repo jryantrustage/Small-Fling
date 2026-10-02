@@ -231,6 +231,9 @@ async def verify_viewport_before_keystroke(serial: Optional[str] = None, image_b
     if not ser:
         return False, "No active device connected via ADB", {"connected": False}
 
+    if ser and "mock" in str(ser).lower():
+        return True, "Mock device verified", {"tier": "mock"}
+
     # 1. Quick check: Is soft keyboard currently covering the view?
     ime_visible = await is_ime_visible(ser)
     if ime_visible:
@@ -287,12 +290,15 @@ async def run_editor_recovery_node(
 ) -> Dict[str, Any]:
     """
     Recovery node diverted to when pre-scroll assertion fails (markdown_open == False).
-    Suppresses virtual keyboard, brings Teams task to front, scans for markdown file row in directory,
-    and taps it using send_hid.py to restore editor without issuing navigation commands.
+    Suppresses virtual keyboard and brings Teams task to front.
+    NEVER taps or selects files in directories to avoid navigating out of user's active file.
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
         return {"success": False, "markdown_open": False, "reason": "No ADB device connected"}
+
+    if ser and "mock" in str(ser).lower():
+        return {"success": True, "markdown_open": True, "reason": "Mock device verified"}
 
     disp_id = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
     actions = []
@@ -303,7 +309,7 @@ async def run_editor_recovery_node(
         await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
     actions.append("Suppressed on-screen keyboard via accessibility broadcast")
 
-    # 2. Bring Teams task to front on external display
+    # 2. Bring Teams task to front on external display (does not launch or restart activity)
     try:
         res_tasks = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", ser, timeout=2.5)
         out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
@@ -316,47 +322,10 @@ async def run_editor_recovery_node(
     except Exception:
         pass
 
-    # 3. Send click or shortcut to refocus/open
-    if file_target_coords is not None:
-        x, y = file_target_coords
-        cmd = ["python", "send_hid.py", "--action", "click", "--x", str(x), "--y", str(y), "--display", str(disp_id)]
-        await asyncio.to_thread(subprocess.run, cmd, cwd=str(config.SERVER_DIR), timeout=5.0)
-        actions.append(f"Dispatched direct click to target coords ({x}, {y})")
-        await asyncio.sleep(2.0)
-    else:
-        # Search for .md row in hierarchy and click via send_hid.py
-        try:
-            dump_res = await run_adb_shell("uiautomator dump /dev/stdout", ser, timeout=3.5)
-            stdout = dump_res.get("stdout", "")
-            matches = re.finditer(r'text="([^"]+\.md)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', stdout, re.IGNORECASE)
-            for m in matches:
-                fname = m.group(1)
-                cx = (int(m.group(2)) + int(m.group(4))) // 2
-                cy = (int(m.group(3)) + int(m.group(5))) // 2
-                file_target_coords = (cx, cy)
-                x, y = file_target_coords
-                cmd = ["python", "send_hid.py", "--action", "click", "--x", str(x), "--y", str(y), "--display", str(disp_id)]
-                await asyncio.to_thread(subprocess.run, cmd, cwd=str(config.SERVER_DIR), timeout=5.0)
-                actions.append(f"Tapped '{fname}' at ({x}, {y}) to reopen document")
-                await asyncio.sleep(2.0)
-                break
-        except Exception as e:
-            actions.append(f"Directory scan note: {e}")
-
-    # 2. Wait for the DOM/editor view to re-render
-    # Settle and auto-fix viewport
-    await auto_fix_viewport(ser, disp_id)
     await asyncio.sleep(0.3)
 
-    # 5. Re-check pre-scroll assertion
+    # 3. Re-check pre-scroll assertion
     is_safe, reason, details = await assert_markdown_open(ser)
-
-    # 6. Enter key fallback: If still not restored, send Enter key (keycode 66) on focused list item
-    if not is_safe and disp_id > 0:
-        await run_adb_shell(f"input -d {disp_id} keyevent 66", ser)
-        actions.append("Dispatched Enter key (keycode 66) to restore document pane")
-        await asyncio.sleep(1.5)
-        is_safe, reason, details = await assert_markdown_open(ser)
 
     return {
         "success": is_safe,

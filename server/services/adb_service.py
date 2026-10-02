@@ -67,6 +67,8 @@ def _png_to_jpeg(png_bytes: Optional[bytes], quality: int = 80, max_dim: int = 1
 
 async def run_adb_shell(cmd_str: str, serial: Optional[str] = None, timeout: float = 5.0) -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
+    if ser and "mock" in str(ser).lower():
+        return {"status": "ok", "stdout": "", "stderr": "", "code": 0}
     cmd = (["-s", ser] if ser else []) + ["shell", cmd_str]
     try:
         res = await asyncio.to_thread(_exec_adb_sync, cmd, timeout)
@@ -152,6 +154,8 @@ def _get_or_create_standby_frame(mode: str = "desktop") -> bytes:
     return frame_bytes
 
 async def get_active_adb_serial(requested_serial: Optional[str] = None, force_refresh: bool = False) -> Optional[str]:
+    if requested_serial and "mock" in str(requested_serial).lower():
+        return requested_serial
     global current_device_model, target_adb_serial, _active_serial_cache, _active_serial_cache_ts, _last_reconnect_ts
     now = time.time()
     if not force_refresh and not requested_serial and _active_serial_cache and (now - _active_serial_cache_ts < 3.5):
@@ -191,6 +195,11 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
             for dev in active:
                 if dev["serial"] == requested_serial or requested_serial in dev["serial"]:
                     return dev["serial"]
+            if ":" in requested_serial:
+                ip_pfx = requested_serial.split(":")[0]
+                for dev in active:
+                    if dev["serial"].startswith(ip_pfx):
+                        return dev["serial"]
             return None
 
         # Prioritize explicit target serial set by user in UI
@@ -199,6 +208,12 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
                 if dev["serial"] == target_adb_serial or target_adb_serial in dev["serial"]:
                     found_serial = dev["serial"]
                     break
+            if not found_serial and ":" in target_adb_serial:
+                ip_pfx = target_adb_serial.split(":")[0]
+                for dev in active:
+                    if dev["serial"].startswith(ip_pfx):
+                        found_serial = dev["serial"]
+                        break
 
         if not found_serial:
             pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
@@ -254,6 +269,8 @@ async def connect_device_for_model(model_pref: str) -> Optional[str]:
 
 async def detect_external_display_id(serial: Optional[str] = None) -> int:
     global current_device_model
+    if serial and "mock" in str(serial).lower():
+        return 14
     ser = await get_active_adb_serial(serial)
     if ser:
         res = await run_adb_shell("dumpsys display", ser, timeout=2.5)
@@ -396,6 +413,8 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
     ser = await get_active_adb_serial(serial)
     if not ser:
         return None
+    if ser and "mock" in str(ser).lower():
+        return _get_or_create_standby_frame("desktop")
 
     cache_key = (ser, "desktop")
     now = time.time()
@@ -653,11 +672,16 @@ async def get_device_info() -> Dict[str, Any]:
     ser = await get_active_adb_serial()
     devs = (await list_adb_devices()).get("devices", [])
     matched = next((d for d in devs if d["serial"] == ser), None)
+    if matched:
+        m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
+        if any(k in m for k in ["pixel_10", "mustang", "frankel"]): current_device_model = "pixel_10"
+        elif any(k in m for k in ["pixel_8", "husky", "shiba"]): current_device_model = "pixel_8"
     active_model = matched.get("model", current_device_model) if matched else current_device_model
-    if matched and target_adb_serial is None:
-        m = active_model.lower()
-        if any(k in m for k in ["pixel_8", "husky", "shiba", "8"]): current_device_model = "pixel_8"
-        elif any(k in m for k in ["pixel_10", "mustang", "frankel", "10"]): current_device_model = "pixel_10"
+    try:
+        from services import state
+        state.active_device_serial = ser
+    except Exception:
+        pass
     disp_map = await detect_surfaceflinger_displays(ser) if ser else {}
 
     cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
