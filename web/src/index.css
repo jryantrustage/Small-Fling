@@ -2114,3 +2114,32 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   border-color: #58a6ff !important;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px rgba(88, 166, 255, 0.15) !important;
 }
+
+/* Spliced Canvas Full-Width Scrollable Viewer */
+.spliced-canvas-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-highlight) var(--bg-main);
+  scroll-behavior: smooth;
+}
+
+.spliced-canvas-scroll-container::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.spliced-canvas-scroll-container::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+.spliced-canvas-scroll-container::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 4px;
+}
+
+.spliced-canvas-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: var(--color-cyan);
+}
+
+.spliced-canvas-scroll-container img {
+  image-rendering: -webkit-optimize-contrast;
+}

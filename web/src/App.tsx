@@ -2,7 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity
+  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
+  ZoomIn, ZoomOut
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -145,6 +146,9 @@ function AppContent() {
   const [backendConnected, setBackendConnected] = useState(true);
   const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
   const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
+  const [splicedScale, setSplicedScale] = useState<number>(100);
+  const [splicedFitMode, setSplicedFitMode] = useState<'width' | 'fit'>('width');
+  const [splicedRefreshKey, setSplicedRefreshKey] = useState<number>(() => Date.now());
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
   const [isInfoHovered, setIsInfoHovered] = useState(false);
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
@@ -1556,11 +1560,118 @@ function AppContent() {
                     </div>
                   </div>
                 ) : inspectorMode === 'spliced' ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Layers size={14} color="#00ff9d" /><span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>SPLICED CANVAS · {frames.length} FRAMES</span></div>
+                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d', zIndex: 10 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Layers size={14} color="#00ff9d" />
+                        <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>
+                          SPLICED CANVAS · {frames.length} FRAMES
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {/* View Mode: Fit Width vs Fit Page */}
+                        <div style={{ display: 'inline-flex', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', overflow: 'hidden' }}>
+                          <button
+                            type="button"
+                            onClick={() => { setSplicedFitMode('width'); setSplicedScale(100); }}
+                            className={`btn btn-xs ${splicedFitMode === 'width' ? 'btn-primary' : 'btn-ghost'}`}
+                            style={{ fontSize: '10px', padding: '2px 8px', borderRadius: 0, fontWeight: 600 }}
+                            title="Scale to full container width preserving aspect ratio (Vertical scroll)"
+                          >
+                            FIT WIDTH
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSplicedFitMode('fit')}
+                            className={`btn btn-xs ${splicedFitMode === 'fit' ? 'btn-primary' : 'btn-ghost'}`}
+                            style={{ fontSize: '10px', padding: '2px 8px', borderRadius: 0, fontWeight: 600 }}
+                            title="Fit full document height into window"
+                          >
+                            FIT PAGE
+                          </button>
+                        </div>
+
+                        {/* Zoom Out */}
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => setSplicedScale(prev => Math.max(50, prev - 15))}
+                          disabled={splicedFitMode === 'fit'}
+                          title="Zoom Out"
+                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <ZoomOut size={11} />
+                        </button>
+
+                        {/* Zoom Indicator / Reset to 100% */}
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => setSplicedScale(100)}
+                          disabled={splicedFitMode === 'fit'}
+                          title="Reset zoom to 100%"
+                          style={{ height: '22px', fontSize: '10px', padding: '0 6px', fontFamily: 'monospace', minWidth: '42px', textAlign: 'center' }}
+                        >
+                          {splicedFitMode === 'fit' ? 'AUTO' : `${splicedScale}%`}
+                        </button>
+
+                        {/* Zoom In */}
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => setSplicedScale(prev => Math.min(250, prev + 15))}
+                          disabled={splicedFitMode === 'fit'}
+                          title="Zoom In"
+                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <ZoomIn size={11} />
+                        </button>
+
+                        {/* Refresh Spliced Document Image */}
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => setSplicedRefreshKey(Date.now())}
+                          title="Refresh Spliced Document View"
+                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <RefreshCw size={11} />
+                        </button>
+                      </div>
                     </div>
-                    <div className="source-image-wrapper fit"><img src={`${API_BASE}/api/spliced-document-image?t=${frames.length}_${frames[frames.length - 1]?.created_at || ''}`} alt="Spliced" style={{ width: '100%', maxHeight: 'calc(100vh - 165px)', objectFit: 'contain', display: 'block' }} /></div>
+
+                    {/* Scrollable container displaying full-width spliced image with natural aspect ratio */}
+                    <div
+                      className="spliced-canvas-scroll-container"
+                      style={{
+                        flex: 1,
+                        width: '100%',
+                        height: 'calc(100% - 35px)',
+                        overflowY: 'auto',
+                        overflowX: splicedScale > 100 ? 'auto' : 'hidden',
+                        background: '#0d1117',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: splicedFitMode === 'fit' ? 'center' : 'flex-start',
+                        padding: 0
+                      }}
+                    >
+                      <img
+                        src={`${API_BASE}/api/spliced-document-image?t=${splicedRefreshKey}_${frames.length}_${frames[frames.length - 1]?.created_at || ''}`}
+                        alt="Spliced Document Canvas"
+                        style={{
+                          width: splicedFitMode === 'width' ? `${splicedScale}%` : 'auto',
+                          maxWidth: splicedFitMode === 'fit' ? '100%' : 'none',
+                          maxHeight: splicedFitMode === 'fit' ? 'calc(100vh - 180px)' : 'none',
+                          height: 'auto',
+                          display: 'block',
+                          objectFit: 'contain',
+                          boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+                          transition: 'width 0.12s ease'
+                        }}
+                      />
+                    </div>
                   </div>
                 ) : activeFrame ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>

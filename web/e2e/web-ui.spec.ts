@@ -76,4 +76,19 @@ test.describe('Web UI Automation & Screen Capture Suite', () => {
 
     await page.screenshot({ path: 'test-results/screenshots/05_web_telemetry_and_viewport.png' });
   });
+
+  test('should display spliced canvas in full width preserving aspect ratio with zoom controls', async ({ page }) => {
+    // Locate the Spliced button tab (e.g. "Spliced (4)")
+    const splicedBtn = page.getByRole('button', { name: /spliced/i }).first();
+    await expect(splicedBtn).toBeVisible();
+    await splicedBtn.click();
+    await page.waitForTimeout(600);
+
+    // Verify the spliced canvas container is visible
+    const splicedContainer = page.locator('.spliced-canvas-scroll-container');
+    await expect(splicedContainer).toBeVisible();
+
+    // Capture screenshot of full-width spliced canvas
+    await page.screenshot({ path: 'test-results/screenshots/09_spliced_canvas_full_width.png' });
+  });
 });
