@@ -971,7 +971,23 @@ function AppContent() {
   );
 
   const devDisplayName = deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10';
-  const devLines = deviceModel === 'pixel_8' ? 31 : 47;
+  const lastCaptured = sortedFrames[sortedFrames.length - 1];
+  const lastCapturedLine = lastCaptured?.bottom_line || telemetry?.current_bottom_line || 0;
+  const devLines = (() => {
+    // 1. If actual line number at last line of page last captured exists, use it
+    if (lastCapturedLine > 0) {
+      return lastCapturedLine;
+    }
+    // 2. Dynamically calculate based on DPI change or profile
+    if (telemetry?.capture_telemetry?.active_dpi) {
+      const dpi = telemetry.capture_telemetry.active_dpi;
+      return Math.max(20, Math.round(49 * (160 / dpi)));
+    }
+    if (deviceInfo?.profile?.lines_per_page) {
+      return deviceInfo.profile.lines_per_page;
+    }
+    return deviceModel === 'pixel_8' ? 40 : 49;
+  })();
 
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">

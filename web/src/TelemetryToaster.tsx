@@ -30,6 +30,8 @@ export interface CaptureTelemetry {
   settle_delay_ms?: number;
   total_captures?: number;
   page?: number;
+  active_dpi?: number;
+  dpi_factor?: number;
   error?: string | null;
 }
 

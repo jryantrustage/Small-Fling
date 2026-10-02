@@ -340,7 +340,7 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
             "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
             "- Do not include markdown code fences, headers, or explanations."
         )
-        candidates = ["minicpm-v:latest", "minicpm-v", config.OLLAMA_VISION_MODEL]
+        candidates = [config.OLLAMA_VISION_MODEL or "minicpm-v:latest"]
         last_ex = None
         for m in candidates:
             try:
@@ -353,7 +353,7 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
                     data=req_data,
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("response", ""), m
             except Exception as e:

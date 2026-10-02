@@ -269,10 +269,31 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                     })
         except Exception as e: print(f"[worker_scan_image] RapidOCR error: {e}")
 
-    gutter_width = int(w * 0.10)
-    gutter_candidates = sorted([
-        {**b, "line_number": int(m.group(1))} for b in ocr_boxes if b["x"] < gutter_width and (m := re.search(r'^\D*(\d{1,7})\D*$', b["text"]))
-    ], key=lambda x: x["y"])
+    processed_boxes: List[Dict[str, Any]] = []
+    for b in ocr_boxes:
+        # Ignore top toolbar/title elements above y < 135 if the image is full HD
+        if h >= 800 and b["y"] < 135:
+            continue
+        txt = b["text"]
+        if b["x"] < 80:
+            if txt.isdigit() and len(txt) <= 6 and b["width"] <= 55:
+                processed_boxes.append({
+                    **b, "is_gutter": True, "line_number": int(txt)
+                })
+                continue
+            if m := re.match(r'^(\d{1,6})\s*([^\d\s].*)$', txt):
+                g_num = m.group(1)
+                code_txt = m.group(2)
+                processed_boxes.append({
+                    **b, "text": g_num, "width": 25, "is_gutter": True, "line_number": int(g_num)
+                })
+                processed_boxes.append({
+                    **b, "text": code_txt, "x": b["x"] + 30, "width": max(10, b["width"] - 30), "is_gutter": False
+                })
+                continue
+        processed_boxes.append({**b, "is_gutter": False})
+
+    gutter_candidates = sorted([b for b in processed_boxes if b.get("is_gutter")], key=lambda x: x["y"])
 
     top_line = bottom_line = 0
     first_line_box = last_line_box = None
@@ -282,8 +303,13 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         first_line_box = {"x": fc["x"], "y": fc["y"], "width": fc["width"], "height": fc["height"], "line_number": top_line}
         last_line_box = {"x": lc["x"], "y": lc["y"], "width": lc["width"], "height": lc["height"], "line_number": bottom_line}
 
+    gutter_width = 75
+    if gutter_candidates:
+        max_gx = max(b["x"] + b["width"] for b in gutter_candidates)
+        gutter_width = max(55, min(max_gx + 10, 85))
+
     rows: List[List[Dict[str, Any]]] = []
-    for b in ocr_boxes:
+    for b in processed_boxes:
         placed = False
         for r in rows:
             if abs(b["center_y"] - sum(x["center_y"] for x in r) / len(r)) < 18:
@@ -295,10 +321,12 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     curr = top_line or 1
     for r in rows:
         r.sort(key=lambda x: x["x"])
-        line_str = " ".join(x["text"] for x in r if x["x"] >= gutter_width)
-        gt = next((x for x in r if x["x"] < gutter_width and x["text"].isdigit()), None)
-        if gt: curr, is_w = int(gt["text"]), False
-        else: is_w = True
+        gt = next((x for x in r if x.get("is_gutter")), None)
+        if gt and "line_number" in gt:
+            curr, is_w = gt["line_number"], False
+        else:
+            is_w = True
+        line_str = " ".join(x["text"] for x in r if not x.get("is_gutter") and x["x"] >= (gutter_width - 15))
         if len(line_str) > 60 or "\n" in line_str: is_w = True
         lines_list.append({
             "line_number": curr, "gutter_number": curr, "text": line_str,
