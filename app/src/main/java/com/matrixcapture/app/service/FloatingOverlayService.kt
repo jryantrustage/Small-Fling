@@ -143,11 +143,11 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                                 "RESTART" -> serviceScope.launch { DesktopPaginationService.instance?.restartFromBeginning() }
                                 "CTRL_END" -> serviceScope.launch {
                                     Log.i(TAG, "HUD executing CTRL_END to jump to EOF")
-                                    DesktopPaginationService.instance?.dispatchKeyCombination(33, 113, 123)
+                                    DesktopPaginationService.instance?.dispatchKeyCombination(0, 113, 123)
                                 }
                                 "CTRL_HOME" -> serviceScope.launch {
                                     Log.i(TAG, "HUD executing CTRL_HOME to snap to Line 1")
-                                    DesktopPaginationService.instance?.dispatchKeyCombination(33, 113, 122)
+                                    DesktopPaginationService.instance?.dispatchKeyCombination(0, 113, 122)
                                 }
                                 "CALIBRATE" -> serviceScope.launch {
                                     Log.i(TAG, "HUD executing instant calibration")

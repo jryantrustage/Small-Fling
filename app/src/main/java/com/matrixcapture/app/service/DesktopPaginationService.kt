@@ -241,15 +241,21 @@ class DesktopPaginationService : AccessibilityService() {
         }.getOrDefault(false)
     }
 
-    suspend fun dispatchKeyEvents(displayId: Int = 33, keycode: Int = 20, count: Int = 1): Boolean {
+    suspend fun dispatchKeyEvents(displayId: Int = 0, keycode: Int = 20, count: Int = 1): Boolean {
         val resolved = resolveTargetDisplayId(displayId)
         val keys = List(count) { keycode.toString() }.joinToString(" ")
-        return executeShellCommand("input -d $resolved keyevent $keys")
+        val cmd = if (resolved > 0) "input -d $resolved keyevent $keys; input keyevent $keys" else "input keyevent $keys"
+        return executeShellCommand(cmd)
     }
 
-    suspend fun dispatchKeyCombination(displayId: Int = 33, key1: Int = 113, key2: Int = 123): Boolean {
+    suspend fun dispatchKeyCombination(displayId: Int = 0, key1: Int = 113, key2: Int = 123): Boolean {
         val resolved = resolveTargetDisplayId(displayId)
-        return executeShellCommand("input -d $resolved keycombination $key1 $key2")
+        val cmd = if (resolved > 0) {
+            "input -d $resolved keycombination -t 150 $key1 $key2; input keycombination -t 150 $key1 $key2"
+        } else {
+            "input keycombination -t 150 $key1 $key2"
+        }
+        return executeShellCommand(cmd)
     }
 
     suspend fun performInstantCalibration(targetDisplayId: Int = 0, getGutterMetrics: (suspend () -> GutterMetricsSnapshot?)? = null): Int = withContext(Dispatchers.Default) {
