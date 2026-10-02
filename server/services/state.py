@@ -117,9 +117,9 @@ async def verify_first_line_in_process(image_path: Path, dpi_factor: float = 1.0
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(ocr_executor, worker_verify_first_line, str(image_path), dpi_factor)
 
-async def detect_top_line_in_process(image_path: Path, dpi_factor: float = 1.0) -> int:
+async def detect_top_line_in_process(image_path: Path, dpi_factor: float = 1.0, target_top: Optional[int] = None) -> int:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path), dpi_factor)
+    return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path), dpi_factor, target_top)
 
 async def scan_image_in_process(image_path: Path) -> Dict[str, Any]:
     loop = asyncio.get_running_loop()

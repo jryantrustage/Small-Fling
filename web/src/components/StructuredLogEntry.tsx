@@ -83,7 +83,7 @@ export const StructuredLogEntry: React.FC<StructuredLogEntryProps> = ({
       `## Objective\nAnalyze the root cause of latency and failure in DAG 1 for node \`${targetNode}\` on ${detectedDevice || 'Device'}.\n\n` +
       `## 📌 Executive Summary\n- **Target Node:** ${targetNode}\n- **Device:** ${detectedDevice || 'ADB Device'}\n- **Error:** ${parsed?.message || ev.message}\n\n` +
       `## 🔍 Diagnostic Evidence & Trace Insights\n` +
-      insights.map(i => `- ${i}`).join('\n') + `\n\n` +
+      insights.map((i: any) => `- ${i}`).join('\n') + `\n\n` +
       `## 🎯 Recommended Action Plan\n1. Ensure external display cursor focus\n2. Verify software keyboard is suppressed\n3. Dispatch hardware Ctrl+End/Ctrl+Home keycombination directly`;
     await copyToClipboard(fallbackPrompt);
     setCopiedPrompt(true);
@@ -331,7 +331,7 @@ export const StructuredLogEntry: React.FC<StructuredLogEntryProps> = ({
             <span>Trace Insights:</span>
           </div>
           <ul className="insights-list">
-            {parsed.traceInsights.map((insight, idx) => (
+            {parsed.traceInsights.map((insight: any, idx: number) => (
               <li key={idx}><code>{insight}</code></li>
             ))}
           </ul>
@@ -374,7 +374,7 @@ export const StructuredLogEntry: React.FC<StructuredLogEntryProps> = ({
         <div className="structured-steps-box">
           <div className="steps-title">Troubleshooting Recommendations:</div>
           <div className="steps-grid">
-            {parsed.troubleshootingSteps.map(st => (
+            {parsed.troubleshootingSteps.map((st: any) => (
               <div key={st.step} className="step-card">
                 <span className="step-num">{st.step}</span>
                 <div className="step-text">

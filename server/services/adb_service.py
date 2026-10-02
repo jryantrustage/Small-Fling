@@ -585,14 +585,14 @@ _ime_visible_cache: Dict[str, Any] = {"val": False, "ts": 0.0}
 async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False) -> bool:
     global _ime_visible_cache
     now = time.time()
-    if not force_check and (now - _ime_visible_cache["ts"] < 4.0):
+    if not force_check and (now - _ime_visible_cache["ts"] < 2.0):
         return _ime_visible_cache["val"]
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
-        chk = await run_adb_shell("dumpsys input_method", ser)
+        chk = await run_adb_shell("dumpsys input_method", ser, timeout=2.0)
         out = chk.get("stdout", "")
-        _ime_visible_cache = {"val": False, "ts": now}
+        has_visible_window = False
         for line in out.splitlines():
             line_str = line.strip()
             if "mImeWindowVis=" in line_str:
@@ -600,11 +600,31 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
                 if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
                     has_visible_window = True
                     break
+            if "minputshown=true" in line_str.lower():
+                has_visible_window = True
+                break
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
         return has_visible_window
     except Exception:
         return False
+
+async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[int] = None) -> bool:
+    """Closes soft keyboard on Android device if open without disturbing editor content."""
+    ser = await get_active_adb_serial(serial)
+    if not ser: return True
+    try:
+        is_open = await is_ime_visible(ser, force_check=True)
+        if is_open:
+            cmd = "input -d 0 keyevent 111 >/dev/null 2>&1"
+            if display_id and display_id > 0:
+                cmd += f"; input -d {display_id} keyevent 111 >/dev/null 2>&1"
+            await run_adb_shell(cmd, ser, timeout=2.0)
+            await asyncio.sleep(0.08)
+            is_open = await is_ime_visible(ser, force_check=True)
+        return not is_open
+    except Exception:
+        return True
 
 async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
     """

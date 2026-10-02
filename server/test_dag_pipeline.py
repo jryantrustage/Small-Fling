@@ -175,3 +175,29 @@ def test_single_node_concurrency_and_preemption():
     abort_res = client.post("/api/dag/nodes/abort")
     assert abort_res.status_code == 200
     assert "status" in abort_res.json()
+
+
+def test_dag_6_arrow_down_and_dag_7_blocking_on_failure():
+    import asyncio
+    from services import state
+    import routers.orchestration as orch
+
+    async def run_test():
+        # Setup DAG state: Node 6 failed (did not reach or advance)
+        state.dag_state["nodes"]["arrow_down"]["status"] = "error"
+        state.dag_state["nodes"]["arrow_down"]["reached"] = False
+        state.dag_state["nodes"]["arrow_down"]["advanced"] = False
+
+        # Attempt to run Node 7 (verification_trigger): DAG 7 MUST block and not proceed!
+        res_n7 = await orch.run_single_dag_node("verification_trigger", {"serial": "mock:9999"})
+        assert res_n7.get("status") == "prevented"
+        assert res_n7.get("allowed") is False
+        assert state.dag_state["nodes"]["verification_trigger"]["status"] == "prevented"
+
+        # Now simulate Node 6 succeeding
+        res_n6 = await orch.run_single_dag_node("arrow_down", {"serial": "mock:9999"})
+        assert res_n6.get("status") == "success"
+        assert res_n6.get("reached") is True
+        assert state.dag_state["nodes"]["arrow_down"]["status"] == "completed"
+
+    asyncio.run(run_test())

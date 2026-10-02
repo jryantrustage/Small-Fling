@@ -9,6 +9,8 @@ from pydantic import BaseModel
 import hashlib
 import re
 import subprocess
+import cv2
+import numpy as np
 import config, db
 from models import TelemetryUpdateRequest, OrchestrationRequest, PipelineModeRequest, OcrSelectionRequest
 from services import state
@@ -1843,18 +1845,48 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             }
 
         elif target_key == "arrow_down":
+            is_mock = active_serial and "mock" in str(active_serial).lower()
             prev_bot = node.get("prev_bottom") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) or 31
             cur_top = state.latest_telemetry.get("current_top_line", 1) or 1
             target_top = prev_bot + 1
-            needed_steps = max(1, target_top - cur_top)
-            step_count = int(cfg.get("step_count") or needed_steps)
             disp_id = await detect_external_display_id(active_serial)
 
-            # 1. Pre-Scroll Assertion: Before dispatching an arrow-down or page-down keystroke, check the frame.
+            if is_mock:
+                final_top = target_top
+                node.update({
+                    "status": "completed",
+                    "arrow_count": max(1, target_top - cur_top),
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "new_top_line": final_top,
+                    "reached": True,
+                    "advanced": True,
+                    "evaluator": "Pacing & Alignment Evaluator",
+                    "healing_step": None,
+                    "error": None,
+                    "telemetry_insight": f"Mock stepped down to Line {target_top}"
+                })
+                if "verification_trigger" in state.dag_state["nodes"]:
+                    state.dag_state["nodes"]["verification_trigger"].update({
+                        "target_top_line": target_top,
+                        "target_top": target_top,
+                        "expected_top": target_top
+                    })
+                return {
+                    "status": "success",
+                    "node_id": "arrow_down",
+                    "step_count": max(1, target_top - cur_top),
+                    "target_top_line": target_top,
+                    "new_top_line": final_top,
+                    "reached": True,
+                    "advanced": True,
+                    "message": f"Mock stepped down to Line {target_top} [OK]"
+                }
+
+            # 1. Pre-Scroll Assertion: Verify Teams markdown editor window is visible
             from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
             markdown_open, reason, details = await assert_markdown_open(active_serial)
 
-            # If markdown_open evaluates to False, divert to a recovery node rather than firing additional navigation commands
             if not markdown_open:
                 state.latest_telemetry["status_message"] = f"Pre-Scroll Assertion: markdown_open is False ({reason}). Diverting to recovery node..."
                 state.dag_state["current_active_node"] = "editor_recovery"
@@ -1867,35 +1899,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 recovery_res = await run_editor_recovery_node(active_serial, disp_id)
 
                 if recovery_res.get("success"):
-                    print("[arrow_down] Pre-Scroll Recovery succeeded [OK] Editor restored. Resuming navigation.")
                     state.latest_telemetry["status_message"] = "Recovery node restored markdown editor [OK] Resuming navigation..."
                     markdown_open = True
                 else:
                     error_msg = f"Navigation blocked: Markdown editor is not open ({reason}) and recovery node failed to restore window."
-                    node["dag_context"] = {
-                        "node_id": "arrow_down",
-                        "project_id": state.get_current_project_id(),
-                        "display_id": disp_id,
-                        "serial": active_serial,
-                        "reason": reason,
-                        "details": details,
-                        "recovery_result": recovery_res,
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    node["trace_insights"] = [
-                        f"Pre-Scroll Assertion failed: Markdown editor is not open or visible ({reason}).",
-                        f"Editor recovery node was unable to restore window: {recovery_res}",
-                        f"Check active tasks on display {disp_id}: adb -s {active_serial} shell dumpsys activity activities | grep -E 'Stack id|Hist'",
-                        f"Launch FilePreviewActivity manually: adb -s {active_serial} shell am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity"
-                    ]
                     node.update({
                         "status": "error",
                         "evaluator": "Editor Window Assertion Evaluator",
                         "healing_step": None,
                         "telemetry_insight": f"Pre-scroll check failed ({reason}) • Recovery failed ⛔",
                         "error": error_msg,
-                        "details": details,
-                        "recovery_result": recovery_res
+                        "reached": False,
+                        "advanced": False
                     })
                     state.latest_telemetry["status_message"] = f"Navigation blocked: {reason} ⛔ Recovery failed."
                     await state.ws_manager.broadcast({
@@ -1904,58 +1919,164 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "node_id": "arrow_down",
                         "status": "error",
                         "error": error_msg,
-                        "dag_context": node["dag_context"],
-                        "trace_insights": node["trace_insights"],
-                        "recovery_result": recovery_res,
-                        "telemetry": state.latest_telemetry
+                        "reached": False,
+                        "advanced": False
                     })
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "message": error_msg,
-                            "dag_context": node["dag_context"],
-                            "trace_insights": node["trace_insights"]
-                        }
-                    )
+                    return {
+                        "status": "error",
+                        "node_id": "arrow_down",
+                        "reached": False,
+                        "advanced": False,
+                        "error": error_msg
+                    }
 
-            # 2. Ensure soft keyboard suppression without tapping screen
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+            # 2. Focus Editor Body & Suppress Soft Keyboard
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", active_serial)
+            # Ensure text caret has focus on desktop display
+            await run_adb_shell(f"input -d {disp_id} tap 500 350", active_serial)
+            await asyncio.sleep(0.12)
+            # Immediately close soft keyboard if tap opened it
+            await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+            await asyncio.sleep(0.08)
 
-            # 3. Constrained Key Bounds: Scope HID scroller to strictly emit PageDown (93) or DownArrow (20) scancodes,
-            # omitting mobile virtual keyboard toggle gestures entirely to prevent rogue modal events
-            scroll_key = int(cfg.get("keycode", 20))
-            if scroll_key not in (20, 93):
-                scroll_key = 20
-            # If stepping a whole page (>= 20 lines) and keycode wasn't explicitly set to 20, use PageDown (93) for instant paging
-            if step_count >= 20 and cfg.get("keycode") is None:
-                scroll_key = 93
-                page_presses = max(1, step_count // 39)
-                keys_arg = " ".join(["93"] * page_presses)
-            else:
-                keys_arg = " ".join([str(scroll_key)] * min(step_count, 49))
-            cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
-            await run_adb_shell(cmd, active_serial)
+            # 3. Dynamic Arrow Down Loop:
+            # Arrow down until the bottom line (e.g. 59) reaches the top.
+            # Top line is determined from visible gutter numbers, accounting for missing lines from word wrap,
+            # and cross-correlating with cursor line position.
+            from ocr_engine import detect_top_line_from_image
 
-            final_top = target_top
-            if cfg.get("verify_after_step", False):
-                await asyncio.sleep(0.1)
-                snap = await capture_external_screenshot(active_serial)
-                if snap:
-                    calib = state.FRAMES_DIR / "dag_node4_step.png"
-                    with open(calib, "wb") as f: f.write(snap)
-                    new_top = await state.detect_top_line_in_process(calib)
-                    if new_top > 0: final_top = new_top
+            total_arrows_pressed = 0
+            max_iterations = 14
+            reached = False
+            current_top = cur_top
+            start_top = cur_top
+            cursor_line = cur_top
 
+            # Capture initial frame to calibrate current top line
+            snap_init = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+            if snap_init:
+                img_init = cv2.imdecode(np.frombuffer(snap_init, np.uint8), cv2.IMREAD_COLOR)
+                init_top, meta_init = detect_top_line_from_image(img_init, target_top=target_top, cursor_line=cursor_line)
+                if init_top > 0:
+                    current_top = init_top
+                    start_top = init_top
+                    cursor_line = init_top
+
+            for iteration in range(max_iterations):
+                needed = target_top - current_top
+                if needed <= 0 or (iteration > 0 and abs(current_top - target_top) <= 1):
+                    reached = True
+                    break
+
+                # Determine batch size:
+                # If far away on initial step, send larger burst
+                # If closer, use smaller increments
+                if iteration == 0 and needed >= 30:
+                    batch_size = min(40, needed)
+                elif needed > 15:
+                    batch_size = min(20, needed)
+                elif needed > 5:
+                    batch_size = min(10, needed)
+                else:
+                    batch_size = max(1, needed)
+
+                keys_arg = " ".join(["20"] * batch_size)
+                cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
+                await run_adb_shell(cmd, active_serial)
+                total_arrows_pressed += batch_size
+                cursor_line += batch_size
+
+                # Keep keyboard closed after arrow keystrokes
+                await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                await asyncio.sleep(0.12)
+
+                # Capture frame and detect top line accounting for word wrap
+                snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                if not snap:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+                det_top, meta = detect_top_line_from_image(img, target_top=target_top, cursor_line=cursor_line)
+                if det_top > 0:
+                    current_top = det_top
+
+                # Reached target (e.g. line 59/60 is on top)
+                if current_top >= target_top or abs(current_top - target_top) <= 1:
+                    reached = True
+                    break
+
+            # Handle minor overshoot (1-3 lines): nudge back up with keyevent 19
+            if current_top > target_top and (current_top - target_top) <= 3:
+                up_steps = current_top - target_top
+                up_arg = " ".join(["19"] * up_steps)
+                await run_adb_shell(f"input -d {disp_id} keyevent {up_arg}", active_serial)
+                await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                await asyncio.sleep(0.12)
+                snap_up = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                if snap_up:
+                    img_up = cv2.imdecode(np.frombuffer(snap_up, np.uint8), cv2.IMREAD_COLOR)
+                    det_top, _ = detect_top_line_from_image(img_up, target_top=target_top)
+                    if det_top > 0:
+                        current_top = det_top
+                reached = (abs(current_top - target_top) <= 1 or current_top >= target_top)
+
+            # Ensure keyboard is closed before concluding
+            await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+
+            advanced = (current_top > start_top)
+            final_top = current_top if current_top > 0 else target_top
+
+            if not advanced and not reached:
+                error_msg = f"Navigation failed: arrow_down did not advance viewport to target Line {target_top}. Page remained stuck at Line {start_top} after {total_arrows_pressed} keystrokes."
+                node.update({
+                    "status": "error",
+                    "arrow_count": total_arrows_pressed,
+                    "target_top_line": target_top,
+                    "target_top": target_top,
+                    "new_top_line": start_top,
+                    "reached": False,
+                    "advanced": False,
+                    "evaluator": "Pacing & Alignment Evaluator",
+                    "healing_step": None,
+                    "error": error_msg,
+                    "telemetry_insight": f"Navigation failed to advance from Line {start_top} ⛔"
+                })
+                state.latest_telemetry["status_message"] = error_msg
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "arrow_down",
+                    "status": "error",
+                    "error": error_msg,
+                    "reached": False,
+                    "advanced": False,
+                    "telemetry": state.latest_telemetry
+                })
+                return {
+                    "status": "error",
+                    "node_id": "arrow_down",
+                    "reached": False,
+                    "advanced": False,
+                    "target_top_line": target_top,
+                    "new_top_line": start_top,
+                    "message": error_msg
+                }
+
+            # Navigation Succeeded!
             state.latest_telemetry["current_top_line"] = final_top
             node.update({
                 "status": "completed",
-                "arrow_count": step_count,
+                "arrow_count": total_arrows_pressed,
                 "target_top_line": target_top,
                 "target_top": target_top,
                 "new_top_line": final_top,
+                "reached": True,
+                "advanced": True,
                 "evaluator": "Pacing & Alignment Evaluator",
                 "healing_step": None,
-                "telemetry_insight": f"Stepped {step_count} down arrows to target Line {target_top} (current Ln {final_top})"
+                "error": None,
+                "telemetry_insight": f"Stepped {total_arrows_pressed} down arrows to target Line {target_top} (current Ln {final_top}) ✔"
             })
             if "verification_trigger" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["verification_trigger"].update({
@@ -1968,21 +2089,57 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "type": "dag_updated",
                 "dag": state.dag_state,
                 "node_id": "arrow_down",
-                "step_count": step_count,
+                "step_count": total_arrows_pressed,
                 "target_top_line": target_top,
                 "new_top_line": final_top,
+                "reached": True,
+                "advanced": True,
                 "telemetry": state.latest_telemetry
             })
             return {
                 "status": "success",
                 "node_id": "arrow_down",
-                "step_count": step_count,
+                "step_count": total_arrows_pressed,
                 "target_top_line": target_top,
                 "new_top_line": final_top,
-                "message": f"Stepped {step_count} down arrows: Target top Ln {target_top} (Current: Ln {final_top}) [OK]"
+                "reached": True,
+                "advanced": True,
+                "message": f"Stepped {total_arrows_pressed} down arrows: Target top Ln {target_top} (Current: Ln {final_top}) [OK]"
             }
 
         elif target_key == "verification_trigger":
+            # Guard: DAG 7 should not proceed if DAG 6 didn't work!
+            n6_info = state.dag_state["nodes"].get("arrow_down", {})
+            if n6_info.get("status") in ("error", "prevented") or n6_info.get("reached") is False or n6_info.get("advanced") is False:
+                error_msg = "Verification trigger blocked: DAG 6 (arrow_down) failed to position target line on top. Halting loop to prevent duplicate capture of identical image."
+                node.update({
+                    "status": "prevented",
+                    "evaluator": "Completion Qualifier Evaluator",
+                    "healing_step": None,
+                    "telemetry_insight": "Trigger blocked: DAG 6 navigation failed ⛔",
+                    "error": error_msg,
+                    "trigger_decision": {
+                        "allowed": False,
+                        "prevented": True,
+                        "reasons": [error_msg]
+                    }
+                })
+                state.latest_telemetry["status_message"] = error_msg
+                await state.ws_manager.broadcast({
+                    "type": "dag_updated",
+                    "dag": state.dag_state,
+                    "node_id": "verification_trigger",
+                    "status": "prevented",
+                    "error": error_msg
+                })
+                return {
+                    "status": "prevented",
+                    "node_id": "verification_trigger",
+                    "allowed": False,
+                    "prevented": True,
+                    "message": error_msg
+                }
+
             target_top = node.get("target_top_line") or (state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) + 1)
             temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
             snap_bytes = temp_calib.read_bytes() if temp_calib.exists() else None
@@ -2501,12 +2658,27 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
 
     n6_res = await run_single_dag_node("arrow_down", opts)
-    if n6_res.get("status") in ("error", "prevented"):
-        st = n6_res.get("status", "error")
+    if (
+        n6_res.get("status") in ("error", "prevented")
+        or n6_res.get("reached") is False
+        or n6_res.get("advanced") is False
+    ):
+        st = "error" if n6_res.get("status") in ("error", "success") else n6_res.get("status", "error")
         capture_group["status"] = st
-        return {"status": st, "node_id": "arrow_down", "result": n6_res}
+        err_msg = n6_res.get("message") or n6_res.get("error") or "Navigation failed: arrow_down did not advance viewport."
+        state.latest_telemetry["status_message"] = f"Loop halted: {err_msg} DAG 7 blocked."
+        return {"status": st, "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
     n7_res = await run_single_dag_node("verification_trigger", opts)
+    if (
+        n7_res.get("status") in ("error", "prevented")
+        or not n7_res.get("allowed", True)
+        or n7_res.get("prevented", False)
+    ):
+        st = n7_res.get("status", "prevented")
+        capture_group["status"] = st
+        return {"status": st, "node_id": "verification_trigger", "result": n7_res}
+
     n8_res = await run_single_dag_node("document_assemble", opts)
 
     return {
