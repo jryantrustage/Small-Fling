@@ -515,18 +515,43 @@ def get_current_project_id() -> Optional[str]:
     return p["id"] if p else None
 
 def get_serialized_lines() -> List[Dict[str, Any]]:
-    return [
-        document_lines[k].to_dict() if hasattr(document_lines[k], "to_dict")
-        else (document_lines[k] if isinstance(document_lines[k], dict)
-              else {"line_number": k, "gutter_number": k, "text": str(document_lines[k]), "status": "ok", "is_blank": not bool(str(document_lines[k]).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": datetime.now().isoformat()})
-        for k in sorted(document_lines.keys())
-    ]
+    if not document_lines:
+        return []
+    min_k = min(document_lines.keys())
+    max_k = max(document_lines.keys())
+    start_k = 1 if (1 < min_k <= 120) else min_k
+
+    res = []
+    for k in range(start_k, max_k + 1):
+        if k in document_lines:
+            it = document_lines[k]
+            res.append(
+                it.to_dict() if hasattr(it, "to_dict")
+                else (it if isinstance(it, dict)
+                      else {"line_number": k, "gutter_number": k, "text": str(it), "status": "ok", "is_blank": not bool(str(it).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": datetime.now().isoformat()})
+            )
+        else:
+            res.append({
+                "line_number": k,
+                "gutter_number": k,
+                "text": "",
+                "status": "gap",
+                "is_blank": True,
+                "confidence": 0.0,
+                "frame_id": "",
+                "sources": [],
+                "notes": f"Gap: Missing line #{k} (not covered in captured frames)",
+                "updated_at": datetime.now().isoformat()
+            })
+    return res
 
 def get_document_metrics() -> Dict[str, Any]:
     sl = get_serialized_lines()
+    issue_lines = [ln for ln in sl if ln.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
     return {
         "document_lines": len(document_lines),
-        "total_lines": len(document_lines),
+        "total_lines": len(sl),
+        "verified_lines_count": len(document_lines),
         "min_line": min(document_lines.keys()) if document_lines else 0,
         "max_line": max(document_lines.keys()) if document_lines else 0,
         "total_frames": len(captured_frames),
@@ -534,8 +559,8 @@ def get_document_metrics() -> Dict[str, Any]:
         "pending_recaptures": len(recapture_queue),
         "verified_overlaps": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
         "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
-        "issues_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"]),
-        "issue_count": sum(1 for ln in sl if ln.get("status") in ["flagged", "missing", "overlap_conflict"])
+        "issues_count": len(issue_lines),
+        "issue_count": len(issue_lines)
     }
 
 def get_fresh_telemetry() -> Dict[str, Any]:

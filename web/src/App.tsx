@@ -3,7 +3,7 @@ import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  ZoomIn, ZoomOut
+  ZoomIn, ZoomOut, Copy, Check
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -206,6 +206,7 @@ function AppContent() {
   const [isBatchDeletingFrames, setIsBatchDeletingFrames] = useState(false);
   const [selectedLineNumbers, setSelectedLineNumbers] = useState<Set<number>>(new Set());
   const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState(false);
 
   // Auto-Fix & Calibrate States
   const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
@@ -949,10 +950,63 @@ function AppContent() {
     }
   };
 
-  const sortedFrames = [...frames].sort((a, b) => a.top_line - b.top_line || a.page_index - b.page_index);
+  const sortedFrames = [...frames].sort((a, b) => (a.page_index || 0) - (b.page_index || 0) || (a.created_at || '').localeCompare(b.created_at || '') || (a.top_line || 0) - (b.top_line || 0));
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId) || frames[0] || null;
+
+  const handleCopyPageReport = useCallback(async () => {
+    try {
+      const res = await api('/api/frames/page-report');
+      let reportText = '';
+      if (res.ok) {
+        reportText = await res.text();
+      } else {
+        const lines = [
+          '# Matrix Capture - Page Line Numbers & Coverage Report',
+          `Generated: ${new Date().toLocaleString()}`,
+          `Total Captured Frames: ${sortedFrames.length}`,
+          `Total Verified Lines: ${documentData.total_lines}`,
+          '',
+          '## Sequential Page Breakdown'
+        ];
+        const gaps: string[] = [];
+        sortedFrames.forEach((f, idx) => {
+          const prev = idx > 0 ? sortedFrames[idx - 1] : null;
+          const flags: string[] = [];
+          if (prev && prev.bottom_line > 0) {
+            if (f.top_line === prev.top_line && f.bottom_line === prev.bottom_line) {
+              flags.push('⚠️ DUPLICATE CAPTURE');
+            } else if (f.top_line > prev.bottom_line + 1) {
+              const gStart = prev.bottom_line + 1;
+              const gEnd = f.top_line - 1;
+              const gCount = gEnd - gStart + 1;
+              flags.push(`⚠️ GAP: Missing Ln ${gStart} → ${gEnd} (${gCount} lines)`);
+              gaps.push(`Gap between Pg ${prev.page_index} and Pg ${f.page_index}: Missing Ln ${gStart} → ${gEnd} (${gCount} lines)`);
+            } else if (f.top_line <= prev.bottom_line && f.top_line > 0) {
+              flags.push(`ℹ️ Overlap: Ln ${f.top_line} → ${prev.bottom_line} (${prev.bottom_line - f.top_line + 1} lines)`);
+            }
+          }
+          const flagStr = flags.length > 0 ? ` [${flags.join(' | ')}]` : '';
+          const span = f.bottom_line >= f.top_line && f.top_line > 0 ? f.bottom_line - f.top_line + 1 : 0;
+          lines.push(`- Page ${f.page_index}: Ln ${f.top_line} → ${f.bottom_line} (${span} lines)${flagStr}`);
+        });
+        lines.push('', '## Gaps Summary');
+        if (gaps.length === 0) {
+          lines.push('✔ No gaps detected between consecutive captured pages.');
+        } else {
+          gaps.forEach((g, i) => lines.push(`${i + 1}. ${g}`));
+        }
+        reportText = lines.join('\n');
+      }
+      await navigator.clipboard.writeText(reportText);
+      setCopyFeedback(true);
+      setTimeout(() => setCopyFeedback(false), 2500);
+    } catch (e) {
+      console.error('Failed to copy page report:', e);
+    }
+  }, [sortedFrames, documentData]);
+
   const filteredLines = (documentData?.lines || []).filter(l => {
-    if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'unaligned') return false;
+    if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       return (l.text || '').toLowerCase().includes(q) || String(l.line_number).includes(q) || String(l.gutter_number || '').includes(q);
@@ -1259,6 +1313,16 @@ function AppContent() {
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${copyFeedback ? 'btn-success' : 'btn-outline'}`}
+                        onClick={handleCopyPageReport}
+                        title="Copy page line numbers & gap coverage report to clipboard"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                      >
+                        {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                        <span>{copyFeedback ? 'Copied' : 'Report'}</span>
+                      </button>
                       {frames.some(f => f.status.startsWith('error')) && (
                         <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
                           <RotateCw size={11} /> Retry Failed
@@ -1736,6 +1800,16 @@ function AppContent() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')}>All ({documentData.total_lines})</button>
                         <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${copyFeedback ? 'btn-success' : 'btn-outline'}`}
+                          onClick={handleCopyPageReport}
+                          title="Copy page line numbers & gap coverage report to clipboard"
+                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                        >
+                          {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                          <span>{copyFeedback ? 'Copied' : 'Page Report'}</span>
+                        </button>
                         <div className="window-controls">
                           <button
                             type="button"
@@ -1768,6 +1842,7 @@ function AppContent() {
                           <tbody>
                             {filteredLines.map(line => {
                               const isSelected = selectedLineNumbers.has(line.line_number);
+                              const isGap = line.status === 'gap' || line.status === 'missing';
                               return (
                                 <tr
                                   key={line.line_number}
@@ -1782,8 +1857,23 @@ function AppContent() {
                                       onChange={(e) => handleToggleSelectLine(line.line_number, e)}
                                     />
                                   </td>
-                                  <td className="td-line-num">{line.gutter_number || line.line_number}{line.is_wrapped && <span className="wrap-tag"> ↵</span>}</td>
-                                  <td className="td-line-text"><pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre></td>
+                                  <td className="td-line-num">
+                                    {isGap ? (
+                                      <span style={{ color: '#f85149', fontWeight: 700 }}>{line.gutter_number || line.line_number}</span>
+                                    ) : (
+                                      <>{line.gutter_number || line.line_number}{line.is_wrapped && <span className="wrap-tag"> ↵</span>}</>
+                                    )}
+                                  </td>
+                                  <td className="td-line-text">
+                                    {isGap ? (
+                                      <span className="gap-line-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f85149', fontStyle: 'italic', fontSize: '11px', fontWeight: 600 }}>
+                                        <AlertCircle size={11} color="#f85149" />
+                                        <span>[GAP: Line #{line.line_number} Missing — Not Captured in Paging]</span>
+                                      </span>
+                                    ) : (
+                                      <pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre>
+                                    )}
+                                  </td>
                                 </tr>
                               );
                             })}
