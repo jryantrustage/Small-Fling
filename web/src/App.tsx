@@ -335,10 +335,20 @@ function AppContent() {
       localStorage.setItem('mc_target_device_model', dev);
       const matchedDevice = deviceInfo?.devices?.find(d =>
         dev === 'pixel_8'
-          ? (d.displayName === 'Pixel 8' || d.model.toLowerCase().includes('pixel_8') || (pixel8Ip && d.serial === pixel8Ip))
-          : (d.displayName === 'Pixel 10' || d.model.toLowerCase().includes('pixel_10') || (pixel10Ip && d.serial === pixel10Ip))
+          ? (d.displayName === 'Pixel 8' || d.model.toLowerCase().includes('pixel_8') || d.raw?.toLowerCase().includes('husky') || (pixel8Ip && d.serial === pixel8Ip))
+          : (d.displayName === 'Pixel 10' || d.model.toLowerCase().includes('pixel_10') || d.raw?.toLowerCase().includes('mustang') || (pixel10Ip && d.serial === pixel10Ip))
       );
-      const targetSerial = (dev === 'pixel_8' ? pixel8Ip : pixel10Ip) || matchedDevice?.serial;
+      // Prioritize active connected matchedDevice serial over stale IP
+      const targetSerial = matchedDevice?.serial || (dev === 'pixel_8' ? pixel8Ip : pixel10Ip);
+      if (targetSerial && targetSerial.includes(':')) {
+        if (dev === 'pixel_10') {
+          setPixel10Ip(targetSerial);
+          localStorage.setItem('mc_pixel_10_address', targetSerial);
+        } else {
+          setPixel8Ip(targetSerial);
+          localStorage.setItem('mc_pixel_8_address', targetSerial);
+        }
+      }
       await api('/api/device/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -793,10 +803,11 @@ function AppContent() {
   const handleTriggerCalibration = async () => {
     setIsRunningCalibration(true);
     try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
       const res = await api('/api/dag/groups/initialize/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: activeProject?.id })
+        body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer })
       });
       const d = await res.json();
       if (res.ok) {
@@ -1090,7 +1101,8 @@ function AppContent() {
             onRetryInit={async () => {
               setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
               try {
-                await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id }) });
+                const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+                await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer }) });
               } catch {}
             }}
             eventsLog={eventsLog}

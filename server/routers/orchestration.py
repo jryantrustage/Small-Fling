@@ -773,38 +773,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     try:
         disp_id = await detect_external_display_id(active_serial)
 
-        # Proactively heal environment triggers before executing node action
-        if not payload.get("skip_env_heal"):
+        # Proactively heal environment triggers before executing node action (only for continuous capture nodes, never disturb user's open document during init/reset)
+        if not payload.get("skip_env_heal") and target_key not in ("init_end", "reset_home"):
             t_pre_0 = time.perf_counter()
             heal_env = await auto_heal_pipeline_environment(active_serial, disp_id, target_key)
             precheck_ms = max(0, int((time.perf_counter() - t_pre_0) * 1000))
             healing_ms += heal_env.get("duration_ms", 0)
 
         if target_key == "init_end":
-            cursor_clf = EditorCursorFocusedClassifier()
-            c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
-            node.update({
-                "evaluator": "Editor Cursor Evaluator",
-                "healing_step": "Refocusing editor cursor",
-                "telemetry_insight": "Verifying text body focus and caret presence on external display..."
-            })
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
-            await emit_dag_telemetry_event(
-                category="SYSTEM",
-                message=f"DAG 1 • [Precheck] Verifying text body focus and caret on display {disp_id}...",
-                dag="initialize",
-                node_id="init_end",
-                serial=active_serial
-            )
-
-            # Always ensure the external display and document body have active cursor focus before sending keycombination
-            try:
-                await cursor_clf.fix(c_ctx)
-                await asyncio.sleep(0.2)
-            except Exception as ce:
-                print(f"[init_end] Cursor classifier check note: {ce}")
-            await ensure_adb_keyboard_closed(active_serial)
-
             node.update({
                 "evaluator": "EOF Navigation Evaluator",
                 "healing_step": "Dispatching Ctrl+End",
@@ -819,7 +795,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 serial=active_serial
             )
 
-            # 1. Send Ctrl+End with focus
+            # Silently ensure virtual keyboard is closed without tapping or resizing
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+
+            # 1. Send Ctrl+End directly without touching or tapping screen
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
             settle_s = float(cfg.get("settle_delay_ms", 300)) / 1000.0
             await asyncio.sleep(settle_s)
@@ -884,24 +863,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
                 await asyncio.sleep(0.35)
 
-            # 3. Auto-fix viewport immediately after scroll has fully landed: close soft keyboard and reflow desktop layout
-            node.update({
-                "evaluator": "Viewport Reflow Evaluator",
-                "healing_step": "Refreshing page capture",
-                "telemetry_insight": "Suppressing soft keyboard & reflowing desktop viewport..."
-            })
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
-            await auto_fix_viewport(active_serial, disp_id)
-            await asyncio.sleep(0.2)
-            await emit_dag_telemetry_event(
-                category="SYSTEM",
-                message="DAG 1 • [Viewport] Auto-dismissing soft keyboard & reflowing 1080p desktop layout",
-                dag="initialize",
-                node_id="init_end",
-                serial=active_serial
-            )
+            # 3. Silently suppress soft keyboard without resizing task or reloading window
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
 
-            # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full height
+            # Re-read gutter to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial)
             if snap_fixed:
                 with open(calib, "wb") as f: f.write(snap_fixed)
@@ -931,21 +896,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 node.update({
                     "evaluator": "Line 1 Stuck Evaluator",
                     "healing_step": "Refreshing page capture",
-                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Refocusing cursor & retrying EOF jump..."
+                    "telemetry_insight": f"Gutter on Ln {top_line or 1} • Retrying EOF jump via Ctrl+End..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
                 await emit_dag_telemetry_event(
                     category="SYSTEM",
-                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Refocusing cursor & retrying Ctrl+End jump...",
+                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Retrying Ctrl+End jump...",
                     dag="initialize",
                     node_id="init_end",
                     serial=active_serial
                 )
                 try:
-                    await ensure_adb_keyboard_closed(active_serial)
-                    await cursor_clf.fix(c_ctx)
-                    await ensure_adb_keyboard_closed(active_serial)
-                    await asyncio.sleep(0.2)
+                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+                    await asyncio.sleep(0.1)
                     await send_hid_keycombination(113, 123, active_serial)
                     await asyncio.sleep(0.6)
                     node.update({
@@ -1189,9 +1152,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Ensure viewport is clean and soft keyboard is suppressed before sending Ctrl+Home
-                await auto_fix_viewport(active_serial, disp_id)
-                await asyncio.sleep(0.15)
+                # Silently ensure soft keyboard is suppressed before sending Ctrl+Home
+                await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+                await asyncio.sleep(0.1)
 
                 # Send Ctrl+Home (keycode 113 122) directly to external display keyboard
                 await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 122)), active_serial)
@@ -1240,16 +1203,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             detected_first = d2 or 1
                     break
 
-                print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), bringing editor to front...")
+                print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), retrying Ctrl+Home...")
                 node.update({
                     "evaluator": "Line 1 Gutter Evaluator",
                     "healing_step": "Refreshing page capture",
-                    "telemetry_insight": f"Top line at Ln {detected_first} • Re-activating FilePreviewActivity & auto-fixing viewport..."
+                    "telemetry_insight": f"Top line at Ln {detected_first} • Retrying Ctrl+Home..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
-                # Re-activate Teams FilePreviewActivity on external display and ensure focus
-                await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", active_serial)
-                await auto_fix_viewport(active_serial, disp_id)
                 await asyncio.sleep(0.3)
 
             if not is_verified:
@@ -2334,19 +2294,9 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     })
 
     try:
-        # Pre-check cursor focus and external display
+        # Ensure external display is identified and soft keyboard suppressed silently
         disp_id = await detect_external_display_id(active_serial)
-        cursor_clf = EditorCursorFocusedClassifier()
-        c_ctx = ClassifierContext(serial=active_serial, display_id=disp_id)
-        try:
-            c_res = await cursor_clf.detect(c_ctx)
-            if c_res.issue_detected:
-                await cursor_clf.fix(c_ctx)
-                await asyncio.sleep(0.2)
-        except Exception as ce:
-            print(f"[execute_dag_group_initialize] Caret focus check note: {ce}")
-
-        await ensure_adb_keyboard_closed(active_serial)
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
 
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
