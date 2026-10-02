@@ -265,6 +265,9 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .table-line-row:hover { background: rgba(255,255,255,0.04); }
 .table-line-row.selected { background: rgba(56, 139, 253, 0.12); border-left: 2px solid #58a6ff; }
 .table-line-row.flagged { background: rgba(248, 81, 73, 0.08); border-left: 2px solid #f85149; }
+.table-line-row.gap, .table-line-row.missing { background: rgba(248, 81, 73, 0.08); border-left: 3px solid #f85149; }
+.table-line-row.gap:hover, .table-line-row.missing:hover { background: rgba(248, 81, 73, 0.16); }
+.gap-line-warning { color: #f85149; font-size: 11px; font-weight: 600; }
 .td-line-num { width: 60px; text-align: right; padding: 4px 12px; color: #6e7681; font-size: 11px; vertical-align: top; -webkit-user-select: none; user-select: none; }
 .td-line-text { padding: 4px 16px; color: #e6edf3; vertical-align: top; }
 .table-code-text { margin: 0; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; word-break: break-all; }

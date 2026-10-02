@@ -28,9 +28,10 @@ def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
 
 def _doc_payload() -> Dict[str, Any]:
     sl = state.get_serialized_lines()
-    issues = [item for item in sl if item.get("status") in ["flagged", "missing", "overlap_conflict"]]
+    issues = [item for item in sl if item.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
     return {
-        "total_lines": len(state.document_lines),
+        "total_lines": len(sl),
+        "verified_lines_count": len(state.document_lines),
         "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
         "max_line": max(state.document_lines.keys()) if state.document_lines else 0,
         "total_frames": len(state.captured_frames),
@@ -440,3 +441,64 @@ async def get_spliced_document_image():
     buf = io.BytesIO()
     canvas.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png", headers={"Content-Disposition": "inline; filename=spliced_document.png"})
+
+@router.get("/api/frames/page-report")
+@router.get("/api/document/page-report")
+async def get_page_report():
+    pid = state.get_current_project_id()
+    frames = db.get_frames(pid)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    lines_report = [
+        "# Matrix Capture - Page Line Numbers & Coverage Report",
+        f"Generated: {now_str}",
+        f"Total Captured Frames: {len(frames)}",
+        f"Total Verified Lines: {len(state.document_lines)}",
+        "",
+        "## Sequential Page Breakdown"
+    ]
+
+    gaps = []
+    prev_bottom = None
+    prev_page = None
+    prev_top = None
+    prev_bot = None
+
+    for idx, f in enumerate(frames):
+        p_num = f.get("page_index", idx + 1)
+        top = f.get("top_line", 0)
+        bot = f.get("bottom_line", 0)
+        span = (bot - top + 1) if (bot >= top and top > 0) else 0
+
+        flags = []
+        if prev_bottom is not None:
+            if top == prev_top and bot == prev_bot:
+                flags.append("⚠️ DUPLICATE CAPTURE (Identical line range as previous page)")
+            elif top > prev_bottom + 1:
+                gap_start = prev_bottom + 1
+                gap_end = top - 1
+                gap_count = gap_end - gap_start + 1
+                flags.append(f"⚠️ GAP: Missing Ln {gap_start} → {gap_end} ({gap_count} lines missing)")
+                gaps.append({"prev_page": prev_page, "page": p_num, "from_line": gap_start, "to_line": gap_end, "count": gap_count})
+            elif top <= prev_bottom and top > 0:
+                overlap_count = prev_bottom - top + 1
+                flags.append(f"ℹ️ Overlap with Pg {prev_page}: Ln {top} → {prev_bottom} ({overlap_count} lines)")
+
+        flag_str = f" [{' | '.join(flags)}]" if flags else ""
+        lines_report.append(f"- Page {p_num:2d}: Ln {top:4d} → {bot:4d} ({span:2d} lines){flag_str}")
+
+        prev_top = top
+        prev_bot = bot
+        prev_bottom = bot
+        prev_page = p_num
+
+    lines_report.append("")
+    lines_report.append("## Gaps & Missing Lines Summary")
+    if not gaps:
+        lines_report.append("✔ No line gaps detected between consecutive captured pages.")
+    else:
+        for idx, g in enumerate(gaps, 1):
+            lines_report.append(f"{idx}. Gap between Page {g['prev_page']} and Page {g['page']}: Missing Ln {g['from_line']} → {g['to_line']} ({g['count']} lines missing)")
+
+    report_text = "\n".join(lines_report)
+    return PlainTextResponse(report_text, headers={"Content-Type": "text/markdown; charset=utf-8"})

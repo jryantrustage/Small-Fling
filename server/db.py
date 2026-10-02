@@ -106,7 +106,7 @@ def clear_project_data(project_id: str) -> bool: return _purge_project_data(proj
 
 def get_frames(project_id: Optional[str]) -> List[Dict[str, Any]]:
     if not project_id: return []
-    rows = _execute("SELECT * FROM frames WHERE project_id = ? ORDER BY top_line ASC, page_index ASC, created_at ASC;", (project_id,), fetchall=True)
+    rows = _execute("SELECT * FROM frames WHERE project_id = ? ORDER BY page_index ASC, created_at ASC, top_line ASC;", (project_id,), fetchall=True)
     res = []
     for r in rows:
         d = dict(r)

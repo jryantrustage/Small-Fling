@@ -44,21 +44,83 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
     nums.sort(key=lambda x: x[0])
     return [n for _, n in nums]
 
+def correct_gutter_sequence(gutter_items: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+    """
+    Validates and corrects line numbers in a vertical gutter column.
+    Detects and corrects outliers (such as truncated numbers like 69 instead of 697)
+    using sequence consensus, median line pitch, and linear projection.
+    """
+    if not gutter_items:
+        return []
+    sorted_items = sorted(gutter_items, key=lambda it: it[0])
+    if len(sorted_items) <= 1:
+        return sorted_items
+
+    # 1. Estimate typical line pitch (pixels per line)
+    pitches = []
+    for i in range(len(sorted_items) - 1):
+        dy = sorted_items[i+1][0] - sorted_items[i][0]
+        dn = sorted_items[i+1][1] - sorted_items[i][1]
+        if dn > 0 and 10 <= dy <= 35 * dn:
+            pitches.append(dy / dn)
+    med_pitch = float(np.median(pitches)) if pitches else 18.0
+
+    # 2. Find anchor/consensus index where consecutive items have dn == 1 and dy approx pitch
+    anchor_idx = None
+    for i in range(len(sorted_items) - 1):
+        dy = sorted_items[i+1][0] - sorted_items[i][0]
+        dn = sorted_items[i+1][1] - sorted_items[i][1]
+        if dn in (1, 2) and abs(dy - dn * med_pitch) <= 8:
+            anchor_idx = i
+            break
+    if anchor_idx is None:
+        anchor_idx = len(sorted_items) - 1 if len(sorted_items) > 1 else 0
+
+    anchor_y, anchor_n = sorted_items[anchor_idx]
+
+    cleaned = []
+    for y_pos, num in sorted_items:
+        projected = int(round(anchor_n + (y_pos - anchor_y) / med_pitch))
+        if projected < 1:
+            projected = 1
+        # If num deviates significantly from projection:
+        if abs(num - projected) > 3:
+            s_num = str(num)
+            s_proj = str(projected)
+            # Prefix truncation e.g. "69" when projected is 697
+            if s_proj.startswith(s_num) or abs(num - projected) > 12:
+                cleaned.append((y_pos, projected))
+            else:
+                cleaned.append((y_pos, num))
+        else:
+            cleaned.append((y_pos, num))
+    return cleaned
+
+def clean_slice_numbers(nums: List[int]) -> List[int]:
+    """Helper to detect and fix digit-truncation outliers in a slice of line numbers."""
+    if not nums or len(nums) < 2:
+        return nums
+    res = list(nums)
+    # Check if first element is a truncated prefix of second element - 1
+    if res[1] > 50 and res[0] < res[1] - 10:
+        expected_first = res[1] - 1
+        if str(expected_first).startswith(str(res[0])) or expected_first - res[0] > 50:
+            res[0] = expected_first
+    return res
+
 def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[int, int]:
     """
     Rapidly extracts top line and bottom line from targeted top/bottom gutter slices in parallel.
     Multiplies base 1080p search bounding boxes by dpi_factor and resolution scaling factor.
+    Includes consensus validation to prevent digit truncation glitches (e.g. 69 instead of 697).
     """
     if img is None: return 0, 0
     h, w = img.shape[:2]
     scale_x = w / 1920.0
-    # Combined normalization multiplier: scales box width & offsets according to active DPI and resolution
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter (scaled dynamically)
-    # At 160 DPI 1080p: ~130-150px
-    # At 120 DPI 1080p: ~90-110px (prevents overflowing into markdown header text)
-    gutter_w = int(max(90.0, min(160.0, 130.0 * norm_multiplier)))
+    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 160px for 4-digit numbers)
+    gutter_w = int(max(105.0, min(175.0, 140.0 * norm_multiplier)))
     top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
     top_crop = img[top_y1:int(h * 0.45), :gutter_w]
     bot_crop = img[int(h * 0.65):int(h * 0.98), :gutter_w]
@@ -66,14 +128,21 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
     f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled)
     f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
-    top_nums, bot_nums = f_top.result(), f_bot.result()
+    top_nums = clean_slice_numbers(f_top.result())
+    bot_nums = f_bot.result()
 
     if top_nums and top_nums[0] > 1 and len(top_nums) >= 2:
         if top_nums[0] <= 12:
             top_nums.insert(0, 1)
 
     if top_nums and bot_nums:
-        return top_nums[0], bot_nums[-1]
+        t, b = top_nums[0], bot_nums[-1]
+        # Sanity check: single screen cannot hold > 75 lines
+        if b > 0 and t > 0 and (b - t) > 75:
+            # If b is large (e.g. 754) and t is small (e.g. 69), project t from b
+            if str(b - 57).startswith(str(t)) or (b - t > 100):
+                t = max(1, b - 57)
+        return t, b
 
     # 2. Secondary: sidebar open (gutter around x ~ 300 scaled by norm_multiplier)
     sidebar_x1 = int(240.0 * norm_multiplier)
@@ -84,16 +153,24 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
         top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
         f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
-        top_nums2, bot_nums2 = f_top2.result(), f_bot2.result()
+        top_nums2 = clean_slice_numbers(f_top2.result())
+        bot_nums2 = f_bot2.result()
         if top_nums2 and top_nums2[0] > 1 and len(top_nums2) >= 2:
             if top_nums2[0] <= 12:
                 top_nums2.insert(0, 1)
         if top_nums2 and bot_nums2:
-            return top_nums2[0], bot_nums2[-1]
+            t2, b2 = top_nums2[0], bot_nums2[-1]
+            if b2 > 0 and t2 > 0 and (b2 - t2) > 75:
+                if str(b2 - 57).startswith(str(t2)) or (b2 - t2 > 100):
+                    t2 = max(1, b2 - 57)
+            return t2, b2
 
     # Return partial if either top or bot detected
     t = (top_nums or (top_nums2 if 'top_nums2' in locals() else []) or [0])[0]
     b = (bot_nums or (bot_nums2 if 'bot_nums2' in locals() else []) or [0])[-1]
+    if b > 0 and t > 0 and (b - t) > 75:
+        if str(b - 57).startswith(str(t)) or (b - t > 100):
+            t = max(1, b - 57)
     return t, b
 
 def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bool, int]:
@@ -187,7 +264,10 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
         if len(items) > len(best_gutter):
             best_gutter = sorted(items, key=lambda it: it[0])
     
-    # Filter monotonically non-decreasing order
+    # Filter and correct gutter numbers using consensus sequence validation
+    if best_gutter:
+        best_gutter = correct_gutter_sequence(best_gutter)
+
     valid = []
     for y_pos, num in best_gutter:
         if not valid or num >= valid[-1][1]:
@@ -250,7 +330,9 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         t, b = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
         return t or 0, {"source": "fast_bounds", "bottom": b}
 
-    doc_top_y = max(130, int(h * (0.135 if dpi_factor < 0.9 else 0.155)))
+    gutter = correct_gutter_sequence(gutter)
+    # The editor text content begins below the toolbar (at 1080p, toolbar is at ~230-240px)
+    doc_top_y = max(180, int(235 * (h / 1080.0) * max(0.8, dpi_factor)))
 
     pitches = []
     for i in range(len(gutter) - 1):
@@ -262,14 +344,18 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         elif line_delta > 1 and 10 <= (y_next - y_curr) <= 30 * line_delta:
             pitches.append(float(y_next - y_curr) / float(line_delta))
 
-    avg_pitch = float(np.median(pitches)) if pitches else max(12.0, 15.0 * (h / 1080.0) * dpi_factor)
+    avg_pitch = float(np.median(pitches)) if pitches else max(12.0, 18.0 * (h / 1080.0) * dpi_factor)
 
     y_first, ln_first = gutter[0]
-    y_dist_above = max(0, y_first - doc_top_y)
-    missing_lines_above = int(round(y_dist_above / avg_pitch))
+    # If the first gutter number is in the top-most editor line slot (y <= doc_top_y + 25), it IS the top line!
+    if y_first <= doc_top_y + 25:
+        missing_lines_above = 0
+    else:
+        y_dist_above = max(0, y_first - doc_top_y)
+        missing_lines_above = int(round(y_dist_above / avg_pitch))
 
     effective_top = max(1, ln_first - missing_lines_above)
-    if target_top and abs(effective_top - target_top) <= 1:
+    if target_top and abs(effective_top - target_top) <= 0:
         effective_top = target_top
 
     caret_info = None
@@ -341,8 +427,8 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         if h >= 800 and b["y"] < 135:
             continue
         txt = b["text"]
-        if b["x"] < 80:
-            if txt.isdigit() and len(txt) <= 6 and b["width"] <= 55:
+        if b["x"] < 130:
+            if txt.isdigit() and len(txt) <= 6 and b["width"] <= 95:
                 processed_boxes.append({
                     **b, "is_gutter": True, "line_number": int(txt)
                 })
@@ -351,21 +437,33 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                 g_num = m.group(1)
                 code_txt = m.group(2)
                 processed_boxes.append({
-                    **b, "text": g_num, "width": 25, "is_gutter": True, "line_number": int(g_num)
+                    **b, "text": g_num, "width": 35, "is_gutter": True, "line_number": int(g_num)
                 })
                 processed_boxes.append({
-                    **b, "text": code_txt, "x": b["x"] + 30, "width": max(10, b["width"] - 30), "is_gutter": False
+                    **b, "text": code_txt, "x": b["x"] + 40, "width": max(10, b["width"] - 40), "is_gutter": False
                 })
                 continue
         processed_boxes.append({**b, "is_gutter": False})
 
-    gutter_candidates = sorted([b for b in processed_boxes if b.get("is_gutter")], key=lambda x: x["y"])
+    raw_candidates = sorted([b for b in processed_boxes if b.get("is_gutter")], key=lambda x: x["y"])
+    gutter_candidates = []
+    if raw_candidates:
+        pairs = [(b["y"], b["line_number"]) for b in raw_candidates]
+        corrected = correct_gutter_sequence(pairs)
+        corr_map = {y: num for y, num in corrected}
+        for b in raw_candidates:
+            if b["y"] in corr_map:
+                b["line_number"] = corr_map[b["y"]]
+            gutter_candidates.append(b)
 
     top_line = bottom_line = 0
     first_line_box = last_line_box = None
     if gutter_candidates:
         fc, lc = gutter_candidates[0], gutter_candidates[-1]
         top_line, bottom_line = fc["line_number"], lc["line_number"]
+        if bottom_line > 0 and top_line > 0 and (bottom_line - top_line) > 75:
+            if str(bottom_line - 57).startswith(str(top_line)) or (bottom_line - top_line > 100):
+                top_line = max(1, bottom_line - 57)
         first_line_box = {"x": fc["x"], "y": fc["y"], "width": fc["width"], "height": fc["height"], "line_number": top_line}
         last_line_box = {"x": lc["x"], "y": lc["y"], "width": lc["width"], "height": lc["height"], "line_number": bottom_line}
 

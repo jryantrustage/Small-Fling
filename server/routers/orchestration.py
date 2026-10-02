@@ -1655,8 +1655,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             expected_top = node.get("target_top_line") or state.dag_state["nodes"].get("arrow_down", {}).get("target_top_line") or state.orchestration_state.get("next_target_top")
 
             if is_fast:
-                top_ln = state.latest_telemetry.get("current_top_line", 1) or 1
-                bot_ln = top_ln + lpp - 1
+                t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+                top_ln = t_det if t_det > 0 else (state.latest_telemetry.get("current_top_line", 1) or 1)
+                bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
                 scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": [], "bounding_boxes": {}}
                 lines_detected = []
             else:
@@ -1846,9 +1847,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
         elif target_key == "arrow_down":
             is_mock = active_serial and "mock" in str(active_serial).lower()
-            prev_bot = node.get("prev_bottom") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) or 31
+            if payload and payload.get("target_top"):
+                target_top = int(payload["target_top"])
+            elif payload and payload.get("prev_bottom"):
+                target_top = int(payload["prev_bottom"]) + 1
+            else:
+                prev_bot = node.get("prev_bottom") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 31) or 31
+                target_top = prev_bot + 1
             cur_top = state.latest_telemetry.get("current_top_line", 1) or 1
-            target_top = prev_bot + 1
             disp_id = await detect_external_display_id(active_serial)
 
             if is_mock:
@@ -1939,14 +1945,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
             await asyncio.sleep(0.08)
 
-            # 3. Dynamic Arrow Down Loop:
-            # Arrow down until the bottom line (e.g. 59) reaches the top.
-            # Top line is determined from visible gutter numbers, accounting for missing lines from word wrap,
-            # and cross-correlating with cursor line position.
+            # 3. Dynamic Arrow Navigation Loop:
+            # Step down until the required top line (previous page bottom + 1) is exactly on the top line of the capture.
             from ocr_engine import detect_top_line_from_image
 
             total_arrows_pressed = 0
-            max_iterations = 14
+            max_iterations = 18
             reached = False
             current_top = cur_top
             start_top = cur_top
@@ -1963,34 +1967,33 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     cursor_line = init_top
 
             for iteration in range(max_iterations):
-                needed = target_top - current_top
-                if needed <= 0 or (iteration > 0 and abs(current_top - target_top) <= 1):
+                if current_top == target_top:
                     reached = True
                     break
 
-                # Determine batch size:
-                # If far away on initial step, send larger burst
-                # If closer, use smaller increments
-                if iteration == 0 and needed >= 30:
+                needed = target_top - current_top
+                if needed > 0:
+                    # Advance down towards target_top
                     batch_size = min(40, needed)
-                elif needed > 15:
-                    batch_size = min(20, needed)
-                elif needed > 5:
-                    batch_size = min(10, needed)
-                else:
-                    batch_size = max(1, needed)
+                    keys_arg = " ".join(["20"] * batch_size)
+                    cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
+                    await run_adb_shell(cmd, active_serial)
+                    total_arrows_pressed += batch_size
+                    cursor_line += batch_size
+                elif needed < 0:
+                    # Minor overshoot: step back up with UP arrow (19)
+                    up_steps = min(5, abs(needed))
+                    up_arg = " ".join(["19"] * up_steps)
+                    cmd = f"input -d {disp_id} keyevent {up_arg}" if disp_id > 0 else f"input keyevent {up_arg}"
+                    await run_adb_shell(cmd, active_serial)
+                    total_arrows_pressed += up_steps
+                    cursor_line -= up_steps
 
-                keys_arg = " ".join(["20"] * batch_size)
-                cmd = f"input -d {disp_id} keyevent {keys_arg}" if disp_id > 0 else f"input keyevent {keys_arg}"
-                await run_adb_shell(cmd, active_serial)
-                total_arrows_pressed += batch_size
-                cursor_line += batch_size
-
-                # Keep keyboard closed after arrow keystrokes
+                # Ensure keyboard is closed
                 await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                 await asyncio.sleep(0.12)
 
-                # Capture frame and detect top line accounting for word wrap
+                # Capture frame and detect top line
                 snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                 if not snap:
                     await asyncio.sleep(0.1)
@@ -2001,8 +2004,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 if det_top > 0:
                     current_top = det_top
 
-                # Reached target (e.g. line 59/60 is on top)
-                if current_top >= target_top or abs(current_top - target_top) <= 1:
+                if current_top == target_top or (iteration >= 3 and abs(current_top - target_top) <= 1):
                     reached = True
                     break
 
@@ -2656,6 +2658,11 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     if n5_res.get("status") == "error":
         capture_group["status"] = "error"
         return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
+
+    bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
+    if bot_ln > 0:
+        opts["prev_bottom"] = bot_ln
+        opts["target_top"] = bot_ln + 1
 
     n6_res = await run_single_dag_node("arrow_down", opts)
     if (
