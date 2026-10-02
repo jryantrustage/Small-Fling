@@ -639,7 +639,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {/* GROUP 1: INITIALIZE */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'initialize') && (
           <div
-            onClick={() => handleDagSelect('initialize')}
             style={{
               flex: '0 0 auto',
               width: '280px',
@@ -653,7 +652,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               flexDirection: 'column',
               justifyContent: 'space-between',
               boxSizing: 'border-box',
-              cursor: 'pointer',
+              cursor: 'default',
               transition: 'all 0.3s ease'
             }}
           >
@@ -737,7 +736,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {/* GROUP 2: CAPTURE ENTIRE MARKDOWN */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'capture_entire_markdown') && (
           <div
-            onClick={() => handleDagSelect('capture_entire_markdown')}
             style={{
               flex: 1,
               minWidth: 0,
@@ -751,7 +749,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               flexDirection: 'column',
               justifyContent: 'space-between',
               boxSizing: 'border-box',
-              cursor: 'pointer',
+              cursor: 'default',
               transition: 'all 0.3s ease'
             }}
           >

@@ -528,7 +528,7 @@ function AppContent() {
     if (!projName) return;
 
     setShowDag(true);
-    setSelectedDag('initialize');
+    setSelectedDag('all');
     setProjectInitProgress({
       active: true,
       percent: 10,
@@ -681,7 +681,7 @@ function AppContent() {
             setFrameBoundingBoxes(p => ({ ...p, [msg.data.frame_id]: msg.data.boxes }));
           } else if (msg.type === 'project_init_progress') {
             setShowDag(true);
-            setSelectedDag('initialize');
+            setSelectedDag('all');
             setProjectInitProgress(prev => ({
               active: true,
               percent: msg.percent ?? prev?.percent ?? 50,

@@ -796,7 +796,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             )
 
             # Silently ensure virtual keyboard is closed without tapping or resizing
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
             # 1. Send Ctrl+End directly without touching or tapping screen
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
@@ -864,7 +864,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await asyncio.sleep(0.35)
 
             # 3. Silently suppress soft keyboard without resizing task or reloading window
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
             # Re-read gutter to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial)
@@ -907,7 +907,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     serial=active_serial
                 )
                 try:
-                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                     await asyncio.sleep(0.1)
                     await send_hid_keycombination(113, 123, active_serial)
                     await asyncio.sleep(0.6)
@@ -942,27 +942,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             troubleshooting_steps = [
                 {
                     "step": 1,
-                    "title": "Verify Editor Focus & Blinking Cursor",
-                    "description": "Click or tap directly inside the document text body on the external desktop screen (Pixel 8 / Pixel 10). Confirm that a blinking vertical line (|) appears next to the markdown text.",
-                    "action": "focus_editor",
-                    "action_label": "Focus Editor"
-                },
-                {
-                    "step": 2,
                     "title": "Ensure Virtual Keyboard is Closed",
                     "description": "Check if an on-screen soft keyboard popped up. If visible, close it so hardware key combinations reach the Teams WebView directly instead of being intercepted.",
                     "action": "close_ime",
                     "action_label": "Hide Keyboard"
                 },
                 {
-                    "step": 3,
+                    "step": 2,
                     "title": "Confirm Desktop Window & Display Focus",
                     "description": "Ensure the Teams editor window is active on the external desktop display (Display 8 on Pixel 10, Display 4/External on Pixel 8) and not minimized or behind another window.",
                     "action": "check_display",
                     "action_label": "Verify Display"
                 },
                 {
-                    "step": 4,
+                    "step": 3,
                     "title": "Manual Navigation / Fallback",
                     "description": "Press Ctrl + End on an attached hardware keyboard, scroll down to the bottom in the preview, or enter the known total lines in the DAG Node 1 configuration.",
                     "action": "manual_override",
@@ -1153,7 +1146,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
                 # Silently ensure soft keyboard is suppressed before sending Ctrl+Home
-                await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+                await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                 await asyncio.sleep(0.1)
 
                 # Send Ctrl+Home (keycode 113 122) directly to external display keyboard
@@ -1913,7 +1906,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     )
 
             # 2. Ensure soft keyboard suppression without tapping screen
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
             # 3. Constrained Key Bounds: Scope HID scroller to strictly emit PageDown (93) or DownArrow (20) scancodes,
             # omitting mobile virtual keyboard toggle gestures entirely to prevent rogue modal events
@@ -2296,7 +2289,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     try:
         # Ensure external display is identified and soft keyboard suppressed silently
         disp_id = await detect_external_display_id(active_serial)
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", active_serial)
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}

@@ -304,10 +304,10 @@ async def run_editor_recovery_node(
     actions = []
 
     # 1. Soft keyboard suppression without keyevent 4 (Back)
-    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser)
+    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
     if disp_id > 0:
         await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
-    actions.append("Suppressed on-screen keyboard via accessibility broadcast")
+    actions.append("Suppressed on-screen keyboard policy")
 
     # 2. Bring Teams task to front on external display (does not launch or restart activity)
     try:

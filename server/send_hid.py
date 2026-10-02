@@ -82,8 +82,7 @@ def main():
         if success and args.keep_keyboard_closed:
             time.sleep(0.1)
             # Dismiss virtual keyboard if tap triggered it, without sending Back (keyevent 4)
-            run_adb("am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser)
-            run_adb(f"input -d {args.display} keyevent 111", ser)
+            run_adb(f"input -d {args.display} keyevent 111 >/dev/null 2>&1", ser)
         print(f"[send_hid] Click at ({args.x}, {args.y}) on display {args.display}: {'SUCCESS' if success else 'FAILED'}")
         sys.exit(0 if success else 1)
 

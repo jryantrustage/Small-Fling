@@ -54,7 +54,6 @@ class DesktopPaginationService : AccessibilityService() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
             if (intent?.action == "com.matrixcapture.app.ACTION_CLOSE_KEYBOARD") {
                 setSoftKeyboardHidden(true)
-                runCatching { performGlobalAction(GLOBAL_ACTION_BACK) }
             }
         }
     }

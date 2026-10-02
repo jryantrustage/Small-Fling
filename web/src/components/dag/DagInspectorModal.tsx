@@ -49,7 +49,6 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
   onRefresh
 }) => {
   const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const [isFixingNode1Focus, setIsFixingNode1Focus] = useState(false);
   const [isHidingKeyboard, setIsHidingKeyboard] = useState(false);
 
   if (!isOpen) return null;
@@ -538,21 +537,6 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
             </div>
             {isNode1Error && (
               <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
-                <button
-                  type="button"
-                  disabled={isFixingNode1Focus}
-                  onClick={async () => {
-                    setIsFixingNode1Focus(true);
-                    try {
-                      await fetch(`${apiBase}/api/classifiers/fix/editor_cursor_focused`, { method: 'POST' });
-                      onRefresh?.();
-                    } catch {}
-                    finally { setIsFixingNode1Focus(false); }
-                  }}
-                  style={{ flex: 1, padding: '5px 8px', background: '#21262d', border: '1px solid #30363d', color: '#58a6ff', borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  {isFixingNode1Focus ? 'Focusing...' : 'Focus Editor'}
-                </button>
                 <button
                   type="button"
                   disabled={isHidingKeyboard}
