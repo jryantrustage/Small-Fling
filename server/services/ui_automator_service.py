@@ -190,8 +190,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     await asyncio.sleep(0.3)
 
     # 5. CRITICAL: Suppress soft keyboard immediately
-    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser)
-    await ensure_adb_keyboard_closed(ser)
+    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
     actions.append("Suppressed on-screen keyboard policy")
 
     await asyncio.sleep(0.4)
