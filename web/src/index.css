@@ -2084,6 +2084,33 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   overflow-y: auto;
 }
 
+/* ==========================================================================
+   STANDBY WORKSPACE HUB (NO PROJECT SELECTED)
+   ========================================================================== */
+.standby-workspace-hub {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-user-select: none;
+  user-select: none;
+}
 
+.standby-workspace-hub::-webkit-scrollbar {
+  width: 6px;
+}
 
+.standby-workspace-hub::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
 
+.hover-card-highlight {
+  transition: transform 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.hover-card-highlight:hover {
+  transform: translateY(-2px);
+  border-color: #58a6ff !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 0 16px rgba(88, 166, 255, 0.15) !important;
+}
