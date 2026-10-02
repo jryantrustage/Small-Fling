@@ -573,17 +573,14 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         if not ser: return False
         chk = await run_adb_shell("dumpsys input_method", ser)
         out = chk.get("stdout", "")
-        has_visible_window = False
-        if "mInputShown=true" in out:
-            has_visible_window = True
-        else:
-            for line in out.splitlines():
-                line_str = line.strip()
-                if "mImeWindowVis=" in line_str:
-                    val_part = line_str.split("mImeWindowVis=")[1].split()[0]
-                    if any(v in val_part for v in ["1", "2", "3", "0x1", "0x2", "0x3"]):
-                        has_visible_window = True
-                        break
+        _ime_visible_cache = {"val": False, "ts": now}
+        for line in out.splitlines():
+            line_str = line.strip()
+            if "mImeWindowVis=" in line_str:
+                val_part = line_str.split("mImeWindowVis=")[1].split()[0]
+                if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
+                    has_visible_window = True
+                    break
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
         return has_visible_window
@@ -595,7 +592,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     High-speed viewport auto-fix & keyboard dismiss for external desktop displays:
     1. Sends AUTO_REFRESH_DISPLAY broadcast to MatrixCapture Kiosk app.
     2. Resizes all window tasks on the external display to full 1920x1080 bounds.
-    3. Dismisses any visible IME / soft keyboard on the external display (and default display).
+    3. Dismisses any visible IME / soft keyboard cleanly without sending Back key to editor.
     4. Enforces hardware keyboard IME suppression.
     """
     ser = await get_active_adb_serial(serial)
@@ -604,7 +601,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
 
     if display_id is None or display_id <= 0:
         disp_id = await detect_external_display_id(ser)
-        display_id = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 2)
+        display_id = disp_id if disp_id > 0 else (12 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
     cmd = (
         f"wm density 120 -d {display_id} >/dev/null 2>&1; "
@@ -612,15 +609,14 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
         f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
-        f"am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1; "
-        f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true' > /dev/null; then "
-        f"input -d {display_id} keyevent 4; input -d 0 keyevent 4; fi"
+        f"am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
 
     is_open = await is_ime_visible(ser, force_check=True)
     if is_open:
-        await run_adb_shell(f"input -d {display_id} keyevent 4; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser, timeout=2.0)
+        # Dismiss on primary phone screen without sending Back to desktop editor
+        await run_adb_shell("input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1", ser, timeout=2.0)
         is_open = await is_ime_visible(ser, force_check=True)
 
     try:
@@ -704,17 +700,21 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Ensure soft keyboard is closed, focus window on external display, and dispatch hardware keycombination directly
-        cmds = [
+        # Ensure soft keyboard is closed and dispatch navigation command directly
+        base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             "am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1",
-            f"if dumpsys input_method | grep -E 'mImeWindowVis=[123]|mInputShown=true' > /dev/null; then input -d {target_d} keyevent 4; sleep 0.1; fi",
-            f"input -d {target_d} tap 960 540",
-            "sleep 0.15",
             f"input -d {target_d} keycombination {key1} {key2}"
         ]
 
-        await run_adb_shell("; ".join(cmds), ser, timeout=5.0)
+        if key2 == 123:
+            # EOF (Ctrl+End): Fast momentum fling downward ensures EOF is reached in Chromium/WebView
+            base_cmds.append(f"for i in 1 2 3 4 5 6 7 8; do input -d {target_d} swipe 500 920 500 220 35; done")
+        elif key2 == 122:
+            # HOME (Ctrl+Home): Fast momentum fling upward ensures Line 1 is reached
+            base_cmds.append(f"for i in 1 2 3 4 5 6 7 8; do input -d {target_d} swipe 500 220 500 920 35; done")
+
+        await run_adb_shell("; ".join(base_cmds), ser, timeout=8.0)
 
 
 

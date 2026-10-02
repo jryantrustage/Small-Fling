@@ -292,4 +292,11 @@ export interface TelemetryEvent {
   message: string;
   data?: any;
   dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
+  device?: string;
+  nodeId?: string;
+  level?: 'info' | 'warning' | 'error' | 'success';
+  traceInsights?: string[];
+  troubleshootingSteps?: Array<{ step: number; title: string; description: string; action?: string; action_label?: string }>;
+  markdownPrompt?: string;
+  statusCode?: number | string;
 }

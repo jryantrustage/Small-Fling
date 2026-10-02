@@ -131,8 +131,11 @@ class FloatingOverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, S
                                 "CAPTURE_DESKTOP" -> {
                                     Log.i(TAG, "HUD ignoring CAPTURE_DESKTOP: actuator disabled")
                                 }
-                                "BEGIN_AUTO_FLIPPING", "BEGIN" -> {
-                                    DesktopPaginationService.instance?.startPacingEngine(totalLines = pState.targetTotalLines)
+                                "BEGIN_AUTO_FLIPPING", "BEGIN", "RUN_DAG_CAPTURE" -> {
+                                    Log.i(TAG, "HUD acknowledged DAG Capture command")
+                                }
+                                "RUN_DAG_INIT" -> {
+                                    Log.i(TAG, "HUD acknowledged DAG Init command")
                                 }
                                 "PAUSE" -> DesktopPaginationService.instance?.pausePagination()
                                 "RESUME" -> DesktopPaginationService.instance?.resumePagination()
@@ -301,7 +304,7 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
             val isRunning = paginationState is DesktopPaginationService.PaginationState.Running
             val isPaused = paginationState is DesktopPaginationService.PaginationState.Paused
 
-            fun sendCmd(cmd: String, action: () -> Unit) = coroutineScope.launch {
+            fun sendCmd(cmd: String, action: () -> Unit = {}) = coroutineScope.launch {
                 Log.i("FloatingOverlayService", "HUD sending orchestration command: $cmd")
                 FloatingOverlayService.getUploadClient(context).sendOrchestrationCommand(cmd, "hud")
                 action()
@@ -428,21 +431,21 @@ fun FloatingHudOverlay(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
                         else -> {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(
-                                    onClick = { sendCmd("BEGIN_AUTO_FLIPPING") { DesktopPaginationService.instance?.startPacingEngine(totalLines = targetVal) } },
+                                    onClick = { sendCmd("RUN_DAG_CAPTURE") },
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)), shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().height(42.dp)
                                 ) {
                                     Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("begin Auto Flipping", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
+                                    Text("Run DAG 2 (Capture)", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace)
                                 }
                                 Button(
-                                    onClick = { },
-                                    enabled = false,
-                                    colors = ButtonDefaults.buttonColors(disabledContainerColor = Color(0xFF161B22), disabledContentColor = Color(0xFF8B949E)),
-                                    shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(36.dp),
+                                    onClick = { sendCmd("RUN_DAG_INIT") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB)), shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth().height(36.dp),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
                                 ) {
-                                    Text("desktop capture (disabled)", color = Color(0xFF8B949E), fontSize = 10.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Run DAG 1 (Init)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }

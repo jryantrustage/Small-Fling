@@ -47,6 +47,60 @@ except ImportError:
         ClassifierContext,
     )
 
+import random
+
+def resolve_friendly_device_name(serial: Optional[str] = None) -> str:
+    s = (serial or state.active_device_serial or "").lower()
+    if any(k in s for k in ["63100", "mustang", "frankel", "pixel_10", "pixel 10"]):
+        return "Pixel 10"
+    if any(k in s for k in ["39101", "husky", "shiba", "pixel_8", "pixel 8"]):
+        return "Pixel 8"
+    dev_model = getattr(state, "current_device_model", "") or current_device_model
+    if "10" in str(dev_model):
+        return "Pixel 10"
+    if "8" in str(dev_model):
+        return "Pixel 8"
+    return "Pixel 10"
+
+async def emit_dag_telemetry_event(
+    category: str,
+    message: str,
+    dag: str = "initialize",
+    node_id: Optional[str] = None,
+    level: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None,
+    trace_insights: Optional[List[str]] = None,
+    troubleshooting_steps: Optional[List[Dict[str, Any]]] = None,
+    serial: Optional[str] = None,
+    status_code: Optional[int] = None
+):
+    dev_name = resolve_friendly_device_name(serial)
+    event_id = f"{int(time.time() * 1000)}-{random.randint(100, 999)}"
+    timestamp = datetime.now().strftime("%I:%M:%S %p").lstrip("0")
+
+    formatted_msg = message
+    if not formatted_msg.lower().startswith(dev_name.lower()):
+        formatted_msg = f"{dev_name}: {message}"
+
+    event = {
+        "id": event_id,
+        "timestamp": timestamp,
+        "category": category,
+        "message": formatted_msg,
+        "dag": dag,
+        "device": dev_name,
+        "nodeId": node_id,
+        "level": level or ("error" if category == "ERROR" else "info"),
+        "data": data,
+        "traceInsights": trace_insights,
+        "troubleshootingSteps": troubleshooting_steps,
+        "statusCode": status_code
+    }
+    await state.ws_manager.broadcast({
+        "type": "dag_telemetry_event",
+        "event": event
+    })
+
 
 async def evaluate_node_5_decision(serial: Optional[str] = None, image_bytes: Optional[bytes] = None):
     try:
@@ -108,23 +162,30 @@ async def get_telemetry():
 @router.post("/api/telemetry")
 async def update_telemetry(p: TelemetryUpdateRequest):
     global current_device_model
-    for k in ["device_id", "is_pacing", "current_page", "current_top_line", "current_bottom_line", "target_total_lines", "dwell_countdown_ms", "phase", "status_message"]:
+    is_dag_active = bool(state.dag_state.get("current_active_node") or getattr(state, "capture_loop_running", False))
+    for k in ["device_id", "current_page", "current_top_line", "current_bottom_line", "target_total_lines", "dwell_countdown_ms", "phase", "status_message"]:
         val = getattr(p, k)
         if val is not None:
             if k == "target_total_lines" and val > 0:
-                state.latest_telemetry[k] = val
+                if not is_dag_active or state.latest_telemetry.get("target_total_lines", 0) <= 0:
+                    state.latest_telemetry[k] = val
                 if (p_active := db.get_active_project()) and p_active.get("target_total_lines", 0) <= 0:
                     db.update_project_target_lines(p_active["id"], val)
+            elif k in ("current_top_line", "current_bottom_line"):
+                if not is_dag_active:
+                    state.latest_telemetry[k] = val
             elif k != "target_total_lines":
                 state.latest_telemetry[k] = val
+    state.latest_telemetry["is_pacing"] = False
     state.latest_telemetry["last_heartbeat"] = datetime.now().isoformat()
     if p.pacer_calibration: state.latest_telemetry["pacer_calibration"].update(p.pacer_calibration)
     if p.mobile_tokens: state.token_stats["mobile_tokens"] = p.mobile_tokens
-    if p.current_top_line and p.current_top_line > 0: state.orchestration_state["top_line"] = p.current_top_line
-    if p.current_bottom_line and p.current_bottom_line > 0:
-        state.orchestration_state["bottom_line"] = p.current_bottom_line
-        state.orchestration_state["next_target_top"] = p.current_bottom_line + 1
-    if p.current_page and p.current_page > 0: state.orchestration_state["page"] = p.current_page
+    if not is_dag_active:
+        if p.current_top_line and p.current_top_line > 0: state.orchestration_state["top_line"] = p.current_top_line
+        if p.current_bottom_line and p.current_bottom_line > 0:
+            state.orchestration_state["bottom_line"] = p.current_bottom_line
+            state.orchestration_state["next_target_top"] = p.current_bottom_line + 1
+        if p.current_page and p.current_page > 0: state.orchestration_state["page"] = p.current_page
 
     if p.device_id:
         did = p.device_id.lower()
@@ -171,15 +232,22 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
     cmd, invoker = payload.command.upper(), state.format_device_name(payload.source)
     state.orchestration_state.update({"last_command": cmd, "source": payload.source or "web", "invoked_by": invoker, "updated_at": datetime.now().isoformat()})
 
-    if cmd in ("BEGIN", "BEGIN_AUTO_FLIPPING"):
+    active_serial = await get_active_adb_serial()
+
+    if cmd in ("BEGIN", "BEGIN_AUTO_FLIPPING", "RUN_DAG_CAPTURE"):
         await ensure_adb_keyboard_closed()
-        state.orchestration_state.update({"status": "RUNNING", "active_step": "SCREEN_CAPTURE", "step_label": f"Auto Flipping Started by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Auto Flipping • Invoked by {invoker}"})
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "step_label": f"DAG Capture Group Started by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Capture Group • Invoked by {invoker}"})
+        asyncio.create_task(execute_dag_group_capture_markdown(serial=active_serial))
+    elif cmd in ("RUN_DAG_INIT", "INIT_DAG"):
+        await ensure_adb_keyboard_closed()
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_INIT", "step_label": f"DAG Init Started by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_INIT", "status_message": f"DAG Initialize Group • Invoked by {invoker}"})
+        asyncio.create_task(execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id()))
     elif cmd == "CAPTURE_DESKTOP":
-        state.orchestration_state.update({"last_command": "NONE", "active_step": "START_READY", "step_label": "Desktop capture actuator disabled"})
-        state.latest_telemetry.update({"status_message": "Desktop capture actuator disabled"})
-        await state.ws_manager.broadcast({"type": "orchestration_event", "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry})
-        return {"status": "disabled", "command": cmd, "message": "Desktop capture actuator is disabled.", "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry}
+        state.orchestration_state.update({"last_command": "CAPTURE_DESKTOP", "active_step": "FRAME_ACQUIRE", "step_label": f"Single Frame Capture by {invoker}"})
+        state.latest_telemetry.update({"status_message": f"DAG Frame Acquisition • Invoked by {invoker}"})
+        asyncio.create_task(run_single_dag_node("frame_acquire", {"serial": active_serial}))
     elif cmd == "GET_NEXT_LINE":
         next_ln = 1
         for f in reversed(sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
@@ -189,22 +257,25 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
         if next_ln == 1 and state.document_lines: next_ln = max(state.document_lines.keys()) + 1
         state.orchestration_state.update({"next_target_top": next_ln, "step_label": f"Next Target Line: {next_ln} (Queried by {invoker})"})
         state.latest_telemetry.update({"status_message": f"Next Page First Line: {next_ln} • Invoked by {invoker}"})
-    elif cmd == "PAUSE":
+    elif cmd in ("PAUSE", "PAUSE_DAG"):
         state.orchestration_state.update({"status": "PAUSED", "step_label": f"Paused by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": False, "phase": "PAUSED", "status_message": f"Paused • Invoked by {invoker}"})
-    elif cmd == "RESUME":
+        state.latest_telemetry.update({"is_pacing": False, "phase": "PAUSED", "status_message": f"DAG Paused • Invoked by {invoker}"})
+    elif cmd in ("RESUME", "RESUME_DAG"):
         await ensure_adb_keyboard_closed()
-        state.orchestration_state.update({"status": "RUNNING", "active_step": "PRECISION_SCROLL", "step_label": f"Resumed by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": True, "phase": "PACING", "status_message": f"Running • Invoked by {invoker}"})
-    elif cmd == "END":
-        state.orchestration_state.update({"status": "COMPLETED", "active_step": "LOOP_EVAL", "step_label": f"Ended by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": False, "phase": "COMPLETED", "status_message": f"Completed • Invoked by {invoker}"})
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "step_label": f"Resumed by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Resumed • Invoked by {invoker}"})
+        asyncio.create_task(execute_dag_group_capture_markdown(serial=active_serial))
+    elif cmd in ("END", "ABORT_DAG", "STOP"):
+        state.orchestration_state.update({"status": "COMPLETED", "active_step": "IDLE", "step_label": f"DAG Stopped by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "IDLE", "status_message": f"DAG Pipeline Stopped • Invoked by {invoker}"})
+        await abort_running_node(reason=f"Stopped by {invoker}")
     elif cmd == "RESTART":
         await ensure_adb_keyboard_closed()
         prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
         lpp = prof["lines_per_page"]
-        state.orchestration_state.update({"status": "RUNNING", "active_step": "START_READY", "step_label": f"Restarted at Line 1 by {invoker}", "top_line": 1, "bottom_line": lpp, "next_target_top": lpp + 1, "page": 1, "device_model": current_device_model, "lines_per_page": lpp})
-        state.latest_telemetry.update({"current_page": 1, "current_top_line": 1, "current_bottom_line": 0, "is_pacing": True, "phase": "PACING", "status_message": f"Restarted • Invoked by {invoker}"})
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_INIT", "step_label": f"Restarted at Line 1 by {invoker}", "top_line": 1, "bottom_line": lpp, "next_target_top": lpp + 1, "page": 1, "device_model": current_device_model, "lines_per_page": lpp})
+        state.latest_telemetry.update({"current_page": 1, "current_top_line": 1, "current_bottom_line": 0, "is_pacing": False, "phase": "DAG_INIT", "status_message": f"DAG Restarted • Invoked by {invoker}"})
+        asyncio.create_task(execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id()))
     elif cmd in ("CALIBRATE_INSTANT", "CALIBRATE"):
         await auto_fix_viewport()
         state.orchestration_state.update({"active_step": "CALIBRATING", "step_label": f"Instant Calibration by {invoker}"})
@@ -414,44 +485,45 @@ async def auto_heal_pipeline_environment(
     if snap and len(snap) > 2000:
         c_ctx = ClassifierContext(serial=serial, display_id=disp_id, image_bytes=snap)
 
-        # Check Edit Mode (pencil icon / split-screen duplication)
-        try:
-            edit_clf = EditModeClassifier()
-            edit_res = await edit_clf.detect(c_ctx)
-            if edit_res.issue_detected:
-                issues_observed.append(edit_res.details or "Editor not in single-pane edit mode")
-                node.update({
-                    "evaluator": "Editor Mode Evaluator",
-                    "healing_step": "Tapping pencil to enter edit mode",
-                    "telemetry_insight": "Split screen / read-only preview detected • Tapping pencil to enter edit mode..."
-                })
-                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-                fix_edit = await enable_edit_mode(serial=serial, display_id=disp_id)
-                actions_taken.extend(fix_edit.get("actions", ["Tapped pencil icon"]))
-                # Refresh snapshot after edit mode change
-                snap = await capture_external_screenshot(serial, max_cache_age_s=0.0)
-                if snap:
-                    c_ctx.image_bytes = snap
-                    c_ctx.image_cv = None
-        except Exception as ee:
-            print(f"[auto_heal] Edit mode check note: {ee}")
+        # Check Edit Mode (pencil icon / split-screen duplication) - only for capture nodes
+        if node_id not in ("init_end", "reset_home"):
+            try:
+                edit_clf = EditModeClassifier()
+                edit_res = await edit_clf.detect(c_ctx)
+                if edit_res.issue_detected:
+                    issues_observed.append(edit_res.details or "Editor not in single-pane edit mode")
+                    node.update({
+                        "evaluator": "Editor Mode Evaluator",
+                        "healing_step": "Tapping pencil to enter edit mode",
+                        "telemetry_insight": "Split screen / read-only preview detected • Tapping pencil to enter edit mode..."
+                    })
+                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                    fix_edit = await enable_edit_mode(serial=serial, display_id=disp_id)
+                    actions_taken.extend(fix_edit.get("actions", ["Tapped pencil icon"]))
+                    # Refresh snapshot after edit mode change
+                    snap = await capture_external_screenshot(serial, max_cache_age_s=0.0)
+                    if snap:
+                        c_ctx.image_bytes = snap
+                        c_ctx.image_cv = None
+            except Exception as ee:
+                print(f"[auto_heal] Edit mode check note: {ee}")
 
-        # Check Dark Mode (theme pull-down)
-        try:
-            light_clf = LightModeClassifier()
-            light_res = await light_clf.detect(c_ctx)
-            if light_res.issue_detected:
-                issues_observed.append(light_res.details or "Light mode is active (screen washed out)")
-                node.update({
-                    "evaluator": "Theme Luminance Evaluator",
-                    "healing_step": "Selecting dark mode from pull-down",
-                    "telemetry_insight": f"High luminance ({light_res.metadata.get('mean_luminance')}) • Selecting Dark Mode from pull-down..."
-                })
-                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-                fix_dm = await select_dark_mode(serial=serial, display_id=disp_id)
-                actions_taken.extend(fix_dm.get("actions", ["Switched to Dark Mode"]))
-        except Exception as le:
-            print(f"[auto_heal] Dark mode check note: {le}")
+            # Check Dark Mode (theme pull-down)
+            try:
+                light_clf = LightModeClassifier()
+                light_res = await light_clf.detect(c_ctx)
+                if light_res.issue_detected:
+                    issues_observed.append(light_res.details or "Light mode is active (screen washed out)")
+                    node.update({
+                        "evaluator": "Theme Luminance Evaluator",
+                        "healing_step": "Selecting dark mode from pull-down",
+                        "telemetry_insight": f"High luminance ({light_res.metadata.get('mean_luminance')}) • Selecting Dark Mode from pull-down..."
+                    })
+                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                    fix_dm = await select_dark_mode(serial=serial, display_id=disp_id)
+                    actions_taken.extend(fix_dm.get("actions", ["Switched to Dark Mode"]))
+            except Exception as le:
+                print(f"[auto_heal] Dark mode check note: {le}")
 
     dur_h_ms = max(0, int((time.perf_counter() - t_h_start) * 1000))
     return {
@@ -686,6 +758,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     healing_ms = 0
 
     try:
+        import importlib
+        from services import adb_service, ui_automator_service
+        try:
+            from ..classifiers import editor_classifiers
+        except ImportError:
+            from classifiers import editor_classifiers
+        importlib.reload(adb_service)
+        importlib.reload(editor_classifiers)
+        importlib.reload(ui_automator_service)
+    except Exception:
+        pass
+
+    try:
         disp_id = await detect_external_display_id(active_serial)
 
         # Proactively heal environment triggers before executing node action
@@ -704,6 +789,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "telemetry_insight": "Verifying text body focus and caret presence on external display..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message=f"DAG 1 • [Precheck] Verifying text body focus and caret on display {disp_id}...",
+                dag="initialize",
+                node_id="init_end",
+                serial=active_serial
+            )
 
             # Always ensure the external display and document body have active cursor focus before sending keycombination
             try:
@@ -719,6 +811,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "telemetry_insight": "Sending Ctrl+End keystroke to jump to document end..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
+            await emit_dag_telemetry_event(
+                category="PACER",
+                message=f"DAG 1 • [Keystroke] Dispatching HID Ctrl+End ({cfg.get('key1', 113)}+{cfg.get('key2', 123)}) to jump to document end...",
+                dag="initialize",
+                node_id="init_end",
+                serial=active_serial
+            )
 
             # 1. Send Ctrl+End with focus
             await send_hid_keycombination(int(cfg.get("key1", 113)), int(cfg.get("key2", 123)), active_serial)
@@ -758,12 +857,28 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     if t_sample > top_line:
                         top_line = t_sample
 
+                    await emit_dag_telemetry_event(
+                        category="FRAME",
+                        message=f"DAG 1 • [Frame Capture] Acquired external screenshot ({round(len(snap)/1024, 1)} KB, sample {sample_idx+1}/6, DPI: {active_dpi})",
+                        dag="initialize",
+                        node_id="init_end",
+                        serial=active_serial
+                    )
+                    await emit_dag_telemetry_event(
+                        category="OCR",
+                        message=f"DAG 1 • [Gutter OCR] Gutter detection: Top Ln {t_sample}, Bottom Ln {b_sample}",
+                        dag="initialize",
+                        node_id="init_end",
+                        serial=active_serial
+                    )
+
                     # When the bottom line stops increasing and stays stable, the scroll has fully landed at EOF!
-                    if b_sample > 0 and b_sample == prev_bot:
+                    # If b_sample is <= 65, it is still on page 1 where document loaded, so allow further samples for scroll animation.
+                    if b_sample > 65 and b_sample == prev_bot:
                         stable_count += 1
-                        if stable_count >= 1:
+                        if stable_count >= 2:
                             break
-                    else:
+                    elif b_sample > 0:
                         stable_count = 0
                         prev_bot = b_sample
 
@@ -778,6 +893,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
             await auto_fix_viewport(active_serial, disp_id)
             await asyncio.sleep(0.2)
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="DAG 1 • [Viewport] Auto-dismissing soft keyboard & reflowing 1080p desktop layout",
+                dag="initialize",
+                node_id="init_end",
+                serial=active_serial
+            )
+
             # Re-read gutter after auto-fix to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial)
             if snap_fixed:
@@ -811,13 +934,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "telemetry_insight": f"Gutter on Ln {top_line or 1} • Refocusing cursor & retrying EOF jump..."
                 })
                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end"})
+                await emit_dag_telemetry_event(
+                    category="SYSTEM",
+                    message=f"DAG 1 • [Healing] Gutter on Ln {top_line or 1}: Refocusing cursor & retrying Ctrl+End jump...",
+                    dag="initialize",
+                    node_id="init_end",
+                    serial=active_serial
+                )
                 try:
                     await ensure_adb_keyboard_closed(active_serial)
                     await cursor_clf.fix(c_ctx)
                     await ensure_adb_keyboard_closed(active_serial)
                     await asyncio.sleep(0.2)
                     await send_hid_keycombination(113, 123, active_serial)
-                    await run_adb_shell(f"input -d {disp_id} keyevent 113 123", active_serial)
                     await asyncio.sleep(0.6)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
@@ -923,6 +1052,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "troubleshooting_steps": troubleshooting_steps,
                     "telemetry": state.latest_telemetry
                 })
+                await emit_dag_telemetry_event(
+                    category="ERROR",
+                    message=f"dag 1 details of log trace • {error_msg}",
+                    dag="initialize",
+                    node_id="init_end",
+                    level="error",
+                    data=node["dag_context"],
+                    trace_insights=node["trace_insights"],
+                    troubleshooting_steps=troubleshooting_steps,
+                    serial=active_serial,
+                    status_code=500
+                )
                 raise HTTPException(
                     status_code=500,
                     detail={
@@ -974,6 +1115,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "error": error_msg,
                     "telemetry": state.latest_telemetry
                 })
+                await emit_dag_telemetry_event(
+                    category="ERROR",
+                    message=f"dag 1 details of log trace • {error_msg}",
+                    dag="initialize",
+                    node_id="init_end",
+                    level="error",
+                    data=node["dag_context"],
+                    trace_insights=node["trace_insights"],
+                    serial=active_serial,
+                    status_code=500
+                )
                 raise HTTPException(
                     status_code=500,
                     detail={
@@ -997,6 +1149,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "error": None
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "init_end", "total_lines": total_lines, "telemetry": state.latest_telemetry})
+            await emit_dag_telemetry_event(
+                category="OCR",
+                message=f"DAG 1 • Calibrated {total_lines:,} total lines at EOF via Ctrl+End ✔",
+                dag="initialize",
+                node_id="init_end",
+                level="success",
+                data={"total_lines": total_lines, "top_line": top_line},
+                serial=active_serial
+            )
             return {
                 "status": "success",
                 "node_id": "init_end",
@@ -1018,6 +1179,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "telemetry_insight": "Dispatching Ctrl+Home to return to Line 1..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
+            await emit_dag_telemetry_event(
+                category="PACER",
+                message=f"DAG 1 • [Keystroke] Dispatching HID Ctrl+Home ({cfg.get('key1', 113)}+{cfg.get('key2', 122)}) to return to Line 1...",
+                dag="initialize",
+                node_id="reset_home",
+                serial=active_serial
+            )
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
@@ -1050,6 +1218,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             "telemetry_insight": f"Sampling gutter top (detected Ln {detected_first or 'verifying'})..."
                         })
                         await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home"})
+                        await emit_dag_telemetry_event(
+                            category="OCR",
+                            message=f"DAG 1 • [Gutter OCR] Verified gutter top: Ln {detected_first or 'verifying'} (attempt {attempt}, sample {sample_idx+1}/6)",
+                            dag="initialize",
+                            node_id="reset_home",
+                            serial=active_serial
+                        )
                         if is_verified:
                             break
 
@@ -1094,7 +1269,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     f"Ctrl+Home failed to navigate to Line 1: Gutter top remained at Line {detected_first or 'unknown'}.",
                     f"Check external display focus: adb -s {active_serial} shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
                     f"Verify FilePreviewActivity is foreground on display {disp_id}: adb -s {active_serial} shell dumpsys activity top | grep -i FilePreviewActivity",
-                    f"Test sending keycode directly: adb -s {active_serial} shell input -d {disp_id} keyevent 113 122",
+                    f"Test sending keycode directly: adb -s {active_serial} shell input -d {disp_id} keycombination 113 122",
                     f"Inspect frame screenshot at: {calib.resolve()}"
                 ]
                 node.update({
@@ -1120,6 +1295,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "trace_insights": node["trace_insights"],
                     "telemetry": state.latest_telemetry
                 })
+                await emit_dag_telemetry_event(
+                    category="ERROR",
+                    message=f"dag 1 details of log trace • {error_msg}",
+                    dag="initialize",
+                    node_id="reset_home",
+                    level="error",
+                    data=node["dag_context"],
+                    trace_insights=node["trace_insights"],
+                    serial=active_serial,
+                    status_code=500
+                )
                 raise HTTPException(
                     status_code=500,
                     detail={
@@ -1141,6 +1327,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             state.latest_telemetry["current_top_line"] = detected_first or 1
             state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 verified at top (detected Ln {detected_first})"
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": True, "first_line": detected_first, "telemetry": state.latest_telemetry})
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message=f"DAG 1 • Line 1 verified at top gutter via Ctrl+Home ✔. Initialization complete.",
+                dag="initialize",
+                node_id="reset_home",
+                level="success",
+                data={"first_line": 1, "verified": True},
+                serial=active_serial
+            )
             return {"status": "success", "node_id": "reset_home", "verified": True, "first_line": detected_first, "message": "Line 1 verified at top gutter via Ctrl+Home ✔"}
 
         elif target_key == "frame_acquire":
@@ -2191,6 +2386,12 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "total_lines": total_lines,
             "dag": state.dag_state
         })
+        await emit_dag_telemetry_event(
+            category="SYSTEM",
+            message=f"DAG 1 • Calibrated {total_lines:,} total lines at EOF ✔. Returning to Line 1...",
+            dag="initialize",
+            serial=active_serial
+        )
 
         node2_res = await run_single_dag_node("reset_home", {"serial": active_serial})
         is_verified = node2_res.get("verified", False)
@@ -2219,6 +2420,15 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
                 "dag": state.dag_state,
                 "telemetry": state.latest_telemetry
             })
+            await emit_dag_telemetry_event(
+                category="ERROR",
+                message=f"dag 1 details of log trace • {err_msg}",
+                dag="initialize",
+                node_id="reset_home",
+                level="error",
+                serial=active_serial,
+                status_code=500
+            )
             return {
                 "status": "error",
                 "group": "initialize",
@@ -2258,6 +2468,13 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "dag": state.dag_state,
             "telemetry": state.latest_telemetry
         })
+        await emit_dag_telemetry_event(
+            category="SYSTEM",
+            message=f"DAG 1 • Initialization complete! {total_lines:,} total lines calibrated and Line 1 verified ✔. DAG 2 ready.",
+            dag="initialize",
+            level="success",
+            serial=active_serial
+        )
 
         return {
             "status": "success",
@@ -2346,7 +2563,8 @@ capture_loop_task: Optional[asyncio.Task] = None
 async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     active_serial = await get_active_adb_serial(serial)
     state.capture_loop_running = True
-    state.latest_telemetry["is_pacing"] = True
+    state.latest_telemetry["is_pacing"] = False
+    state.latest_telemetry["phase"] = "DAG_CAPTURE"
     state.orchestration_state["status"] = "RUNNING"
 
     try:

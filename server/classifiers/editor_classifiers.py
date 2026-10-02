@@ -27,7 +27,6 @@ async def _tap_coords(serial: str, disp_id: int, coords: Tuple[int, int], delay:
         await run_adb_shell(f"input tap {x} {y}", serial)
     if delay:
         await asyncio.sleep(delay)
-    await auto_fix_viewport(serial, disp_id)
 
 async def _recheck_classifier(classifier: BaseClassifier, serial: str, disp_id: int) -> Optional[ClassificationResult]:
     snap = await capture_external_screenshot(serial)
@@ -165,56 +164,31 @@ class TeamsMarkdownVisibleClassifier(BaseClassifier):
         disp_id = context.display_id or await detect_external_display_id(serial)
         actions = []
 
-        # 1. Launch / bring Teams to front on the external display (Pixel 8 and Pixel 10)
-        if disp_id > 0:
-            await run_adb_shell(f"am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher --display {disp_id}", serial)
-            actions.append(f"Dispatched am start for Teams on display {disp_id}")
-        else:
-            await run_adb_shell("am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher", serial)
-            actions.append("Dispatched am start for Teams on primary display")
+        # 1. Check if Teams is already in foreground on external display
+        focus_res = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", serial, timeout=1.5)
+        focus_out = focus_res.get("stdout", "") if focus_res.get("status") == "ok" else ""
+        teams_already_open = "com.microsoft.teams" in focus_out
 
-        # 2. Check if a Teams task exists and bring to front
-        try:
-            res_tasks = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", serial, timeout=2.5)
-            out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
-            if out_tasks:
-                m_t = re.search(r'#(\d+)\s+type=', out_tasks)
-                if m_t:
-                    task_id = m_t.group(1)
-                    await run_adb_shell(f"cmd activity task to-front {task_id}", serial)
-                    actions.append(f"Brought Teams task #{task_id} to front")
-        except Exception:
-            pass
+        if not teams_already_open:
+            if disp_id > 0:
+                await run_adb_shell(f"am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher --display {disp_id}", serial, timeout=2.0)
+                actions.append(f"Dispatched am start for Teams on display {disp_id}")
+            else:
+                await run_adb_shell("am start -n com.microsoft.teams/com.microsoft.skype.teams.Launcher", serial, timeout=2.0)
+                actions.append("Dispatched am start for Teams on primary display")
+            await asyncio.sleep(0.4)
 
-        # 3. Tap center of external display to focus Teams window
-        tap_coords = (960, 540)
-        await _tap_coords(serial, disp_id, tap_coords, delay=0.4)
-        actions.append(f"Tapped external display at {tap_coords} to focus Teams window")
+        # 2. Tap document body on external display to place cursor caret
+        tap_coords = (500, 300)
+        await _tap_coords(serial, disp_id, tap_coords, delay=0.1)
+        actions.append(f"Tapped document text body at {tap_coords} on display {disp_id} to establish editor focus")
 
-        # 4. If Teams is currently displaying a file list / directory, scan hierarchy for .md file and tap it
-        try:
-            dump_res = await run_adb_shell("uiautomator dump /dev/stdout", serial, timeout=3.5)
-            stdout = dump_res.get("stdout", "")
-            matches = re.finditer(r'text="([^"]+\.md)"[^>]*bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', stdout, re.IGNORECASE)
-            opened_file = False
-            for m in matches:
-                fname = m.group(1)
-                x1, y1, x2, y2 = int(m.group(2)), int(m.group(3)), int(m.group(4)), int(m.group(5))
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                # Tap file to open it
-                await _tap_coords(serial, disp_id, (cx, cy), delay=1.0)
-                actions.append(f"Tapped '{fname}' at ({cx}, {cy}) to reopen document")
-                opened_file = True
-                break
-        except Exception as e:
-            actions.append(f"Directory scan note: {e}")
-
-        # 5. Ensure soft keyboard is closed
+        # 3. Ensure soft keyboard is closed
         await ensure_adb_keyboard_closed(serial)
         actions.append("Suppressed on-screen keyboard")
 
-        # 6. Allow settle and recheck
+        # 4. Brief settle
+        await asyncio.sleep(0.2)
         await asyncio.sleep(0.8)
         re_detect = await _recheck_classifier(self, serial, disp_id)
         success = bool(re_detect and not re_detect.issue_detected)
@@ -318,13 +292,14 @@ class EditModeClassifier(BaseClassifier):
         h_t = 1080
         if img is not None:
             h_t, w_t = img.shape[:2]
-            # Check center strip for vertical split-screen boundary (text duplicated across two panes)
+            # Check center strip for vertical split-screen boundary (solid continuous divider line)
             center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
             if center_strip.size > 0:
                 cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
                 sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
                 sobel_abs = cv2.convertScaleAbs(sobel_x)
-                if np.max(np.mean(sobel_abs, axis=0)) > 28.0:
+                col_means = np.mean(sobel_abs, axis=0)
+                if np.max(col_means) > 85.0:
                     split_screen_detected = True
                     edit_mode_active = False
 
@@ -760,10 +735,11 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         # 1. Bring Teams FilePreviewActivity to front on external display (only if not already focused)
         try:
             win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", serial, timeout=1.5)
-            if "FilePreviewActivity" not in (win_chk.get("stdout") or ""):
+            stdout = win_chk.get("stdout") or ""
+            if "FilePreviewActivity" not in stdout and "com.microsoft.teams" not in stdout:
                 if disp_id > 0:
-                    await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity", serial)
-                    actions.append(f"Ensured Teams FilePreviewActivity is active on display {disp_id}")
+                    await run_adb_shell(f"am start --display {disp_id} -n com.microsoft.teams/com.microsoft.skype.teams.Launcher", serial)
+                    actions.append(f"Ensured Teams is active on display {disp_id}")
                     await asyncio.sleep(0.5)
         except Exception:
             pass

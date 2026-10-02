@@ -64,7 +64,7 @@ export interface FlowDagProps {
 
 export const FlowDag: React.FC<FlowDagProps> = ({
   apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 1, currentBottomLine = 49,
-  targetTotalLines = 0, currentPage = 1, isOrchestrating = false, onRefresh,
+  targetTotalLines = 0, currentPage = 1, isOrchestrating: _isOrchestrating = false, onRefresh,
   selectedDag = 'all', onSelectDag, selectedNodeId, onSelectNodeId,
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
   onClose, isMinimized = false, onToggleMinimize
@@ -195,7 +195,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isInitGroupCompleted = Boolean(!isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified) || projectInitProgress?.status === 'completed'));
   const isInitGroupError = Boolean(!isInitGroupRunning && (initGroup.status === 'error' || isNode1Error || projectInitProgress?.status === 'error'));
 
-  const isCaptureGroupRunning = Boolean(runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isLoopRunning || (activeRunningId !== null && !['init_end', 'reset_home'].includes(activeRunningId)) || isOrchestrating);
+  const isCaptureGroupRunning = Boolean(runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isLoopRunning || (activeRunningId !== null && !['init_end', 'reset_home'].includes(activeRunningId)));
 
   // Single-purpose status resolver
   const getNodeLiveStatus = useCallback((id: string) => {
