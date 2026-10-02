@@ -153,8 +153,27 @@ function AppContent() {
     try { return (localStorage.getItem('mc_target_device_model') as any) || 'pixel_8'; } catch { return 'pixel_8'; }
   });
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
-  const [showStudioDrawer, setShowStudioDrawer] = useState(false);
+  const [showStudioDrawer, setShowStudioDrawer] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mc_show_studio_drawer');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
   const [studioInitialTab, setStudioInitialTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>('kiosk');
+
+  const handleOpenStudio = (tab?: 'kiosk' | 'device' | 'processes' | 'telemetry') => {
+    if (tab) setStudioInitialTab(tab);
+    setShowStudioDrawer(true);
+    setStudioMinimized(false);
+    try { localStorage.setItem('mc_show_studio_drawer', 'true'); } catch {}
+  };
+
+  const handleCloseStudio = () => {
+    setShowStudioDrawer(false);
+    try { localStorage.setItem('mc_show_studio_drawer', 'false'); } catch {}
+  };
   const [pixel8Ip, setPixel8Ip] = useState(() => localStorage.getItem('mc_pixel_8_address') || '192.168.86.87:37547');
   const [pixel10Ip, setPixel10Ip] = useState(() => localStorage.getItem('mc_pixel_10_address') || '192.168.86.81:44587');
   const [isConnectingIp, setIsConnectingIp] = useState(false);
@@ -974,11 +993,7 @@ function AppContent() {
           <div className="device-selector-wrapper" ref={deviceDropdownRef}>
             <button
               className={`device-selector-btn ${showStudioDrawer && studioInitialTab === 'device' && !studioMinimized ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
-              onClick={() => {
-                setStudioInitialTab('device');
-                setShowStudioDrawer(true);
-                setStudioMinimized(false);
-              }}
+              onClick={() => handleOpenStudio('device')}
               title="Select connected Android device & configure wireless ADB in Studio"
             >
               <div className={`device-status-dot ${isCurrentDeviceConnected ? 'online' : 'offline'}`} />
@@ -1005,13 +1020,35 @@ function AppContent() {
               type="button"
               className={`window-dock-pill ${showStudioDrawer ? 'active' : ''} ${studioMinimized ? 'minimized' : ''}`}
               onClick={() => {
-                if (!showStudioDrawer) { setShowStudioDrawer(true); setStudioMinimized(false); }
+                if (!showStudioDrawer) handleOpenStudio();
                 else setStudioMinimized(p => !p);
               }}
               title="Toggle / Minimize / Restore Device & Kiosk Studio workspace"
             >
               <Monitor size={11} />
               <span>Studio {showStudioDrawer ? (studioMinimized ? '▲' : '●') : '○'}</span>
+            </button>
+            <button
+              type="button"
+              className={`window-dock-pill ${showStudioDrawer && studioInitialTab === 'telemetry' && !studioMinimized ? 'active' : ''}`}
+              onClick={() => handleOpenStudio('telemetry')}
+              title="Open Live Telemetry & Structured Logs in Studio"
+            >
+              <Activity size={11} />
+              <span>Telemetry</span>
+            </button>
+            <button
+              type="button"
+              className={`window-dock-pill ${showStudioDrawer && studioInitialTab === 'kiosk' && !studioMinimized ? 'active' : ''}`}
+              onClick={() => {
+                setLiveMode('desktop');
+                setStreamKey(Date.now());
+                handleOpenStudio('kiosk');
+              }}
+              title="Open Phone Live Screen Stream in Studio"
+            >
+              <Smartphone size={11} />
+              <span>Phone Stream</span>
             </button>
             <button
               type="button"
@@ -1155,7 +1192,7 @@ function AppContent() {
           )}
         </aside>
 
-        {activeProject && (
+        {activeProject ? (
           <>
             {framesMinimized ? (
               <aside
@@ -1631,93 +1668,306 @@ function AppContent() {
                 )}
               </>
             ) : null}
-
-            {/* Device & Kiosk Studio Integrated Window */}
-            {showStudioDrawer && (
-              studioMinimized ? (
-                <aside
-                  className="window-minimized-rail"
-                  onClick={() => setStudioMinimized(false)}
-                  title="Click to restore Device Studio panel"
-                  style={{ borderLeft: '1px solid var(--border-color)', borderRight: 'none' }}
-                >
-                  <Smartphone size={14} color="#58a6ff" />
-                  <span className="minimized-rail-label">DEVICE STUDIO ({deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10'})</span>
-                  <Maximize2 size={12} style={{ marginTop: 'auto' }} />
-                </aside>
-              ) : (
-                <>
-                  {!studioMaximized && (
-                    <div
-                      className={`panel-resizer ${isDraggingStudio ? 'dragging' : ''}`}
-                      onMouseDown={handleStudioResizer}
-                      title="Drag to resize Device Studio window"
-                    >
-                      <div className="panel-resizer-line" />
-                    </div>
-                  )}
-                  <section
-                    className={`device-studio-panel ${studioMaximized ? 'maximized' : ''}`}
-                    style={!studioMaximized ? { width: `${studioPanelWidth}px`, flexShrink: 0 } : undefined}
-                  >
-                    <DeviceStudioDrawer
-                      isOpen={showStudioDrawer}
-                      onClose={() => setShowStudioDrawer(false)}
-                      isIntegrated={true}
-                      isMinimized={studioMinimized}
-                      onToggleMinimize={() => setStudioMinimized(p => !p)}
-                      isMaximized={studioMaximized}
-                      onToggleMaximize={() => setStudioMaximized(p => !p)}
-                      apiBase={API_BASE}
-                      initialTab={studioInitialTab}
-                      deviceInfo={deviceInfo}
-                      deviceModel={deviceModel}
-                      onSelectDevice={handleSelectDevice}
-                      onSelectSerial={handleSelectSerial}
-                      onConnectAdbIp={handleConnectAdbIp}
-                      isConnectingIp={isConnectingIp}
-                      connectStatusMsg={connectStatusMsg}
-                      onPairAdb={handlePairAdb}
-                      isPairing={isPairing}
-                      pairStatusMsg={pairStatusMsg}
-                      pixel8Ip={pixel8Ip}
-                      setPixel8Ip={setPixel8Ip}
-                      pixel10Ip={pixel10Ip}
-                      setPixel10Ip={setPixel10Ip}
-                      alignmentData={alignmentData}
-                      onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
-                      onOpenAlignmentModal={() => setShowAlignmentModal(true)}
-                      liveMode={liveMode}
-                      onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
-                      streamKey={streamKey}
-                      onRefreshStream={() => setStreamKey(Date.now())}
-                      showBoundingBoxes={showBoundingBoxes}
-                      onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
-                      onCloseKeyboard={handleCloseKeyboard}
-                      isClosingKeyboard={isClosingKeyboard}
-                      telemetry={telemetry}
-                      tokenStats={tokenStats}
-                      documentSummary={{
-                        total_lines: documentData?.total_lines || 0,
-                        min_line: documentData?.min_line || 0,
-                        max_line: documentData?.max_line || 0,
-                        total_frames: frames.length,
-                        issue_count: documentData?.issue_count || 0,
-                        verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
-                      }}
-                      wsConnected={wsConnected}
-                      latencyMs={latencyMs}
-                      eventsLog={eventsLog}
-                      onClearEvents={() => setEventsLog([])}
-                      onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
-                      projectInitProgress={projectInitProgress}
-                      onDismissInitProgress={() => setProjectInitProgress(null)}
-                    />
-                  </section>
-                </>
-              )
-            )}
           </>
+        ) : (
+          <main className="frame-inspector-panel standby-workspace-hub" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'radial-gradient(ellipse at 50% 20%, rgba(22, 27, 34, 0.95) 0%, #0d1117 80%)' }}>
+            <div className="standby-hub-container" style={{ maxWidth: '880px', margin: 'auto', padding: '40px 24px', display: 'flex', flexDirection: 'column', gap: '28px', width: '100%' }}>
+              
+              {/* Top Banner */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #30363d', paddingBottom: '20px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 10px #00ff9d' }} />
+                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0, letterSpacing: '-0.3px' }}>
+                      Matrix Capture Studio
+                    </h2>
+                    <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: 'rgba(0, 255, 157, 0.12)', border: '1px solid rgba(0, 255, 157, 0.3)', color: '#00ff9d' }}>
+                      Device &amp; Telemetry Active
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#8b949e', margin: 0, lineHeight: 1.5 }}>
+                    Real-time phone inspection, external display streaming, and live pipeline telemetry are ready without needing a project.
+                  </p>
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => setShowNewProjectModal(true)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 600 }}
+                >
+                  <Plus size={15} />
+                  <span>Create Project</span>
+                </button>
+              </div>
+
+              {/* Status Summary Bar */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    <Smartphone size={13} color={isCurrentDeviceConnected ? '#00ff9d' : '#ff7b72'} />
+                    <span>Target Device</span>
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
+                    {devDisplayName}
+                  </div>
+                  <div style={{ fontSize: '11px', color: isCurrentDeviceConnected ? '#00ff9d' : '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isCurrentDeviceConnected ? '#00ff9d' : '#8b949e' }} />
+                    {isCurrentDeviceConnected ? (deviceInfo?.active_serial || 'Connected') : 'Offline / Disconnected'}
+                  </div>
+                </div>
+
+                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    <Monitor size={13} color="#58a6ff" />
+                    <span>Display Mode</span>
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
+                    {liveMode === 'desktop' ? 'External Desktop (1080p)' : 'Phone Mirror'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8b949e' }}>
+                    SurfaceFlinger stream active
+                  </div>
+                </div>
+
+                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    <Activity size={13} color="#bc8cff" />
+                    <span>Telemetry Stream</span>
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
+                    {wsConnected ? 'WebSocket Live' : 'HTTP Polling'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: wsConnected ? '#00ff9d' : '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>{latencyMs}ms roundtrip</span>
+                    <span>•</span>
+                    <span>{eventsLog.length} events</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Launch Cards into Studio Tabs */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Quick Launch Into Studio
+                </span>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+                  
+                  {/* Phone Screen Stream */}
+                  <div
+                    onClick={() => {
+                      setLiveMode('desktop');
+                      setStreamKey(Date.now());
+                      handleOpenStudio('kiosk');
+                    }}
+                    style={{
+                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
+                      border: '1px solid #30363d',
+                      borderRadius: '10px',
+                      padding: '18px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                    }}
+                    className="hover-card-highlight"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(0, 255, 157, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Smartphone size={18} color="#00ff9d" />
+                      </div>
+                      <span style={{ fontSize: '11px', color: '#00ff9d', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                        Open Stream →
+                      </span>
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
+                        Phone &amp; Desktop Live Stream
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
+                        View live HDMI external desktop, toggle phone mirror, and verify viewport rendering in real-time.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Telemetry Studio */}
+                  <div
+                    onClick={() => handleOpenStudio('telemetry')}
+                    style={{
+                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
+                      border: '1px solid #30363d',
+                      borderRadius: '10px',
+                      padding: '18px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                    }}
+                    className="hover-card-highlight"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(188, 140, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Activity size={18} color="#bc8cff" />
+                      </div>
+                      <span style={{ fontSize: '11px', color: '#bc8cff', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                        Open Telemetry →
+                      </span>
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
+                        Telemetry &amp; Structured Logs
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
+                        Monitor OCR confidence metrics, pipeline latency breakdowns, and structured system events.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Wireless ADB & Device Pairing */}
+                  <div
+                    onClick={() => handleOpenStudio('device')}
+                    style={{
+                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
+                      border: '1px solid #30363d',
+                      borderRadius: '10px',
+                      padding: '18px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                    }}
+                    className="hover-card-highlight"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(88, 166, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Sliders size={18} color="#58a6ff" />
+                      </div>
+                      <span style={{ fontSize: '11px', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                        Device Config →
+                      </span>
+                    </div>
+                    <div>
+                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
+                        Wireless ADB &amp; Density
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
+                        Configure IP endpoints, pair Android 11+ Wi-Fi ports, calibrate display DPI, and test input events.
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Projects List if any exist */}
+              {projects.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid #21262d', paddingTop: '20px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#8b949e' }}>
+                    Or select an existing document project:
+                  </span>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {projects.map(p => (
+                      <button
+                        key={p.id}
+                        className="btn btn-outline"
+                        onClick={() => handleSwitchProject(p.id)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
+                      >
+                        <FolderKanban size={13} color="#00ff9d" />
+                        <span>{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </main>
+        )}
+
+        {/* Device & Kiosk Studio Integrated Window */}
+        {showStudioDrawer && (
+          studioMinimized ? (
+            <aside
+              className="window-minimized-rail"
+              onClick={() => setStudioMinimized(false)}
+              title="Click to restore Device Studio panel"
+              style={{ borderLeft: '1px solid var(--border-color)', borderRight: 'none' }}
+            >
+              <Smartphone size={14} color="#58a6ff" />
+              <span className="minimized-rail-label">DEVICE STUDIO ({deviceModel === 'pixel_8' ? 'PIXEL 8' : 'PIXEL 10'})</span>
+              <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+            </aside>
+          ) : (
+            <>
+              {!studioMaximized && (
+                <div
+                  className={`panel-resizer ${isDraggingStudio ? 'dragging' : ''}`}
+                  onMouseDown={handleStudioResizer}
+                  title="Drag to resize Device Studio window"
+                >
+                  <div className="panel-resizer-line" />
+                </div>
+              )}
+              <section
+                className={`device-studio-panel ${studioMaximized ? 'maximized' : ''}`}
+                style={!studioMaximized ? { width: `${studioPanelWidth}px`, flexShrink: 0 } : undefined}
+              >
+                <DeviceStudioDrawer
+                  isOpen={showStudioDrawer}
+                  onClose={handleCloseStudio}
+                  isIntegrated={true}
+                  isMinimized={studioMinimized}
+                  onToggleMinimize={() => setStudioMinimized(p => !p)}
+                  isMaximized={studioMaximized}
+                  onToggleMaximize={() => setStudioMaximized(p => !p)}
+                  apiBase={API_BASE}
+                  initialTab={studioInitialTab}
+                  deviceInfo={deviceInfo}
+                  deviceModel={deviceModel}
+                  onSelectDevice={handleSelectDevice}
+                  onSelectSerial={handleSelectSerial}
+                  onConnectAdbIp={handleConnectAdbIp}
+                  isConnectingIp={isConnectingIp}
+                  connectStatusMsg={connectStatusMsg}
+                  onPairAdb={handlePairAdb}
+                  isPairing={isPairing}
+                  pairStatusMsg={pairStatusMsg}
+                  pixel8Ip={pixel8Ip}
+                  setPixel8Ip={setPixel8Ip}
+                  pixel10Ip={pixel10Ip}
+                  setPixel10Ip={setPixel10Ip}
+                  alignmentData={alignmentData}
+                  onTriggerAlignmentCheck={handleTriggerAlignmentCheck}
+                  onOpenAlignmentModal={() => setShowAlignmentModal(true)}
+                  liveMode={liveMode}
+                  onSwitchLiveMode={m => { setLiveMode(m); setStreamKey(Date.now()); }}
+                  streamKey={streamKey}
+                  onRefreshStream={() => setStreamKey(Date.now())}
+                  showBoundingBoxes={showBoundingBoxes}
+                  onToggleBoundingBoxes={() => setShowBoundingBoxes(p => !p)}
+                  onCloseKeyboard={handleCloseKeyboard}
+                  isClosingKeyboard={isClosingKeyboard}
+                  telemetry={telemetry}
+                  tokenStats={tokenStats}
+                  documentSummary={{
+                    total_lines: documentData?.total_lines || 0,
+                    min_line: documentData?.min_line || 0,
+                    max_line: documentData?.max_line || 0,
+                    total_frames: frames?.length || 0,
+                    issue_count: documentData?.issue_count || 0,
+                    verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length
+                  }}
+                  wsConnected={wsConnected}
+                  latencyMs={latencyMs}
+                  eventsLog={eventsLog}
+                  onClearEvents={() => setEventsLog([])}
+                  onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
+                  projectInitProgress={projectInitProgress}
+                  onDismissInitProgress={() => setProjectInitProgress(null)}
+                />
+              </section>
+            </>
+          )
         )}
       </div>
 
