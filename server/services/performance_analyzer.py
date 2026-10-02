@@ -183,7 +183,7 @@ Analyze the root cause of latency and performance degradation in the Small-Fling
 {evidence_lines}
 
 ### Environmental & Device Context
-- **Active Device Serial:** `{telemetry.get('device_id') or 'Connected ADB Device'}`
+- **Active Device:** {f"{'Pixel 10 Pro XL' if any(k in str(telemetry.get('device_id', '') or telemetry.get('active_serial', '') or '').lower() for k in ['63100', 'mustang', 'pixel_10']) else ('Pixel 8 Pro' if any(k in str(telemetry.get('device_id', '') or telemetry.get('active_serial', '') or '').lower() for k in ['39101', 'husky', 'pixel_8']) else 'Pixel Device')} (`{telemetry.get('device_id') or telemetry.get('active_serial') or 'Connected ADB'}`)"}
 - **Target Display ID:** `{telemetry.get('capture_telemetry', {}).get('display_id') or 'External Desktop'}`
 - **Active Density / DPI:** `{telemetry.get('capture_telemetry', {}).get('active_dpi', 120)} DPI` (`{telemetry.get('capture_telemetry', {}).get('dpi_factor', 0.75)}x`)
 - **Keyboard Suppressed / Guarded:** `{telemetry.get('keyboard_visible') is False}`

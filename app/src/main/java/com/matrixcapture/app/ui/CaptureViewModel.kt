@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.os.PowerManager
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.matrixcapture.app.capture.DisplayCaptureManager
@@ -213,11 +214,8 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun startPacingOnly(totalLines: Int = _uiState.value.targetTotalLines, dwellMs: Long = 1500L) {
-        val ps = DesktopPaginationService.instance ?: return run { _uiState.update { it.copy(errorMessage = "Accessibility Service not enabled.") } }
-        val dId = ps.resolveTargetDisplayId(_uiState.value.targetDisplay?.displayId)
-        acquireVmWakeLock()
-        _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running pacer test on Display $dId...") }
-        ps.startPacingEngine(dId, totalLines, dwellMs, "PACING_TEST", onPageAdvanced = { page, top, bot -> _uiState.update { it.copy(workflowStatus = "Page $page (Lines $top-$bot) • Freeze ${dwellMs}ms") } })
+        Log.w(TAG, "Legacy startPacingOnly deprecated in favor of server DAG node workflow.")
+        runDagCapture()
     }
 
     fun calibrateDocument() {
@@ -296,13 +294,14 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         uploadClient.sendOrchestrationCommand(cmd, "mobile")
     }
 
-    fun beginOrchestration() { updateOrch("BEGIN_AUTO_FLIPPING", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true) }; startPacingOnly() }
-    fun pauseOrchestration() { updateOrch("PAUSE", "PAUSED"); DesktopPaginationService.instance?.pausePagination() }
-    fun resumeOrchestration() { updateOrch("RESUME", "RUNNING"); DesktopPaginationService.instance?.resumePagination() }
-    fun endOrchestration() { updateOrch("END", "COMPLETED"); _uiState.update { it.copy(isWorkflowRunning = false) }; stopWorkflow() }
+    fun runDagCapture() { updateOrch("RUN_DAG_CAPTURE", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 2 (Capture)") } }
+    fun runDagInit() { updateOrch("RUN_DAG_INIT", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 1 (Initialize)") } }
+    fun beginOrchestration() { runDagCapture() }
+    fun pauseOrchestration() { updateOrch("PAUSE", "PAUSED"); _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Paused") } }
+    fun resumeOrchestration() { updateOrch("RESUME", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "DAG Resumed") } }
+    fun endOrchestration() { updateOrch("END", "COMPLETED"); _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Stopped") }; stopWorkflow() }
     fun restartOrchestration() {
-        updateOrch("RESTART", "RUNNING"); _uiState.update { it.copy(currentPage = 1, currentTopLine = 1, currentBottomLine = 0) }
-        viewModelScope.launch { DesktopPaginationService.instance?.restartFromBeginning() }
+        updateOrch("RESTART", "RUNNING"); _uiState.update { it.copy(currentPage = 1, currentTopLine = 1, currentBottomLine = 0, isWorkflowRunning = true, workflowStatus = "Restarting DAG 1 (Initialize)") }
     }
 
     data class UiState(

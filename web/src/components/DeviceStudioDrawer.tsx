@@ -1528,7 +1528,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                         <h4>DOCUMENT CAPTURE PROGRESS</h4>
                       </div>
                       <span className="kiosk-section-tag" style={{ color: '#00ff9d' }}>
-                        {telemetry.phase || 'PACING'}
+                        {telemetry.phase || 'STANDBY'}
                       </span>
                     </div>
 

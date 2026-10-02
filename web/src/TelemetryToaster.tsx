@@ -9,6 +9,13 @@ export interface TelemetryEvent {
   message: string;
   data?: any;
   dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
+  device?: string;
+  nodeId?: string;
+  level?: 'info' | 'warning' | 'error' | 'success';
+  traceInsights?: string[];
+  troubleshootingSteps?: Array<{ step: number; title: string; description: string; action?: string; action_label?: string }>;
+  markdownPrompt?: string;
+  statusCode?: number | string;
 }
 
 export interface CaptureTelemetry {
@@ -153,13 +160,14 @@ export interface TelemetryToasterProps {
   onSelectNodeId?: (nodeId: string | null) => void;
   apiBase?: string;
   onRefresh?: () => void;
+  onOpenPromptModal?: (nodeId: string) => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
-  selectedNodeId, onSelectNodeId, apiBase, onRefresh
+  selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
@@ -612,7 +620,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                 <div className="telemetry-pacer-grid">
                   {[
                     ['Target Device:', deviceModel === 'pixel_8' ? 'Google Pixel 8 (49L)' : 'Google Pixel 10 (49L)', 'val highlight'],
-                    ['Active Step:', telemetry.orchestration?.active_step || (telemetry.is_pacing ? 'PACING' : 'IDLE'), 'val font-mono'],
+                    ['Active Step:', telemetry.orchestration?.active_step || telemetry.phase || 'IDLE', 'val font-mono'],
                     ['Current Page:', `Page #${telemetry.current_page || 1}`, 'val'],
                     ['Top Gutter Line:', `Ln ${telemetry.current_top_line || documentSummary.min_line || 0}`, 'val'],
                     ['Bottom Gutter Line:', `Ln ${telemetry.current_bottom_line || documentSummary.max_line || 0}`, 'val'],
@@ -689,6 +697,8 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                     <StructuredLogEntry
                       key={ev.id}
                       ev={ev}
+                      deviceModel={deviceModel}
+                      onOpenPromptModal={onOpenPromptModal}
                       onReturnAlignmentOverlay={onReturnAlignmentOverlay}
                     />
                   ))}

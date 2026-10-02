@@ -328,7 +328,15 @@ class DesktopPaginationService : AccessibilityService() {
         onFrameCaptureNeeded: (suspend (pageIndex: Int, topLine: Int, bottomLine: Int) -> Unit)? = null,
         isFinishedCheck: (suspend () -> Boolean)? = null
     ) {
-        if (!isPaginating.compareAndSet(false, true)) return
+        Log.w(TAG, "Legacy startPacingEngine is deprecated and disabled in favor of server DAG node workflow events.")
+        return
+    }
+
+    private fun _unusedLegacyPaginationLoop(targetDisplayId: Int, totalLines: Int, dwellTimeMs: Long, phase: String,
+        onSegmentBoundary: (suspend (chunkIndex: Int, handoverLine: Int, overlapLine: Int) -> Unit)?,
+        onPageAdvanced: (suspend (pageIndex: Int, topLine: Int, bottomLine: Int) -> Unit)?,
+        onFrameCaptureNeeded: (suspend (pageIndex: Int, topLine: Int, bottomLine: Int) -> Unit)?,
+        isFinishedCheck: (suspend () -> Boolean)?) {
         val resolvedDisplay = resolveTargetDisplayId(targetDisplayId)
         val targetDevice = _deviceModel.value.resolve()
         val initialTarget = if (totalLines > 0) totalLines else _calculatedTotalLines.value

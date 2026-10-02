@@ -17,6 +17,9 @@ import { GotoLineModal } from './components/GotoLineModal';
 import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 import { LiveResponsiveViewport } from './components/LiveResponsiveViewport';
 import { useAgoTimer } from './hooks/useAgoTimer';
+import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
+import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
+import { discernNodePerformance } from './utils/dagDiagnostics';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -93,6 +96,30 @@ function AppContent() {
   });
   const [fixingClassifierId, setFixingClassifierId] = useState<string | null>(null);
   const [isFixingAll, setIsFixingAll] = useState(false);
+  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  const [promptModalNodeId, setPromptModalNodeId] = useState<string>('init_end');
+  const [serverDiagnosisCache, setServerDiagnosisCache] = useState<Record<string, PerformanceDiagnosis>>({});
+
+  const handleOpenPromptModal = useCallback(async (nodeId: string) => {
+    setPromptModalNodeId(nodeId);
+    setIsPromptModalOpen(true);
+    try {
+      const res = await api(`/api/dag/nodes/${nodeId}/root-cause`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'success') {
+          const prompt = data.markdown_prompt || '';
+          setServerDiagnosisCache(prev => ({
+            ...prev,
+            [nodeId]: {
+              ...data,
+              promptDataUri: 'data:text/markdown;charset=utf-8,' + encodeURIComponent(prompt)
+            }
+          }));
+        }
+      }
+    } catch {}
+  }, []);
   const [framesPanelWidth, setFramesPanelWidth] = useState(() => {
     try { return Number(localStorage.getItem('mc_frames_panel_width')) || 280; } catch { return 280; }
   });
@@ -639,6 +666,46 @@ function AppContent() {
             if (msg.status === 'completed' || msg.percent === 100) {
               fetchData();
             }
+          } else if (msg.type === 'dag_telemetry_event' && msg.event) {
+            setEventsLog(prev => [...prev.slice(-99), msg.event]);
+          } else if (msg.type === 'dag_updated') {
+            const dagNodeId = msg.node_id || msg.dag?.current_active_node || 'init_end';
+            const devName = deviceInfo?.active_model || (deviceModel === 'pixel_10' ? 'Pixel 10 Pro XL' : 'Pixel 8 Pro');
+            if (msg.status === 'error' || msg.error) {
+              const errText = typeof msg.error === 'string' ? msg.error : (msg.error?.message || 'Node execution failed');
+              setEventsLog(prev => [
+                ...prev.slice(-99),
+                {
+                  id: `${Date.now()}-${Math.random()}`,
+                  timestamp: new Date().toLocaleTimeString(),
+                  category: 'ERROR',
+                  message: `${devName}: DAG 1 details of log trace • ${errText}`,
+                  dag: 'initialize',
+                  device: devName,
+                  nodeId: dagNodeId,
+                  level: 'error',
+                  data: msg.dag_context || msg.dag?.nodes?.[dagNodeId]?.dag_context,
+                  traceInsights: msg.trace_insights || msg.dag?.nodes?.[dagNodeId]?.trace_insights,
+                  troubleshootingSteps: msg.troubleshooting_steps || msg.dag?.nodes?.[dagNodeId]?.troubleshooting_steps,
+                  statusCode: 500
+                }
+              ]);
+            } else if (msg.status === 'completed' && msg.total_lines) {
+              setEventsLog(prev => [
+                ...prev.slice(-99),
+                {
+                  id: `${Date.now()}-${Math.random()}`,
+                  timestamp: new Date().toLocaleTimeString(),
+                  category: 'OCR',
+                  message: `${devName}: DAG 1 • Calibrated ${Number(msg.total_lines).toLocaleString()} total lines at EOF ✔`,
+                  dag: 'initialize',
+                  device: devName,
+                  nodeId: msg.node_id || 'init_end',
+                  level: 'success',
+                  data: { total_lines: msg.total_lines }
+                }
+              ]);
+            }
           } else if (msg.type === 'alignment_status') {
             const d = msg.alignment || msg.data;
             if (d) setAlignmentData(d);
@@ -648,7 +715,7 @@ function AppContent() {
     };
     connect();
     return () => { ws?.close(); clearTimeout(timer); };
-  }, [addTelemetryEvent, fetchData]);
+  }, [addTelemetryEvent, fetchData, deviceInfo?.active_model, deviceModel]);
 
   const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
     if (mode === 'cloud' && !apiKeyConfigured) {
@@ -1012,7 +1079,7 @@ function AppContent() {
             currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49}
             targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
             currentPage={telemetry.current_page || frames.length || 1}
-            isOrchestrating={telemetry.is_pacing}
+            isOrchestrating={Boolean(telemetry.phase?.startsWith('DAG_') || projectInitProgress?.status === 'running')}
             onRefresh={fetchData}
             selectedDag={selectedDag}
             onSelectDag={setSelectedDag}
@@ -1773,7 +1840,48 @@ function AppContent() {
         onSelectNodeId={setSelectedNodeId}
         apiBase={API_BASE}
         onRefresh={fetchData}
+        onOpenPromptModal={handleOpenPromptModal}
       />
+
+      {isPromptModalOpen && (
+        <AiPerformancePromptModal
+          isOpen={isPromptModalOpen}
+          onClose={() => setIsPromptModalOpen(false)}
+          nodeMeta={NODES_METADATA.find(n => n.id === promptModalNodeId) || NODES_METADATA[0]}
+          diagnosis={serverDiagnosisCache[promptModalNodeId] || discernNodePerformance(
+            NODES_METADATA.find(n => n.id === promptModalNodeId) || NODES_METADATA[0],
+            {
+              isError: true,
+              isDone: false,
+              isRunning: false,
+              isActive: false,
+              statusLabel: 'ERROR',
+              metricLabel: '',
+              evaluator: '',
+              healingStep: null,
+              telemetryInsight: '',
+              color: '#f85149',
+              startedAt: null,
+              finishedAt: null,
+              durationMs: null,
+              nodeError: 'Node encountered error'
+            },
+            {
+              active_node: promptModalNodeId,
+              target_total_lines: 0,
+              current_top_line: 1,
+              current_bottom_line: 59,
+              current_page: 1,
+              is_keyboard_guarded: true,
+              arrow_step_count: 48,
+              verification_trigger_fired: false,
+              ocr_worker_active: true,
+              ocr_latency_ms: 45
+            },
+            deviceInfo?.active_serial
+          )}
+        />
+      )}
     </div>
   );
 }

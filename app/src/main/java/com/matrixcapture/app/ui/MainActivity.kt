@@ -202,16 +202,16 @@ fun MatrixCaptureDashboard(
                     RestartBtn(onRestartOrchestration)
                 }
                 else -> {
-                    Button(onClick = onBeginOrchestration, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF9D))) {
+                    Button(onClick = onBeginOrchestration, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF9D))) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(24.dp))
-                            Text("begin Auto Flipping", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, fontSize = 16.sp, letterSpacing = 0.5.sp)
+                            Icon(Icons.Default.PlayArrow, null, tint = Color.Black, modifier = Modifier.size(22.dp))
+                            Text("Run DAG 2 (Capture)", color = Color.Black, fontWeight = FontWeight.ExtraBold, fontFamily = FontFamily.Monospace, fontSize = 15.sp, letterSpacing = 0.5.sp)
                         }
                     }
-                    Button(onClick = onCaptureDesktopMode, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
+                    Button(onClick = onRestartOrchestration, modifier = Modifier.fillMaxWidth().height(46.dp), shape = RoundedCornerShape(12.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1F6FEB))) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.CameraAlt, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                            Text("repeatedly capture page 1", color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                            Icon(Icons.Default.Refresh, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Text("Run DAG 1 (Initialize)", color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                         }
                     }
                     if (uiState.currentTopLine > 1 || uiState.uploadedFramesCount > 0) RestartBtn(onRestartOrchestration)

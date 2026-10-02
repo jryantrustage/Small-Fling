@@ -4,6 +4,14 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+# Ensure standard output can handle UTF-8 / emojis on Windows without cp1252 encoding crashes
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -237,8 +245,8 @@ if __name__ == "__main__":
     import subprocess
 
     is_debug = sys.gettrace() is not None or "debugpy" in sys.modules
-    # Disable uvicorn reloader subprocess when under debugger to prevent orphaned processes during VS Code restart
-    reload_enabled = not is_debug
+    # Keep reload enabled so changes in development are automatically picked up
+    reload_enabled = True
 
     uvicorn_kwargs = {
         "host": config.SERVER_HOST,

@@ -155,9 +155,9 @@ export function calculateNodeLiveStatus(
     }
     case 'arrow_down': {
       isDone = nodeData.status === 'completed';
-      defaultEvaluator = 'Pacing & Alignment Evaluator';
+      defaultEvaluator = 'Navigation & Viewport Evaluator';
       metricLabel = healingStep || `Target Ln ${nextTargetTop}`;
-      statusLabel = isThisActive ? (healingStep ? 'PACING' : 'STEPPING') : (isDone ? 'STEPPED' : 'READY');
+      statusLabel = isThisActive ? (healingStep ? 'ALIGNING' : 'STEPPING') : (isDone ? 'STEPPED' : 'READY');
       defaultInsight = `Viewport stepped down to target Line ${nextTargetTop}`;
       color = '#ffa657';
       break;
