@@ -226,6 +226,9 @@ function AppContent() {
   }, [deviceInfo]);
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
   const isDocVisibleRef = useRef(true);
+  const isFetchingRef = useRef(false);
+  const activeProjectRef = useRef(activeProject);
+  useEffect(() => { activeProjectRef.current = activeProject; }, [activeProject]);
   const lineListRef = useRef<HTMLDivElement>(null);
 
   const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all') => {
@@ -442,7 +445,8 @@ function AppContent() {
   };
 
   const fetchData = useCallback(async () => {
-    if (!isDocVisibleRef.current) return;
+    if (!isDocVisibleRef.current || isFetchingRef.current) return;
+    isFetchingRef.current = true;
     const t0 = performance.now();
     try {
       const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes, alignRes] = await Promise.all([
@@ -487,6 +491,7 @@ function AppContent() {
       if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
       if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
     } catch { setBackendConnected(false); }
+    finally { isFetchingRef.current = false; }
   }, []);
 
   useEffect(() => {
@@ -615,18 +620,18 @@ function AppContent() {
           setActiveProject(delData.active_project || null);
         } else {
           setProjects(prev => prev.filter(p => p.id !== id));
-          if (activeProject?.id === id) {
+          if (activeProjectRef.current?.id === id) {
             setActiveProject(null);
           }
         }
-        if (activeProject?.id === id || delData?.deleted_project_id === activeProject?.id) {
+        const wasActive = activeProjectRef.current?.id === id || delData?.deleted_project_id === activeProjectRef.current?.id || !delData?.active_project;
+        if (wasActive) {
           setFrames([]);
           setSelectedFrameId(null);
           setSelectedFrameIds(new Set());
           setSelectedLineNumbers(new Set());
           setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
         }
-        await fetchData();
         addTelemetryEvent('SYSTEM', `Deleted project "${projName}" (${id})`);
       } else {
         const err = await res.json().catch(() => ({ detail: 'Failed to delete project' }));
@@ -703,8 +708,12 @@ function AppContent() {
             setSelectedFrameId(null);
             setSelectedFrameIds(new Set());
           } else if (msg.type === 'project_deleted') {
-            setProjects(p => p.filter(item => item.id !== msg.project_id));
-            if (activeProject?.id === msg.project_id) {
+            if (msg.projects) {
+              setProjects(msg.projects);
+            } else {
+              setProjects(p => p.filter(item => item.id !== msg.project_id));
+            }
+            if (activeProjectRef.current?.id === msg.project_id || !msg.active_project) {
               setActiveProject(msg.active_project || null);
               if (!msg.active_project) {
                 setFrames([]);
@@ -714,7 +723,6 @@ function AppContent() {
                 setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
               }
             }
-            fetchData();
           } else if (msg.type === 'project_switched') {
             setActiveProject(msg.project || null);
             fetchData();
@@ -1269,8 +1277,8 @@ function AppContent() {
             apiBase={API_BASE}
             activeProjectId={activeProject?.id}
             activeDeviceSerial={deviceInfo?.active_serial}
-            currentTopLine={telemetry.current_top_line || documentData.min_line || 1}
-            currentBottomLine={telemetry.current_bottom_line || documentData.max_line || 49}
+            currentTopLine={telemetry.current_top_line !== undefined ? telemetry.current_top_line : (documentData.min_line ?? 0)}
+            currentBottomLine={telemetry.current_bottom_line !== undefined ? telemetry.current_bottom_line : (documentData.max_line ?? 0)}
             targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
             currentPage={telemetry.current_page || frames.length || 1}
             isOrchestrating={Boolean(telemetry.phase?.startsWith('DAG_') || projectInitProgress?.status === 'running')}

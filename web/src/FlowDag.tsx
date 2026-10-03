@@ -63,7 +63,7 @@ export interface FlowDagProps {
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
-  apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 1, currentBottomLine = 49,
+  apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 0, currentBottomLine = 0,
   targetTotalLines = 0, currentPage = 1, isOrchestrating: _isOrchestrating = false, onRefresh,
   selectedDag = 'all', onSelectDag, selectedNodeId, onSelectNodeId,
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
@@ -152,9 +152,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             ...prev,
             ...d,
             target_total_lines: d.target_total_lines !== undefined ? d.target_total_lines : targetTotalLines,
-            current_top_line: d.current_top_line || currentTopLine,
-            current_bottom_line: d.current_bottom_line || currentBottomLine,
-            current_page: d.current_page || currentPage
+            current_top_line: d.current_top_line !== undefined ? d.current_top_line : currentTopLine,
+            current_bottom_line: d.current_bottom_line !== undefined ? d.current_bottom_line : currentBottomLine,
+            current_page: d.current_page !== undefined ? d.current_page : currentPage
           }));
           if (d.node_5_config?.qualifiers) setNode5Config(prev => ({ ...prev, ...d.node_5_config, qualifiers: { ...prev.qualifiers, ...d.node_5_config.qualifiers } }));
           if (d.dag?.nodes?.frame_acquire?.config) setNode3Config(prev => ({ ...prev, ...d.dag.nodes.frame_acquire.config }));
@@ -510,7 +510,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 <span style={{ fontWeight: 800, fontSize: '11px', letterSpacing: '0.6px', color: '#00ff9d', flexShrink: 0 }}>PAGINATION FLOW DAG</span>
                 <span style={{ color: '#6e7681', fontSize: '10px', flexShrink: 0 }}>|</span>
                 <span style={{ fontSize: '10px', color: '#8b949e', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 0 }}>
-                  Page #{dagStatus.current_page || currentPage} · Ln {dagStatus.current_top_line || 1}-{dagStatus.current_bottom_line || 49} of {dagStatus.target_total_lines || targetTotalLines || 'EOF'} lines · Target Next Ln {Math.max(1, (dagStatus.current_bottom_line || 49) + 1)}
+                  Page #{dagStatus.current_page ?? currentPage ?? 1} · Ln {dagStatus.current_top_line ?? currentTopLine ?? 0}-{dagStatus.current_bottom_line ?? currentBottomLine ?? 0} of {dagStatus.target_total_lines || targetTotalLines || 'EOF'} lines · Target Next Ln {Math.max(1, (dagStatus.current_bottom_line ?? currentBottomLine ?? 0) + 1)}
                 </span>
               </div>
             )}

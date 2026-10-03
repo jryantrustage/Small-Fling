@@ -119,8 +119,8 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 160px for 4-digit numbers)
-    gutter_w = int(max(105.0, min(175.0, 140.0 * norm_multiplier)))
+    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 220px for 4-digit numbers)
+    gutter_w = int(max(115.0, min(220.0, 155.0 * norm_multiplier)))
     top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
     top_crop = img[top_y1:int(h * 0.45), :gutter_w]
     bot_crop = img[int(h * 0.65):int(h * 0.98), :gutter_w]
@@ -179,7 +179,7 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
-    gutter_w = int(max(90.0, min(160.0, 130.0 * norm_multiplier)))
+    gutter_w = int(max(95.0, min(200.0, 140.0 * norm_multiplier)))
     top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
 
     top_crop = img[top_y1:int(h * 0.45), :gutter_w]

@@ -88,7 +88,7 @@ test.describe('Project Lifecycle & Deletion Suite with 15 Captures', () => {
     await page.screenshot({ path: 'test-results/screenshots/after_project_deletion.png', fullPage: true });
 
     // 10. Check backend API to ensure project was deleted
-    const verifyRes = await page.request.get(`http://localhost:8000/api/projects`);
+    const verifyRes = await page.request.get(`http://127.0.0.1:8000/api/projects`);
     const projectList = await verifyRes.json();
     const stillExists = projectList.some((p: any) => p.id === createdProjectId);
     expect(stillExists).toBeFalsy();
