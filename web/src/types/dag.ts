@@ -193,3 +193,65 @@ export const NODES_METADATA: NodeMeta[] = [
     hasConfig: true
   }
 ];
+
+export interface Dag2NodeExecutionRecord {
+  node_id: string;
+  name: string;
+  status: string;
+  started_at_ms: number;
+  finished_at_ms: number;
+  duration_ms: number;
+  details?: Record<string, any>;
+}
+
+export interface Dag2LoopExecutionRecord {
+  loop_index: number;
+  loop_id: string;
+  status: string;
+  started_at_ms: number;
+  finished_at_ms: number;
+  duration_ms: number;
+  duration_formatted: string;
+  nodes: Dag2NodeExecutionRecord[];
+}
+
+export interface Dag2Bottleneck {
+  rank: number;
+  node_id: string;
+  name: string;
+  time_spent: string;
+  percentage: number;
+  root_cause: string;
+  remediation: string;
+}
+
+export interface Dag2NodeStatistic {
+  node_id: string;
+  name: string;
+  total_ms: number;
+  total_formatted: string;
+  avg_ms: number;
+  avg_formatted: string;
+  percentage_of_total: number;
+}
+
+export interface Dag2PerformanceReport {
+  status: string;
+  generated_at?: string;
+  summary: {
+    total_loops: number;
+    total_elapsed_ms: number;
+    total_elapsed_formatted: string;
+    average_loop_ms: number;
+    average_loop_formatted: string;
+    min_loop_ms: number;
+    min_loop_formatted: string;
+    max_loop_ms: number;
+    max_loop_formatted: string;
+    trend: string;
+  };
+  loops: Dag2LoopExecutionRecord[];
+  node_statistics: Dag2NodeStatistic[];
+  bottlenecks: Dag2Bottleneck[];
+  ai_optimization_prompt: string;
+}

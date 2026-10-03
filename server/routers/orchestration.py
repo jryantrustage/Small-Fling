@@ -2742,6 +2742,20 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         })
         return {"status": "error", "group": "initialize", "error": err}
 
+def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: int, status: str, nodes: List[Dict[str, Any]]):
+    from services.performance_analyzer import format_duration_min_sec
+    rec = {
+        "loop_index": loop_idx,
+        "loop_id": f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        "status": status,
+        "started_at_ms": start_ms,
+        "finished_at_ms": end_ms,
+        "duration_ms": dur_ms,
+        "duration_formatted": format_duration_min_sec(dur_ms),
+        "nodes": nodes
+    }
+    state.record_dag2_loop_result(rec)
+
 async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Dict[str, Any]:
     active_serial = await get_active_adb_serial(serial)
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
@@ -2754,22 +2768,89 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
 
     opts = {"serial": active_serial, "fast_loop": True}
 
+    from services.performance_analyzer import format_duration_min_sec
+    loop_idx = len(state.get_dag2_loop_history()) + 1
+    loop_start_ms = int(time.time() * 1000)
+    loop_t0 = time.perf_counter()
+    loop_nodes = []
+
+    # Node 3: frame_acquire
+    n3_t0 = time.perf_counter()
+    n3_start_ms = int(time.time() * 1000)
     n3_res = await run_single_dag_node("frame_acquire", opts)
+    n3_t1 = time.perf_counter()
+    n3_end_ms = int(time.time() * 1000)
+    n3_dur_ms = max(1, int((n3_t1 - n3_t0) * 1000))
+    loop_nodes.append({
+        "node_id": "frame_acquire",
+        "name": "Frame Acquire (Node 3)",
+        "status": n3_res.get("status", "completed"),
+        "started_at_ms": n3_start_ms,
+        "finished_at_ms": n3_end_ms,
+        "duration_ms": n3_dur_ms,
+        "details": {
+            "page": n3_res.get("page", 0),
+            "display_id": state.latest_telemetry.get("capture_telemetry", {}).get("display_id"),
+            "latency_ms": state.latest_telemetry.get("capture_telemetry", {}).get("last_latency_ms", 0),
+            "file_size": n3_res.get("file_size", 0)
+        }
+    })
     if n3_res.get("status") == "error":
         capture_group["status"] = "error"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
         return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
 
     # Downstream compute nodes do not need repeated ADB/screencap environment healing
     opts["skip_env_heal"] = True
 
+    # Node 4: local_ai_ocr
+    n4_t0 = time.perf_counter()
+    n4_start_ms = int(time.time() * 1000)
     n4_res = await run_single_dag_node("local_ai_ocr", opts)
+    n4_t1 = time.perf_counter()
+    n4_end_ms = int(time.time() * 1000)
+    n4_dur_ms = max(1, int((n4_t1 - n4_t0) * 1000))
+    loop_nodes.append({
+        "node_id": "local_ai_ocr",
+        "name": "Local AI OCR (Node 4)",
+        "status": n4_res.get("status", "completed"),
+        "started_at_ms": n4_start_ms,
+        "finished_at_ms": n4_end_ms,
+        "duration_ms": n4_dur_ms,
+        "details": {
+            "model_used": n4_res.get("model_used", "MiniCPM-V"),
+            "lines_count": n4_res.get("lines_count", 0),
+            "char_count": n4_res.get("char_count", 0)
+        }
+    })
     if n4_res.get("status") == "error":
         capture_group["status"] = "error"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
         return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
+    # Node 5: frame_ocr
+    n5_t0 = time.perf_counter()
+    n5_start_ms = int(time.time() * 1000)
     n5_res = await run_single_dag_node("frame_ocr", opts)
+    n5_t1 = time.perf_counter()
+    n5_end_ms = int(time.time() * 1000)
+    n5_dur_ms = max(1, int((n5_t1 - n5_t0) * 1000))
+    loop_nodes.append({
+        "node_id": "frame_ocr",
+        "name": "Gutter Boundary Verify (Node 5)",
+        "status": n5_res.get("status", "completed"),
+        "started_at_ms": n5_start_ms,
+        "finished_at_ms": n5_end_ms,
+        "duration_ms": n5_dur_ms,
+        "details": {
+            "top_line": n5_res.get("top_line", 0),
+            "bottom_line": n5_res.get("bottom_line", 0),
+            "extracted_lines": len(n5_res.get("lines", []))
+        }
+    })
     if n5_res.get("status") == "error":
         capture_group["status"] = "error"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
         return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
 
     bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
@@ -2777,7 +2858,33 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         opts["prev_bottom"] = bot_ln
         opts["target_top"] = bot_ln + 1
 
+    # Node 6: arrow_down
+    n6_t0 = time.perf_counter()
+    n6_start_ms = int(time.time() * 1000)
     n6_res = await run_single_dag_node("arrow_down", opts)
+    n6_t1 = time.perf_counter()
+    n6_end_ms = int(time.time() * 1000)
+    n6_dur_ms = max(1, int((n6_t1 - n6_t0) * 1000))
+    prev_b = opts.get("prev_bottom", 0)
+    tgt_t = opts.get("target_top", prev_b + 1)
+    arr_cnt = n6_res.get("arrow_count", 0)
+    loop_nodes.append({
+        "node_id": "arrow_down",
+        "name": "Arrow Down Viewport Pacer (Node 6)",
+        "status": n6_res.get("status", "completed"),
+        "started_at_ms": n6_start_ms,
+        "finished_at_ms": n6_end_ms,
+        "duration_ms": n6_dur_ms,
+        "details": {
+            "previous_bottom_line": prev_b,
+            "target_top_line": tgt_t,
+            "reached_top_line": n6_res.get("new_top_line") or n6_res.get("final_top", 0),
+            "arrow_keys_pressed": arr_cnt,
+            "positioning_method": "HID Arrow Down Keystrokes (Loop)",
+            "dwell_ms": state.latest_telemetry.get("pacer_calibration", {}).get("dwell_ms", 25),
+            "settle_ms": state.latest_telemetry.get("capture_telemetry", {}).get("settle_delay_ms", 300)
+        }
+    })
     if (
         n6_res.get("status") in ("error", "prevented")
         or n6_res.get("reached") is False
@@ -2787,9 +2894,29 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         capture_group["status"] = st
         err_msg = n6_res.get("message") or n6_res.get("error") or "Navigation failed: arrow_down did not advance viewport."
         state.latest_telemetry["status_message"] = f"Loop halted: {err_msg} DAG 7 blocked."
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
         return {"status": st, "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
+    # Node 7: verification_trigger
+    n7_t0 = time.perf_counter()
+    n7_start_ms = int(time.time() * 1000)
     n7_res = await run_single_dag_node("verification_trigger", opts)
+    n7_t1 = time.perf_counter()
+    n7_end_ms = int(time.time() * 1000)
+    n7_dur_ms = max(1, int((n7_t1 - n7_t0) * 1000))
+    loop_nodes.append({
+        "node_id": "verification_trigger",
+        "name": "Verification Trigger (Node 7)",
+        "status": n7_res.get("status", "completed"),
+        "started_at_ms": n7_start_ms,
+        "finished_at_ms": n7_end_ms,
+        "duration_ms": n7_dur_ms,
+        "details": {
+            "allowed": n7_res.get("allowed", True),
+            "loop_count": n7_res.get("loop_count", loop_idx),
+            "consecutive_failures": n7_res.get("consecutive_failures", 0)
+        }
+    })
     if (
         n7_res.get("status") in ("error", "prevented")
         or not n7_res.get("allowed", True)
@@ -2797,13 +2924,55 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     ):
         st = n7_res.get("status", "prevented")
         capture_group["status"] = st
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
         return {"status": st, "node_id": "verification_trigger", "result": n7_res}
 
+    # Node 8: document_assemble
+    n8_t0 = time.perf_counter()
+    n8_start_ms = int(time.time() * 1000)
     n8_res = await run_single_dag_node("document_assemble", opts)
+    n8_t1 = time.perf_counter()
+    n8_end_ms = int(time.time() * 1000)
+    n8_dur_ms = max(1, int((n8_t1 - n8_t0) * 1000))
+    loop_nodes.append({
+        "node_id": "document_assemble",
+        "name": "Document Assemble (Node 8)",
+        "status": n8_res.get("status", "completed"),
+        "started_at_ms": n8_start_ms,
+        "finished_at_ms": n8_end_ms,
+        "duration_ms": n8_dur_ms,
+        "details": {
+            "total_captured_lines": n8_res.get("total_captured_lines", 0),
+            "completion_percent": n8_res.get("completion_percent", 0),
+            "is_complete": n8_res.get("is_complete", False)
+        }
+    })
+
+    # Record completed loop
+    loop_t1 = time.perf_counter()
+    loop_end_ms = int(time.time() * 1000)
+    loop_dur_ms = max(1, int((loop_t1 - loop_t0) * 1000))
+    _save_dag2_loop_record(loop_idx, loop_start_ms, loop_end_ms, loop_dur_ms, "success", loop_nodes)
+
+    loop_rec = {
+        "loop_index": loop_idx,
+        "duration_ms": loop_dur_ms,
+        "duration_formatted": format_duration_min_sec(loop_dur_ms),
+        "started_at_ms": loop_start_ms,
+        "finished_at_ms": loop_end_ms
+    }
+    await state.ws_manager.broadcast({
+        "type": "dag2_loop_completed",
+        "loop": loop_rec,
+        "loop_index": loop_idx,
+        "duration_ms": loop_dur_ms,
+        "duration_formatted": format_duration_min_sec(loop_dur_ms)
+    })
 
     return {
         "status": "success",
         "group": "capture_entire_markdown",
+        "loop": loop_rec,
         "node3": n3_res,
         "node4": n4_res,
         "node5": n5_res,
@@ -2988,4 +3157,23 @@ async def scan_direct(request: Request, file: UploadFile = File(...), engine: Op
         return {"status": "success", "engine": eff_engine, "model_target": mt, "pipeline_mode": pm, **res}
     finally:
         if temp_path.exists(): temp_path.unlink()
+
+
+@router.get("/api/dag/report/dag2")
+async def get_dag2_performance_report():
+    """
+    Returns granular millisecond tracking of each loop and each node across DAG 2 execution,
+    along with bottleneck analytics on positioning (bottom + 1 -> top of next page)
+    and an AI prompt ready for export to Gemini 3.8.
+    """
+    from services.performance_analyzer import analyze_dag2_performance_report
+    history = state.get_dag2_loop_history()
+    report = analyze_dag2_performance_report(history, state.latest_telemetry)
+    return report
+
+
+@router.post("/api/dag/report/dag2/clear")
+async def clear_dag2_performance_report():
+    state.clear_dag2_loop_history()
+    return {"status": "success", "message": "DAG 2 loop performance history cleared"}
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
-  Maximize2, Minimize2, Square, Minus
+  Maximize2, Minimize2, Square, Minus, Activity
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type {
@@ -17,6 +17,7 @@ import { DagNodeCard } from './components/dag/DagNodeCard';
 import { DagNodePopover, DagBlockedDiagnosticBox } from './components/dag/DagNodePopover';
 import { DagInspectorModal } from './components/dag/DagInspectorModal';
 import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
+import { Dag2PerformanceReportModal } from './components/dag/Dag2PerformanceReportModal';
 import {
   Node3CaptureConfigModal,
   Node4OcrConfigModal,
@@ -97,6 +98,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isNode3ConfigOpen, setIsNode3ConfigOpen] = useState(false);
   const [isNode4ConfigOpen, setIsNode4ConfigOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
+  const [isDag2ReportModalOpen, setIsDag2ReportModalOpen] = useState(false);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
@@ -139,7 +141,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   const [triggerDecision, setTriggerDecision] = useState<TriggerDecisionState>({ allowed: true, prevented: false, reasons: [] });
 
-  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isConfigModalOpen || isTextModalOpen || isNode3ConfigOpen || isNode4ConfigOpen;
+  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isConfigModalOpen || isTextModalOpen || isNode3ConfigOpen || isNode4ConfigOpen || isDag2ReportModalOpen;
 
   // Real-time synchronization
   useEffect(() => {
@@ -786,6 +788,22 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={(e) => { e.stopPropagation(); setIsDag2ReportModalOpen(true); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 6px',
+                    borderRadius: '3px', border: '1px solid rgba(88, 166, 255, 0.45)',
+                    background: 'rgba(88, 166, 255, 0.16)',
+                    color: '#58a6ff',
+                    fontSize: '8.5px', fontWeight: 800, cursor: 'pointer',
+                    boxShadow: '0 0 6px rgba(88, 166, 255, 0.12)'
+                  }}
+                  title="View detailed millisecond loop timing, bottleneck analytics, and export AI optimization prompt for Gemini 3.8"
+                >
+                  <Activity size={8} />
+                  <span>Report</span>
+                </button>
+                <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); handleRunGroup('capture_entire_markdown', { single_cycle: true }); }}
                   disabled={runningGroupId !== null || runningNodeId !== null || isLoopRunning}
                   style={{
@@ -962,6 +980,12 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           diagnosis={promptDiagnosis}
         />
       )}
+
+      {/* MODAL 6: DAG 2 Loop Millisecond Performance Report & Gemini 3.8 Optimization Engine */}
+      <Dag2PerformanceReportModal
+        isOpen={isDag2ReportModalOpen}
+        onClose={() => setIsDag2ReportModalOpen(false)}
+      />
     </div>
   );
 };

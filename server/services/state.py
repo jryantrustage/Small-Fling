@@ -235,6 +235,19 @@ orchestration_state: Dict[str, Any] = {
     "device_model": "pixel_10", "lines_per_page": 49, "updated_at": datetime.now().isoformat()
 }
 
+dag2_loop_history: List[Dict[str, Any]] = []
+
+def record_dag2_loop_result(loop_record: Dict[str, Any]) -> None:
+    dag2_loop_history.append(loop_record)
+    if len(dag2_loop_history) > 200:
+        del dag2_loop_history[0]
+
+def get_dag2_loop_history() -> List[Dict[str, Any]]:
+    return list(dag2_loop_history)
+
+def clear_dag2_loop_history() -> None:
+    dag2_loop_history.clear()
+
 dag_state: Dict[str, Any] = {
     "groups": {
         "initialize": {
