@@ -68,6 +68,26 @@ def update_project_target_lines(project_id: str, target_total_lines: int) -> boo
         conn.commit()
     return True
 
+def update_project_description(project_id: str, description: str) -> bool:
+    with get_connection() as conn:
+        conn.cursor().execute("UPDATE projects SET description = ?, updated_at = ? WHERE id = ?;", (description.strip(), datetime.now().isoformat(), project_id))
+        conn.commit()
+    return True
+
+def append_project_filename(project_id: str, filename: str) -> str:
+    proj = get_project(project_id)
+    if not proj:
+        return ""
+    cur_desc = (proj.get("description") or "").strip()
+    clean_fn = filename.strip()
+    if not clean_fn:
+        return cur_desc
+    if clean_fn in cur_desc:
+        return cur_desc
+    new_desc = f"{cur_desc} | {clean_fn}" if cur_desc else clean_fn
+    update_project_description(project_id, new_desc)
+    return new_desc
+
 def activate_project(project_id: str) -> bool:
     with get_connection() as conn:
         c = conn.cursor()

@@ -1465,6 +1465,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     l_cnt = s_res.get("lines_count", len(l_det))
                     c_cnt = len(ext_text)
                     eng_name = s_res.get("model_used", "MiniCPM-V (Ollama)")
+                    det_fn = s_res.get("detected_filename")
+                    if det_fn:
+                        pid = state.get_current_project_id()
+                        if pid:
+                            db.append_project_filename(pid, det_fn)
+                            try:
+                                proj = db.get_project(pid)
+                                await state.ws_manager.broadcast({"type": "project_updated", "project": proj})
+                                await state.ws_manager.broadcast({"type": "project_switched", "project": proj})
+                            except Exception:
+                                pass
                     for item in l_det:
                         try:
                             raw_ln = str(item.get("line_number") or "").strip()
@@ -1533,6 +1544,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             lines_count = scan_res.get("lines_count", len(lines_detected))
             char_count = len(extracted_text)
             engine_name = scan_res.get("model_used", "MiniCPM-V (Ollama)")
+            det_fn = scan_res.get("detected_filename")
+            if det_fn:
+                pid = state.get_current_project_id()
+                if pid:
+                    db.append_project_filename(pid, det_fn)
+                    try:
+                        proj = db.get_project(pid)
+                        await state.ws_manager.broadcast({"type": "project_updated", "project": proj})
+                        await state.ws_manager.broadcast({"type": "project_switched", "project": proj})
+                    except Exception:
+                        pass
 
             for item in lines_detected:
                 try:
