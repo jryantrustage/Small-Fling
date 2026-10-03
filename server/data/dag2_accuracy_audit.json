@@ -1,0 +1,107 @@
+{
+  "status": "success",
+  "audited_at": "2026-10-03T12:58:46.291807",
+  "model_auditor": "gemini-3.5-flash",
+  "overall_accuracy_percent": 23.5,
+  "character_error_rate_pct": 76.5,
+  "audited_lines_count": 4,
+  "perfect_matches_count": 0,
+  "sampled_lines": [
+    {
+      "line_number": 1,
+      "ocr_text": "# Matrix_main_26-09-17-8-19am.md",
+      "gemini_reference_text": "Matrix_main_26-09-17-8-19am.md",
+      "accuracy_percent": 93.8,
+      "status": "minor_discrepancy",
+      "character_diff_summary": "Extra '# ' prefix added before the filename title.",
+      "discrepancies": [
+        {
+          "type": "extra",
+          "expected_char": "",
+          "ocr_char": "#",
+          "description": "Prefix markdown character prepended"
+        },
+        {
+          "type": "extra",
+          "expected_char": "",
+          "ocr_char": " ",
+          "description": "Extra space prepended"
+        }
+      ],
+      "diagnostics": {
+        "image_processing": "The back arrow and teams icon next to the filename might have been misconstrued as a markdown character.",
+        "dpi_resolution": "DPI is fine; the text itself is perfectly legible.",
+        "model_tuning": "Model hallucinated markdown formatting (#) due to the file extension .md shown in the title bar."
+      }
+    },
+    {
+      "line_number": 11,
+      "ocr_text": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+      "gemini_reference_text": "",
+      "accuracy_percent": 0.0,
+      "status": "mismatch",
+      "character_diff_summary": "Completely hallucinated line; not present in the current visible window of the screenshot.",
+      "discrepancies": [
+        {
+          "type": "extra",
+          "expected_char": "",
+          "ocr_char": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+          "description": "Hallucinated layout borders/pattern"
+        }
+      ],
+      "diagnostics": {
+        "image_processing": "None; image is clear but does not contain this line.",
+        "dpi_resolution": "No impact.",
+        "model_tuning": "The model hallucinated tabular ASCII art structure likely from context memory of other document templates."
+      }
+    },
+    {
+      "line_number": 21,
+      "ocr_text": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+      "gemini_reference_text": "",
+      "accuracy_percent": 0.0,
+      "status": "mismatch",
+      "character_diff_summary": "Completely hallucinated line; not present in the screenshot.",
+      "discrepancies": [
+        {
+          "type": "extra",
+          "expected_char": "",
+          "ocr_char": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+          "description": "Hallucinated layout borders/pattern"
+        }
+      ],
+      "diagnostics": {
+        "image_processing": "None.",
+        "dpi_resolution": "No impact.",
+        "model_tuning": "Hallucination of markdown tables structure."
+      }
+    },
+    {
+      "line_number": 30,
+      "ocr_text": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+      "gemini_reference_text": "",
+      "accuracy_percent": 0.0,
+      "status": "mismatch",
+      "character_diff_summary": "Completely hallucinated line; not present in the screenshot.",
+      "discrepancies": [
+        {
+          "type": "extra",
+          "expected_char": "",
+          "ocr_char": "  |    \\    /    \\    /    \\    /    \\    /    \\   |",
+          "description": "Hallucinated layout borders/pattern"
+        }
+      ],
+      "diagnostics": {
+        "image_processing": "None.",
+        "dpi_resolution": "No impact.",
+        "model_tuning": "Hallucination of markdown table components."
+      }
+    }
+  ],
+  "system_recommendations": {
+    "device_dpi": "Ensure standard screenshot capture dimensions matching 1:1 display pixel ratio to prevent alignment scaling mismatch.",
+    "display_resolution": "Use native rendering dimensions to prevent high frequency noise in text lines.",
+    "ocr_image_preprocessing": "Segment text blocks to ensure coordinates align directly with active screen viewports instead of generating arbitrary file structures.",
+    "model_temperature_and_prompt": "Lower model temperature to 0.0 to eliminate pattern hallucination and force strict verbatim extraction of the visible editor screen text."
+  }
+}
