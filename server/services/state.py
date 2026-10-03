@@ -126,12 +126,9 @@ async def detect_top_line_in_process(image_path: Path, dpi_factor: float = 1.0, 
     return await loop.run_in_executor(ocr_executor, worker_detect_top_line, str(image_path), dpi_factor, target_top)
 
 async def scan_image_in_process(image_path: Path) -> Dict[str, Any]:
-    try:
-        import services.ocr_service as ocr_svc
-        return await ocr_svc.scan_image_with_minicpm(image_path)
-    except Exception:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(ocr_executor, worker_scan_image, str(image_path), config.OLLAMA_URL, config.OLLAMA_VISION_MODEL, 15)
+    import services.ocr_service as ocr_svc
+    return await ocr_svc.scan_image_with_minicpm(image_path)
+
 
 ocr_engine = LocalGutterOCREngine(
     ollama_url=config.OLLAMA_URL,

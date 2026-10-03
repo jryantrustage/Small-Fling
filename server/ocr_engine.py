@@ -828,13 +828,44 @@ class LocalOllamaStitcher:
 
 DeterministicLineStitcher = LocalOllamaStitcher
 
+def scan_image_with_minicpm_sync(image_path: str) -> Dict[str, Any]:
+    """Scan image with MiniCPM-V in Ollama for verbatim line extraction."""
+    try:
+        from services.ocr_service import call_minicpm_ollama_sync, parse_minicpm_output
+        raw_resp, model_name = call_minicpm_ollama_sync(Path(image_path))
+        plines, top_ln, bot_ln, formatted = parse_minicpm_output(raw_resp)
+        return {
+            "status": "success",
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
+            "lines": plines,
+            "extracted_text": formatted,
+            "lines_count": len(plines),
+            "bounding_boxes": {},
+            "model_used": f"MiniCPM-V ({model_name})"
+        }
+    except Exception as e:
+        print(f"[scan_image_with_minicpm_sync] error: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "top_line": 0,
+            "bottom_line": 0,
+            "lines": [],
+            "extracted_text": "",
+            "lines_count": 0,
+            "bounding_boxes": {},
+            "model_used": "MiniCPM-V (Failed)"
+        }
+
 class LocalGutterOCREngine(BaseOCREngine):
     @property
     def name(self) -> str: return "local_gutter_ocr"
 
-    def __init__(self, ollama_url: str = "http://127.0.0.1:11434", ollama_vision_model: str = "llama3.2-vision", ollama_coder_model: str = "qwen2.5-coder", ollama_timeout: int = 45):
+    def __init__(self, ollama_url: str = "http://127.0.0.1:11434", ollama_vision_model: str = "minicpm-v:latest", ollama_coder_model: str = "qwen2.5-coder", ollama_timeout: int = 45):
         self.ollama_url, self.ollama_vision_model, self.ollama_coder_model, self.ollama_timeout = ollama_url.rstrip("/"), ollama_vision_model, ollama_coder_model, ollama_timeout
         self.stitcher = LocalOllamaStitcher(self.ollama_url, self.ollama_coder_model, min(ollama_timeout, 15))
 
     def scan_image(self, image_path: str) -> Dict[str, Any]:
-        return worker_scan_image(image_path, self.ollama_url, self.ollama_vision_model, self.ollama_timeout)
+        return scan_image_with_minicpm_sync(image_path)
+
