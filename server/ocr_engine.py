@@ -10,14 +10,105 @@ try:
 except ImportError:
     RapidOCR = None
 
+from pathlib import Path
+
+# Hardware-tuned threading for Intel Core Ultra 9 288V (4 Lion Cove P-cores, 4 Skymont E-cores)
+try:
+    cv2.setNumThreads(4)
+    if cv2.ocl.haveOpenCL():
+        cv2.ocl.setUseOpenCL(True)
+except Exception:
+    pass
+
+try:
+    import openvino as ov
+    _ov_core = ov.Core()
+    _ov_cache_dir = Path(__file__).resolve().parent / "storage" / ".ov_cache"
+    _ov_cache_dir.mkdir(parents=True, exist_ok=True)
+    _ov_core.set_property({'CACHE_DIR': str(_ov_cache_dir)})
+except Exception:
+    _ov_core = None
+
+def get_hardware_acceleration_profile() -> Dict[str, Any]:
+    return {
+        "platform": "Intel Core Ultra 9 288V (Lunar Lake Series 2)",
+        "memory_gb": 32,
+        "cores": {
+            "p_cores": 4,
+            "e_cores": 4,
+            "scheduling": "PCORE_ONLY",
+            "threads_pinned": 4
+        },
+        "openvino_available": _ov_core is not None,
+        "openvino_devices": _ov_core.available_devices if _ov_core is not None else [],
+        "openvino_cache_dir": str(_ov_cache_dir) if _ov_core is not None else None,
+        "opencv_opencl": cv2.ocl.useOpenCL() if hasattr(cv2, "ocl") else False,
+        "opencv_threads": cv2.getNumThreads() if hasattr(cv2, "getNumThreads") else 4
+    }
+
+class _OpenVINOInferSessionWrapper:
+    """Wraps an OpenVINO compiled model to match RapidOCR's OrtInferSession interface."""
+    def __init__(self, compiled_model, original_infer):
+        self.compiled_model = compiled_model
+        self.orig = original_infer
+
+    def __call__(self, input_content: np.ndarray):
+        res = self.compiled_model([input_content])
+        return [res[out] for out in self.compiled_model.outputs]
+
+    def get_input_names(self): return self.orig.get_input_names()
+    def get_output_names(self): return self.orig.get_output_names()
+    def get_character_list(self): return getattr(self.orig, 'get_character_list', lambda: None)()
+    def have_key(self, k): return getattr(self.orig, 'have_key', lambda _: False)(k)
+
+def _accelerate_rapidocr_with_openvino(ocr_inst):
+    """
+    Accelerates RapidOCR on Intel Core Ultra 9 288V Series 2 architecture:
+    - Text Detector and Recognizer mapped to Lion Cove P-cores with AVX-VNNI (PCORE_ONLY scheduling, CPU pinning)
+    - OpenVINO disk caching enabled for instantaneous warm start
+    """
+    if _ov_core is None or ocr_inst is None:
+        return ocr_inst
+    try:
+        import rapidocr_onnxruntime
+        pkg_dir = Path(rapidocr_onnxruntime.__file__).parent
+        det_path = pkg_dir / "models" / "ch_PP-OCRv3_det_infer.onnx"
+        rec_path = pkg_dir / "models" / "ch_PP-OCRv3_rec_infer.onnx"
+
+        # Explicit configuration for Intel Core Ultra 9 288V Lion Cove P-cores
+        cpu_config = {
+            'PERFORMANCE_HINT': 'LATENCY',
+            'NUM_STREAMS': '1',
+            'SCHEDULING_CORE_TYPE': 'PCORE_ONLY',
+            'ENABLE_CPU_PINNING': 'YES',
+            'INFERENCE_NUM_THREADS': '4',
+            'CPU_DENORMALS_OPTIMIZATION': 'YES'
+        }
+
+        if det_path.exists() and hasattr(ocr_inst, 'text_detector') and hasattr(ocr_inst.text_detector, 'infer'):
+            compiled_det = _ov_core.compile_model(_ov_core.read_model(str(det_path)), 'CPU', cpu_config)
+            ocr_inst.text_detector.infer = _OpenVINOInferSessionWrapper(compiled_det, ocr_inst.text_detector.infer)
+
+        if rec_path.exists() and hasattr(ocr_inst, 'text_recognizer') and hasattr(ocr_inst.text_recognizer, 'session'):
+            compiled_rec = _ov_core.compile_model(_ov_core.read_model(str(rec_path)), 'CPU', cpu_config)
+            ocr_inst.text_recognizer.session = _OpenVINOInferSessionWrapper(compiled_rec, ocr_inst.text_recognizer.session)
+
+        print(f"[OpenVINO] Accelerated RapidOCR for Intel Core Ultra 9 288V (Lion Cove P-cores with AVX-VNNI, PCORE_ONLY Pinning, Latency Mode)")
+    except Exception as e:
+        print(f"[OpenVINO] Acceleration fallback to standard ONNX: {e}")
+    return ocr_inst
+
 _rapid_ocr_instance = None
-_fast_ocr_executor = ThreadPoolExecutor(max_workers=2)
+_fast_ocr_executor = ThreadPoolExecutor(max_workers=4)
 
 def get_rapid_ocr():
     global _rapid_ocr_instance
     if _rapid_ocr_instance is None and RapidOCR is not None:
-        try: _rapid_ocr_instance = RapidOCR(use_angle_cls=False)
-        except Exception as e: print(f"[Worker] RapidOCR init error: {e}")
+        try:
+            raw_ocr = RapidOCR(use_angle_cls=False)
+            _rapid_ocr_instance = _accelerate_rapidocr_with_openvino(raw_ocr)
+        except Exception as e:
+            print(f"[Worker] RapidOCR init error: {e}")
     return _rapid_ocr_instance
 
 def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:

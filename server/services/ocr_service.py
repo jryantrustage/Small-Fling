@@ -189,11 +189,13 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
     def _call_ollama_sync():
         with Image.open(image_path) as img:
             w, h = img.size
-            scale = min(1.0, 720.0 / h) if h > 720 else 1.0
-            if scale < 1.0:
-                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
+            max_dim = 1920
+            if max(w, h) > max_dim:
+                scale = max_dim / float(max(w, h))
+                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
+            img.convert("RGB").save(buf, format="PNG", optimize=False)
             img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
         prompt = (
@@ -203,21 +205,37 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
             "Rules:\n"
             "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
             "- LINE_NUM must be the integer line number visible in the left gutter.\n"
-            "- code_content must be the verbatim code with exact indentation.\n"
+            "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
             "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
             "- Do not include markdown code fences, headers, or explanations."
         )
         models = ["minicpm-v:latest", "minicpm-v", config.OLLAMA_VISION_MODEL]
         last_ex = None
+        # Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB LPDDR5X-8533, 4 Lion Cove P-cores):
+        # - num_thread: 4 pins token routing to P-cores, avoiding Skymont E-core context switching
+        # - num_batch: 512 maximizes AVX-VNNI throughput
+        # - num_ctx: 4096 takes advantage of 32GB unified RAM
+        # - temperature: 0.0, top_k: 1, min_p: 0.05, repeat_penalty: 1.08 suppresses infinite bracket loops
+        ollama_opts = {
+            "num_predict": 1024,
+            "temperature": 0.0,
+            "top_k": 1,
+            "min_p": 0.05,
+            "repeat_penalty": 1.08,
+            "repeat_last_n": 64,
+            "num_thread": 4,
+            "num_ctx": 4096,
+            "num_batch": 512,
+        }
         for m in models:
             try:
                 connection_stats["total_http_requests"] += 1
                 req_data = json.dumps({
                     "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
-                    "options": {"num_predict": 768, "temperature": 0.05}
+                    "options": ollama_opts
                 }).encode("utf-8")
                 req = urllib.request.Request(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", data=req_data, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=35) as resp:
+                with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     connection_stats["ollama_available"] = True
                     return data.get("response", ""), m
@@ -322,11 +340,13 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
     def _call_minicpm_sync():
         with Image.open(image_path) as img:
             w, h = img.size
-            scale = min(1.0, 960.0 / h) if h > 960 else 1.0
-            if scale < 1.0:
-                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
+            max_dim = 1920
+            if max(w, h) > max_dim:
+                scale = max_dim / float(max(w, h))
+                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
-            img.convert("RGB").save(buf, format="JPEG", quality=85)
+            # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
+            img.convert("RGB").save(buf, format="PNG", optimize=False)
             img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
         prompt = (
@@ -336,24 +356,35 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
             "Rules:\n"
             "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
             "- LINE_NUM must be the integer line number visible in the left gutter.\n"
-            "- code_content must be the verbatim code with exact indentation.\n"
+            "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
             "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
             "- Do not include markdown code fences, headers, or explanations."
         )
         candidates = [config.OLLAMA_VISION_MODEL or "minicpm-v:latest"]
         last_ex = None
+        ollama_opts = {
+            "num_predict": 1024,
+            "temperature": 0.0,
+            "top_k": 1,
+            "min_p": 0.05,
+            "repeat_penalty": 1.08,
+            "repeat_last_n": 64,
+            "num_thread": 4,
+            "num_ctx": 4096,
+            "num_batch": 512,
+        }
         for m in candidates:
             try:
                 req_data = json.dumps({
                     "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
-                    "options": {"num_predict": 768, "temperature": 0.05}
+                    "options": ollama_opts
                 }).encode("utf-8")
                 req = urllib.request.Request(
                     f"{config.OLLAMA_URL.rstrip('/')}/api/generate",
                     data=req_data,
                     headers={"Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=3) as resp:
+                with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("response", ""), m
             except Exception as e:

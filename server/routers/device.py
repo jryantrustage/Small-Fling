@@ -305,3 +305,12 @@ async def save_device_address(req: Request):
 async def adb_command(req: AdbCommandRequest):
     res = await adb.run_adb_shell(req.command, req.serial)
     return res
+
+@router.get("/api/system/hardware-profile")
+async def get_hardware_profile_endpoint():
+    """Returns local inference runtime hardware capabilities and Intel Lunar Lake Series 2 tuning profile."""
+    from ocr_engine import get_hardware_acceleration_profile
+    return {
+        "status": "ok",
+        "profile": get_hardware_acceleration_profile()
+    }

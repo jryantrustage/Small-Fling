@@ -1,0 +1,1402 @@
+[
+  {
+    "id": "minicpm_code_ocr_000001",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000001.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "155: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n156:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n157:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n158:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n159:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n160:   return evaluateKernel(`${cacheKey}#v2`, {\n161:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n162:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n163:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n164:   });\n165: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000002",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000002.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "187: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n188:   // Process multi-level template substitutions: `${user.profile['name']}`\n189:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n190:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n191:     let current: any = context;\n192:     for (const token of tokens) {\n193:       if (current == null) return `undefined`;\n194:       current = current[token];\n195:     }\n196:     return String(current ?? '');\n197:   });\n198: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000003",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000003.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "44: # Markdown & Technical Documentation Block\n45: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n46: | :--- | :--- | :--- | :--- |\n47: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n48: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n49: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n50: \n51: ```json\n52: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n53: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000004",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000004.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "122: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n123:   // Process multi-level template substitutions: `${user.profile['name']}`\n124:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n125:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n126:     let current: any = context;\n127:     for (const token of tokens) {\n128:       if (current == null) return `undefined`;\n129:       current = current[token];\n130:     }\n131:     return String(current ?? '');\n132:   });\n133: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000005",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000005.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "140: # Markdown & Technical Documentation Block\n141: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n142: | :--- | :--- | :--- | :--- |\n143: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n144: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n145: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n146: \n147: ```json\n148: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n149: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000006",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000006.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "394: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n395:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n396:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n397:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n398:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n399:             if resp.status not in {200, 201, 204}:\n400:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n401:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n402:             data = await resp.json()\n403:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000007",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000007.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "267: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n268:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n269:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n270:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n271:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n272:   return evaluateKernel(`${cacheKey}#v2`, {\n273:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n274:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n275:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n276:   });\n277: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000008",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000008.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "76: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n77:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n78:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n79:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n80:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n81:   return evaluateKernel(`${cacheKey}#v2`, {\n82:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n83:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n84:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n85:   });\n86: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000009",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000009.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "96: # Markdown & Technical Documentation Block\n97: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n98: | :--- | :--- | :--- | :--- |\n99: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n100: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n101: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n102: \n103: ```json\n104: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n105: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000010",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000010.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "377: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n378:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n379:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n380:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n381:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n382:   return evaluateKernel(`${cacheKey}#v2`, {\n383:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n384:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n385:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n386:   });\n387: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000011",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000011.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "235: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n236:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n237:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n238:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n239:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n240:   return evaluateKernel(`${cacheKey}#v2`, {\n241:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n242:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n243:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n244:   });\n245: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000012",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000012.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "59: # Markdown & Technical Documentation Block\n60: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n61: | :--- | :--- | :--- | :--- |\n62: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n63: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n64: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n65: \n66: ```json\n67: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n68: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000013",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000013.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "177: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n178:   // Process multi-level template substitutions: `${user.profile['name']}`\n179:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n180:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n181:     let current: any = context;\n182:     for (const token of tokens) {\n183:       if (current == null) return `undefined`;\n184:       current = current[token];\n185:     }\n186:     return String(current ?? '');\n187:   });\n188: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000014",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000014.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "386: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n387:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n388:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n389:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n390:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n391:   return evaluateKernel(`${cacheKey}#v2`, {\n392:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n393:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n394:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n395:   });\n396: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000015",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000015.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "343: # Markdown & Technical Documentation Block\n344: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n345: | :--- | :--- | :--- | :--- |\n346: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n347: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n348: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n349: \n350: ```json\n351: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n352: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000016",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000016.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "92: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n93:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n94:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n95:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n96:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n97:             if resp.status not in {200, 201, 204}:\n98:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n99:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n100:             data = await resp.json()\n101:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000017",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000017.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "222: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n223:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n224:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n225:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n226:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n227:   return evaluateKernel(`${cacheKey}#v2`, {\n228:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n229:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n230:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n231:   });\n232: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000018",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000018.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "405: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n406:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n407:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n408:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n409:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n410:   return evaluateKernel(`${cacheKey}#v2`, {\n411:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n412:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n413:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n414:   });\n415: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000019",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000019.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "362: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n363:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n364:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n365:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n366:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n367:             if resp.status not in {200, 201, 204}:\n368:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n369:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n370:             data = await resp.json()\n371:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000020",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000020.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "384: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n385:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n386:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n387:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n388:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n389:   return evaluateKernel(`${cacheKey}#v2`, {\n390:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n391:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n392:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n393:   });\n394: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000021",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000021.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "71: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n72:   // Process multi-level template substitutions: `${user.profile['name']}`\n73:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n74:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n75:     let current: any = context;\n76:     for (const token of tokens) {\n77:       if (current == null) return `undefined`;\n78:       current = current[token];\n79:     }\n80:     return String(current ?? '');\n81:   });\n82: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000022",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000022.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "413: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n414:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n415:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n416:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n417:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n418:             if resp.status not in {200, 201, 204}:\n419:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n420:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n421:             data = await resp.json()\n422:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000023",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000023.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "420: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n421:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n422:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n423:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n424:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n425:             if resp.status not in {200, 201, 204}:\n426:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n427:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n428:             data = await resp.json()\n429:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000024",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000024.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "27: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n28:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n29:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n30:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n31:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n32:             if resp.status not in {200, 201, 204}:\n33:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n34:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n35:             data = await resp.json()\n36:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000025",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000025.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "407: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n408:   // Process multi-level template substitutions: `${user.profile['name']}`\n409:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n410:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n411:     let current: any = context;\n412:     for (const token of tokens) {\n413:       if (current == null) return `undefined`;\n414:       current = current[token];\n415:     }\n416:     return String(current ?? '');\n417:   });\n418: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000026",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000026.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "381: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n382:   // Process multi-level template substitutions: `${user.profile['name']}`\n383:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n384:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n385:     let current: any = context;\n386:     for (const token of tokens) {\n387:       if (current == null) return `undefined`;\n388:       current = current[token];\n389:     }\n390:     return String(current ?? '');\n391:   });\n392: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000027",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000027.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "251: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n252:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n253:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n254:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n255:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n256:             if resp.status not in {200, 201, 204}:\n257:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n258:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n259:             data = await resp.json()\n260:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000028",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000028.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "109: # Markdown & Technical Documentation Block\n110: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n111: | :--- | :--- | :--- | :--- |\n112: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n113: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n114: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n115: \n116: ```json\n117: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n118: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000029",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000029.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "352: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n353:   // Process multi-level template substitutions: `${user.profile['name']}`\n354:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n355:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n356:     let current: any = context;\n357:     for (const token of tokens) {\n358:       if (current == null) return `undefined`;\n359:       current = current[token];\n360:     }\n361:     return String(current ?? '');\n362:   });\n363: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000030",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000030.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "410: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n411:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n412:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n413:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n414:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n415:             if resp.status not in {200, 201, 204}:\n416:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n417:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n418:             data = await resp.json()\n419:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000031",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000031.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "145: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n146:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n147:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n148:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n149:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n150:             if resp.status not in {200, 201, 204}:\n151:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n152:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n153:             data = await resp.json()\n154:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000032",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000032.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "335: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n336:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n337:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n338:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n339:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n340:             if resp.status not in {200, 201, 204}:\n341:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n342:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n343:             data = await resp.json()\n344:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000033",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000033.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "160: # Markdown & Technical Documentation Block\n161: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n162: | :--- | :--- | :--- | :--- |\n163: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n164: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n165: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n166: \n167: ```json\n168: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n169: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000034",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000034.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "435: # Markdown & Technical Documentation Block\n436: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n437: | :--- | :--- | :--- | :--- |\n438: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n439: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n440: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n441: \n442: ```json\n443: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n444: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000035",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000035.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "181: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n182:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n183:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n184:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n185:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n186:             if resp.status not in {200, 201, 204}:\n187:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n188:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n189:             data = await resp.json()\n190:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000036",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000036.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "430: # Markdown & Technical Documentation Block\n431: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n432: | :--- | :--- | :--- | :--- |\n433: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n434: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n435: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n436: \n437: ```json\n438: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n439: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000037",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000037.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "378: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n379:   // Process multi-level template substitutions: `${user.profile['name']}`\n380:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n381:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n382:     let current: any = context;\n383:     for (const token of tokens) {\n384:       if (current == null) return `undefined`;\n385:       current = current[token];\n386:     }\n387:     return String(current ?? '');\n388:   });\n389: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000038",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000038.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "238: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n239:   // Process multi-level template substitutions: `${user.profile['name']}`\n240:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n241:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n242:     let current: any = context;\n243:     for (const token of tokens) {\n244:       if (current == null) return `undefined`;\n245:       current = current[token];\n246:     }\n247:     return String(current ?? '');\n248:   });\n249: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000039",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000039.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "263: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n264:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n265:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n266:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n267:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n268:             if resp.status not in {200, 201, 204}:\n269:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n270:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n271:             data = await resp.json()\n272:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000040",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000040.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "438: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n439:   // Process multi-level template substitutions: `${user.profile['name']}`\n440:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n441:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n442:     let current: any = context;\n443:     for (const token of tokens) {\n444:       if (current == null) return `undefined`;\n445:       current = current[token];\n446:     }\n447:     return String(current ?? '');\n448:   });\n449: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000041",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000041.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "131: # Markdown & Technical Documentation Block\n132: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n133: | :--- | :--- | :--- | :--- |\n134: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n135: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n136: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n137: \n138: ```json\n139: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n140: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000042",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000042.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "173: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n174:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n175:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n176:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n177:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n178:             if resp.status not in {200, 201, 204}:\n179:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n180:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n181:             data = await resp.json()\n182:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000043",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000043.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "35: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n36:   // Process multi-level template substitutions: `${user.profile['name']}`\n37:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n38:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n39:     let current: any = context;\n40:     for (const token of tokens) {\n41:       if (current == null) return `undefined`;\n42:       current = current[token];\n43:     }\n44:     return String(current ?? '');\n45:   });\n46: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000044",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000044.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "146: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n147:   // Process multi-level template substitutions: `${user.profile['name']}`\n148:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n149:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n150:     let current: any = context;\n151:     for (const token of tokens) {\n152:       if (current == null) return `undefined`;\n153:       current = current[token];\n154:     }\n155:     return String(current ?? '');\n156:   });\n157: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000045",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000045.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "306: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n307:   // Process multi-level template substitutions: `${user.profile['name']}`\n308:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n309:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n310:     let current: any = context;\n311:     for (const token of tokens) {\n312:       if (current == null) return `undefined`;\n313:       current = current[token];\n314:     }\n315:     return String(current ?? '');\n316:   });\n317: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000046",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000046.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "78: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n79:   // Process multi-level template substitutions: `${user.profile['name']}`\n80:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n81:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n82:     let current: any = context;\n83:     for (const token of tokens) {\n84:       if (current == null) return `undefined`;\n85:       current = current[token];\n86:     }\n87:     return String(current ?? '');\n88:   });\n89: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000047",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000047.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "32: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n33:   // Process multi-level template substitutions: `${user.profile['name']}`\n34:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n35:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n36:     let current: any = context;\n37:     for (const token of tokens) {\n38:       if (current == null) return `undefined`;\n39:       current = current[token];\n40:     }\n41:     return String(current ?? '');\n42:   });\n43: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000048",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000048.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "295: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n296:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n297:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n298:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n299:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n300:   return evaluateKernel(`${cacheKey}#v2`, {\n301:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n302:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n303:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n304:   });\n305: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000049",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000049.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "353: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n354:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n355:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n356:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n357:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n358:             if resp.status not in {200, 201, 204}:\n359:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n360:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n361:             data = await resp.json()\n362:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000050",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000050.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "243: # Markdown & Technical Documentation Block\n244: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n245: | :--- | :--- | :--- | :--- |\n246: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n247: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n248: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n249: \n250: ```json\n251: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n252: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000051",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000051.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "29: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n30:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n31:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n32:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n33:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n34:   return evaluateKernel(`${cacheKey}#v2`, {\n35:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n36:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n37:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n38:   });\n39: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000052",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000052.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "109: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n110:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n111:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n112:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n113:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n114:             if resp.status not in {200, 201, 204}:\n115:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n116:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n117:             data = await resp.json()\n118:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000053",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000053.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "134: # Markdown & Technical Documentation Block\n135: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n136: | :--- | :--- | :--- | :--- |\n137: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n138: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n139: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n140: \n141: ```json\n142: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n143: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000054",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000054.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "249: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n250:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n251:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n252:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n253:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n254:   return evaluateKernel(`${cacheKey}#v2`, {\n255:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n256:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n257:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n258:   });\n259: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000055",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000055.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "50: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n51:   // Process multi-level template substitutions: `${user.profile['name']}`\n52:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n53:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n54:     let current: any = context;\n55:     for (const token of tokens) {\n56:       if (current == null) return `undefined`;\n57:       current = current[token];\n58:     }\n59:     return String(current ?? '');\n60:   });\n61: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000056",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000056.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "169: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n170:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n171:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n172:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n173:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n174:   return evaluateKernel(`${cacheKey}#v2`, {\n175:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n176:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n177:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n178:   });\n179: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000057",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000057.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "293: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n294:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n295:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n296:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n297:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n298:             if resp.status not in {200, 201, 204}:\n299:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n300:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n301:             data = await resp.json()\n302:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000058",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000058.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "173: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n174:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n175:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n176:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n177:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n178:             if resp.status not in {200, 201, 204}:\n179:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n180:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n181:             data = await resp.json()\n182:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000059",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000059.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "79: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n80:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n81:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n82:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n83:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n84:             if resp.status not in {200, 201, 204}:\n85:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n86:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n87:             data = await resp.json()\n88:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000060",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000060.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "14: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n15:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n16:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n17:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n18:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n19:   return evaluateKernel(`${cacheKey}#v2`, {\n20:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n21:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n22:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n23:   });\n24: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000061",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000061.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "338: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n339:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n340:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n341:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n342:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n343:   return evaluateKernel(`${cacheKey}#v2`, {\n344:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n345:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n346:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n347:   });\n348: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000062",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000062.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "37: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n38:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n39:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n40:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n41:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n42:   return evaluateKernel(`${cacheKey}#v2`, {\n43:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n44:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n45:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n46:   });\n47: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000063",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000063.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "286: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n287:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n288:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n289:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n290:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n291:             if resp.status not in {200, 201, 204}:\n292:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n293:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n294:             data = await resp.json()\n295:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000064",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000064.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "398: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n399:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n400:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n401:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n402:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n403:   return evaluateKernel(`${cacheKey}#v2`, {\n404:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n405:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n406:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n407:   });\n408: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000065",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000065.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "164: # Markdown & Technical Documentation Block\n165: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n166: | :--- | :--- | :--- | :--- |\n167: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n168: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n169: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n170: \n171: ```json\n172: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n173: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000066",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000066.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "434: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n435:   // Process multi-level template substitutions: `${user.profile['name']}`\n436:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n437:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n438:     let current: any = context;\n439:     for (const token of tokens) {\n440:       if (current == null) return `undefined`;\n441:       current = current[token];\n442:     }\n443:     return String(current ?? '');\n444:   });\n445: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000067",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000067.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "331: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n332:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n333:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n334:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n335:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n336:   return evaluateKernel(`${cacheKey}#v2`, {\n337:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n338:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n339:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n340:   });\n341: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000068",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000068.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "329: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n330:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n331:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n332:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n333:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n334:   return evaluateKernel(`${cacheKey}#v2`, {\n335:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n336:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n337:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n338:   });\n339: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000069",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000069.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "43: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n44:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n45:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n46:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n47:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n48:   return evaluateKernel(`${cacheKey}#v2`, {\n49:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n50:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n51:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n52:   });\n53: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000070",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000070.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "401: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n402:   // Process multi-level template substitutions: `${user.profile['name']}`\n403:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n404:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n405:     let current: any = context;\n406:     for (const token of tokens) {\n407:       if (current == null) return `undefined`;\n408:       current = current[token];\n409:     }\n410:     return String(current ?? '');\n411:   });\n412: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000071",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000071.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "293: # Markdown & Technical Documentation Block\n294: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n295: | :--- | :--- | :--- | :--- |\n296: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n297: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n298: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n299: \n300: ```json\n301: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n302: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000072",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000072.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "233: # Markdown & Technical Documentation Block\n234: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n235: | :--- | :--- | :--- | :--- |\n236: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n237: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n238: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n239: \n240: ```json\n241: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n242: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000073",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000073.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "277: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n278:   // Process multi-level template substitutions: `${user.profile['name']}`\n279:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n280:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n281:     let current: any = context;\n282:     for (const token of tokens) {\n283:       if (current == null) return `undefined`;\n284:       current = current[token];\n285:     }\n286:     return String(current ?? '');\n287:   });\n288: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000074",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000074.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "404: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n405:   // Process multi-level template substitutions: `${user.profile['name']}`\n406:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n407:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n408:     let current: any = context;\n409:     for (const token of tokens) {\n410:       if (current == null) return `undefined`;\n411:       current = current[token];\n412:     }\n413:     return String(current ?? '');\n414:   });\n415: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000075",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000075.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "418: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n419:   // Process multi-level template substitutions: `${user.profile['name']}`\n420:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n421:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n422:     let current: any = context;\n423:     for (const token of tokens) {\n424:       if (current == null) return `undefined`;\n425:       current = current[token];\n426:     }\n427:     return String(current ?? '');\n428:   });\n429: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000076",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000076.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "26: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n27:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n28:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n29:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n30:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n31:             if resp.status not in {200, 201, 204}:\n32:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n33:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n34:             data = await resp.json()\n35:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000077",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000077.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "342: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n343:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n344:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n345:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n346:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n347:             if resp.status not in {200, 201, 204}:\n348:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n349:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n350:             data = await resp.json()\n351:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000078",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000078.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "238: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n239:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n240:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n241:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n242:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n243:   return evaluateKernel(`${cacheKey}#v2`, {\n244:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n245:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n246:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n247:   });\n248: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000079",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000079.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "148: # Markdown & Technical Documentation Block\n149: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n150: | :--- | :--- | :--- | :--- |\n151: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n152: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n153: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n154: \n155: ```json\n156: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n157: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000080",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000080.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "125: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n126:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n127:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n128:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n129:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n130:   return evaluateKernel(`${cacheKey}#v2`, {\n131:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n132:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n133:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n134:   });\n135: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000081",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000081.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "351: # Markdown & Technical Documentation Block\n352: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n353: | :--- | :--- | :--- | :--- |\n354: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n355: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n356: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n357: \n358: ```json\n359: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n360: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000082",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000082.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "208: # Markdown & Technical Documentation Block\n209: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n210: | :--- | :--- | :--- | :--- |\n211: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n212: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n213: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n214: \n215: ```json\n216: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n217: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000083",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000083.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "41: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n42:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n43:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n44:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n45:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n46:   return evaluateKernel(`${cacheKey}#v2`, {\n47:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n48:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n49:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n50:   });\n51: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000084",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000084.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "71: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n72:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n73:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n74:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n75:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n76:             if resp.status not in {200, 201, 204}:\n77:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n78:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n79:             data = await resp.json()\n80:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000085",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000085.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "268: # Markdown & Technical Documentation Block\n269: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n270: | :--- | :--- | :--- | :--- |\n271: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n272: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n273: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n274: \n275: ```json\n276: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n277: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000086",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000086.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "268: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n269:   // Process multi-level template substitutions: `${user.profile['name']}`\n270:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n271:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n272:     let current: any = context;\n273:     for (const token of tokens) {\n274:       if (current == null) return `undefined`;\n275:       current = current[token];\n276:     }\n277:     return String(current ?? '');\n278:   });\n279: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000087",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000087.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "10: const templateParser = (rawString: string, context: Record<string, unknown>) => {\n11:   // Process multi-level template substitutions: `${user.profile['name']}`\n12:   return rawString.replace(/\\$\\{([a-zA-Z0-9_.\\[\\]'\"-]+)\\}/g, (_match, expr) => {\n13:     const tokens = expr.split(/[.\\[\\]'\"_]+/).filter(Boolean);\n14:     let current: any = context;\n15:     for (const token of tokens) {\n16:       if (current == null) return `undefined`;\n17:       current = current[token];\n18:     }\n19:     return String(current ?? '');\n20:   });\n21: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000088",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000088.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "286: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n287:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n288:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n289:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n290:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n291:   return evaluateKernel(`${cacheKey}#v2`, {\n292:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n293:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n294:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n295:   });\n296: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000089",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000089.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "242: # Markdown & Technical Documentation Block\n243: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n244: | :--- | :--- | :--- | :--- |\n245: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n246: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n247: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n248: \n249: ```json\n250: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n251: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000090",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000090.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "223: # Markdown & Technical Documentation Block\n224: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n225: | :--- | :--- | :--- | :--- |\n226: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n227: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n228: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n229: \n230: ```json\n231: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n232: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000091",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000091.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "332: # Markdown & Technical Documentation Block\n333: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n334: | :--- | :--- | :--- | :--- |\n335: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n336: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n337: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n338: \n339: ```json\n340: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n341: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000092",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000092.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "393: # Markdown & Technical Documentation Block\n394: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n395: | :--- | :--- | :--- | :--- |\n396: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n397: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n398: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n399: \n400: ```json\n401: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n402: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000093",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000093.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "103: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n104:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n105:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n106:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n107:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n108:             if resp.status not in {200, 201, 204}:\n109:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n110:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n111:             data = await resp.json()\n112:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000094",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000094.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "79: # Markdown & Technical Documentation Block\n80: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n81: | :--- | :--- | :--- | :--- |\n82: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n83: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n84: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n85: \n86: ```json\n87: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n88: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000095",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000095.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "168: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n169:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n170:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n171:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n172:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n173:   return evaluateKernel(`${cacheKey}#v2`, {\n174:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n175:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n176:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n177:   });\n178: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000096",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000096.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "416: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n417:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n418:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n419:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n420:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n421:   return evaluateKernel(`${cacheKey}#v2`, {\n422:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n423:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n424:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n425:   });\n426: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000097",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000097.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "307: # Markdown & Technical Documentation Block\n308: | Component | Target Device | Accelerator Architecture | Peak Throughput |\n309: | :--- | :--- | :--- | :--- |\n310: | PP-OCRv3 Det | Intel Core Ultra 9 288V | 4x Lion Cove P-cores (AVX-VNNI) | ~66.1 ms/frame |\n311: | PP-OCRv3 Rec | Intel Core Ultra 9 288V | PCORE_ONLY Pinning (TBB latency) | ~6.0 ms/slice |\n312: | MiniCPM-V 2.6 | Intel Arc 140V Xe2 | 64 Vector Engines + 16GB Memory | ~28 tok/sec |\n313: \n314: ```json\n315: {\n  \"status\": \"optimal\",\n  \"lpp\": 42,\n  \"anchors\": [{\"y\": 165, \"hash\": \"0x9b3f\"}]\n}\n316: ```"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000098",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000098.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "365: export const computeMatrixTransform = (tensor: Float32Array): Matrix4x4 => {\n366:   const { dimensions = [1080, 2400], stride = 4 } = tensor.metadata ?? {};\n367:   if (!tensor || tensor.length === 0) return Matrix4x4.identity();\n368:   const cacheKey = `matrix::${dimensions.join('x')}::stride_${stride}`;\n369:   const lookupMap = new Map<string, Array<{ id: number; weight: float }>>();\n370:   return evaluateKernel(`${cacheKey}#v2`, {\n371:     transform: (x, y) => Math.hypot(x, y) * Math.sin(x / 180 * Math.PI),\n372:     flags: ['--strict', '--optimize-vnni', '--force-pcore'],\n373:     fallback: () => ({ success: false, reason: 'Out of VNNI registers' })\n374:   });\n375: };"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000099",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000099.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "140: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n141:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n142:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n143:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n144:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n145:             if resp.status not in {200, 201, 204}:\n146:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n147:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n148:             data = await resp.json()\n149:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  },
+  {
+    "id": "minicpm_code_ocr_000100",
+    "image": "C:\\Projects\\Small-Fling\\dataset_minicpm_code_ocr\\images\\sample_000100.png",
+    "conversations": [
+      {
+        "from": "user",
+        "value": "<image>\nExtract code lines verbatim with gutter line numbers from the image.\nOutput each line in the strict structured format:\nLINE_NUM: code_content"
+      },
+      {
+        "from": "assistant",
+        "value": "395: async def _dispatch_stream_events(session_id: str, payload: Dict[str, Any]) -> None:\n396:     pattern = re.compile(r'^[a-zA-Z0-9_-]+@[a-zA-Z0-9-]+\\.[a-z]{2,8}$') # 验证邮箱格式\n397:     headers = {'Authorization': f'Bearer {token}', 'X-Request-ID': f'req_{uuid.uuid4().hex[:12]}'}\n398:     async with aiohttp.ClientSession(timeout=ClientTimeout(total=45)) as session:\n399:         async with session.post(url, json={'events': [e for e in payload.get('items', [])]}) as resp:\n400:             if resp.status not in {200, 201, 204}:\n401:                 logger.error(f'Stream [ID={session_id}] rejected with code {resp.status}!')\n402:                 raise HTTPException(status_code=resp.status, detail=await resp.text())\n403:             data = await resp.json()\n404:     return {'status': 'acknowledged', 'count': len(data.get('records', []))}"
+      }
+    ]
+  }
+]

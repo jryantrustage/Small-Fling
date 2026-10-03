@@ -1,0 +1,31 @@
+FROM ./output_minicpm_code_ocr_merged/minicpm-v-code-ocr-q4_k_m.gguf
+
+# Anti-looping sampling parameters tuned for Intel Core Ultra 9 288V (Series 2)
+PARAMETER temperature 0.0
+PARAMETER top_k 1
+PARAMETER top_p 0.95
+PARAMETER min_p 0.05
+PARAMETER repeat_penalty 1.08
+PARAMETER repeat_last_n 64
+PARAMETER num_predict 1024
+PARAMETER num_ctx 4096
+PARAMETER num_thread 4
+
+TEMPLATE """{{ if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}{{ if .Prompt }}<|im_start|>user
+{{ .Prompt }}<|im_end|>
+{{ end }}<|im_start|>assistant
+{{ .Response }}<|im_end|>"""
+
+SYSTEM """You are a precision optical character recognition model for code and structured documents.
+Extract code lines verbatim with gutter line numbers from the image.
+Output each line in the strict structured format:
+LINE_NUM: code_content
+
+Rules:
+- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.
+- LINE_NUM must be the integer line number visible in the left gutter.
+- code_content must be the verbatim code with exact indentation, brackets, backticks, and operators.
+- Never repeat lines or get trapped in repetitive loops.
+- Do not output explanations, markdown code blocks, or greetings."""
