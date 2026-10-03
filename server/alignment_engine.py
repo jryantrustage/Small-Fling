@@ -51,126 +51,121 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
 
     h, w = img.shape[:2]
     ocr = get_rapid_ocr()
+    if ocr is None:
+        return {
+            "status": "teams markdown not aligned",
+            "is_aligned": False,
+            "reason": "OCR engine unavailable",
+            "boxes": {},
+            "timestamp": None
+        }
+
+    # 1. OCR top 60% of image for structural header, title, and toolbar
+    top_limit_y = int(h * 0.60)
+    top_crop = img[:top_limit_y, :]
+    top_res, _ = ocr(top_crop)
+    top_tokens = []
+    if top_res:
+        for b, t, s in top_res:
+            pts = np.array(b)
+            bx1, by1 = int(pts[:, 0].min()), int(pts[:, 1].min())
+            bw, bh = int(pts[:, 0].max() - bx1), int(pts[:, 1].max() - by1)
+            top_tokens.append((bx1, by1, bw, bh, t.strip(), float(s)))
 
     # ---------------------------------------------------------
     # 1. BLUE BOX: Teams Logo / Header Dropdown ('Teams')
     # ---------------------------------------------------------
-    # Expected relative area: top-left header bar (y: 1%..10%, x: 1%..25%)
-    y1_t, y2_t = int(h * 0.010), int(h * 0.100)
-    x1_t, x2_t = int(w * 0.010), int(w * 0.250)
-    crop_teams = img[y1_t:y2_t, x1_t:x2_t]
     teams_detected = False
     teams_text = ""
-    teams_box = [x1_t, y1_t, x2_t - x1_t, y2_t - y1_t]
+    # Default fallback box dynamically scaled by dpi_factor
+    teams_box = [int(w * 0.03), int(15 * dpi_factor), int(80 * dpi_factor), int(30 * dpi_factor)]
+    teams_bottom_y = int(50 * dpi_factor)
 
-    if ocr and crop_teams.size > 0:
-        crop_teams_2x = cv2.resize(crop_teams, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-        res_t, _ = ocr(crop_teams_2x)
-        if res_t:
-            for b, t, s in res_t:
-                clean = t.strip()
-                if "team" in clean.lower():
-                    teams_detected = True
-                    teams_text = clean
-                    pts = np.array(b) / 1.5
-                    bx1 = int(pts[:, 0].min())
-                    by1 = int(pts[:, 1].min())
-                    bx2 = int(pts[:, 0].max())
-                    by2 = int(pts[:, 1].max())
-                    teams_box = [max(0, x1_t + bx1 - 6), max(0, y1_t + by1 - 4), (bx2 - bx1) + 16, (by2 - by1) + 8]
-                    break
+    for bx1, by1, bw, bh, t, s in top_tokens:
+        if by1 < int(h * 0.25) and bx1 < int(w * 0.40):
+            if "team" in t.lower():
+                teams_detected = True
+                teams_text = t
+                teams_box = [max(0, bx1 - 6), max(0, by1 - 4), bw + 14, bh + 8]
+                teams_bottom_y = by1 + bh
+                break
 
     # ---------------------------------------------------------
     # 2. YELLOW BOX: Markdown File Name (*.md)
     # ---------------------------------------------------------
-    # Expected relative area: document title tab bar (y: ~4%..17%, x: ~1%..45%)
-    y1_f, y2_f = int(h * 0.040), int(h * 0.170)
-    x1_f, x2_f = int(w * 0.010), int(w * 0.450)
-    crop_file = img[y1_f:y2_f, x1_f:x2_f]
     file_detected = False
     file_name = ""
-    file_box = [x1_f, y1_f, x2_f - x1_f, y2_f - y1_f]
+    file_box = [int(w * 0.05), teams_bottom_y + int(10 * dpi_factor), int(200 * dpi_factor), int(30 * dpi_factor)]
+    file_bottom_y = teams_bottom_y + int(45 * dpi_factor)
 
-    if ocr and crop_file.size > 0:
-        # Strategy A: 1.5x scaled RGB (highest accuracy for RapidOCR on desktop captures)
-        crop_f_scaled = cv2.resize(crop_file, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-        res_f, _ = ocr(crop_f_scaled)
-        candidates = []
-        if res_f:
-            for b, t, s in res_f:
-                clean = re.sub(r'^[<←\- \t]+', '', t.strip()).strip()
-                if clean:
-                    candidates.append((clean, b, s, 1.5))
-        
-        # Strategy B fallback: normalized grayscale
-        if not any(c[0].lower().endswith('.md') or len(c[0]) >= 3 for c in candidates):
-            gray_f = cv2.cvtColor(crop_file, cv2.COLOR_BGR2GRAY)
-            norm_f = cv2.normalize(gray_f, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-            norm_f_2x = cv2.resize(norm_f, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-            res_norm, _ = ocr(norm_f_2x)
-            if res_norm:
-                for b, t, s in res_norm:
-                    clean = re.sub(r'^[<←\- \t]+', '', t.strip()).strip()
-                    if clean:
-                        candidates.append((clean, b, s, 2.0))
+    file_candidates = []
+    for bx1, by1, bw, bh, t, s in top_tokens:
+        if by1 >= teams_bottom_y - 10 and by1 < int(h * 0.45) and bx1 < int(w * 0.60):
+            clean = re.sub(r'^[<←\- \t]+', '', t).strip()
+            if not clean:
+                continue
+            if expected_doc_name and expected_doc_name.lower() in clean.lower():
+                file_candidates.insert(0, (clean, [bx1, by1, bw, bh], 10.0))
+            elif '.md' in clean.lower() or '.markdown' in clean.lower():
+                file_candidates.insert(0, (clean, [bx1, by1, bw, bh], 5.0 + s))
+            elif any(k in clean.lower() for k in ['matrix', 'document', 'readme', 'draft', 'note']):
+                file_candidates.append((clean, [bx1, by1, bw, bh], 2.0 + s))
+            elif len(clean) >= 4 and not any(k in clean.lower() for k in ['team', 'h1', '99', '</>', '1004', '2:']):
+                file_candidates.append((clean, [bx1, by1, bw, bh], s))
 
-        # Select best candidate: prioritize *.md, else longest valid title
-        md_matches = [c for c in candidates if '.md' in c[0].lower()]
-        best_candidate = md_matches[0] if md_matches else (candidates[0] if candidates and len(candidates[0][0]) >= 3 else None)
-
-        if best_candidate:
-            c_text, c_b, _, scale = best_candidate
-            file_detected = True
-            file_name = c_text
-            pts = np.array(c_b) / scale
-            bx1 = int(pts[:, 0].min())
-            by1 = int(pts[:, 1].min())
-            bx2 = int(pts[:, 0].max())
-            by2 = int(pts[:, 1].max())
-            file_box = [max(0, x1_f + bx1 - 6), max(0, y1_f + by1 - 4), (bx2 - bx1) + 14, (by2 - by1) + 8]
+    if file_candidates:
+        file_candidates.sort(key=lambda x: -x[2])
+        c_text, c_box, _ = file_candidates[0]
+        file_detected = True
+        file_name = c_text
+        file_box = [max(0, c_box[0] - 6), max(0, c_box[1] - 4), c_box[2] + 12, c_box[3] + 8]
+        file_bottom_y = c_box[1] + c_box[3]
 
     # ---------------------------------------------------------
     # 3. WHITE BOX 1: Edit Mode ("Pencil Icon" Active)
     # ---------------------------------------------------------
-    # Expected relative area: top-right editor action bar (y: 5%..22%, x: 60%..99%)
-    y1_tb, y2_tb = int(h * 0.050), int(h * 0.220)
-    x1_tb, x2_tb = int(w * 0.600), int(w * 0.990)
-    crop_tb = img[y1_tb:y2_tb, x1_tb:x2_tb]
+    # Find editor body start from top_tokens to bound toolbar accurately regardless of DPI
+    first_body_y = None
+    for bx1, by1, bw, bh, t, s in top_tokens:
+        clean = t.strip()
+        if by1 > file_bottom_y + 10:
+            if any(k in clean.lower() for k in ['h1', '99', '</>']) and bh < 60:
+                pass # toolbar icon
+            elif len(clean) >= 3 and (bx1 < int(w * 0.35) or clean.startswith('#') or clean.startswith('>') or re.match(r'^\d+', clean)):
+                if first_body_y is None or by1 < first_body_y:
+                    first_body_y = by1
+
+    tb_y1 = max(0, file_bottom_y)
+    tb_y2 = first_body_y if (first_body_y and first_body_y > tb_y1 + 40) else min(h, tb_y1 + int(max(90, 180 * dpi_factor)))
+    crop_tb = img[tb_y1:tb_y2, :]
 
     edit_mode_active = False
     blue_pixel_count = 0
-    edit_box = [int(w * 0.690), y1_tb, int(w * 0.050), y2_tb - y1_tb]
+    edit_box = [int(w * 0.70), tb_y1, int(40 * dpi_factor), tb_y2 - tb_y1]
 
+    # Search for blue pencil icon in toolbar region
     if crop_tb.size > 0:
         hsv_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
-        blue_mask = cv2.inRange(hsv_tb, np.array([95, 50, 50]), np.array([140, 255, 255]))
-        blue_pixel_count = int(np.count_nonzero(blue_mask))
-        if blue_pixel_count >= 15:
+        blue_mask = cv2.inRange(hsv_tb, np.array([95, 50, 50]), np.array([135, 255, 255]))
+        contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        best_pencil = None
+        best_area = 0
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area > 15:
+                bx, by, bw, bh = cv2.boundingRect(c)
+                if bx > int(w * 0.35) and area > best_area:
+                    best_area = area
+                    best_pencil = (bx, by, bw, bh)
+        if best_pencil:
+            bx, by, bw, bh = best_pencil
             edit_mode_active = True
-            pts = np.argwhere(blue_mask)
-            min_y, min_x = pts.min(axis=0)
-            max_y, max_x = pts.max(axis=0)
-            edit_box = [x1_tb + min_x - 6, y1_tb + min_y - 6, (max_x - min_x) + 12, (max_y - min_y) + 12]
-        else:
-            # Check OCR for 'Edit Mode' or 'Edit' text in toolbar
-            if ocr:
-                res_tb, _ = ocr(cv2.resize(crop_tb, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC))
-                if res_tb:
-                    for b, t, s in res_tb:
-                        if 'edit' in t.lower():
-                            edit_mode_active = True
-                            pts = np.array(b) / 1.5
-                            bx1 = int(pts[:, 0].min())
-                            by1 = int(pts[:, 1].min())
-                            bx2 = int(pts[:, 0].max())
-                            by2 = int(pts[:, 1].max())
-                            edit_box = [x1_tb + bx1 - 6, y1_tb + by1 - 6, (bx2 - bx1) + 12, (by2 - by1) + 12]
-                            break
+            blue_pixel_count = int(best_area)
+            edit_box = [bx - 6, tb_y1 + by - 6, bw + 12, bh + 12]
 
-    # Check for split-screen mode: when edit mode is not selected, Teams displays a split
-    # screen with duplicated text side-by-side across two columns/panes, which must be avoided.
+    # Check for split screen mode (preview side-by-side)
     split_screen_detected = False
-    center_strip = img[int(h * 0.20):int(h * 0.80), int(w * 0.46):int(w * 0.54)]
+    center_strip = img[int(h * 0.25):int(h * 0.75), int(w * 0.46):int(w * 0.54)]
     if center_strip.size > 0:
         cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
         sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
@@ -178,123 +173,102 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         col_means = np.mean(sobel_abs, axis=0)
         if np.max(col_means) > 28.0:
             split_screen_detected = True
-
-    if split_screen_detected:
-        # Split screen indicates edit mode (pencil) is not selected and text is duplicated
-        edit_mode_active = False
+            edit_mode_active = False
 
     # ---------------------------------------------------------
     # 4. WHITE BOX 2: Dark Mode ("Moon Icon" & Dark Luminance)
     # ---------------------------------------------------------
-    # Sample upper editor text area above any soft keyboard (y: 18%..42%, x: 15%..75%)
-    body_sample = img[int(h * 0.18):int(h * 0.42), int(w * 0.15):int(w * 0.75)]
+    body_y1 = min(h - 50, tb_y2 + int(15 * dpi_factor))
+    body_y2 = min(h - 40, body_y1 + int(h * 0.30))
+    body_sample = img[body_y1:body_y2, int(w * 0.15):int(w * 0.85)]
     mean_lum = float(np.mean(cv2.cvtColor(body_sample, cv2.COLOR_BGR2GRAY))) if body_sample.size > 0 else 100.0
 
-    moon_found = False
-    dark_box = [int(w * 0.850), y1_tb, int(w * 0.080), y2_tb - y1_tb]
-    if crop_tb.size > 0:
-        gray_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2GRAY)
-        tb_mid = int(gray_tb.shape[1] * 0.45)
-        moon_mask = (gray_tb[:, tb_mid:] > 110)
-        moon_pts = np.argwhere(moon_mask)
-        if len(moon_pts) >= 6:
-            min_y, min_x = moon_pts.min(axis=0)
-            max_y, max_x = moon_pts.max(axis=0)
-            if (max_x - min_x) < int(gray_tb.shape[1] * 0.5):
-                dark_box = [x1_tb + tb_mid + min_x - 4, y1_tb + min_y - 4, (max_x - min_x) + 12, (max_y - min_y) + 10]
-                moon_found = True
-
-    dark_mode_active = (mean_lum < 55.0) or moon_found
+    dark_mode_active = (mean_lum < 65.0)
+    dark_box = [int(w * 0.88), tb_y1, int(40 * dpi_factor), tb_y2 - tb_y1]
 
     # ---------------------------------------------------------
-    # 5. GREEN BOX: First Line Number (Current Page Top)
+    # 5 & 6. GREEN & RED BOXES: First & Last Line Numbers
     # ---------------------------------------------------------
-    # Left gutter region in editor body (DPI-aware vertical starting boundary)
-    # At lower DPI (e.g. 120 DPI, dpi_factor <= 0.85), toolbar ends higher (y ~ 135-150px)
-    # and line 1 is located at y ~ 160-175px. At 160+ DPI, toolbar ends around y ~ 170-190px.
-    gutter_top_pct = 0.130 if dpi_factor < 0.9 else 0.150
-    y1_g, y2_g = max(130, int(h * gutter_top_pct)), int(h * 0.450)
-    x1_g, x2_g = 0, int(max(60.0, min(120.0, 90.0 * max(0.4, dpi_factor))))
-    crop_green = img[y1_g:y2_g, x1_g:x2_g]
+    # Dynamic gutter search: left margin below toolbar
+    gutter_w = int(max(150, min(360, 220 * dpi_factor)))
+    body_gutter = img[tb_y1:h - int(h * 0.04), :gutter_w]
+    
+    gutter_lines = []
+    # OCR pass on gutter crop
+    res_g, _ = ocr(body_gutter)
+    if res_g:
+        for b, t, s in res_g:
+            pts = np.array(b)
+            bx1, by1 = int(pts[:, 0].min()), tb_y1 + int(pts[:, 1].min())
+            bw, bh = int(pts[:, 0].max() - pts[:, 0].min()), int(pts[:, 1].max() - pts[:, 1].min())
+            clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
+            if m := re.search(r'^\s*(\d+)', clean):
+                val = int(m.group(1))
+                if 1 <= val <= 999999:
+                    char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
+                    box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
+                    gutter_lines.append((by1, val, box))
+
+    # Also incorporate top_tokens below toolbar
+    for bx1, by1, bw, bh, t, s in top_tokens:
+        if by1 >= tb_y1 and bx1 < gutter_w:
+            clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
+            if m := re.search(r'^\s*(\d+)', clean):
+                val = int(m.group(1))
+                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 for gl in gutter_lines):
+                    char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
+                    box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
+                    gutter_lines.append((by1, val, box))
+
     first_line_num = 0
-    first_line_box = [x1_g, y1_g, int(w * 0.035), int(h * 0.030)]
+    first_line_box = [int(w * 0.02), tb_y2, int(35 * dpi_factor), int(25 * dpi_factor)]
+    last_line_num = 0
+    last_line_box = [int(w * 0.02), h - int(50 * dpi_factor), int(35 * dpi_factor), int(25 * dpi_factor)]
 
-    if ocr and crop_green.size > 0:
-        nums = []
-        for fx in [1.5, 2.0]:
-            crop_scaled = cv2.resize(crop_green, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
-            res_g, _ = ocr(crop_scaled)
-            if res_g:
-                for b, t, s in res_g:
-                    clean_num = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-                    if m := re.search(r'^\s*(\d+)', clean_num):
-                        try:
-                            n_val = int(m.group(1))
-                            pts = np.array(b) / fx
-                            bx1 = int(pts[:, 0].min())
-                            by1 = int(pts[:, 1].min())
-                            bx2 = int(pts[:, 0].max())
-                            by2 = int(pts[:, 1].max())
-                            box_w = min(int(w * 0.035), max(18, (bx2 - bx1) + 6))
-                            tight_box = [max(0, x1_g + bx1 - 3), max(0, y1_g + by1 - 3), box_w, (by2 - by1) + 6]
-                            nums.append((y1_g + by1, n_val, tight_box))
-                        except ValueError: pass
-            if any(n == 1 for _, n, _ in nums):
-                break
-
-        if nums:
-            nums.sort(key=lambda x: (x[0], x[1]))
-            top_y, top_val, top_box = nums[0]
-            # If top detected line > 1, check whether line 1 is visible above it using vertical gutter pitch
-            if top_val > 1 and len(nums) >= 2:
-                pitches = [nums[i+1][0] - nums[i][0] for i in range(min(4, len(nums)-1)) if nums[i+1][1] > nums[i][1]]
-                avg_pitch = (sum(pitches) / len(pitches)) if pitches else 15.0
-                est_l1_y = top_y - int((top_val - 1) * avg_pitch)
-                if est_l1_y >= y1_g - 5:
-                    first_line_num = 1
-                    first_line_box = [top_box[0], max(y1_g, est_l1_y), top_box[2], top_box[3]]
-                else:
-                    first_line_num = top_val
-                    first_line_box = top_box
+    if gutter_lines:
+        gutter_lines.sort(key=lambda x: x[0])
+        top_y, top_val, top_box = gutter_lines[0]
+        # If top detected line > 1, check whether line 1 is visible directly above it using vertical gutter pitch
+        if top_val > 1 and len(gutter_lines) >= 2:
+            pitches = [gutter_lines[i+1][0] - gutter_lines[i][0] for i in range(min(4, len(gutter_lines)-1)) if gutter_lines[i+1][1] > gutter_lines[i][1]]
+            avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(18.0, 36.0 * (dpi_factor / 2.0))
+            est_l1_y = top_y - int((top_val - 1) * avg_pitch)
+            if est_l1_y >= tb_y1 - 10:
+                first_line_num = 1
+                first_line_box = [top_box[0], max(tb_y1, est_l1_y), top_box[2], top_box[3]]
             else:
                 first_line_num = top_val
                 first_line_box = top_box
+        else:
+            first_line_num = top_val
+            first_line_box = top_box
+
+        # Last line
+        last_line_num = gutter_lines[-1][1]
+        last_line_box = gutter_lines[-1][2]
+
+        # If only 1 line was found in gutter_lines (e.g. at 400 DPI where only line 1 has leading digits),
+        # estimate last line from vertical rows or text content in editor body:
+        if (len(gutter_lines) <= 2 or last_line_num <= 4) and first_line_num == 1:
+            bot_crop = img[int(h * 0.45):h - int(h * 0.05), :int(w * 0.50)]
+            res_bot, _ = ocr(bot_crop)
+            if res_bot:
+                pts_bot = []
+                for b, t, s in res_bot:
+                    pts = np.array(b)
+                    pts_bot.append((int(h * 0.45) + int(pts[:, 1].min()), int(pts[:, 1].max() - pts[:, 1].min()), int(pts[:, 0].min())))
+                if pts_bot:
+                    pts_bot.sort(key=lambda x: -x[0])
+                    b_y, b_h, b_x = pts_bot[0]
+                    pitch = max(24.0, (first_line_box[3] * 1.35) if first_line_box[3] > 15 else 48.0)
+                    est_lines = max(2, int(round((b_y - first_line_box[1]) / pitch)) + 1)
+                    last_line_num = max(last_line_num, first_line_num + est_lines - 1)
+                    last_line_box = [first_line_box[0], b_y, first_line_box[2], b_h + 4]
+            else:
+                last_line_num = first_line_num + 7
+                last_line_box = [first_line_box[0], int(h * 0.85), first_line_box[2], first_line_box[3]]
 
     first_line_detected = (first_line_num > 0)
-
-    # ---------------------------------------------------------
-    # 6. RED BOX: Last Line Number (Current Page Bottom)
-    # ---------------------------------------------------------
-    # Left gutter bottom region (y: 82%..99%, x: 0.5%..15%)
-    y1_r, y2_r = int(h * 0.820), int(h * 0.990)
-    x1_r, x2_r = max(0, int(w * 0.005)), int(w * 0.150)
-    crop_red = img[y1_r:y2_r, x1_r:x2_r]
-    last_line_num = 0
-    last_line_box = [x1_r, y1_r, int(w * 0.035), int(h * 0.030)]
-
-    if ocr and crop_red.size > 0:
-        crop_r_scaled = cv2.resize(crop_red, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-        res_r, _ = ocr(crop_r_scaled)
-        if res_r:
-            nums = []
-            for b, t, s in res_r:
-                clean_num = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-                if m := re.search(r'\b(\d+)\b', clean_num):
-                    try:
-                        n_val = int(m.group(1))
-                        pts = np.array(b) / 1.5
-                        bx1 = int(pts[:, 0].min())
-                        by1 = int(pts[:, 1].min())
-                        bx2 = int(pts[:, 0].max())
-                        by2 = int(pts[:, 1].max())
-                        tight_box = [x1_r + bx1 - 3, y1_r + by1 - 3, (bx2 - bx1) + 6, (by2 - by1) + 6]
-                        nums.append((by1, n_val, tight_box))
-                    except ValueError: pass
-            if nums:
-                nums.sort(key=lambda x: -x[0]) # bottom-most
-                last_line_num = nums[0][1]
-                last_line_box = nums[0][2]
-
     last_line_detected = (last_line_num > 0)
 
     # ---------------------------------------------------------

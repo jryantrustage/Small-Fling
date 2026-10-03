@@ -210,11 +210,12 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 220px for 4-digit numbers)
-    gutter_w = int(max(115.0, min(220.0, 155.0 * norm_multiplier)))
-    top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
-    top_crop = img[top_y1:int(h * 0.45), :gutter_w]
-    bot_crop = img[int(h * 0.65):int(h * 0.98), :gutter_w]
+    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 360px for high DPI)
+    gutter_w = int(max(130.0, min(360.0, 180.0 * norm_multiplier)))
+    top_y1 = max(80, int(h * 0.10))
+    top_y2 = min(h - 100, int(h * 0.60))
+    top_crop = img[top_y1:top_y2, :gutter_w]
+    bot_crop = img[int(h * 0.55):int(h * 0.98), :gutter_w]
 
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
     f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled)
@@ -239,8 +240,8 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     sidebar_x1 = int(240.0 * norm_multiplier)
     sidebar_x2 = sidebar_x1 + gutter_w
     if sidebar_x2 < w:
-        top_crop2 = img[top_y1:int(h * 0.45), sidebar_x1:sidebar_x2]
-        bot_crop2 = img[int(h * 0.65):int(h * 0.98), sidebar_x1:sidebar_x2]
+        top_crop2 = img[top_y1:top_y2, sidebar_x1:sidebar_x2]
+        bot_crop2 = img[int(h * 0.55):int(h * 0.98), sidebar_x1:sidebar_x2]
         top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
         f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
@@ -270,17 +271,18 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
-    gutter_w = int(max(95.0, min(200.0, 140.0 * norm_multiplier)))
-    top_y1 = max(130, int(h * (0.130 if dpi_factor < 0.9 else 0.150)))
+    gutter_w = int(max(130.0, min(360.0, 180.0 * norm_multiplier)))
+    top_y1 = max(80, int(h * 0.10))
+    top_y2 = min(h - 100, int(h * 0.60))
 
-    top_crop = img[top_y1:int(h * 0.45), :gutter_w]
+    top_crop = img[top_y1:top_y2, :gutter_w]
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
     top_nums = extract_numbers_from_slice(top_scaled)
     if not top_nums:
         sidebar_x1 = int(240.0 * norm_multiplier)
         sidebar_x2 = sidebar_x1 + gutter_w
         if sidebar_x2 < w:
-            top_crop2 = img[top_y1:int(h * 0.45), sidebar_x1:sidebar_x2]
+            top_crop2 = img[top_y1:top_y2, sidebar_x1:sidebar_x2]
             top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
             top_nums = extract_numbers_from_slice(top2_scaled)
     if not top_nums: return False, 0
@@ -297,7 +299,8 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     if img is None: return []
     h, w = img.shape[:2]
     top_y = int(h * 0.10)
-    bot_y = int(h * 0.90)
+    top_y = int(h * 0.08)
+    bot_y = int(h * 0.96)
     ocr = get_rapid_ocr()
     if ocr is None: return []
 
@@ -306,8 +309,8 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
 
     # Fast check: scan targeted gutter width scaled by norm_multiplier
     candidates = []
-    sub_w1 = int(min(w, max(180, int(w * 0.12 * norm_multiplier))))
-    sub_w2 = int(min(w, max(360, int(w * 0.35 * norm_multiplier))))
+    sub_w1 = int(min(w, max(220, int(w * 0.15 * norm_multiplier))))
+    sub_w2 = int(min(w, max(420, int(w * 0.40 * norm_multiplier))))
     for sub_w in [sub_w1, sub_w2]:
         sub = img[top_y:bot_y, :sub_w]
         try:
