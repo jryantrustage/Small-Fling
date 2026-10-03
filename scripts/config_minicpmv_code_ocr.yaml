@@ -1,0 +1,45 @@
+### Model Configuration
+model_name_or_path: openbmb/MiniCPM-V-2_6
+trust_remote_code: true
+
+### Vision & Backbone Freezing Constraints
+freeze_vision_tower: true
+tune_vision: false
+tune_llm: true
+
+### Fine-Tuning Method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 32
+lora_alpha: 64
+lora_dropout: 0.05
+# Maps to LLM projections and cross-modal resampler, strictly omitting k_proj to protect KV-cache integrity
+lora_target: q_proj,v_proj,o_proj,gate_proj,up_proj,down_proj,resampler,embed_tokens
+
+### Dataset
+dataset_dir: ./dataset_minicpm_code_ocr
+dataset: dataset_minicpm_code_ocr
+template: minicpm_v
+cutoff_len: 4096
+max_samples: 100000
+overwrite_cache: true
+preprocessing_num_workers: 4
+
+### Output & Logging
+output_dir: ./output_minicpm_code_ocr
+logging_steps: 10
+save_steps: 100
+plot_loss: true
+overwrite_output_dir: true
+
+### Training Hyperparameters
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 1.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+fp16: true
+bf16: false
+ddp_timeout: 180000000

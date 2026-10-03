@@ -1,0 +1,10 @@
+{
+  "dataset_minicpm_code_ocr": {
+    "file_name": "dataset.json",
+    "formatting": "sharegpt",
+    "columns": {
+      "messages": "conversations",
+      "images": "image"
+    }
+  }
+}
