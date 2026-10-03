@@ -146,6 +146,18 @@ def generate_ai_resolution_prompt(analysis: Dict[str, Any], dag_state: Dict[str,
     evidence_lines = "\n".join(f"- {e}" for e in analysis.get("evidence", []))
     remediation_lines = "\n".join(f"{idx+1}. {r}" for idx, r in enumerate(analysis.get("remediations", [])))
 
+    from services import state, adb_service
+    act_ser = telemetry.get('active_serial') or getattr(state, 'active_device_serial', None) or adb_service._active_serial_cache or adb_service.target_adb_serial or ""
+    dev_name = telemetry.get('device_id')
+    if not dev_name or str(dev_name).lower() in ("idle", "connected adb", "pixel device"):
+        if any(k in act_ser.lower() for k in ['63100', 'mustang', 'pixel_10']) or adb_service.current_device_model == "pixel_10":
+            dev_name = "Pixel 10 Pro XL"
+        elif any(k in act_ser.lower() for k in ['39101', 'husky', 'pixel_8']) or adb_service.current_device_model == "pixel_8":
+            dev_name = "Pixel 8 Pro"
+        else:
+            dev_name = "Pixel Device"
+    ser_tag = act_ser if act_ser else ("Pixel 10 Pro XL" if "10" in dev_name else "Pixel 8 Pro")
+
     prompt = f"""# 🛠️ System Performance Degradation Resolution Prompt
 
 ## Objective
@@ -183,7 +195,7 @@ Analyze the root cause of latency and performance degradation in the Small-Fling
 {evidence_lines}
 
 ### Environmental & Device Context
-- **Active Device:** {f"{'Pixel 10 Pro XL' if any(k in str(telemetry.get('device_id', '') or telemetry.get('active_serial', '') or '').lower() for k in ['63100', 'mustang', 'pixel_10']) else ('Pixel 8 Pro' if any(k in str(telemetry.get('device_id', '') or telemetry.get('active_serial', '') or '').lower() for k in ['39101', 'husky', 'pixel_8']) else 'Pixel Device')} (`{telemetry.get('device_id') or telemetry.get('active_serial') or 'Connected ADB'}`)"}
+- **Active Device:** {dev_name} (`{ser_tag}`)
 - **Target Display ID:** `{telemetry.get('capture_telemetry', {}).get('display_id') or 'External Desktop'}`
 - **Active Density / DPI:** `{telemetry.get('capture_telemetry', {}).get('active_dpi', 120)} DPI` (`{telemetry.get('capture_telemetry', {}).get('dpi_factor', 0.75)}x`)
 - **Keyboard Suppressed / Guarded:** `{telemetry.get('keyboard_visible') is False}`

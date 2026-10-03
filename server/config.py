@@ -41,7 +41,7 @@ SERVER_PORT: int = int(os.environ.get("SERVER_PORT", "8000"))
 _cors = os.environ.get("CORS_ALLOWED_ORIGINS", "*").strip()
 CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in _cors.split(",") if o.strip()]
 
-TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "0"))
+TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))

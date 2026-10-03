@@ -201,3 +201,25 @@ def test_dag_6_arrow_down_and_dag_7_blocking_on_failure():
         assert state.dag_state["nodes"]["arrow_down"]["status"] == "completed"
 
     asyncio.run(run_test())
+
+
+def test_display_id_sanitization_and_pacer_stall_resilience():
+    from services.adb_service import sanitize_input_display_id
+
+    # 1. 64-bit physical display IDs (e.g., SurfaceFlinger hardware ID) must NOT be passed to Android input
+    assert sanitize_input_display_id(4613572713243172731) is None
+    assert sanitize_input_display_id("4613572713243172731") is None
+
+    # 2. Valid logical display IDs (1..255) must be preserved as int
+    assert sanitize_input_display_id(6) == 6
+    assert sanitize_input_display_id("6") == 6
+    assert sanitize_input_display_id(4) == 4
+    assert sanitize_input_display_id(255) == 255
+
+    # 3. Invalid display IDs (0, negative, None, garbage) must return None
+    assert sanitize_input_display_id(0) is None
+    assert sanitize_input_display_id(-1) is None
+    assert sanitize_input_display_id(None) is None
+    assert sanitize_input_display_id("invalid") is None
+    assert sanitize_input_display_id(256) is None
+

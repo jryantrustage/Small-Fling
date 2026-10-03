@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Maximize2, Minimize2, RefreshCw, ZoomIn } from 'lucide-react';
+import { Maximize2, Minimize2, RefreshCw, ZoomIn, Copy, Check, Download } from 'lucide-react';
 import { BoundingBoxesOverlay } from './BoundingBoxesOverlay';
 import type { AlignmentData, DeviceInfoData } from '../types';
 
@@ -45,6 +45,8 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   const [naturalSize, setNaturalSize] = useState({ width: 0, height: 0 });
   const [viewMode, setViewMode] = useState<'fit' | 'fill'>(defaultViewMode);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   // ResizeObserver on the container to measure available viewport space responsively
   useEffect(() => {
@@ -132,6 +134,65 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
       console.warn('Fullscreen request failed:', err);
     }
   }, []);
+
+  const handleCopyImage = useCallback(async () => {
+    if (copying) return;
+    setCopying(true);
+    try {
+      // Fetch uncompressed PNG frame from device screenshot endpoint
+      const response = await fetch(`/api/device/screen?mode=${liveMode}&format=png`);
+      if (!response.ok) {
+        throw new Error(`Failed to capture image: HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+
+      // Attempt modern asynchronous Clipboard API write
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } else {
+        // Fallback: Trigger direct PNG download if clipboard image write isn't supported in current environment
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `screen_${liveMode}_${Date.now()}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      }
+    } catch (err) {
+      console.error('Copy live image failed:', err);
+      // Fallback: try capturing canvas from imgRef if available
+      try {
+        if (imgRef.current) {
+          const canvas = document.createElement('canvas');
+          canvas.width = imgRef.current.naturalWidth || 1920;
+          canvas.height = imgRef.current.naturalHeight || 1080;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(imgRef.current, 0, 0);
+            canvas.toBlob(async (fallbackBlob) => {
+              if (fallbackBlob && navigator.clipboard && window.ClipboardItem) {
+                await navigator.clipboard.write([new ClipboardItem({ 'image/png': fallbackBlob })]);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2500);
+              }
+            }, 'image/png');
+          }
+        }
+      } catch (canvasErr) {
+        console.error('Canvas capture fallback failed:', canvasErr);
+      }
+    } finally {
+      setCopying(false);
+    }
+  }, [copying, liveMode]);
 
   return (
     <div
@@ -305,6 +366,31 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
             >
               <ZoomIn size={11} />
               <span>{viewMode.toUpperCase()}</span>
+            </button>
+
+            {/* Copy Live Screenshot to Clipboard */}
+            <button
+              type="button"
+              className="btn btn-xs btn-outline live-copy-btn"
+              onClick={handleCopyImage}
+              disabled={copying}
+              title={copied ? 'Copied to Clipboard!' : 'Copy Live Frame to Clipboard (PNG)'}
+              style={{
+                height: '24px',
+                padding: '2px 8px',
+                fontSize: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                background: copied ? 'rgba(35, 134, 54, 0.85)' : 'rgba(15, 23, 42, 0.85)',
+                borderColor: copied ? 'rgba(46, 160, 67, 0.6)' : 'rgba(255, 255, 255, 0.2)',
+                color: copied ? '#ffffff' : '#e6edf3',
+                backdropFilter: 'blur(6px)',
+                cursor: copying ? 'wait' : 'pointer',
+              }}
+            >
+              {copied ? <Check size={11} color="#3fb950" /> : <Copy size={11} />}
+              <span>{copied ? 'COPIED' : copying ? 'COPYING...' : 'COPY FRAME'}</span>
             </button>
 
             {/* Native Fullscreen Button */}

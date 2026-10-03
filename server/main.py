@@ -213,7 +213,7 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
         "device_id": "idle", "is_pacing": False, "current_page": 0,
         "current_top_line": 0, "current_bottom_line": 0, "target_total_lines": tlines,
         "dwell_countdown_ms": 0, "phase": "IDLE", "status_message": "Matrix Capture Studio ready",
-        "last_heartbeat": None
+        "last_heartbeat": None, "keyboard_visible": False
     })
     # Reset DAG nodes to clean idle state
     if "nodes" in state.dag_state:

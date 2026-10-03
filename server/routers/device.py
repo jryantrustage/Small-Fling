@@ -104,8 +104,27 @@ async def select_device_api(req: DeviceSelectRequest):
 async def get_adb_devices():
     return await adb.list_adb_devices()
 
+import asyncio
+
 @router.get("/api/device/screen")
-async def device_screen_endpoint(mode: str = "desktop", serial: Optional[str] = None, quality: int = Query(80, ge=30, le=95), max_dim: int = Query(1280, ge=480, le=1920)):
+async def device_screen_endpoint(
+    mode: str = "desktop",
+    serial: Optional[str] = None,
+    format: str = Query("jpeg"),
+    quality: int = Query(80, ge=30, le=100),
+    max_dim: int = Query(1280, ge=480, le=3840)
+):
+    ser = await adb.get_active_adb_serial(serial)
+    if format.lower() == "png":
+        if mode == "desktop":
+            png_bytes = await adb.capture_external_screenshot(ser, bypass_lock=True)
+        else:
+            res = await asyncio.to_thread(adb._exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
+            png_bytes = adb._extract_png_bytes(res.stdout) if res.returncode == 0 else None
+        if not png_bytes:
+            raise HTTPException(status_code=503, detail="Failed to capture screen PNG")
+        return Response(content=png_bytes, media_type="image/png", headers={"Cache-Control": "no-store, must-revalidate"})
+
     jpg = await adb.capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
     if not jpg:
         raise HTTPException(status_code=503, detail="Failed to capture screen")
