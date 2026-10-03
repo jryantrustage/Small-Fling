@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle, RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, Sliders, Key, Cpu, Zap } from 'lucide-react';
+import { Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle, RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, Sliders, Key, Cpu, Zap, FileText, Layout } from 'lucide-react';
 import type { ConnectedDisplay, KioskTelemetry } from '../types';
 
 interface Props {
@@ -16,6 +16,7 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
   const [displays, setDisplays] = useState<ConnectedDisplay[]>([]);
   const [selectedDisplayId, setSelectedDisplayId] = useState<number>(13);
   const [targetPackage, setTargetPackage] = useState('com.microsoft.teams');
+  const [targetType, setTargetType] = useState<'auto' | 'markdown_viewer' | 'teams_app'>('markdown_viewer');
   const [kioskMode, setKioskMode] = useState<'freeform' | 'mirrored' | 'kiosk'>('kiosk');
   const [suppressHotkeys, setSuppressHotkeys] = useState(true);
   const [disableStatusBar, setDisableStatusBar] = useState(true);
@@ -63,7 +64,7 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
     try {
       const res = await fetch(`${apiBase}/api/device/kiosk/lock`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ display_id: selectedDisplayId, package_id: targetPackage, mode: kioskMode, restrictions: { suppress_hotkeys: suppressHotkeys, disable_status_bar: disableStatusBar, prevent_sleep: preventSleep }, serial: activeSerial || null })
+        body: JSON.stringify({ display_id: selectedDisplayId, package_id: targetPackage, target_type: targetType, mode: kioskMode, restrictions: { suppress_hotkeys: suppressHotkeys, disable_status_bar: disableStatusBar, prevent_sleep: preventSleep }, serial: activeSerial || null })
       });
       const elapsed = Math.round(performance.now() - start);
       setLastActionLatencyMs(elapsed);
@@ -252,6 +253,41 @@ export const DeviceConfigDrawer: React.FC<Props> = ({ isOpen, onClose, apiBase, 
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Target Window & Activity Distinction */}
+          <div className="kiosk-section-card">
+            <div className="kiosk-section-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Layout size={15} color="#38bdf8" />
+                <h4>TARGET WINDOW & ACTIVITY</h4>
+              </div>
+              {telemetry?.locked_target_type && telemetry.locked_target_type !== 'none' && (
+                <span className="kiosk-section-tag" style={{ color: '#00ff9d', borderColor: 'rgba(0,255,157,0.3)' }}>
+                  LOCKED: {telemetry.locked_target_type === 'markdown_viewer' ? 'MARKDOWN VIEWER' : telemetry.locked_target_type.toUpperCase()}
+                </span>
+              )}
+            </div>
+            <div className="kiosk-mode-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+              {[
+                ['markdown_viewer', FileText, 'Markdown Viewer', `FilePreviewActivity ${telemetry?.markdown_viewer_task_id ? `(Task #${telemetry.markdown_viewer_task_id})` : ''} • Locks document editor & preview in place.`],
+                ['teams_app', Smartphone, 'Teams Main App', `PersonalFilesActivity ${telemetry?.teams_app_task_id ? `(Task #${telemetry.teams_app_task_id})` : ''} • Locks files list and channels window.`],
+                ['auto', Sliders, 'Auto-Detect', 'Prefers Markdown Viewer if open, otherwise locks the top Teams activity.']
+              ].map(([t, Icon, title, desc]) => (
+                <button
+                  key={t as string}
+                  type="button"
+                  className={`kiosk-mode-tile ${targetType === t ? 'active' : ''}`}
+                  onClick={() => setTargetType(t as any)}
+                >
+                  <div className="mode-tile-header">
+                    <Icon size={14} />
+                    <span>{title as string}</span>
+                  </div>
+                  <p style={{ fontSize: '11px', marginTop: '4px', opacity: 0.85 }}>{desc as string}</p>
+                </button>
+              ))}
             </div>
           </div>
 

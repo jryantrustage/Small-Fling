@@ -211,6 +211,13 @@ latest_telemetry: Dict[str, Any] = {
         "settle_delay_ms": 40,
         "total_captures": 0,
         "error": None
+    },
+    "latest_key_event": None,
+    "key_event_stats": {
+        "total_dispatched": 0,
+        "navigated_away_count": 0,
+        "last_navigated_away": None,
+        "key_counts": {}
     }
 }
 
@@ -236,6 +243,69 @@ orchestration_state: Dict[str, Any] = {
 }
 
 dag2_loop_history: List[Dict[str, Any]] = []
+
+# High-Precision Key Event Telemetry Storage
+key_events_telemetry: List[Dict[str, Any]] = []
+active_dag2_loop_key_events: List[Dict[str, Any]] = []
+current_dag2_loop_id: Optional[str] = None
+current_dag2_loop_index: Optional[int] = None
+
+def record_key_event_telemetry(event: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Records a high-precision key event dispatch with timestamps, keycodes, duration,
+    and visual/window state outcomes (such as whether FilePreviewActivity remained visible).
+    """
+    now = datetime.now()
+    event.setdefault("id", f"ke_{now.strftime('%Y%m%d_%H%M%S_%f')}")
+    event.setdefault("timestamp_iso", now.isoformat())
+    event.setdefault("timestamp_epoch_ms", int(now.timestamp() * 1000))
+    if current_dag2_loop_id and "loop_id" not in event:
+        event["loop_id"] = current_dag2_loop_id
+    if current_dag2_loop_index is not None and "loop_index" not in event:
+        event["loop_index"] = current_dag2_loop_index
+
+    key_events_telemetry.append(event)
+    if len(key_events_telemetry) > 500:
+        del key_events_telemetry[0]
+
+    # Track in active loop if DAG 2 loop is running
+    if current_dag2_loop_id:
+        active_dag2_loop_key_events.append(event)
+
+    latest_telemetry["latest_key_event"] = event
+
+    stats = latest_telemetry.setdefault("key_event_stats", {
+        "total_dispatched": 0,
+        "navigated_away_count": 0,
+        "last_navigated_away": None,
+        "key_counts": {}
+    })
+    stats["total_dispatched"] += 1
+    key_label = event.get("key_name") or str(event.get("keycode", "unknown"))
+    stats["key_counts"][key_label] = stats["key_counts"].get(key_label, 0) + 1
+
+    if event.get("navigated_away"):
+        stats["navigated_away_count"] += 1
+        stats["last_navigated_away"] = event
+
+    return event
+
+def get_key_events_telemetry(limit: int = 100, loop_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    if loop_id:
+        filtered = [e for e in key_events_telemetry if e.get("loop_id") == loop_id]
+        return filtered[-limit:]
+    return list(key_events_telemetry[-limit:])
+
+def clear_key_events_telemetry() -> None:
+    key_events_telemetry.clear()
+    active_dag2_loop_key_events.clear()
+    latest_telemetry["latest_key_event"] = None
+    latest_telemetry["key_event_stats"] = {
+        "total_dispatched": 0,
+        "navigated_away_count": 0,
+        "last_navigated_away": None,
+        "key_counts": {}
+    }
 
 def record_dag2_loop_result(loop_record: Dict[str, Any]) -> None:
     dag2_loop_history.append(loop_record)

@@ -271,7 +271,12 @@ export interface KioskTelemetry {
   kiosk_mode: 'freeform' | 'mirrored' | 'kiosk';
   target_display_id: number;
   locked_package: string;
+  locked_target_type?: 'markdown_viewer' | 'teams_app' | 'generic' | 'none';
   locked_task_id: number;
+  is_markdown_viewer_active?: boolean;
+  markdown_viewer_task_id?: number | null;
+  teams_app_task_id?: number | null;
+  top_activity?: string | null;
   foreground_package: string;
   device_owner_active: boolean;
   active_admin_active: boolean;

@@ -253,7 +253,7 @@ def safe_step_down(
     # 1. Soft keyboard guard (suppress without pressing Back)
     ime_chk = run_adb("dumpsys input_method | grep -E 'mInputShown=true'", ser)
     if "mInputShown=true" in ime_chk:
-        run_adb(f"input -d {display_id} keyevent 111", ser)
+        run_adb("input -d 0 keyevent 111 >/dev/null 2>&1", ser)
         time.sleep(0.15)
 
     # 2. Visual inspection

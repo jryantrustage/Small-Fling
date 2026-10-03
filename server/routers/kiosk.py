@@ -9,6 +9,7 @@ router = APIRouter(prefix="/api/device/kiosk", tags=["kiosk"])
 class KioskLockRequest(BaseModel):
     display_id: int = 13
     package_id: str = "com.microsoft.teams"
+    target_type: Optional[str] = "auto"  # "auto", "markdown_viewer", "teams_app"
     mode: str = "kiosk"
     restrictions: Optional[Dict[str, Any]] = None
     serial: Optional[str] = None
@@ -36,6 +37,7 @@ async def lock_external_display_endpoint(req: KioskLockRequest):
     res = await kiosk_service.lock_external_display(
         display_id=req.display_id,
         package_id=req.package_id,
+        target_type=req.target_type or "auto",
         mode=req.mode,
         restrictions=req.restrictions,
         serial=req.serial

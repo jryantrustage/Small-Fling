@@ -394,8 +394,9 @@ class KeyboardOpenClassifier(BaseClassifier):
         await asyncio.sleep(0.15)
 
         still_open = await is_ime_visible(serial, force_check=True)
-        if still_open and disp_id > 0:
-            await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
+        if still_open:
+            # Suppress exclusively on phone screen (display 0) to avoid closing desktop FilePreviewActivity
+            await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", serial)
             await asyncio.sleep(0.15)
             still_open = await is_ime_visible(serial, force_check=True)
 
@@ -440,9 +441,16 @@ class ModalOverlayClassifier(BaseClassifier):
     async def fix(self, context: ClassifierContext) -> FixResult:
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
-        if disp_id > 0:
+        # Protect Teams FilePreviewActivity: KEYCODE_ESCAPE exits the document!
+        res_win = await run_adb_shell("dumpsys window windows | grep -E 'mCurrentFocus|topApp'", serial, timeout=2.0)
+        win_out = res_win.get("stdout", "")
+        if "FilePreviewActivity" in win_out:
+            disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+            await run_adb_shell(f"input {disp_pfx}tap 300 300", serial)
+            return FixResult(classifier_id=self.id, success=True, message="Focused Markdown Editor to dismiss overlay",
+                             actions_taken=["Tapped editor pane to clear focus overlay without closing document"])
+        if disp_id and disp_id > 0:
             await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
-        await run_adb_shell("input keyevent 111", serial)
         await asyncio.sleep(0.3)
         return FixResult(classifier_id=self.id, success=True, message="Sent Escape to dismiss modal dialog",
                          actions_taken=["Dispatched KEYCODE_ESCAPE (111) to dismiss modal"])

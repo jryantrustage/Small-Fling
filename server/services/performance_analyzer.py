@@ -238,9 +238,11 @@ def format_duration_min_sec(ms: int) -> str:
     return f"{seconds}s {millis:03d}ms"
 
 
-def analyze_dag2_performance_report(loop_history: List[Dict[str, Any]], telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    telemetry = telemetry or {}
+def analyze_dag2_performance_report(loop_history: Optional[List[Dict[str, Any]]] = None, telemetry: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from services import state
+    telemetry = telemetry or {}
+    if loop_history is None:
+        loop_history = state.get_dag2_loop_history()
     loops_to_analyze = list(loop_history) if loop_history else []
 
     # If no loops recorded yet in this session, synthesize baseline loops from captured frames
@@ -482,6 +484,31 @@ def analyze_dag2_performance_report(loop_history: List[Dict[str, Any]], telemetr
             }
         }
 
+    # Key Event Telemetry & Window Diagnostic Correlation
+    try:
+        from services import state
+        recent_key_events = state.get_key_events_telemetry(limit=100)
+    except Exception:
+        recent_key_events = []
+
+    total_key_duration = sum(e.get("duration_ms", 0) for e in recent_key_events)
+    avg_key_lat = round(total_key_duration / max(1, len(recent_key_events)), 1)
+    nav_away_events = [e for e in recent_key_events if e.get("navigated_away")]
+
+    key_breakdown = {}
+    for e in recent_key_events:
+        kn = e.get("key_name") or "unknown"
+        key_breakdown[kn] = key_breakdown.get(kn, 0) + 1
+
+    key_events_summary = {
+        "total_dispatched": len(recent_key_events),
+        "total_duration_ms": round(total_key_duration, 1),
+        "avg_duration_ms": avg_key_lat,
+        "navigated_away_incidents": len(nav_away_events),
+        "critical_incidents": nav_away_events,
+        "key_breakdown": key_breakdown
+    }
+
     report = {
         "status": "success",
         "generated_at": datetime.now().isoformat(),
@@ -501,6 +528,14 @@ def analyze_dag2_performance_report(loop_history: List[Dict[str, Any]], telemetr
         "node_statistics": node_statistics,
         "bottlenecks": bottlenecks,
         "accuracy_audit": accuracy_audit,
+        "key_events_telemetry": recent_key_events,
+        "key_events_summary": key_events_summary,
+        "viewport_integrity_audit": {
+            "status": "HEALTHY" if len(nav_away_events) == 0 else "DEGRADED_VIEWPORT_DISMISSED",
+            "is_markdown_view_intact": len(nav_away_events) == 0,
+            "navigated_away_count": len(nav_away_events),
+            "culprit_events": nav_away_events
+        },
         "target_total_lines": telemetry.get("target_total_lines", 9946),
         "current_top_line": telemetry.get("current_top_line", 1),
         "current_bottom_line": telemetry.get("current_bottom_line", 50),
@@ -570,6 +605,30 @@ def generate_dag2_ai_optimization_prompt(report: Dict[str, Any]) -> str:
             f"    - *Model Tuning:* {al.get('diagnostics', {}).get('model_tuning', 'None')}"
         )
     accuracy_section_text = "\n\n".join(accuracy_lines_md) if accuracy_lines_md else "No sampled lines audited yet."
+
+    # Format Key Events Telemetry section
+    ke_summary = report.get("key_events_summary") or {}
+    ke_events = report.get("key_events_telemetry") or []
+
+    ke_rows = []
+    for ev in ke_events[-20:]:
+        trans = f"{ev.get('pre_activity', 'unknown')} -> {ev.get('post_activity', 'unknown')}"
+        state_badge = "❌ NAVIGATED AWAY" if ev.get("navigated_away") else "✅ INTACT"
+        ke_rows.append(
+            f"| `{ev.get('event_id', '?')}` | {ev.get('timestamp_epoch_ms', 0)} | {ev.get('duration_ms', 0)}ms | "
+            f"`{ev.get('caller_node', 'unknown')}` | `{ev.get('key_or_combination', '?')}` | "
+            f"Display {ev.get('display_id', 8)} | `{trans}` | {state_badge} |"
+        )
+    ke_table = "\n".join(ke_rows) if ke_rows else "| None | - | - | - | - | - | - | - |"
+
+    ke_alerts = []
+    if ke_summary.get("navigated_away_incidents", 0) > 0:
+        ke_alerts.append(f"⚠️ **CRITICAL VIEWPORT DISRUPTION DETECTED**: {ke_summary.get('navigated_away_incidents')} event(s) caused `FilePreviewActivity` to lose focus!")
+        for c in ke_summary.get("critical_incidents", []):
+            ke_alerts.append(f"  - **Culprit Event**: `{c.get('key_or_combination')}` invoked by `{c.get('caller_node')}` at epoch {c.get('timestamp_epoch_ms')} (Duration: {c.get('duration_ms')}ms). Window changed from `{c.get('pre_activity')}` to `{c.get('post_activity')}`.")
+    else:
+        ke_alerts.append("✅ **STABLE VIEWPORT**: All dispatched key events preserved `FilePreviewActivity` in the active foreground.")
+    ke_alerts_text = "\n".join(ke_alerts)
 
     prompt = f"""# Small-Fling DAG 2 Loop Acceleration & Bottleneck Optimization Prompt (Gemini 3.8 Revision)
 
@@ -647,10 +706,26 @@ Please review the code in [`server/routers/orchestration.py`](file:///c:/Project
    - This hides OCR latency behind the viewport movement, cutting cycle time by ~4-5 seconds.
 
 3. **Improve OCR Preprocessing & Device DPI Fidelity**:
-   - Incorporate the diagnosed image filter recommendations (adaptive contrast stretch +12%, unsharp masking on text bounding box ROI) in `server/services/ocr_service.py` to prevent thin character erosion (`|`, `\`, `/`, `-`, `;`).
+   - Incorporate the diagnosed image filter recommendations (adaptive contrast stretch +12%, unsharp masking on text bounding box ROI) in `server/services/ocr_service.py` to prevent thin character erosion (`|`, `\\`, `/`, `-`, `;`).
    - Add automated DPI calibration check (`adb shell wm density 400`) in `server/services/adb_service.py`.
 
 4. **Validate Total Loop Improvement**:
    - Ensure the total DAG 2 loop time expressed in minutes and seconds drops from > 10s down to < 2.5s per loop while maintaining 100% character-level accuracy.
+
+---
+
+## Key Event Telemetry & Viewport Stability Diagnostics
+- **Total Key Events Dispatched:** {ke_summary.get('total_dispatched', 0)}
+- **Total Keystroke Latency:** {ke_summary.get('total_duration_ms', 0)}ms (Avg: {ke_summary.get('avg_duration_ms', 0)}ms / event)
+- **Viewport Exit Incidents:** {ke_summary.get('navigated_away_incidents', 0)}
+- **Keystroke Distribution:** {', '.join(f'{k}: {v}' for k, v in ke_summary.get('key_breakdown', {}).items()) if ke_summary.get('key_breakdown') else 'None'}
+
+### Viewport Integrity Assessment:
+{ke_alerts_text}
+
+### High-Precision Keystroke & Motion Trace Matrix (Last 20 Events):
+| Event ID | Timestamp (Epoch ms) | Duration | Caller Node | Key Event / Sequence | Display | Window Transition | Viewport State |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+{ke_table}
 """
     return prompt.strip()

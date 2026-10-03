@@ -689,9 +689,7 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
     try:
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open:
-            cmd = "input -d 0 keyevent 111 >/dev/null 2>&1"
-            if display_id and display_id > 0:
-                cmd += f"; input -d {display_id} keyevent 111 >/dev/null 2>&1"
+            cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1"
             await run_adb_shell(cmd, ser, timeout=2.0)
             await asyncio.sleep(0.08)
             is_open = await is_ime_visible(ser, force_check=True)
@@ -715,15 +713,17 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         disp_id = await detect_external_display_id(ser)
         display_id = disp_id if disp_id > 0 else (12 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
-    # Dynamically calibrate DPI to optimal 24-35 lines viewport height
+    # Dynamically calibrate DPI to optimal 24-35 lines viewport height (only modifies density if changed)
     calib = await calibrate_display_dpi(ser, display_id)
     act_dpi = calib.get("active_dpi", 220)
 
+    # Only resize the top foreground task on the external display (e.g. FilePreviewActivity),
+    # avoiding resizing background tasks which causes them to take over the foreground
     cmd = (
-        f"wm density {act_dpi} -d {display_id} >/dev/null 2>&1; "
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
-        f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
-        f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
+        f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
+        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'topResumedActivity|mFocusedApp' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
+        f"if [ -n \"$top_tid\" ]; then cmd activity task resize \"$top_tid\" 0 0 1920 1080 >/dev/null 2>&1; fi; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
         f"input -d 0 keyevent 111 >/dev/null 2>&1"
     )
@@ -809,8 +809,66 @@ async def get_device_info() -> Dict[str, Any]:
         "cached_addresses": cdata
     }
 
-async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None):
+async def record_dispatched_key_event(
+    key_name: str,
+    keycodes: List[int],
+    shell_command: str,
+    display_id: Optional[int],
+    duration_ms: float,
+    serial: Optional[str] = None,
+    caller_node: Optional[str] = None,
+    details: Optional[Dict[str, Any]] = None,
+    check_window_state: bool = True
+) -> Dict[str, Any]:
+    """
+    Captures high-precision telemetry for key event dispatches, checking window states
+    to diagnose whether any key event causes the Markdown Viewer (FilePreviewActivity) to navigate away.
+    """
     from services import state
+    pre_window = (details or {}).get("pre_activity") or ""
+    post_window = (details or {}).get("post_activity") or ""
+    navigated_away = (details or {}).get("navigated_away", False)
+
+    if check_window_state and serial and "mock" not in str(serial).lower():
+        try:
+            res_win = await run_adb_shell("dumpsys activity activities | grep -E topResumedActivity", serial, timeout=1.8)
+            post_window = res_win.get("stdout", "").strip() if res_win.get("status") == "ok" else ""
+            if pre_window and "FilePreviewActivity" in pre_window and ("FilePreviewActivity" not in post_window):
+                navigated_away = True
+                print(f"[DIAGNOSTIC ALERT ⚠️] Key event '{key_name}' on display #{display_id} caused window switch away from FilePreviewActivity! Pre: {pre_window} -> Post: {post_window}")
+        except Exception:
+            pass
+    elif pre_window and post_window:
+        if "FilePreviewActivity" in pre_window and ("FilePreviewActivity" not in post_window):
+            navigated_away = True
+
+    event = {
+        "key_name": key_name,
+        "keycodes": keycodes,
+        "shell_command": shell_command,
+        "display_id": display_id,
+        "duration_ms": duration_ms,
+        "caller_node": caller_node or "system",
+        "pre_activity": pre_window,
+        "post_activity": post_window,
+        "navigated_away": navigated_away,
+        "details": details or {}
+    }
+
+    state.record_key_event_telemetry(event)
+    try:
+        await state.ws_manager.broadcast({
+            "type": "key_event_telemetry",
+            "event": event
+        })
+    except Exception:
+        pass
+
+    return event
+
+async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = None, caller_node: Optional[str] = None):
+    from services import state
+    t0 = time.perf_counter()
     # 1. Update orchestration state so connected Android app immediately executes it via HTTP
     cmd_name = "CTRL_END" if key2 == 123 else ("CTRL_HOME" if key2 == 122 else f"KEY_{key1}_{key2}")
     state.orchestration_state.update({
@@ -822,12 +880,18 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
     # 2. Silently ensure soft keyboard is suppressed, focus editor, and dispatch hardware keycombination (O(1) instant jump)
     ser = await get_active_adb_serial(serial)
     if ser:
+        pre_act = ""
+        if "mock" not in str(ser).lower():
+            try:
+                res_w = await run_adb_shell("dumpsys activity activities | grep -E topResumedActivity", ser, timeout=1.5)
+                pre_act = res_w.get("stdout", "").strip() if res_w.get("status") == "ok" else ""
+            except Exception:
+                pass
+
         disp_id = await detect_external_display_id(ser)
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
-        disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
-        # Ensure soft keyboard is closed and dispatch navigation command directly with duration flag
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             "input -d 0 keyevent 111 >/dev/null 2>&1",
@@ -836,7 +900,21 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
         base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
-        await run_adb_shell("; ".join(base_cmds), ser, timeout=8.0)
+        full_cmd = "; ".join(base_cmds)
+        await run_adb_shell(full_cmd, ser, timeout=8.0)
+        dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        await record_dispatched_key_event(
+            key_name=cmd_name,
+            keycodes=[key1, key2],
+            shell_command=full_cmd,
+            display_id=target_d,
+            duration_ms=dur_ms,
+            serial=ser,
+            caller_node=caller_node or "send_hid_keycombination",
+            details={"pre_activity": pre_act, "key1": key1, "key2": key2},
+            check_window_state=True
+        )
 
 
 async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Optional[int] = None, target_dpi: Optional[int] = None) -> Dict[str, Any]:
@@ -917,6 +995,18 @@ async def dispatch_accelerated_viewport_step(
     t0 = time.perf_counter()
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
+        dur_ms = 1.0
+        from services import state
+        state.record_key_event_telemetry({
+            "key_name": f"{method.upper()}: {delta_lines}L (mock)",
+            "keycodes": [93] if method == "pagedown" else [20],
+            "shell_command": "mock",
+            "display_id": display_id,
+            "duration_ms": dur_ms,
+            "caller_node": "arrow_down",
+            "navigated_away": False,
+            "details": {"delta_lines": delta_lines, "method": method}
+        })
         return {
             "status": "ok",
             "method": method,
@@ -924,6 +1014,13 @@ async def dispatch_accelerated_viewport_step(
             "duration_ms": 1,
             "command": "mock"
         }
+
+    pre_act = ""
+    try:
+        res_w = await run_adb_shell("dumpsys activity activities | grep -E topResumedActivity", ser, timeout=1.5)
+        pre_act = res_w.get("stdout", "").strip() if res_w.get("status") == "ok" else ""
+    except Exception:
+        pass
 
     did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
     valid_d = sanitize_input_display_id(did)
@@ -941,10 +1038,10 @@ async def dispatch_accelerated_viewport_step(
             chosen_method = "batched"
 
     shell_cmds = [
-        "settings put secure show_ime_with_hard_keyboard 0",
-        "input -d 0 keyevent 111 >/dev/null 2>&1"
+        "settings put secure show_ime_with_hard_keyboard 0"
     ]
 
+    key_sequence = []
     page_stride = 49  # Standard lines per page for desktop 1080p markdown editor
     if chosen_method == "pagedown":
         # Option A: Single PageDown command (keycode 93) + micro-adjustment
@@ -969,18 +1066,38 @@ async def dispatch_accelerated_viewport_step(
     else:
         # Option B: Batched ADB Keyevents in a single shell command
         count = max(1, min(delta_lines, 80))
-        keys_str = " ".join(["20"] * count)
+        key_sequence = ["20"] * count
+        keys_str = " ".join(key_sequence)
         shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
 
     full_cmd = "; ".join(shell_cmds)
     res = await run_adb_shell(full_cmd, ser, timeout=3.0)
-    dur_ms = max(1, int((time.perf_counter() - t0) * 1000))
+    dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    ev_name = f"PageDown(93)" if chosen_method == "pagedown" else (f"DownArrow(20) x{delta_lines}" if chosen_method != "swipe" else "TouchSwipe")
+    keycodes_list = [int(k) for k in key_sequence] if key_sequence else []
+
+    await record_dispatched_key_event(
+        key_name=ev_name,
+        keycodes=keycodes_list,
+        shell_command=full_cmd,
+        display_id=valid_d,
+        duration_ms=dur_ms,
+        serial=ser,
+        caller_node="arrow_down",
+        details={
+            "delta_lines": delta_lines,
+            "method": chosen_method,
+            "pre_activity": pre_act
+        },
+        check_window_state=True
+    )
 
     return {
         "status": "ok" if res.get("status") == "ok" else "error",
         "method": chosen_method,
         "delta_lines": delta_lines,
-        "duration_ms": dur_ms,
+        "duration_ms": int(dur_ms),
         "output": res.get("stdout", ""),
         "command": full_cmd
     }

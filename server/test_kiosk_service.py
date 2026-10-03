@@ -53,3 +53,24 @@ def test_kiosk_auto_refresh_endpoint():
     data = res.json()
     assert data.get("status") == "ok"
     assert "refreshed_tasks" in data
+
+def test_kiosk_lock_markdown_viewer_distinction():
+    # Test locking specifically with target_type="markdown_viewer"
+    lock_res = client.post("/api/device/kiosk/lock", json={
+        "display_id": 8,
+        "package_id": "com.microsoft.teams",
+        "target_type": "markdown_viewer"
+    })
+    assert lock_res.status_code == 200
+    lock_data = lock_res.json()
+    assert lock_data.get("status") == "ok"
+    assert lock_data.get("locked_target_type") in ("markdown_viewer", "generic")
+    
+    # Check kiosk status reports target distinction
+    status_res = client.get("/api/device/kiosk/status")
+    assert status_res.status_code == 200
+    status = status_res.json()
+    assert "is_markdown_viewer_active" in status
+    assert "markdown_viewer_task_id" in status
+    assert "teams_app_task_id" in status
+
