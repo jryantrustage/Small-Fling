@@ -75,30 +75,60 @@ def activate_project(project_id: str) -> bool:
         c.execute("UPDATE projects SET is_active = 0;"); c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (project_id,))
         conn.commit(); return True
 
+STORAGE_FRAMES_DIR = Path(__file__).parent / "storage" / "frames"
+ALL_FRAMES_DIRS = [FRAMES_DIR, STORAGE_FRAMES_DIR]
+
+def _remove_frame_files(filenames: List[str], project_id: Optional[str] = None):
+    for fdir in ALL_FRAMES_DIRS:
+        if not fdir.exists():
+            continue
+        for fn in filenames:
+            (fdir / fn).unlink(missing_ok=True)
+            stem = Path(fn).stem
+            for extra in fdir.glob(f"*{stem}*"):
+                extra.unlink(missing_ok=True)
+        if project_id:
+            for extra in fdir.glob(f"*{project_id}*"):
+                extra.unlink(missing_ok=True)
+
 def delete_project(project_id: str) -> bool:
     with get_connection() as conn:
-        c = conn.cursor(); row = c.execute("SELECT is_active FROM projects WHERE id = ?;", (project_id,)).fetchone()
-        if not row: return False
+        c = conn.cursor()
+        row = c.execute("SELECT is_active FROM projects WHERE id = ?;", (project_id,)).fetchone()
+        if not row:
+            return False
         was_active = bool(row["is_active"])
         fns = [r["filename"] for r in c.execute("SELECT filename FROM frames WHERE project_id = ?;", (project_id,)).fetchall()]
-        c.execute("DELETE FROM projects WHERE id = ?;", (project_id,)); conn.commit()
-        for fn in fns: (FRAMES_DIR / fn).unlink(missing_ok=True)
+        
+        # Explicitly clean up related tables to ensure thorough deletion
+        c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM project_telemetry WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
+        conn.commit()
+
+        _remove_frame_files(fns, project_id)
+
         if was_active:
             fb = c.execute("SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;").fetchone()
-            if fb: c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (fb["id"],)); conn.commit()
+            if fb:
+                c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (fb["id"],))
+                conn.commit()
         return True
 
 def _purge_project_data(project_id: str, new_status: str) -> bool:
     with get_connection() as conn:
         c = conn.cursor()
-        if not c.execute("SELECT id FROM projects WHERE id = ?;", (project_id,)).fetchone(): return False
+        if not c.execute("SELECT id FROM projects WHERE id = ?;", (project_id,)).fetchone():
+            return False
         fns = [r["filename"] for r in c.execute("SELECT filename FROM frames WHERE project_id = ?;", (project_id,)).fetchall()]
-        c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,)); c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
         now = datetime.now().isoformat()
         c.execute("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?;", (new_status, now, project_id))
         c.execute("UPDATE project_telemetry SET telemetry_json = '{}', updated_at = ? WHERE project_id = ?;", (now, project_id))
         conn.commit()
-        for fn in fns: (FRAMES_DIR / fn).unlink(missing_ok=True)
+        _remove_frame_files(fns, project_id)
         return True
 
 def abort_project(project_id: str) -> bool: return _purge_project_data(project_id, "aborted")
@@ -129,10 +159,15 @@ def update_frame_position(frame_id: str, custom_offset_y: float) -> bool:
 
 def delete_frame(frame_id: str) -> bool:
     with get_connection() as conn:
-        c = conn.cursor(); row = c.execute("SELECT filename FROM frames WHERE frame_id = ?;", (frame_id,)).fetchone()
-        if not row: return False
-        c.execute("DELETE FROM frames WHERE frame_id = ?;", (frame_id,)); c.execute("DELETE FROM document_lines WHERE frame_id = ?;", (frame_id,)); conn.commit()
-        (FRAMES_DIR / row["filename"]).unlink(missing_ok=True); return True
+        c = conn.cursor()
+        row = c.execute("SELECT filename FROM frames WHERE frame_id = ?;", (frame_id,)).fetchone()
+        if not row:
+            return False
+        c.execute("DELETE FROM frames WHERE frame_id = ?;", (frame_id,))
+        c.execute("DELETE FROM document_lines WHERE frame_id = ?;", (frame_id,))
+        conn.commit()
+        _remove_frame_files([row["filename"]])
+        return True
 
 def get_document_lines(project_id: Optional[str]) -> Dict[int, Dict[str, Any]]:
     if not project_id: return {}

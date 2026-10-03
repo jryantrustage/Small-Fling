@@ -579,6 +579,7 @@ def load_persisted_state():
         if not p:
             document_lines.clear()
             captured_frames.clear()
+            recapture_queue.clear()
             latest_telemetry["current_page"] = 0
             latest_telemetry["current_top_line"] = 0
             latest_telemetry["current_bottom_line"] = 0
@@ -587,7 +588,8 @@ def load_persisted_state():
         lines_db = db.get_document_lines(pid)
         document_lines.clear()
         for k, v in lines_db.items(): document_lines[k] = v
-        captured_frames = {f["frame_id"]: f for f in db.get_frames(pid)}
+        captured_frames.clear()
+        captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
         tel = db.get_project_telemetry(pid)
         if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
         if tel.get("token_stats"): token_stats.update(tel["token_stats"])
@@ -595,6 +597,7 @@ def load_persisted_state():
     except Exception as e:
         print(f"Error loading state from SQLite: {e}")
 
+    recapture_queue.clear()
     if RECAPTURE_QUEUE_FILE.exists():
         try:
             with open(RECAPTURE_QUEUE_FILE, "r", encoding="utf-8") as f:

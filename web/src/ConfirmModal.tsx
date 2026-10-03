@@ -64,7 +64,7 @@ export const Modal: React.FC<ModalProps> = ({
     : ['info', 'success'].includes(effectiveVariant) ? <Info size={18} /> : null;
 
   return (
-    <div className="modal-overlay" onClick={onClose} role="dialog" aria-modal="true">
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose(); }} role="dialog" aria-modal="true">
       <div className={`modal-card modal-variant-${effectiveVariant}`} onClick={e => e.stopPropagation()} style={{ ...(width && { width }), ...(maxWidth && { maxWidth }) }}>
         <div className={`modal-glow-bar modal-glow-${effectiveVariant}`} />
         <div className="modal-header">
@@ -148,6 +148,7 @@ export const ConfirmProvider: React.FC<{ children: ReactNode }> = ({ children })
   }, []);
 
   const closeWith = (val: boolean) => {
+    console.log('[ConfirmModal] closeWith called with:', val);
     dialog?.resolve(val);
     setDialog(null);
   };

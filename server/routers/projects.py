@@ -388,8 +388,35 @@ async def delete_project(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
     state.load_persisted_state()
     active_proj = db.get_active_project()
+    active_pid = active_proj["id"] if active_proj else None
+
+    # Broadcast project deletion and state synchronization to all connected clients
+    await state.ws_manager.broadcast({
+        "type": "project_deleted",
+        "project_id": project_id,
+        "active_project": active_proj,
+        "projects": db.get_projects()
+    })
     await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
-    return {"status": "success", "active_project": active_proj}
+    await state.ws_manager.broadcast({
+        "type": "frames_purged" if not active_proj else "frame_deleted",
+        "frames": db.get_frames(active_pid)
+    })
+    try:
+        from routers.frames_document import _doc_payload
+        await state.ws_manager.broadcast({
+            "type": "document_updated",
+            "data": _doc_payload()
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "deleted_project_id": project_id,
+        "active_project": active_proj,
+        "projects": db.get_projects()
+    }
 
 @router.post("/api/projects/{project_id}/abort")
 async def abort_project(project_id: str):
