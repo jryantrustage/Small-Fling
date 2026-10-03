@@ -17,9 +17,9 @@ import config
 from services import state
 
 has_key = bool(config.GEMINI_API_KEY)
-active_pipeline_mode = "cloud" if has_key else "local"
-active_model_target = "gemini" if has_key else "ollama"
-active_ocr_engine = "auto" if has_key else "local"
+active_pipeline_mode = "local"
+active_model_target = "ollama"
+active_ocr_engine = "minicpm"
 
 def sync_pipeline_mode_with_keys() -> None:
     global active_pipeline_mode, active_model_target, active_ocr_engine
@@ -28,7 +28,7 @@ def sync_pipeline_mode_with_keys() -> None:
     if not key_exists:
         active_pipeline_mode = "local"
         active_model_target = "ollama"
-        active_ocr_engine = "local"
+        active_ocr_engine = "minicpm"
 
 
 connection_stats: Dict[str, Any] = {
@@ -153,13 +153,15 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
         state.save_persisted_state()
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
-    res = await state.scan_image_in_process(image_path)
+    res = await scan_image_with_minicpm(image_path)
     top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
+    model_name = res.get("model_used", "MiniCPM-V")
     state.captured_frames[frame_id].update({
         "top_line": top_ln,
         "bottom_line": bot_ln,
         "extracted_line_count": len(lines),
         "status": "processed",
+        "model_used": model_name,
         "bounding_boxes": res.get("bounding_boxes", {})
     })
     if top_ln > 0 and bot_ln > 0:
@@ -171,14 +173,14 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
                 "line_number": ln,
                 "gutter_number": ln,
                 "text": item.get("text", ""),
-                "is_blank": item.get("is_blank", False),
+                "is_blank": item.get("is_blank", not bool(item.get("text", "").strip())),
                 "is_wrapped": item.get("is_wrapped", False),
                 "wrapped_line_count": item.get("wrapped_line_count", 1),
                 "status": "verified",
                 "frame_id": frame_id,
                 "sources": [frame_id],
                 "confidence": item.get("confidence", 0.98),
-                "notes": "Local Gutter OCR (Worker Process)",
+                "notes": f"Local LLM OCR ({model_name})",
                 "updated_at": datetime.now().isoformat()
             }
     state.save_persisted_state()
@@ -289,8 +291,7 @@ async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: i
             print(f"[Ollama] Falling back to Gemini Cloud API for frame {frame_id}")
             await process_frame_with_gemini(frame_id, image_path, top_line, bottom_line)
         else:
-            print(f"[Ollama] Gemini not configured, falling back to local OCR for frame {frame_id}")
-            await process_frame_with_local_ocr(frame_id, image_path)
+            state.captured_frames[frame_id]["status"] = f"error: {str(e)}"
     finally:
         state.save_persisted_state()
 
@@ -306,15 +307,16 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
     pm = (pipeline_mode or active_pipeline_mode).lower()
     if not has_key and pm == "cloud":
         pm = "local"
-    effective_engine = engine or ("local" if pm == "local" or not has_key else active_ocr_engine)
+    effective_engine = engine or ("minicpm" if pm == "local" or not has_key else active_ocr_engine)
     effective_target = model_target or ("ollama" if pm == "local" or not has_key else active_model_target)
     mode = effective_engine.lower()
     target = normalize_model_target(effective_target)
     if not has_key and (mode in {"gemini", "cloud"} or target == "gemini"):
-        mode = "local"
+        mode = "minicpm"
         target = "ollama"
-    if mode == "local" or (mode in {"auto", "gemini"} and target == "gemini" and not has_key):
-        return await process_frame_with_local_ocr(frame_id, image_path)
+    if mode in {"minicpm", "ollama", "local"}:
+        await process_frame_with_target(frame_id, image_path, top_line, bottom_line, "ollama")
+        return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
     elif mode in {"gemini", "cloud"}:
         await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
@@ -327,13 +329,8 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
             pass
         return local_res
     else:
-        try:
-            if not has_key and target == "gemini":
-                return await process_frame_with_local_ocr(frame_id, image_path)
-            await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
-            return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
-        except Exception:
-            return await process_frame_with_local_ocr(frame_id, image_path)
+        await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
+        return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
 async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
     """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction, with graceful fallback to RapidOCR."""
@@ -404,29 +401,30 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
                 code = match.group(2)
                 plines.append({"line_number": ln, "gutter_number": ln, "text": code})
 
+        top_ln = min((int(p["line_number"]) for p in plines if p.get("line_number")), default=0)
+        bot_ln = max((int(p["line_number"]) for p in plines if p.get("line_number")), default=0)
         formatted = "\n".join(f"{p['line_number']:>3}: {p['text']}" for p in plines) if plines else raw_text
         return {
             "status": "success",
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
             "lines": plines,
             "extracted_text": formatted,
             "lines_count": len(plines),
+            "bounding_boxes": {},
             "model_used": f"MiniCPM-V ({model_name})"
         }
     except Exception as e:
-        print(f"[MiniCPM-V OCR] Ollama call error: {e}, falling back to local RapidOCR")
-        rapid_res = await state.scan_image_in_process(image_path)
-        lines = rapid_res.get("lines", [])
-        formatted = []
-        for l in lines:
-            txt = l.get("text", "").strip()
-            ln = l.get("line_number")
-            formatted.append(f"{ln:>3}: {txt}" if txt else f"{ln:>3}:")
-        text = "\n".join(formatted) if formatted else "(No lines detected)"
+        print(f"[MiniCPM-V OCR] Ollama call error: {e}")
         return {
-            "status": "fallback",
-            "lines": lines,
-            "extracted_text": text,
-            "lines_count": len(lines),
-            "model_used": "RapidOCR (Fallback)"
+            "status": "error",
+            "error": str(e),
+            "top_line": 0,
+            "bottom_line": 0,
+            "lines": [],
+            "extracted_text": "",
+            "lines_count": 0,
+            "bounding_boxes": {},
+            "model_used": "MiniCPM-V (Failed)"
         }
 

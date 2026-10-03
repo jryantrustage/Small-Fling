@@ -1515,78 +1515,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "telemetry_insight": f"Background worker notice: {ex}"
                     })
 
-            if is_fast:
-                rapid_res = await state.scan_image_in_process(temp_calib)
-                r_lines = rapid_res.get("lines", [])
-                r_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in r_lines) if r_lines else ""
-                for item in r_lines:
-                    try:
-                        raw_ln = str(item.get("line_number") or "").strip()
-                        digits = re.sub(r"\D", "", raw_ln)
-                        ln = int(digits) if digits else None
-                    except Exception:
-                        ln = None
-                    if ln and ln > 0:
-                        state.document_lines[ln] = {
-                            "line_number": ln, "gutter_number": ln, "text": item.get("text", ""),
-                            "is_blank": not bool(item.get("text", "").strip()), "is_wrapped": False,
-                            "wrapped_line_count": 1, "status": "verified", "confidence": 0.98,
-                            "notes": "RapidOCR Fast In-Process", "updated_at": datetime.now().isoformat()
-                        }
-                if r_lines:
-                    state.save_persisted_state()
-                    await state.ws_manager.broadcast({
-                        "type": "document_updated",
-                        "document": state.get_document_metrics(),
-                        "data": state.get_document_metrics()
-                    })
-
-                asyncio.create_task(_run_minicpm_background(temp_calib))
-                preview_msg = r_text[:300] + ("..." if len(r_text) > 300 else "") if r_text else "MiniCPM-V vision worker running in background ⚡"
-                node.update({
-                    "status": "completed",
-                    "extracted_text": r_text or "(Dispatched to background AI worker...)",
-                    "preview_text": preview_msg,
-                    "lines_count": len(r_lines),
-                    "char_count": len(r_text),
-                    "model_used": "RapidOCR (Fast) + MiniCPM-V (Worker)",
-                    "evaluator": "Multimodal Vision Evaluator",
-                    "healing_step": None,
-                    "telemetry_insight": f"Fast OCR extracted {len(r_lines)} lines in < 45ms • MiniCPM-V verbatim worker running in background ⚡",
-                    "error": None
-                })
-                state.latest_telemetry["status_message"] = f"DAG Node 3b: Extracted {len(r_lines)} lines in < 45ms • MiniCPM-V running in background ⚡"
-                await state.ws_manager.broadcast({
-                    "type": "dag_updated",
-                    "dag": state.dag_state,
-                    "node_id": "local_ai_ocr",
-                    "extracted_text": node["extracted_text"],
-                    "lines_count": len(r_lines),
-                    "char_count": len(r_text),
-                    "model_used": node["model_used"],
-                    "telemetry": state.latest_telemetry
-                })
-                return {
-                    "status": "success",
-                    "node_id": "local_ai_ocr",
-                    "lines_count": len(r_lines),
-                    "char_count": len(r_text),
-                    "extracted_text": node["extracted_text"],
-                    "model_used": node["model_used"],
-                    "message": f"Local AI OCR extracted {len(r_lines)} lines in < 45ms ⚡"
-                }
-
             try:
                 scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib)
             except Exception as e:
-                rapid_res = await state.scan_image_in_process(temp_calib)
-                r_lines = rapid_res.get("lines", [])
+                print(f"[local_ai_ocr] MiniCPM-V invocation error: {e}")
                 scan_res = {
-                    "status": "fallback",
-                    "lines": r_lines,
-                    "extracted_text": "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in r_lines),
-                    "lines_count": len(r_lines),
-                    "model_used": "RapidOCR (Fallback)"
+                    "status": "error",
+                    "error": str(e),
+                    "lines": [],
+                    "extracted_text": "",
+                    "lines_count": 0,
+                    "model_used": "MiniCPM-V (Error)"
                 }
 
             extracted_text = scan_res.get("extracted_text", "")
@@ -1762,7 +1701,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "created_at": datetime.now().isoformat(),
                 "extracted_line_count": len(lines_detected) if lines_detected else lpp,
                 "bounding_boxes": scan_res.get("bounding_boxes", {}),
-                "model_used": cfg.get("engine", "local:rapidocr"),
+                "model_used": cfg.get("engine", "MiniCPM-V (Ollama)"),
                 "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
             }
             state.captured_frames[fid] = frame_info
@@ -1787,7 +1726,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if is_fast:
                 async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
                     try:
-                        bg_scan = await state.scan_image_in_process(target_img)
+                        bg_scan = await ocr_svc.scan_image_with_minicpm(target_img)
                         bg_lines = bg_scan.get("lines", [])
                         real_top = bg_scan.get("top_line", t_val) or t_val
                         real_bot = bg_scan.get("bottom_line", b_val) or b_val
@@ -2964,7 +2903,7 @@ async def set_pipeline_mode(req: PipelineModeRequest):
     if m == "cloud" and not config.GEMINI_API_KEY:
         raise HTTPException(status_code=400, detail="Cloud Pipeline requires a Gemini API key. Please configure your key in Secrets or use Local Pipeline.")
     ocr_svc.active_pipeline_mode = m
-    if m == "local": ocr_svc.active_model_target, ocr_svc.active_ocr_engine = "ollama", "local"
+    if m == "local": ocr_svc.active_model_target, ocr_svc.active_ocr_engine = "ollama", "minicpm"
     else: ocr_svc.active_model_target, ocr_svc.active_ocr_engine = "gemini", "auto"
     payload = {"type": "pipeline_mode_changed", "pipeline_mode": ocr_svc.active_pipeline_mode, "mode": ocr_svc.active_pipeline_mode, "model_target": ocr_svc.active_model_target, "ocr_engine": ocr_svc.active_ocr_engine, "engine": ocr_svc.active_ocr_engine}
     await state.ws_manager.broadcast(payload)
@@ -2976,12 +2915,12 @@ async def get_ocr_engines():
     ocr_svc.sync_pipeline_mode_with_keys()
     return {
         "engines": [
-            {"id": "auto", "name": "Auto (Gemini with Local Fallback)" if has_gemini else "Auto (Local RapidOCR)", "available": True, "type": "auto"},
-            {"id": "local", "name": "Local RapidOCR / OpenCV Engine", "available": True, "type": "local"},
+            {"id": "minicpm", "name": "Local MiniCPM-V (Ollama Vision)", "available": True, "type": "local"},
+            {"id": "auto", "name": "Auto (Gemini with MiniCPM-V Fallback)" if has_gemini else "Auto (Local MiniCPM-V)", "available": True, "type": "auto"},
             {"id": "gemini", "name": "Gemini 2.5 Cloud Vision", "available": has_gemini, "type": "cloud"},
-            {"id": "hybrid", "name": "Hybrid (Gemini Text + Local Bounding Boxes)", "available": has_gemini, "type": "hybrid"}
+            {"id": "hybrid", "name": "Hybrid (Gemini Text + Local MiniCPM-V)", "available": has_gemini, "type": "hybrid"}
         ],
-        "active_engine": ocr_svc.active_ocr_engine, "model_targets": ["gemini", "ollama"],
+        "active_engine": ocr_svc.active_ocr_engine, "model_targets": ["ollama", "gemini"],
         "active_model_target": ocr_svc.active_model_target, "pipeline_mode": ocr_svc.active_pipeline_mode
     }
 
@@ -2990,9 +2929,12 @@ async def select_ocr_engine(req: OcrSelectionRequest):
     has_gemini = bool(config.GEMINI_API_KEY)
     if req.engine:
         eng = req.engine.lower()
-        if eng not in {"auto", "local", "gemini", "hybrid"}: raise HTTPException(status_code=400, detail=f"Invalid engine '{req.engine}'.")
+        if eng in {"local", "minicpm", "ollama"}:
+            eng = "minicpm"
+        elif eng not in {"auto", "gemini", "hybrid"}:
+            raise HTTPException(status_code=400, detail=f"Invalid engine '{req.engine}'.")
         if eng in {"gemini", "hybrid"} and not has_gemini:
-            raise HTTPException(status_code=400, detail=f"Engine '{req.engine}' requires a configured Gemini API key. Please configure your key or use 'local'.")
+            raise HTTPException(status_code=400, detail=f"Engine '{req.engine}' requires a configured Gemini API key. Please configure your key or use 'minicpm'.")
         ocr_svc.active_ocr_engine = eng
     if req.model_target: ocr_svc.active_model_target = ocr_svc.normalize_model_target(req.model_target)
     await state.ws_manager.broadcast({"type": "ocr_engine_changed", "active_engine": ocr_svc.active_ocr_engine, "active_model_target": ocr_svc.active_model_target})
@@ -3005,12 +2947,13 @@ async def scan_direct(request: Request, file: UploadFile = File(...), engine: Op
     temp_path = state.FRAMES_DIR / f"temp_scan_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
     pm = pipeline_mode or request.query_params.get("pipeline_mode") or (ocr_svc.active_pipeline_mode if has_gemini else "local")
     mt = ocr_svc.normalize_model_target(model_target or ("ollama" if pm == "local" or not has_gemini else ocr_svc.active_model_target) or request.query_params.get("model_target"))
-    eff_engine = engine or ("local" if not has_gemini else ocr_svc.active_ocr_engine)
+    eff_engine = engine or ("minicpm" if not has_gemini else ocr_svc.active_ocr_engine)
     if not has_gemini and eff_engine in {"gemini", "hybrid"}:
-        eff_engine = "local"
+        eff_engine = "minicpm"
     try:
         with open(temp_path, "wb") as f: f.write(contents)
-        return {"status": "success", "engine": eff_engine, "model_target": mt, "pipeline_mode": pm, **state.ocr_engine.scan_image(str(temp_path))}
+        res = await ocr_svc.scan_image_with_minicpm(temp_path)
+        return {"status": "success", "engine": eff_engine, "model_target": mt, "pipeline_mode": pm, **res}
     finally:
         if temp_path.exists(): temp_path.unlink()
 
