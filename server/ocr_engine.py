@@ -833,7 +833,7 @@ def scan_image_with_minicpm_sync(image_path: str) -> Dict[str, Any]:
     try:
         from services.ocr_service import call_minicpm_ollama_sync, parse_minicpm_output
         raw_resp, model_name = call_minicpm_ollama_sync(Path(image_path))
-        plines, top_ln, bot_ln, formatted = parse_minicpm_output(raw_resp)
+        plines, top_ln, bot_ln, formatted, detected_filename = parse_minicpm_output(raw_resp)
         return {
             "status": "success",
             "top_line": top_ln,
@@ -842,7 +842,8 @@ def scan_image_with_minicpm_sync(image_path: str) -> Dict[str, Any]:
             "extracted_text": formatted,
             "lines_count": len(plines),
             "bounding_boxes": {},
-            "model_used": f"MiniCPM-V ({model_name})"
+            "model_used": f"MiniCPM-V ({model_name})",
+            "detected_filename": detected_filename
         }
     except Exception as e:
         print(f"[scan_image_with_minicpm_sync] error: {e}")

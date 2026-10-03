@@ -14,6 +14,7 @@ from google import genai
 from google.genai import types
 
 import config
+import db
 from services import state
 
 has_key = bool(config.GEMINI_API_KEY)
@@ -156,6 +157,16 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     res = await scan_image_with_minicpm(image_path)
     top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
     model_name = res.get("model_used", "MiniCPM-V")
+    det_fn = res.get("detected_filename")
+    if det_fn:
+        pid = state.captured_frames.get(frame_id, {}).get("project_id") or state.get_current_project_id()
+        if pid:
+            db.append_project_filename(pid, det_fn)
+            try:
+                proj = db.get_project(pid)
+                await state.ws_manager.broadcast({"type": "project_updated", "project": proj})
+            except Exception:
+                pass
     state.captured_frames[frame_id].update({
         "top_line": top_ln,
         "bottom_line": bot_ln,
@@ -194,7 +205,7 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
     """
     with Image.open(image_path) as img:
         w, h = img.size
-        max_dim = 1920
+        max_dim = 1344
         if max(w, h) > max_dim:
             scale = max_dim / float(max(w, h))
             img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
@@ -205,13 +216,16 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
 
     prompt = (
         "Extract code lines verbatim with gutter line numbers from the image.\n"
-        "Output each line in the strict structured format:\n"
+        "If a document/file name is visible in the window title bar, tab, or header at the top (e.g. 'filename.md'), output it first as:\n"
+        "FILE_NAME: <detected file name>\n"
+        "Output each code/text line in the strict structured format:\n"
         "LINE_NUM: code_content\n\n"
-        "Rules:\n"
-        "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
-        "- LINE_NUM must be the integer line number visible in the left gutter.\n"
+        "CRITICAL RULES:\n"
+        "- The window title bar, app header, or tab at the top is the FILE_NAME. It is NOT part of the editor gutter. NEVER output it as LINE_1 or any line number.\n"
+        "- LINE_NUM must strictly be the integer line number visible in the left gutter inside the editor.\n"
+        "- Line 1 starts at gutter line number 1 (e.g. '# Matrix_main_26-09-17-8-19am'). Line 1 content in your output must align with gutter line 1.\n"
         "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
-        "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
+        "- If a gutter line is blank, output 'LINE_NUM:' with no code content.\n"
         "- Do not include markdown code fences, headers, or explanations."
     )
     models = []
@@ -230,7 +244,7 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
         "num_ctx": 4096,
         "num_batch": 512,
     }
-    timeout_sec = max(config.OLLAMA_TIMEOUT, 60)
+    timeout_sec = max(config.OLLAMA_TIMEOUT, 180)
     for m in models:
         try:
             connection_stats["total_http_requests"] += 1
@@ -255,20 +269,31 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
     raise last_ex or RuntimeError("Ollama MiniCPM-V vision models failed")
 
 
-def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int, str]:
+def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int, str, Optional[str]]:
     """
-    Parses MiniCPM-V textual output with robust multi-delimiter regex and JSON fallback.
+    Parses MiniCPM-V textual output with robust multi-delimiter regex, filename detection, and JSON fallback.
     Supports formats:
       '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code'
+    Extracts FILE_NAME from header and ensures Line 1 of the gutter aligns with Line 1 of document text.
     """
     raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
     plines: List[Dict[str, Any]] = []
     line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?\[?(\d+)\]?\s*(?:[:|.)\]\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
 
+    detected_filename: Optional[str] = None
+    fn_match = re.search(r"^\s*FILE_NAME\s*:\s*([^\r\n]+)", raw_text, re.MULTILINE | re.IGNORECASE)
+    if fn_match:
+        cand = fn_match.group(1).strip()
+        cand = re.sub(r"^[`'\"]+|[`'\"]+$", "", cand).strip()
+        if cand and cand.upper() not in {"NONE", "N/A", "NULL", "UNKNOWN", "NOT VISIBLE"}:
+            detected_filename = cand
+
     seen_lines = set()
     for line in raw_text.splitlines():
         line_clean = line.rstrip()
         if not line_clean.strip():
+            continue
+        if re.match(r"^\s*FILE_NAME\s*:", line_clean, re.IGNORECASE):
             continue
         if match := line_pattern.match(line_clean):
             ln = int(match.group(1))
@@ -316,20 +341,53 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
                 })
 
     plines.sort(key=lambda x: x["line_number"])
+
+    # File name detection fallback & gutter line alignment:
+    # If the first line is the window title bar filename (e.g. filename.md), exclude it from the scan
+    # and align gutter line 1 with line 1 of the document text.
+    FILENAME_EXT_REGEX = re.compile(
+        r"^[a-zA-Z0-9_\-.]+\.(?:md|markdown|py|js|ts|tsx|jsx|json|html|css|yaml|yml|c|cpp|h|hpp|go|rs|java|kt|sh|rb|sql|txt)$",
+        re.IGNORECASE
+    )
+    if plines:
+        first_txt = (plines[0].get("text") or "").strip()
+        first_ln = plines[0].get("line_number", 0)
+        if first_ln <= 2 and FILENAME_EXT_REGEX.match(first_txt):
+            if not detected_filename:
+                detected_filename = first_txt
+            plines.pop(0)
+            if plines and not (plines[0].get("text") or "").strip():
+                plines.pop(0)
+            if plines:
+                offset = plines[0]["line_number"] - 1
+                if offset > 0:
+                    for p in plines:
+                        p["line_number"] -= offset
+                        p["gutter_number"] = p["line_number"]
+
     top_ln = min((p["line_number"] for p in plines), default=0)
     bot_ln = max((p["line_number"] for p in plines), default=0)
     formatted = "\n".join(f"{p['line_number']:>3}: {p['text']}" for p in plines) if plines else raw_text
-    return plines, top_ln, bot_ln, formatted
+    return plines, top_ln, bot_ln, formatted, detected_filename
 
 
 async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
     try:
         raw_resp, model_used = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
-        plines, top_g, bot_g, _ = parse_minicpm_output(raw_resp)
+        plines, top_g, bot_g, _, detected_filename = parse_minicpm_output(raw_resp)
         top_val = top_g if top_g > 0 else (top_line if top_line > 0 else None)
         bot_val = bot_g if bot_g > 0 else (bottom_line if bottom_line > 0 else None)
         _apply_extracted_lines(frame_id, plines, top_val, bot_val, f"Ollama Vision ({model_used})")
         state.captured_frames[frame_id]["model_used"] = f"ollama:{model_used}"
+        if detected_filename:
+            pid = state.captured_frames[frame_id].get("project_id") or state.get_current_project_id()
+            if pid:
+                db.append_project_filename(pid, detected_filename)
+                try:
+                    proj = db.get_project(pid)
+                    await state.ws_manager.broadcast({"type": "project_updated", "project": proj})
+                except Exception:
+                    pass
     except Exception as e:
         print(f"[Ollama] Frame {frame_id} failed or timed out: {e}")
         connection_stats["last_connection_error"] = str(e)
@@ -383,7 +441,7 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
     """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction."""
     try:
         raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
-        plines, top_ln, bot_ln, formatted = parse_minicpm_output(raw_resp)
+        plines, top_ln, bot_ln, formatted, detected_filename = parse_minicpm_output(raw_resp)
         return {
             "status": "success",
             "top_line": top_ln,
@@ -392,7 +450,8 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
             "extracted_text": formatted,
             "lines_count": len(plines),
             "bounding_boxes": {},
-            "model_used": f"MiniCPM-V ({model_name})"
+            "model_used": f"MiniCPM-V ({model_name})",
+            "detected_filename": detected_filename
         }
     except Exception as e:
         print(f"[MiniCPM-V OCR] Ollama call error: {e}")

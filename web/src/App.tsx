@@ -723,7 +723,7 @@ function AppContent() {
                 setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
               }
             }
-          } else if (msg.type === 'project_switched') {
+          } else if (msg.type === 'project_switched' || msg.type === 'project_updated') {
             setActiveProject(msg.project || null);
             fetchData();
           } else if (msg.type === 'document_updated') {
@@ -1124,9 +1124,20 @@ function AppContent() {
             <h1 className="brand-title">Matrix Capture</h1>
             <span className="brand-tag">v2.5 Studio</span>
           </div>
-          <div className="project-badge" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+          <div className="project-badge" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={activeProject?.description ? `File: ${activeProject.description}` : (activeProject?.name || 'Select Project')}>
             <FolderKanban size={13} color="#00ff9d" />
-            <span className="project-badge-name">{activeProject ? activeProject.name : 'Select Project'}</span>
+            <span className="project-badge-name">
+              {activeProject ? (
+                <>
+                  {activeProject.name}
+                  {activeProject.description && (
+                    <span style={{ fontSize: '11px', color: '#8b949e', fontWeight: 400, marginLeft: '6px' }}>
+                      ({activeProject.description})
+                    </span>
+                  )}
+                </>
+              ) : 'Select Project'}
+            </span>
             <ChevronDown size={11} />
           </div>
           {activeProject && (
@@ -1341,7 +1352,12 @@ function AppContent() {
                         <Trash2 size={13} />
                       </button>
                     </div>
-                    <div className="project-stats">
+                    {p.description && (
+                      <div style={{ fontSize: '11px', color: '#58a6ff', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.description}>
+                        File: {p.description}
+                      </div>
+                    )}
+                    <div className="project-stats" style={{ marginTop: p.description ? '3px' : undefined }}>
                       <span>{p.frame_count ?? 0} frames</span>
                       <span>•</span>
                       <span>{p.line_count ?? 0} lines</span>

@@ -161,6 +161,17 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
     try:
         res = await ocr_svc.scan_image_with_minicpm(ipath)
         top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
+        det_fn = res.get("detected_filename")
+        if det_fn:
+            pid = finfo.get("project_id") or state.get_current_project_id()
+            if pid:
+                db.append_project_filename(pid, det_fn)
+                try:
+                    proj = db.get_project(pid)
+                    await state.ws_manager.broadcast({"type": "project_updated", "project": proj})
+                    await state.ws_manager.broadcast({"type": "project_switched", "project": proj})
+                except Exception:
+                    pass
         finfo.update({
             "top_line": top_ln,
             "bottom_line": bot_ln,

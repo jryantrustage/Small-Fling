@@ -10,6 +10,8 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+        timeout: 180000,
+        proxyTimeout: 180000,
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, res) => {
             if (res && 'writeHead' in res && !res.headersSent) {
