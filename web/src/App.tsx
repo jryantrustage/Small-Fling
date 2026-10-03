@@ -592,11 +592,51 @@ function AppContent() {
     finally { setIsNavigating(false); }
   };
 
-  const handleDeleteProject = async (id: string) => {
-    const ok = await confirm({ title: 'Delete Project', message: 'Delete this project and all its transcribed frames?', variant: 'danger', confirmText: 'Delete' });
+  const handleDeleteProject = async (id: string, name?: string) => {
+    const projName = name || projects.find(p => p.id === id)?.name || id;
+    console.log('[App] handleDeleteProject initiated for:', id, projName);
+    const ok = await confirm({
+      title: 'Delete Project',
+      message: `Permanently delete project "${projName}" and all of its captured frames and ledger data?`,
+      variant: 'danger',
+      confirmText: 'Delete Project'
+    });
+    console.log('[App] confirm modal result:', ok);
     if (!ok) return;
-    const res = await api(`/api/projects/${id}`, { method: 'DELETE' });
-    if (res.ok) await fetchData();
+
+    try {
+      console.log(`[App] Sending DELETE /api/projects/${id}`);
+      const res = await api(`/api/projects/${id}`, { method: 'DELETE' });
+      console.log(`[App] DELETE /api/projects/${id} response status:`, res.status, res.ok);
+      if (res.ok) {
+        const delData = await res.json().catch(() => null);
+        if (delData?.projects) {
+          setProjects(delData.projects);
+          setActiveProject(delData.active_project || null);
+        } else {
+          setProjects(prev => prev.filter(p => p.id !== id));
+          if (activeProject?.id === id) {
+            setActiveProject(null);
+          }
+        }
+        if (activeProject?.id === id || delData?.deleted_project_id === activeProject?.id) {
+          setFrames([]);
+          setSelectedFrameId(null);
+          setSelectedFrameIds(new Set());
+          setSelectedLineNumbers(new Set());
+          setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+        }
+        await fetchData();
+        addTelemetryEvent('SYSTEM', `Deleted project "${projName}" (${id})`);
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Failed to delete project' }));
+        console.error('[App] DELETE failed:', err);
+        await showAlert({ title: 'Delete Failed', message: err.detail || 'Failed to delete project.', variant: 'danger' });
+      }
+    } catch (e: any) {
+      console.error('[App] DELETE exception:', e);
+      await showAlert({ title: 'Delete Error', message: e.message || 'Network error deleting project.', variant: 'danger' });
+    }
   };
 
   const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
@@ -658,6 +698,26 @@ function AppContent() {
           } else if (msg.type === 'frame_deleted') {
             setFrames(p => p.filter(f => f.frame_id !== msg.frame_id));
             addTelemetryEvent('FRAME', `Frame ${msg.frame_id?.slice(0, 8)} deleted`);
+          } else if (msg.type === 'frames_purged') {
+            setFrames([]);
+            setSelectedFrameId(null);
+            setSelectedFrameIds(new Set());
+          } else if (msg.type === 'project_deleted') {
+            setProjects(p => p.filter(item => item.id !== msg.project_id));
+            if (activeProject?.id === msg.project_id) {
+              setActiveProject(msg.active_project || null);
+              if (!msg.active_project) {
+                setFrames([]);
+                setSelectedFrameId(null);
+                setSelectedFrameIds(new Set());
+                setSelectedLineNumbers(new Set());
+                setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+              }
+            }
+            fetchData();
+          } else if (msg.type === 'project_switched') {
+            setActiveProject(msg.project || null);
+            fetchData();
           } else if (msg.type === 'document_updated') {
             const docObj = msg.data || msg.document;
             if (docObj) {
@@ -1061,6 +1121,18 @@ function AppContent() {
             <span className="project-badge-name">{activeProject ? activeProject.name : 'Select Project'}</span>
             <ChevronDown size={11} />
           </div>
+          {activeProject && (
+            <button
+              type="button"
+              className="btn-text-danger"
+              onClick={e => { e.stopPropagation(); handleDeleteProject(activeProject.id, activeProject.name); }}
+              title={`Delete active project "${activeProject.name}"`}
+              aria-label={`Delete active project ${activeProject.name}`}
+              style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <Trash2 size={12} />
+            </button>
+          )}
         </div>
 
         <div className="header-center">
@@ -1249,8 +1321,22 @@ function AppContent() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
                         <span className={`project-status-dot ${p.id === activeProject?.id ? 'active' : ''}`} />
                         <span className="project-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                        {p.id === activeProject?.id && <span className="active-badge">ACTIVE</span>}
                       </div>
-                      <button className="btn-text-danger" onClick={e => { e.stopPropagation(); handleDeleteProject(p.id); }} title="Delete project" style={{ padding: '2px 4px', opacity: 0.8 }}><Trash2 size={12} /></button>
+                      <button
+                        type="button"
+                        className="btn-text-danger"
+                        onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                        title={`Delete project "${p.name}"`}
+                        aria-label={`Delete project ${p.name}`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                    <div className="project-stats">
+                      <span>{p.frame_count ?? 0} frames</span>
+                      <span>•</span>
+                      <span>{p.line_count ?? 0} lines</span>
                     </div>
                   </div>
                 ))}
@@ -2083,15 +2169,28 @@ function AppContent() {
                   </span>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                     {projects.map(p => (
-                      <button
-                        key={p.id}
-                        className="btn btn-outline"
-                        onClick={() => handleSwitchProject(p.id)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px' }}
-                      >
-                        <FolderKanban size={13} color="#00ff9d" />
-                        <span>{p.name}</span>
-                      </button>
+                      <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', overflow: 'hidden' }}>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          onClick={() => handleSwitchProject(p.id)}
+                          style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px', border: 'none', background: 'transparent' }}
+                        >
+                          <FolderKanban size={13} color="#00ff9d" />
+                          <span>{p.name}</span>
+                          <span style={{ fontSize: '11px', color: '#8b949e', marginLeft: '4px' }}>({p.frame_count ?? 0} frames)</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-text-danger"
+                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                          title={`Delete project "${p.name}"`}
+                          aria-label={`Delete project ${p.name}`}
+                          style={{ padding: '6px 8px', borderLeft: '1px solid #30363d', borderRadius: 0, background: 'rgba(248, 81, 73, 0.08)' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
