@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from fastapi import HTTPException
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 from google import genai
 from google.genai import types
 
@@ -198,12 +198,47 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     state.update_dag_after_frame(frame_id, top_ln, bot_ln)
     return res
 
+def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Image.Image:
+    """
+    Applies empirical image filter recommendations to prevent thin character erosion
+    ('|', '\\', '/', '-', ';', brackets) and eliminate toolbar/status bar distractions:
+      1. Region of Interest (ROI) Cropping:
+         Excludes top toolbar (y: 0..160) and bottom taskbar/dock to prevent
+         hallucination of window title bar text as Line 1 or ASCII grid loops.
+      2. Adaptive Contrast Stretch (+12%):
+         Broadens dynamic range of faint syntax colors against dark code backgrounds.
+      3. Unsharp Masking on Text ROI:
+         Sharpens thin stems of pipes, slashes, brackets, and line numbers.
+    """
+    w, h = pil_img.size
+    img = pil_img
+
+    # 1. ROI crop to active editor text and gutter region (exclude title bar and dock if standard 1080p desktop)
+    if roi_crop and w >= 1200 and h >= 800:
+        y_top = max(0, min(160, int(h * 0.14)))
+        y_bot = min(h, max(y_top + 400, int(h * 0.96)))
+        x_left = 0
+        x_right = min(w, max(1400, int(w * 0.88)))
+        img = img.crop((x_left, y_top, x_right, y_bot))
+
+    # 2. Adaptive contrast stretch (+12%)
+    contrast_enhancer = ImageEnhance.Contrast(img)
+    img = contrast_enhancer.enhance(1.12)
+
+    # 3. Unsharp masking to preserve character fidelity
+    img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=130, threshold=3))
+
+    return img
+
+
 def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
     """
     Synchronous worker for invoking MiniCPM-V vision models via Ollama.
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, Lion Cove P-cores with AVX-VNNI).
     """
-    with Image.open(image_path) as img:
+    with Image.open(image_path) as raw_img:
+        # Preprocess with ROI crop, +12% adaptive contrast stretch, and unsharp masking
+        img = preprocess_frame_for_ocr(raw_img, roi_crop=True)
         w, h = img.size
         max_dim = 1344
         if max(w, h) > max_dim:
@@ -216,16 +251,17 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
 
     prompt = (
         "Extract code lines verbatim with gutter line numbers from the image.\n"
-        "If a document/file name is visible in the window title bar, tab, or header at the top (e.g. 'filename.md'), output it first as:\n"
+        "If a document/file name is visible in the tab or header, output it first as:\n"
         "FILE_NAME: <detected file name>\n"
         "Output each code/text line in the strict structured format:\n"
         "LINE_NUM: code_content\n\n"
         "CRITICAL RULES:\n"
-        "- The window title bar, app header, or tab at the top is the FILE_NAME. It is NOT part of the editor gutter. NEVER output it as LINE_1 or any line number.\n"
+        "- The window title bar or app header is NOT part of the editor gutter. NEVER output it as LINE_1 or any line number.\n"
         "- LINE_NUM must strictly be the integer line number visible in the left gutter inside the editor.\n"
-        "- Line 1 starts at gutter line number 1 (e.g. '# Matrix_main_26-09-17-8-19am'). Line 1 content in your output must align with gutter line 1.\n"
+        "- Line 1 starts at gutter line number 1. Line 1 content in your output must align with gutter line 1.\n"
         "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
         "- If a gutter line is blank, output 'LINE_NUM:' with no code content.\n"
+        "- If a line number is not visible in the left gutter, NEVER hallucinate it. State 'Not visible' or omit it.\n"
         "- Do not include markdown code fences, headers, or explanations."
     )
     models = []
@@ -238,7 +274,7 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
         "temperature": 0.0,
         "top_k": 1,
         "min_p": 0.05,
-        "repeat_penalty": 1.08,
+        "repeat_penalty": 1.18,
         "repeat_last_n": 64,
         "num_thread": 4,
         "num_ctx": 4096,
