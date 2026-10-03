@@ -235,6 +235,49 @@ export interface Dag2NodeStatistic {
   percentage_of_total: number;
 }
 
+export interface Dag2LineDiscrepancy {
+  type: string;
+  expected_char: string;
+  ocr_char: string;
+  description: string;
+}
+
+export interface Dag2LineDiagnostics {
+  image_processing?: string;
+  dpi_resolution?: string;
+  model_tuning?: string;
+}
+
+export interface Dag2SampledLineAudit {
+  line_number: number;
+  ocr_text: string;
+  gemini_reference_text: string;
+  accuracy_percent: number;
+  status: 'perfect_match' | 'minor_discrepancy' | 'mismatch';
+  character_diff_summary: string;
+  discrepancies?: Dag2LineDiscrepancy[];
+  diagnostics?: Dag2LineDiagnostics;
+}
+
+export interface Dag2SystemRecommendations {
+  device_dpi?: string;
+  display_resolution?: string;
+  ocr_image_preprocessing?: string;
+  model_temperature_and_prompt?: string;
+}
+
+export interface Dag2AccuracyAudit {
+  status: string;
+  audited_at?: string;
+  model_auditor?: string;
+  overall_accuracy_percent: number;
+  character_error_rate_pct: number;
+  audited_lines_count: number;
+  perfect_matches_count: number;
+  sampled_lines: Dag2SampledLineAudit[];
+  system_recommendations?: Dag2SystemRecommendations;
+}
+
 export interface Dag2PerformanceReport {
   status: string;
   generated_at?: string;
@@ -253,5 +296,6 @@ export interface Dag2PerformanceReport {
   loops: Dag2LoopExecutionRecord[];
   node_statistics: Dag2NodeStatistic[];
   bottlenecks: Dag2Bottleneck[];
+  accuracy_audit?: Dag2AccuracyAudit;
   ai_optimization_prompt: string;
 }

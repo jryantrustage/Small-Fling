@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Activity, Sparkles, Clock, Zap, Download, Copy, Check,
   RefreshCw, Trash2, ChevronRight, ChevronDown, TrendingUp, TrendingDown,
-  AlertCircle, BarChart2, Cpu
+  AlertCircle, BarChart2, Cpu, FileCheck, CheckCircle2, XCircle, Sliders, Eye, Maximize2
 } from 'lucide-react';
 import { Modal } from '../../ConfirmModal';
 import type { Dag2PerformanceReport, Dag2NodeExecutionRecord } from '../../types/dag';
@@ -17,9 +17,10 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
   isOpen,
   onClose
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'trace' | 'gemini_prompt'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'trace' | 'accuracy' | 'gemini_prompt'>('overview');
   const [report, setReport] = useState<Dag2PerformanceReport | null>(null);
   const [loading, setLoading] = useState(false);
+  const [auditingAccuracy, setAuditingAccuracy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [expandedLoops, setExpandedLoops] = useState<Record<number, boolean>>({ 1: true });
@@ -58,6 +59,19 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
       await fetchReport();
     } catch (err: any) {
       setError(err?.message || 'Failed to clear loop history');
+    }
+  };
+
+  const handleAuditAccuracy = async () => {
+    setAuditingAccuracy(true);
+    try {
+      const res = await fetch('/api/dag/report/dag2/audit-accuracy', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      await fetchReport();
+    } catch (err: any) {
+      setError(err?.message || 'Failed to trigger Gemini 3.8 accuracy audit');
+    } finally {
+      setAuditingAccuracy(false);
     }
   };
 
@@ -159,6 +173,31 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
             >
               <Clock size={13} />
               <span>Millisecond Trace Matrix ({report?.loops?.length || 0} Loops)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('accuracy')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                background: activeTab === 'accuracy' ? 'rgba(163, 113, 247, 0.22)' : '#161b22',
+                border: `1px solid ${activeTab === 'accuracy' ? '#a371f7' : '#30363d'}`,
+                color: activeTab === 'accuracy' ? '#a371f7' : '#8b949e',
+                padding: '5px 12px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <FileCheck size={13} color="#a371f7" />
+              <span>Accuracy & Line Audit (Gemini 3.8)</span>
+              {report?.accuracy_audit && (
+                <span style={{
+                  fontSize: '9.5px', padding: '1px 5px', borderRadius: '8px',
+                  background: report.accuracy_audit.overall_accuracy_percent >= 90 ? 'rgba(57, 211, 83, 0.2)' : 'rgba(255, 166, 87, 0.2)',
+                  color: report.accuracy_audit.overall_accuracy_percent >= 90 ? '#39d353' : '#ffa657',
+                  fontWeight: 800, marginLeft: '2px'
+                }}>
+                  {report.accuracy_audit.overall_accuracy_percent}%
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -579,7 +618,321 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
           </div>
         )}
 
-        {/* TAB 3: GEMINI 3.8 AI PROMPT EXPORTER */}
+        {/* TAB 3: ACCURACY & LINE AUDIT (GEMINI 3.8) */}
+        {activeTab === 'accuracy' && report && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Header & Quick Action */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              background: '#161b22', border: '1px solid #30363d', borderRadius: '6px',
+              padding: '10px 14px', flexWrap: 'wrap', gap: '10px'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileCheck size={16} color="#a371f7" />
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
+                    Gemini 3.8 Ground-Truth Character Fidelity & Line-per-Line Examination
+                  </span>
+                  <span style={{
+                    fontSize: '9.5px', background: 'rgba(163, 113, 247, 0.15)', color: '#a371f7',
+                    padding: '2px 7px', borderRadius: '4px', border: '1px solid rgba(163, 113, 247, 0.3)',
+                    fontWeight: 700
+                  }}>
+                    {report.accuracy_audit?.model_auditor || 'gemini-3.8-flash'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '10.5px', color: '#8b949e', marginTop: '3px' }}>
+                  Periodically samples lines with rich syntax (<code style={{ color: '#ffa657' }}>| \ / [] {'{}'} () +-=&quot;&apos;</code>) and performs line-by-line diffs against Gemini 3.8 to diagnose DPI, resolution, and image processing needs.
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={handleAuditAccuracy}
+                  disabled={auditingAccuracy}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    background: auditingAccuracy ? '#21262d' : 'rgba(163, 113, 247, 0.2)',
+                    border: `1px solid ${auditingAccuracy ? '#30363d' : '#a371f7'}`,
+                    color: auditingAccuracy ? '#8b949e' : '#a371f7',
+                    padding: '6px 12px', borderRadius: '5px', fontSize: '11px', fontWeight: 800,
+                    cursor: auditingAccuracy ? 'wait' : 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Run on-demand Gemini 3.8 line audit on captured frames"
+                >
+                  <RefreshCw size={12} className={auditingAccuracy ? 'spin' : ''} />
+                  <span>{auditingAccuracy ? 'Auditing with Gemini 3.8...' : 'Re-run Gemini 3.8 Line Audit'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Metrics Counters Bar */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
+              <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>
+                  Overall Character Fidelity
+                </div>
+                <div style={{
+                  fontSize: '20px', fontWeight: 900, marginTop: '4px',
+                  color: (report.accuracy_audit?.overall_accuracy_percent ?? 0) >= 90 ? '#39d353'
+                    : (report.accuracy_audit?.overall_accuracy_percent ?? 0) >= 70 ? '#ffa657' : '#ff7b72'
+                }}>
+                  {report.accuracy_audit?.overall_accuracy_percent ?? 0}%
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#6e7681', marginTop: '2px' }}>
+                  Exact character-level sequence match
+                </div>
+              </div>
+
+              <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>
+                  Character Error Rate (CER)
+                </div>
+                <div style={{
+                  fontSize: '20px', fontWeight: 900, marginTop: '4px',
+                  color: (report.accuracy_audit?.character_error_rate_pct ?? 0) <= 10 ? '#39d353' : '#ff7b72'
+                }}>
+                  {report.accuracy_audit?.character_error_rate_pct ?? 0}%
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#6e7681', marginTop: '2px' }}>
+                  Substitutions, omissions & insertions
+                </div>
+              </div>
+
+              <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>
+                  Audited Code Lines
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, marginTop: '4px', color: '#58a6ff' }}>
+                  {report.accuracy_audit?.audited_lines_count ?? 0}
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#6e7681', marginTop: '2px' }}>
+                  Extracted lines evaluated
+                </div>
+              </div>
+
+              <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '10px', color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>
+                  Perfect Matches
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, marginTop: '4px', color: '#00ff9d' }}>
+                  {report.accuracy_audit?.perfect_matches_count ?? 0}
+                  <span style={{ fontSize: '11px', color: '#8b949e', fontWeight: 600, marginLeft: '4px' }}>
+                    / {report.accuracy_audit?.audited_lines_count ?? 0}
+                  </span>
+                </div>
+                <div style={{ fontSize: '9.5px', color: '#6e7681', marginTop: '2px' }}>
+                  100% verbatim agreement
+                </div>
+              </div>
+            </div>
+
+            {/* Diagnostic Advice & Hardware Adjustment Grid */}
+            <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '12px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px' }}>
+                <Sliders size={14} color="#58a6ff" />
+                <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#f0f6fc' }}>
+                  System Adjustment Directives (DPI, Resolution & Image Preprocessing)
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+                {/* DPI & Resolution */}
+                <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '5px', padding: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#58a6ff', fontWeight: 800, fontSize: '11px' }}>
+                    <Maximize2 size={12} />
+                    <span>Device DPI & Resolution</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#c9d1d9', marginTop: '6px', lineHeight: 1.4 }}>
+                    {report.accuracy_audit?.system_recommendations?.device_dpi ||
+                     report.accuracy_audit?.system_recommendations?.display_resolution ||
+                     'Maintain native 1080p unscaled resolution. Use adb shell wm density 400 to prevent character stroke blurring.'}
+                  </div>
+                  <div style={{ fontSize: '9.5px', color: '#8b949e', marginTop: '6px', borderTop: '1px dashed #21262d', paddingTop: '4px' }}>
+                    💡 Higher density prevents pixel collapse on thin symbols (<code style={{ color: '#ffa657' }}>|</code>, <code style={{ color: '#ffa657' }}>\</code>, <code style={{ color: '#ffa657' }}>/</code>).
+                  </div>
+                </div>
+
+                {/* OCR Image Preprocessing */}
+                <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '5px', padding: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#00ff9d', fontWeight: 800, fontSize: '11px' }}>
+                    <Eye size={12} />
+                    <span>OCR Image Preprocessing</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#c9d1d9', marginTop: '6px', lineHeight: 1.4 }}>
+                    {report.accuracy_audit?.system_recommendations?.ocr_image_preprocessing ||
+                     'Crop the text viewport region directly to exclude toolbar and system status bar, reducing distraction for vision models.'}
+                  </div>
+                  <div style={{ fontSize: '9.5px', color: '#8b949e', marginTop: '6px', borderTop: '1px dashed #21262d', paddingTop: '4px' }}>
+                    💡 Contrast stretch and unsharp masking deepen dark editor background contrast.
+                  </div>
+                </div>
+
+                {/* Model Tuning & Temperature */}
+                <div style={{ background: '#0d1117', border: '1px solid #30363d', borderRadius: '5px', padding: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#ffa657', fontWeight: 800, fontSize: '11px' }}>
+                    <Cpu size={12} />
+                    <span>Model Tuning & Temperature</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: '#c9d1d9', marginTop: '6px', lineHeight: 1.4 }}>
+                    {report.accuracy_audit?.system_recommendations?.model_temperature_and_prompt ||
+                     'Set temperature to 0.0 with repetition_penalty >= 1.15 to suppress degenerate repetition patterns on ASCII characters.'}
+                  </div>
+                  <div style={{ fontSize: '9.5px', color: '#8b949e', marginTop: '6px', borderTop: '1px dashed #21262d', paddingTop: '4px' }}>
+                    💡 Enforces verbatim OCR transcription and stops markdown header hallucination.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Line-per-Line Examination Cards */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#f0f6fc' }}>
+                  Line-per-Line Character Examination ({report.accuracy_audit?.sampled_lines?.length || 0} Lines Audited)
+                </span>
+                <span style={{ fontSize: '10px', color: '#8b949e' }}>
+                  Audited via Gemini 3.8 ground-truth inspection
+                </span>
+              </div>
+
+              {(!report.accuracy_audit?.sampled_lines || report.accuracy_audit.sampled_lines.length === 0) ? (
+                <div style={{
+                  background: '#161b22', border: '1px dashed #30363d', borderRadius: '6px',
+                  padding: '24px', textAlign: 'center', color: '#8b949e', fontSize: '11px'
+                }}>
+                  No lines audited yet. Click &quot;Re-run Gemini 3.8 Line Audit&quot; above to inspect captured frames against Gemini 3.8.
+                </div>
+              ) : (
+                report.accuracy_audit.sampled_lines.map((line, idx) => {
+                  const isPerfect = line.status === 'perfect_match' || line.accuracy_percent === 100;
+                  const isMinor = line.status === 'minor_discrepancy' || (line.accuracy_percent >= 70 && line.accuracy_percent < 100);
+                  const statusColor = isPerfect ? '#39d353' : isMinor ? '#ffa657' : '#ff7b72';
+                  const statusBg = isPerfect ? 'rgba(57, 211, 83, 0.15)' : isMinor ? 'rgba(255, 166, 87, 0.15)' : 'rgba(248, 81, 73, 0.15)';
+
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        background: '#161b22', border: `1px solid ${isPerfect ? '#21262d' : statusColor}`,
+                        borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px'
+                      }}
+                    >
+                      {/* Line Title Bar */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            background: '#21262d', color: '#58a6ff', fontWeight: 800, fontSize: '11px',
+                            padding: '2px 8px', borderRadius: '4px', border: '1px solid #30363d'
+                          }}>
+                            Line {line.line_number}
+                          </span>
+                          <span style={{
+                            background: statusBg, color: statusColor, fontWeight: 700, fontSize: '10px',
+                            padding: '2px 8px', borderRadius: '4px', border: `1px solid ${statusColor}44`,
+                            display: 'flex', alignItems: 'center', gap: '4px'
+                          }}>
+                            {isPerfect ? <CheckCircle2 size={11} /> : isMinor ? <AlertCircle size={11} /> : <XCircle size={11} />}
+                            <span>{isPerfect ? '100% Match' : `${line.accuracy_percent}% Fidelity`}</span>
+                          </span>
+                        </div>
+
+                        <span style={{ fontSize: '10.5px', color: '#8b949e', fontStyle: 'italic' }}>
+                          {line.character_diff_summary || (isPerfect ? 'Exact character match' : 'Discrepancy detected')}
+                        </span>
+                      </div>
+
+                      {/* Side-by-side or Stacked Comparison View */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                        {/* OCR Text */}
+                        <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '4px', padding: '8px' }}>
+                          <div style={{ fontSize: '9.5px', color: '#ffa657', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>
+                            OCR Extracted (Local MiniCPM-V) [{line.ocr_text?.length || 0} chars]
+                          </div>
+                          <div style={{
+                            fontFamily: 'monospace', fontSize: '11px', color: '#f0f6fc',
+                            background: '#161b22', padding: '6px 8px', borderRadius: '3px',
+                            border: '1px solid #30363d', wordBreak: 'break-all', whiteSpace: 'pre-wrap'
+                          }}>
+                            {line.ocr_text || <span style={{ color: '#6e7681' }}>(Empty)</span>}
+                          </div>
+                        </div>
+
+                        {/* Gemini Reference Text */}
+                        <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '4px', padding: '8px' }}>
+                          <div style={{ fontSize: '9.5px', color: '#a371f7', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>
+                            Gemini 3.8 Ground-Truth Reference [{line.gemini_reference_text?.length || 0} chars]
+                          </div>
+                          <div style={{
+                            fontFamily: 'monospace', fontSize: '11px', color: '#f0f6fc',
+                            background: '#161b22', padding: '6px 8px', borderRadius: '3px',
+                            border: '1px solid #30363d', wordBreak: 'break-all', whiteSpace: 'pre-wrap'
+                          }}>
+                            {line.gemini_reference_text || (
+                              <span style={{ color: '#ff7b72', fontStyle: 'italic' }}>
+                                (Not present in captured viewport / Hallucinated line)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Discrepancy Chips */}
+                      {line.discrepancies && line.discrepancies.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '2px' }}>
+                          {line.discrepancies.map((d, dIdx) => (
+                            <span
+                              key={dIdx}
+                              style={{
+                                fontSize: '10px', background: 'rgba(248, 81, 73, 0.1)',
+                                border: '1px solid rgba(248, 81, 73, 0.25)', color: '#ff7b72',
+                                padding: '2px 6px', borderRadius: '3px', fontFamily: 'monospace'
+                              }}
+                            >
+                              {d.type.toUpperCase()}: expected &quot;{d.expected_char || 'NONE'}&quot; vs ocr &quot;{d.ocr_char || 'NONE'}&quot; ({d.description})
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Line-level Diagnostics */}
+                      {line.diagnostics && (
+                        <div style={{
+                          background: '#0d1117', border: '1px solid #21262d', borderRadius: '4px',
+                          padding: '6px 10px', fontSize: '10px', color: '#8b949e',
+                          display: 'flex', flexDirection: 'column', gap: '2px'
+                        }}>
+                          {line.diagnostics.image_processing && (
+                            <div>
+                              <strong style={{ color: '#00ff9d' }}>Image Processing: </strong>
+                              <span>{line.diagnostics.image_processing}</span>
+                            </div>
+                          )}
+                          {line.diagnostics.dpi_resolution && (
+                            <div>
+                              <strong style={{ color: '#58a6ff' }}>DPI / Resolution: </strong>
+                              <span>{line.diagnostics.dpi_resolution}</span>
+                            </div>
+                          )}
+                          {line.diagnostics.model_tuning && (
+                            <div>
+                              <strong style={{ color: '#ffa657' }}>Model Tuning: </strong>
+                              <span>{line.diagnostics.model_tuning}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: GEMINI 3.8 AI PROMPT EXPORTER */}
         {activeTab === 'gemini_prompt' && report && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {/* Action Bar */}

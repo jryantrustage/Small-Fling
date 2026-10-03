@@ -55,14 +55,28 @@ def sample_representative_code_lines(limit: int = 4) -> List[Dict[str, Any]]:
     Picks lines across different positions in the document.
     """
     pid = state.get_current_project_id()
-    lines_dict = db.get_document_lines(pid) if pid else {}
-    if not lines_dict and hasattr(state, "document_lines"):
-        lines_dict = {
-            k: (v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"line_number": k, "text": str(v)}))
-            for k, v in getattr(state, "document_lines", {}).items()
-        }
-        
-    all_lines = sorted(lines_dict.values(), key=lambda x: x.get("line_number", 0))
+    all_lines = []
+    try:
+        sql = """
+        SELECT l.line_number, l.line_text as text, l.frame_id, f.filename, f.top_line, f.bottom_line
+        FROM document_lines l
+        LEFT JOIN frames f ON l.frame_id = f.frame_id
+        WHERE length(trim(l.line_text)) > 0
+        ORDER BY l.line_number ASC;
+        """
+        all_lines = [dict(r) for r in db._execute(sql, fetchall=True)]
+    except Exception:
+        pass
+
+    if not all_lines:
+        lines_dict = db.get_document_lines(pid) if pid else {}
+        if not lines_dict and hasattr(state, "document_lines"):
+            lines_dict = {
+                k: (v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"line_number": k, "text": str(v)}))
+                for k, v in getattr(state, "document_lines", {}).items()
+            }
+        all_lines = sorted(lines_dict.values(), key=lambda x: x.get("line_number", 0))
+
     if not all_lines:
         # Fallback synthetic lines with diverse code characters for demonstration
         return [
@@ -125,7 +139,6 @@ def find_frame_image_file(frame_id: str) -> Optional[Path]:
     if not frame_id:
         return None
         
-    # Check state FRAMES_DIR
     for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
         if p and p.exists():
             direct = p / f"{frame_id}.png"
@@ -135,7 +148,6 @@ def find_frame_image_file(frame_id: str) -> Optional[Path]:
             if matches:
                 return matches[0]
                 
-    # Search in all storage/frames
     for f in state.captured_frames.values():
         if f.get("frame_id") == frame_id and f.get("filename"):
             for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
@@ -146,7 +158,40 @@ def find_frame_image_file(frame_id: str) -> Optional[Path]:
     return None
 
 
-async def run_gemini_38_accuracy_audit(
+def find_frame_for_line(line_number: int, frame_id: Optional[str] = None) -> Optional[Path]:
+    """
+    Finds the frame image file that contains the given line number.
+    """
+    if frame_id:
+        img = find_frame_image_file(frame_id)
+        if img and img.exists():
+            return img
+
+    try:
+        with db.get_connection() as conn:
+            c = conn.cursor()
+            row = c.execute(
+                "SELECT filename FROM frames WHERE top_line <= ? AND bottom_line >= ? ORDER BY top_line DESC LIMIT 1;",
+                (line_number, line_number)
+            ).fetchone()
+            if row and row["filename"]:
+                for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
+                    cand = p / row["filename"]
+                    if cand.exists():
+                        return cand
+    except Exception:
+        pass
+
+    for fid, f in state.captured_frames.items():
+        if f.get("top_line", 0) <= line_number <= f.get("bottom_line", 0):
+            cand = find_frame_image_file(fid)
+            if cand and cand.exists():
+                return cand
+
+    return None
+
+
+def run_gemini_38_accuracy_audit(
     sampled_lines: Optional[List[Dict[str, Any]]] = None,
     force_refresh: bool = False
 ) -> Dict[str, Any]:
