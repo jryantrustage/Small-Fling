@@ -93,6 +93,8 @@ async def select_device_api(req: DeviceSelectRequest):
         
     info = await get_device_info()
     await adb.ensure_adb_keyboard_closed(adb.target_adb_serial)
+    await adb.calibrate_display_dpi(adb.target_adb_serial)
+    asyncio.create_task(adb.check_and_update_alignment(adb.target_adb_serial))
 
     latest_telemetry["status_message"] = f"Switched to {info.get('active_model')} ({lpp} Lines/Page) ✔"
     await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})

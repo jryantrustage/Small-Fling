@@ -715,8 +715,12 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         disp_id = await detect_external_display_id(ser)
         display_id = disp_id if disp_id > 0 else (12 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
+    # Dynamically calibrate DPI to optimal 24-35 lines viewport height
+    calib = await calibrate_display_dpi(ser, display_id)
+    act_dpi = calib.get("active_dpi", 220)
+
     cmd = (
-        f"wm density 400 -d {display_id} >/dev/null 2>&1; "
+        f"wm density {act_dpi} -d {display_id} >/dev/null 2>&1; "
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
         f"for tid in $(dumpsys window | grep -E 'mDisplayId={display_id} taskId=' | sed -n 's/.*taskId=\\([0-9]*\\).*/\\1/p' | sort -u); do "
         f"cmd activity task resize \"$tid\" 0 0 1920 1080 >/dev/null 2>&1; done; "
@@ -835,17 +839,36 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         await run_adb_shell("; ".join(base_cmds), ser, timeout=8.0)
 
 
-async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Optional[int] = None, target_dpi: int = 400) -> Dict[str, Any]:
+async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Optional[int] = None, target_dpi: Optional[int] = None) -> Dict[str, Any]:
     """
-    Automated DPI calibration check for external desktop display.
-    Ensures Android virtual density is set to target DPI (400 DPI) to prevent
-    thin glyph blurring (pipes '|', slashes '\\', '/', and brackets) under high-resolution desktop rendering.
+    Automated dynamic DPI calibration check for external desktop display.
+    Dynamically derives target DPI based on display physical resolution (or height)
+    to target 24 to 35 visible lines (~780dp virtual height):
+      - 1080p (h=1080) -> 220 DPI (yields ~28-32 lines)
+      - 1440p (h=1440) -> 290 DPI (yields ~28-32 lines)
+      - 720p  (h=720)  -> 150 DPI (yields ~28-32 lines)
+    If a specific target_dpi is passed, uses that explicitly.
     """
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
-        return {"status": "ok", "active_dpi": target_dpi, "dpi_factor": round(target_dpi / 160.0, 3)}
+        chosen_dpi = target_dpi or 220
+        return {"status": "ok", "active_dpi": chosen_dpi, "dpi_factor": round(chosen_dpi / 160.0, 3)}
 
     did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    
+    # Check display resolution
+    h_px = 1080
+    size_res = await run_adb_shell(f"wm size -d {did}", ser, timeout=1.8)
+    if size_res.get("status") == "ok":
+        out_sz = size_res.get("stdout", "")
+        if m_sz := re.search(r'(?:Physical|Override)\s*size:\s*(\d+)x(\d+)', out_sz):
+            dim1, dim2 = int(m_sz.group(1)), int(m_sz.group(2))
+            h_px = min(dim1, dim2)
+
+    if target_dpi is None or target_dpi <= 0:
+        # Calibrate to target ~780dp virtual height for 24-35 lines
+        target_dpi = max(140, min(360, int(round((h_px / 780.0) * 160.0 / 10.0) * 10)))
+
     check_res = await run_adb_shell(f"wm density -d {did}", ser, timeout=1.8)
     out = check_res.get("stdout", "")
     current_dpi = 160

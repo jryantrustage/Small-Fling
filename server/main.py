@@ -21,6 +21,7 @@ from models import ConfigRequest, ResetStateRequest
 from services import state
 from services.adb_service import (
     ensure_adb_keyboard_closed,
+    calibrate_display_dpi,
     alignment_monitor_loop,
     awake_keepalive_loop,
 )
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
     tasks = []
     try:
         tasks.append(asyncio.create_task(ensure_adb_keyboard_closed()))
+        tasks.append(asyncio.create_task(calibrate_display_dpi()))
         tasks.append(asyncio.create_task(alignment_monitor_loop()))
         tasks.append(asyncio.create_task(awake_keepalive_loop()))
     except Exception:
