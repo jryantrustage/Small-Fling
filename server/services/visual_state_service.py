@@ -300,12 +300,13 @@ async def run_editor_recovery_node(
     if ser and "mock" in str(ser).lower():
         return {"success": True, "markdown_open": True, "reason": "Mock device verified"}
 
-    disp_id = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    raw_disp = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else None
     actions = []
 
     # 1. Soft keyboard suppression without keyevent 4 (Back)
     await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
-    if disp_id > 0:
+    if disp_id and disp_id > 0:
         await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
     actions.append("Suppressed on-screen keyboard policy")
 

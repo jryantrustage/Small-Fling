@@ -316,6 +316,157 @@ def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[
     is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < int(300 * max(0.4, dpi_factor)))
     return is_at_home, (1 if is_at_home else first_ln)
 
+def extract_content_text_rows(img: np.ndarray, gutter_w: int = 140, min_y: int = 140, max_y: int = 980) -> List[Dict[str, Any]]:
+    """
+    Extracts text lines from the editor content area (excluding the left gutter column and top toolbar).
+    Groups OCR bounding boxes that share approximately the same vertical center into coherent text rows.
+    """
+    if img is None: return []
+    ocr = get_rapid_ocr()
+    if ocr is None: return []
+    try:
+        results, _ = ocr(img)
+    except Exception as e:
+        print(f"[extract_content_text_rows] OCR error: {e}")
+        return []
+    if not results: return []
+
+    boxes = []
+    for bbox, text, score in results:
+        clean = text.strip()
+        if not clean: continue
+        pts = np.array(bbox)
+        min_x = int(np.min(pts[:, 0]))
+        max_x = int(np.max(pts[:, 0]))
+        box_min_y = int(np.min(pts[:, 1]))
+        box_max_y = int(np.max(pts[:, 1]))
+        center_y = (box_min_y + box_max_y) / 2.0
+
+        if min_x >= gutter_w and min_y <= center_y <= max_y:
+            boxes.append({
+                "text": clean, "min_x": min_x, "max_x": max_x,
+                "min_y": box_min_y, "max_y": box_max_y, "center_y": center_y,
+                "score": float(score)
+            })
+
+    if not boxes: return []
+    rows: List[List[Dict[str, Any]]] = []
+    for b in boxes:
+        placed = False
+        for r in rows:
+            avg_y = sum(x["center_y"] for x in r) / len(r)
+            if abs(b["center_y"] - avg_y) <= 12.0:
+                r.append(b)
+                placed = True
+                break
+        if not placed:
+            rows.append([b])
+
+    rows.sort(key=lambda r: sum(x["center_y"] for x in r) / len(r))
+    content_rows = []
+    for r in rows:
+        r.sort(key=lambda x: x["min_x"])
+        combined_text = " ".join(x["text"] for x in r)
+        avg_cy = int(round(sum(x["center_y"] for x in r) / len(r)))
+        content_rows.append({
+            "y": avg_cy,
+            "text": combined_text,
+            "min_x": min(x["min_x"] for x in r),
+            "max_x": max(x["max_x"] for x in r),
+            "min_y": min(x["min_y"] for x in r),
+            "max_y": max(x["max_y"] for x in r)
+        })
+    return content_rows
+
+def detect_line_wrap_state(img: np.ndarray, dpi_factor: float = 1.0) -> Dict[str, Any]:
+    """
+    Detects whether the editor viewport is dominated by wrapped text spanning multiple visual lines
+    where gutter line numbers may be missing or sparse.
+    Extracts top and bottom text anchors to enable deterministic text-anchored pagination.
+    """
+    if img is None:
+        return {
+            "is_wrapped_page": False, "gutter_count": 0, "content_row_count": 0,
+            "top_text_anchor": "", "bottom_text_anchor": "", "content_rows": []
+        }
+
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+    h, w = img.shape[:2]
+    norm_mult = max(0.4, (w / 1920.0) * dpi_factor)
+    gutter_w = int(max(110.0, min(220.0, 150.0 * norm_mult)))
+    doc_top_y = max(135, int(150 * (h / 1080.0)))
+    doc_bot_y = int(h * 0.96)
+
+    content_rows = extract_content_text_rows(img, gutter_w=gutter_w, min_y=doc_top_y, max_y=doc_bot_y)
+    gutter_count = len(gutter)
+    content_row_count = len(content_rows)
+
+    is_wrapped = (gutter_count <= 2 and content_row_count >= 5) or ((content_row_count - gutter_count) >= 15)
+
+    top_text = content_rows[0]["text"] if content_rows else ""
+    bottom_text = content_rows[-1]["text"] if content_rows else ""
+    top_y = content_rows[0]["y"] if content_rows else 0
+    bottom_y = content_rows[-1]["y"] if content_rows else 0
+
+    return {
+        "is_wrapped_page": is_wrapped,
+        "gutter_count": gutter_count,
+        "content_row_count": content_row_count,
+        "top_text_anchor": top_text,
+        "bottom_text_anchor": bottom_text,
+        "top_text_y": top_y,
+        "bottom_text_y": bottom_y,
+        "top_gutter_line": gutter[0][1] if gutter else 0,
+        "bottom_gutter_line": gutter[-1][1] if gutter else 0,
+        "content_rows": content_rows
+    }
+
+def find_text_anchor_offset(img: np.ndarray, anchor_text: str, target_y: int = 165, dpi_factor: float = 1.0) -> Optional[int]:
+    """
+    Searches for anchor_text (or significant substring/token match) in img.
+    If found at row y_found, returns dy = y_found - target_y.
+    Positive dy means anchor is below target_y (viewport needs to advance/move up by dy).
+    Returns None if anchor cannot be found.
+    """
+    if not anchor_text or not anchor_text.strip() or img is None:
+        return None
+
+    clean_anchor = anchor_text.strip()
+    if len(clean_anchor) < 4:
+        return None
+
+    h, w = img.shape[:2]
+    norm_mult = max(0.4, (w / 1920.0) * dpi_factor)
+    gutter_w = int(max(110.0, min(220.0, 150.0 * norm_mult)))
+    content_rows = extract_content_text_rows(img, gutter_w=gutter_w, min_y=120, max_y=int(h * 0.98))
+    if not content_rows:
+        return None
+
+    # 1. Exact or substring match
+    anchor_clean = re.sub(r'\s+', ' ', clean_anchor).lower()
+    for row in content_rows:
+        row_clean = re.sub(r'\s+', ' ', row["text"]).lower()
+        if anchor_clean in row_clean or row_clean in anchor_clean:
+            return row["y"] - target_y
+
+    # 2. Token overlap match (at least 2 words or 60% token overlap)
+    anchor_words = [w for w in re.findall(r'\w{3,}', anchor_clean)]
+    if len(anchor_words) >= 2:
+        best_match = None
+        best_overlap = 0
+        for row in content_rows:
+            row_clean = re.sub(r'\s+', ' ', row["text"]).lower()
+            row_words = set(re.findall(r'\w{3,}', row_clean))
+            overlap = sum(1 for w in anchor_words if w in row_words)
+            if overlap >= max(2, int(len(anchor_words) * 0.6)) and overlap > best_overlap:
+                best_overlap = overlap
+                best_match = row
+
+        if best_match is not None:
+            return best_match["y"] - target_y
+
+    return None
+
 def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None, cursor_line: Optional[int] = None, dpi_factor: float = 1.0) -> Tuple[int, Dict[str, Any]]:
     """
     Accurately determines the line number on the very top of the editor document.

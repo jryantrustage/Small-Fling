@@ -19,10 +19,10 @@ def init_device_model_from_cache() -> str:
         if cf.exists():
             c = json.loads(cf.read_text())
             last, p10, p8 = c.get("last_address", ""), c.get("pixel_10_address", ""), c.get("pixel_8_address", "")
-            if last and last == p10: return "pixel_10"
             if last and last == p8: return "pixel_8"
+            if last and last == p10: return "pixel_10"
     except Exception: pass
-    return "pixel_10"
+    return "pixel_8"
 
 current_device_model = init_device_model_from_cache()
 target_adb_serial: Optional[str] = None
@@ -215,6 +215,13 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
                         found_serial = dev["serial"]
                         break
 
+        if not found_serial and len(active) > 1:
+            for dev in active:
+                s = dev["serial"]
+                if _display_map_cache.get(s, {}).get("desktop"):
+                    found_serial = s
+                    break
+
         if not found_serial:
             pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
             p8_keys, p10_keys = ["pixel_8", "husky", "shiba"], ["pixel_10", "mustang", "frankel"]
@@ -228,6 +235,17 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
 
         if not found_serial:
             found_serial = active[0]["serial"]
+
+        if found_serial:
+            m = ""
+            for dev in active:
+                if dev["serial"] == found_serial:
+                    m = (dev.get("model", "") + " " + dev.get("raw", "")).lower()
+                    break
+            if any(k in m for k in ["pixel_8", "husky", "shiba"]):
+                current_device_model = "pixel_8"
+            elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
+                current_device_model = "pixel_10"
 
         _active_serial_cache = found_serial
         _active_serial_cache_ts = now
@@ -267,6 +285,25 @@ async def connect_device_for_model(model_pref: str) -> Optional[str]:
         print(f"Error in connect_device_for_model({model_pref}): {e}")
     return None
 
+def sanitize_input_display_id(display_id: Any) -> Optional[int]:
+    """
+    Validates and sanitizes display ID for Android /system/bin/input command.
+    Android input command only supports 32-bit signed integers and specifically
+    logical display IDs (typically 0-255). 64-bit SurfaceFlinger physical IDs
+    (e.g., 4613572713243172731) cause NumberFormatException or IllegalArgumentException.
+    Returns:
+        int if 0 < display_id <= 255, else None
+    """
+    try:
+        if display_id is None:
+            return None
+        did = int(display_id)
+        if 0 < did <= 255:
+            return did
+        return None
+    except (ValueError, TypeError):
+        return None
+
 async def detect_external_display_id(serial: Optional[str] = None) -> int:
     global current_device_model
     if serial and "mock" in str(serial).lower():
@@ -278,17 +315,17 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
             out = res["stdout"]
             # 1. First priority: look for DisplayViewport with type=EXTERNAL
             m = re.search(r'DisplayViewport\{type=EXTERNAL.*?displayId=(\d+)', out)
-            if m and int(m.group(1)) != 0:
+            if m and 0 < int(m.group(1)) <= 255:
                 return int(m.group(1))
             # 2. Look for DisplayInfo with displayId X ... type EXTERNAL
             m = re.search(r'displayId\s+(\d+).*?type\s+EXTERNAL', out, re.DOTALL)
-            if m and int(m.group(1)) != 0:
+            if m and 0 < int(m.group(1)) <= 255:
                 return int(m.group(1))
             # 3. Check for any non-zero displayId associated with EXTERNAL
             for line in out.splitlines():
                 if "EXTERNAL" in line:
                     m = re.search(r'(?:mDisplayId|displayId)[= ]+(\d+)', line)
-                    if m and int(m.group(1)) != 0:
+                    if m and 0 < int(m.group(1)) <= 255:
                         return int(m.group(1))
             # 4. Check which display is actively hosting Teams
             try:
@@ -299,14 +336,14 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                         m_d = re.search(r'Display #(\d+)', line)
                         if m_d:
                             cur_disp = int(m_d.group(1))
-                        if cur_disp and cur_disp > 0 and "com.microsoft.teams" in line:
+                        if cur_disp and 0 < cur_disp <= 255 and "com.microsoft.teams" in line:
                             return cur_disp
             except Exception:
                 pass
             # 5. Fallback search for any non-zero display id in dumpsys
             for line in out.splitlines():
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
-                if m and int(m.group(1)) != 0:
+                if m and 0 < int(m.group(1)) <= 255:
                     return int(m.group(1))
     return 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
 
@@ -355,7 +392,7 @@ async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_ref
     now = time.time()
     cached = _display_map_cache.get(ser)
     cached_ts = _display_map_cache_ts.get(ser, 0.0)
-    if not force_refresh and cached and (now - cached_ts < 45.0):
+    if not force_refresh and cached and (now - cached_ts < 300.0):
         return cached
 
     displays = {}
@@ -403,13 +440,22 @@ async def detect_surfaceflinger_display_id(serial: Optional[str] = None) -> Opti
     return (await detect_surfaceflinger_displays(serial)).get("desktop")
 
 def _update_frame_cache(serial: str, mode: str, png_bytes: bytes):
-    try:
-        jpg = _png_to_jpeg(png_bytes, quality=75, max_dim=1280)
-        _frame_cache[(serial, mode)] = {"bytes": jpg, "raw_png": png_bytes, "ts": time.time()}
-    except Exception:
-        pass
+    _frame_cache[(serial, mode)] = {"bytes": None, "raw_png": png_bytes, "ts": time.time()}
 
-async def capture_external_screenshot(serial: Optional[str] = None, max_cache_age_s: float = 0.35, bypass_lock: bool = False) -> Optional[bytes]:
+def _get_cached_jpeg(cached: Optional[Dict[str, Any]], quality: int = 75, max_dim: int = 1280) -> Optional[bytes]:
+    if not cached:
+        return None
+    if cached.get("bytes"):
+        return cached["bytes"]
+    raw = cached.get("raw_png")
+    if raw:
+        jpg = _png_to_jpeg(raw, quality=quality, max_dim=max_dim)
+        if jpg:
+            cached["bytes"] = jpg
+            return jpg
+    return None
+
+async def capture_external_screenshot(serial: Optional[str] = None, max_cache_age_s: float = 0.35, bypass_lock: bool = True) -> Optional[bytes]:
     ser = await get_active_adb_serial(serial)
     if not ser:
         return None
@@ -425,7 +471,7 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
     acquired_lock = False
     if not bypass_lock:
         try:
-            await asyncio.wait_for(_screencap_lock.acquire(), timeout=3.0)
+            await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.08)
             acquired_lock = True
             cached = _frame_cache.get(cache_key)
             if cached and cached.get("raw_png") and (time.time() - cached.get("ts", 0.0) < max_cache_age_s):
@@ -435,14 +481,23 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
                 return cached["raw_png"]
 
     try:
-        disp_map = await detect_surfaceflinger_displays(ser)
-        known_id = disp_map.get("desktop")
+        # Fast-path: use in-memory known desktop display ID without calling dumpsys
+        known_id = _display_map_cache.get(ser, {}).get("desktop")
+        if not known_id:
+            from services import state as app_state
+            known_id = app_state.latest_telemetry.get("capture_telemetry", {}).get("display_id")
+
+        if not known_id or str(known_id) in ("0", "phone"):
+            disp_map = await detect_surfaceflinger_displays(ser)
+            known_id = disp_map.get("desktop")
 
         # 1. Try detected external display via known SurfaceFlinger or display ID
         if known_id and str(known_id) not in ("0", "phone"):
             cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
-            cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
+            cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
             if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                from services import state as app_state
+                app_state.latest_telemetry.setdefault("capture_telemetry", {})["display_id"] = str(known_id)
                 _update_frame_cache(ser, "desktop", png_bytes)
                 return png_bytes
             else:
@@ -451,22 +506,26 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
                 known_id = disp_map.get("desktop")
                 if known_id and str(known_id) not in ("0", "phone"):
                     cmd = ["-s", ser, "exec-out", "screencap", "-d", str(known_id), "-p"]
-                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.0)
+                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
                     if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
+                        from services import state as app_state
+                        app_state.latest_telemetry.setdefault("capture_telemetry", {})["display_id"] = str(known_id)
                         _update_frame_cache(ser, "desktop", png_bytes)
                         return png_bytes
 
         # 2. Check other active SurfaceFlinger displays if any (excluding phone display)
-        res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 2.5)
+        res = await asyncio.to_thread(_exec_adb_sync, ["-s", ser, "shell", "dumpsys SurfaceFlinger --display-id"], 2.0)
         if res.returncode == 0 and res.stdout:
             all_ids = re.findall(r'Display\s+(\d+)', res.stdout)
-            phone_id = disp_map.get("phone", "0")
+            phone_id = _display_map_cache.get(ser, {}).get("phone", "0")
             for did in all_ids:
                 if did != phone_id and did != known_id:
                     cmd = ["-s", ser, "exec-out", "screencap", "-d", str(did), "-p"]
-                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.5)
+                    cap = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 2.0)
                     if cap.returncode == 0 and (png_bytes := _extract_png_bytes(cap.stdout)):
-                        disp_map["desktop"] = str(did)
+                        if ser not in _display_map_cache:
+                            _display_map_cache[ser] = {}
+                        _display_map_cache[ser]["desktop"] = str(did)
                         _update_frame_cache(ser, "desktop", png_bytes)
                         return png_bytes
 
@@ -487,29 +546,40 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
     now = time.time()
     # Fast-path cache check: return fresh frame if captured within last 600ms
     cached = _frame_cache.get(cache_key)
-    if cached and cached.get("bytes") and (now - cached.get("ts", 0.0) < 0.6):
-        return cached["bytes"]
+    if cached and (now - cached.get("ts", 0.0) < 0.6):
+        jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+        if jpg:
+            return jpg
 
     acquired = False
     try:
-        # Non-blocking lock acquisition with 2.2s timeout for wireless ADB
-        await asyncio.wait_for(_screencap_lock.acquire(), timeout=2.2)
+        # Non-blocking lock acquisition with 80ms timeout
+        await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.08)
         acquired = True
     except asyncio.TimeoutError:
         # If lock is held, return cached frame immediately
-        if cached and cached.get("bytes"):
-            return cached["bytes"]
+        if cached:
+            jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+            if jpg:
+                return jpg
         return _get_or_create_standby_frame(mode)
 
     try:
         # Re-check cache inside lock
         cached = _frame_cache.get(cache_key)
-        if cached and cached.get("bytes") and (time.time() - cached.get("ts", 0.0) < 0.6):
-            return cached["bytes"]
+        if cached and (time.time() - cached.get("ts", 0.0) < 0.6):
+            jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+            if jpg:
+                return jpg
 
         if mode == "desktop":
             raw_bytes = await capture_external_screenshot(ser, bypass_lock=True)
             if raw_bytes:
+                cached = _frame_cache.get(cache_key)
+                if cached:
+                    jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+                    if jpg:
+                        return jpg
                 jpg = _png_to_jpeg(raw_bytes, quality, max_dim)
                 if jpg:
                     _frame_cache[cache_key] = {"bytes": jpg, "raw_png": raw_bytes, "ts": time.time()}
@@ -522,17 +592,20 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             if res.returncode != 0 or not res.stdout:
                 res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
             if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
+                _frame_cache[cache_key] = {"bytes": None, "raw_png": png_bytes, "ts": time.time()}
                 jpg = _png_to_jpeg(png_bytes, quality, max_dim)
                 if jpg:
-                    _frame_cache[cache_key] = {"bytes": jpg, "raw_png": png_bytes, "ts": time.time()}
+                    _frame_cache[cache_key]["bytes"] = jpg
                     return jpg
     finally:
         if acquired:
             _screencap_lock.release()
 
     # If capture failed on this frame, return previous cached frame or standby frame
-    if cached and cached.get("bytes") and (time.time() - cached.get("ts", 0.0) < 5.0):
-        return cached["bytes"]
+    if cached:
+        jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+        if jpg:
+            return jpg
     return _get_or_create_standby_frame(mode)
 
 async def configure_display_awake_policies(serial: Optional[str] = None):
@@ -700,6 +773,11 @@ async def get_device_info() -> Dict[str, Any]:
     try:
         from services import state
         state.active_device_serial = ser
+        if ser:
+            friendly_name = "Pixel 10 Pro XL" if current_device_model == "pixel_10" else "Pixel 8 Pro"
+            state.latest_telemetry["active_serial"] = ser
+            state.latest_telemetry["device_id"] = friendly_name
+            state.latest_telemetry["device_model"] = current_device_model
     except Exception:
         pass
     disp_map = await detect_surfaceflinger_displays(ser) if ser else {}
@@ -741,7 +819,8 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
     ser = await get_active_adb_serial(serial)
     if ser:
         disp_id = await detect_external_display_id(ser)
-        target_d = disp_id if disp_id > 0 else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
+        valid_d = sanitize_input_display_id(disp_id)
+        target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
         disp_pfx = f"-d {target_d} " if target_d > 0 else ""
 
         # Ensure soft keyboard is closed and dispatch navigation command directly with duration flag
@@ -749,7 +828,7 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
             "settings put secure show_ime_with_hard_keyboard 0",
             "input -d 0 keyevent 111 >/dev/null 2>&1",
         ]
-        if target_d > 0:
+        if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
         base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
@@ -780,13 +859,11 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
         if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < 1.5):
             snap_bytes = cached_d["raw_png"]
         else:
-            snap_bytes = await capture_external_screenshot(active_serial)
+            snap_bytes = await capture_external_screenshot(active_serial, bypass_lock=True)
 
         if snap_bytes:
             # Sync to frame cache so stream generator shares this fresh frame
-            jpg = _png_to_jpeg(snap_bytes, quality=75, max_dim=960)
-            if jpg:
-                _frame_cache[cache_key] = {"bytes": jpg, "raw_png": snap_bytes, "ts": time.time()}
+            _update_frame_cache(active_serial, "desktop", snap_bytes)
 
             dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial)
             res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes, None, dpi_factor)
@@ -814,6 +891,12 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
             res = state.sanitize_for_json(res)
             state.latest_alignment_status.clear()
             state.latest_alignment_status.update(res)
+            if res.get("first_line_number") is not None:
+                try: state.latest_telemetry["current_top_line"] = int(res["first_line_number"])
+                except Exception: pass
+            if res.get("last_line_number") is not None:
+                try: state.latest_telemetry["current_bottom_line"] = int(res["last_line_number"])
+                except Exception: pass
             if not res.get("is_aligned", False) and state.orchestration_state.get("status") == "RUNNING":
                 state.orchestration_state.update({"status": "PAUSED", "step_label": "PAUSED: teams markdown not aligned"})
                 state.latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({res.get('reason')})"
