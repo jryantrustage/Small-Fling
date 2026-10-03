@@ -3177,3 +3177,24 @@ async def clear_dag2_performance_report():
     state.clear_dag2_loop_history()
     return {"status": "success", "message": "DAG 2 loop performance history cleared"}
 
+
+@router.get("/api/dag/report/dag2/accuracy")
+def get_dag2_accuracy_audit():
+    """
+    Returns the latest line-by-line character accuracy audit using Gemini 3.8 inspection.
+    """
+    from services.accuracy_verifier import run_gemini_38_accuracy_audit
+    audit = run_gemini_38_accuracy_audit(force_refresh=False)
+    return audit
+
+
+@router.post("/api/dag/report/dag2/audit-accuracy")
+def trigger_dag2_accuracy_audit():
+    """
+    Performs an on-demand line-by-line character accuracy audit with Gemini 3.8
+    on representative code lines containing symbols and complex characters.
+    """
+    from services.accuracy_verifier import run_gemini_38_accuracy_audit
+    audit = run_gemini_38_accuracy_audit(force_refresh=True)
+    return audit
+
