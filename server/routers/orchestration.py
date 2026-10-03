@@ -791,8 +791,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             disp_w, disp_h = await get_display_dimensions(active_serial, valid_disp_id or disp_id or 0)
             sb_x = max(100, disp_w - 5)
             await run_adb_shell(
-                f"input {d_pfx}tap {disp_w // 2} {disp_h // 2}; "
-                f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input keyevent 111 >/dev/null 2>&1; "
+                f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
                 f"input {d_pfx}keycombination 113 123; input keycombination 113 123; "
                 f"input {d_pfx}draganddrop {sb_x} 250 {sb_x} {disp_h - 80} 300",
                 active_serial
@@ -1141,8 +1140,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 # Ensure window focus, suppress soft keyboard, and send Ctrl+Home + reverse scrollbar drag
                 await run_adb_shell(
                     f"input {d_pfx}tap {disp_w // 2} {disp_h // 2}; "
-                    f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input keyevent 111 >/dev/null 2>&1; "
-                    f"input {d_pfx}keycombination 113 122; input keycombination 113 122; "
+                    f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
+                    f"input {d_pfx}keycombination 113 122; "
                     f"input {d_pfx}draganddrop {sb_x} {disp_h - 80} {sb_x} 250 300",
                     active_serial
                 )
@@ -1981,7 +1980,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             valid_disp_id = sanitize_input_display_id(disp_id)
 
             # 2. Suppress Soft Keyboard (avoid tapping content to prevent caret trapping)
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input keyevent 111 >/dev/null 2>&1", active_serial)
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
             await asyncio.sleep(0.05)
 
             # 3. Accelerated Viewport Positioning Engine:
@@ -2024,7 +2023,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await asyncio.sleep(0.10)
 
             # Ensure keyboard is closed before concluding
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input keyevent 111 >/dev/null 2>&1", active_serial)
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
 
             advanced = (current_top != start_top) or (abs(current_top - target_top) <= 1)
             final_top = current_top if current_top > 0 else target_top
@@ -2675,19 +2674,28 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         })
         return {"status": "error", "group": "initialize", "error": err}
 
-def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: int, status: str, nodes: List[Dict[str, Any]]):
+def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: int, status: str, nodes: List[Dict[str, Any]], loop_id: Optional[str] = None):
     from services.performance_analyzer import format_duration_min_sec
+    key_evs = list(state.active_dag2_loop_key_events)
+    nav_away = any(e.get("navigated_away", False) for e in key_evs)
     rec = {
         "loop_index": loop_idx,
-        "loop_id": f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        "loop_id": loop_id or (state.current_dag2_loop_id or f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
         "status": status,
         "started_at_ms": start_ms,
         "finished_at_ms": end_ms,
         "duration_ms": dur_ms,
         "duration_formatted": format_duration_min_sec(dur_ms),
-        "nodes": nodes
+        "nodes": nodes,
+        "key_events": key_evs,
+        "key_events_count": len(key_evs),
+        "key_events_total_duration_ms": round(sum(e.get("duration_ms", 0) for e in key_evs), 2),
+        "viewport_navigated_away": nav_away
     }
     state.record_dag2_loop_result(rec)
+    state.current_dag2_loop_id = None
+    state.current_dag2_loop_index = None
+    state.active_dag2_loop_key_events = []
 
 async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Dict[str, Any]:
     active_serial = await get_active_adb_serial(serial)
@@ -2703,6 +2711,11 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
 
     from services.performance_analyzer import format_duration_min_sec
     loop_idx = len(state.get_dag2_loop_history()) + 1
+    loop_id = f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    state.current_dag2_loop_id = loop_id
+    state.current_dag2_loop_index = loop_idx
+    state.active_dag2_loop_key_events = []
+
     loop_start_ms = int(time.time() * 1000)
     loop_t0 = time.perf_counter()
     loop_nodes = []
@@ -2832,7 +2845,8 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
             "positioning_method": "Accelerated PageDown / Batched Stride",
             "dwell_ms": 0,
             "settle_ms": 100,
-            "pipelined_overlap": True
+            "pipelined_overlap": True,
+            "key_events": list(state.active_dag2_loop_key_events)
         }
     })
 
@@ -3153,4 +3167,28 @@ def trigger_dag2_accuracy_audit():
     from services.accuracy_verifier import run_gemini_38_accuracy_audit
     audit = run_gemini_38_accuracy_audit(force_refresh=True)
     return audit
+
+
+@router.get("/api/telemetry/key-events")
+async def get_key_events_telemetry_endpoint(limit: int = 50, loop_id: Optional[str] = None):
+    """
+    Returns granular timing and window outcome telemetry for recent key event dispatches,
+    including pre/post window state and whether any key event caused the Markdown Viewer to navigate away.
+    """
+    events = state.get_key_events_telemetry(limit=limit, loop_id=loop_id)
+    stats = state.latest_telemetry.get("key_event_stats", {})
+    return {
+        "status": "success",
+        "count": len(events),
+        "events": events,
+        "stats": stats
+    }
+
+
+@router.post("/api/telemetry/key-events/clear")
+async def clear_key_events_telemetry_endpoint():
+    """Clears the key event telemetry history buffer."""
+    state.clear_key_events_telemetry()
+    return {"status": "success", "message": "Key events telemetry buffer cleared"}
+
 

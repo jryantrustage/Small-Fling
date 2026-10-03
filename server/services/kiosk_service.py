@@ -12,7 +12,12 @@ kiosk_state: Dict[str, Any] = {
     "kiosk_mode": "freeform",   # freeform, mirrored, kiosk
     "target_display_id": -1,
     "locked_package": "",
+    "locked_target_type": "none", # "markdown_viewer", "teams_app", "generic", "none"
     "locked_task_id": -1,
+    "is_markdown_viewer_active": False,
+    "markdown_viewer_task_id": None,
+    "teams_app_task_id": None,
+    "top_activity": None,
     "foreground_package": "",
     "device_owner_active": False,
     "active_admin_active": False,
@@ -106,6 +111,41 @@ async def get_connected_displays(serial: Optional[str] = None) -> List[Dict[str,
 
     return displays
 
+async def find_teams_task_targets(serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Distinguishes between the Markdown Viewer (FilePreviewActivity) and the Teams App (PersonalFilesActivity/MainActivity).
+    Returns task IDs, active flags, and component names.
+    """
+    ser = await adb.get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "markdown_viewer_task_id": 314,
+            "teams_app_task_id": 307,
+            "is_markdown_viewer_active": True,
+            "is_teams_app_active": True,
+            "top_activity": "com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity"
+        }
+
+    res = await adb.run_adb_shell("dumpsys activity activities", ser, timeout=3.5)
+    out = res.get("stdout", "") if res.get("status") == "ok" else ""
+
+    md_m = re.search(r'FilePreviewActivity\s+t(\d+)', out)
+    md_task_id = int(md_m.group(1)) if md_m else None
+
+    teams_m = re.search(r'(PersonalFilesActivity|MainActivity)\s+t(\d+)', out)
+    teams_task_id = int(teams_m.group(2)) if teams_m else None
+
+    top_m = re.search(r'(?:topResumedActivity|mFocusedApp).*ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+([^\s\}]+)', out)
+    top_act = top_m.group(1) if top_m else None
+
+    return {
+        "markdown_viewer_task_id": md_task_id,
+        "teams_app_task_id": teams_task_id,
+        "is_markdown_viewer_active": bool(md_task_id is not None),
+        "is_teams_app_active": bool(teams_task_id is not None),
+        "top_activity": top_act
+    }
+
 async def query_kiosk_status(serial: Optional[str] = None) -> Dict[str, Any]:
     global kiosk_state
     ser = await adb.get_active_adb_serial(serial)
@@ -153,6 +193,17 @@ async def query_kiosk_status(serial: Optional[str] = None) -> Dict[str, Any]:
     ext_disp = next((d for d in displays if d.get("isExternal")), None)
     target_did = ext_disp.get("displayId", 13) if ext_disp else -1
 
+    # 5. Distinguish Markdown Viewer vs Teams App
+    targets = await find_teams_task_targets(ser)
+    locked_target_type = "none"
+    if locked_task_id > 0:
+        if targets.get("markdown_viewer_task_id") == locked_task_id:
+            locked_target_type = "markdown_viewer"
+        elif targets.get("teams_app_task_id") == locked_task_id:
+            locked_target_type = "teams_app"
+        else:
+            locked_target_type = "generic"
+
     kiosk_state.update({
         "connected": True,
         "serial": ser,
@@ -160,7 +211,12 @@ async def query_kiosk_status(serial: Optional[str] = None) -> Dict[str, Any]:
         "kiosk_mode": "kiosk" if lock_status != "UNLOCKED" else kiosk_state.get("kiosk_mode", "freeform"),
         "target_display_id": target_did,
         "locked_package": locked_pkg or kiosk_state.get("locked_package", ""),
+        "locked_target_type": locked_target_type,
         "locked_task_id": locked_task_id,
+        "is_markdown_viewer_active": targets.get("is_markdown_viewer_active", False),
+        "markdown_viewer_task_id": targets.get("markdown_viewer_task_id"),
+        "teams_app_task_id": targets.get("teams_app_task_id"),
+        "top_activity": targets.get("top_activity"),
         "foreground_package": fg_pkg,
         "device_owner_active": is_owner,
         "active_admin_active": is_admin,
@@ -174,6 +230,7 @@ async def query_kiosk_status(serial: Optional[str] = None) -> Dict[str, Any]:
 async def lock_external_display(
     display_id: int = 13,
     package_id: str = "com.microsoft.teams",
+    target_type: str = "auto",  # "auto", "markdown_viewer", "teams_app"
     mode: str = "kiosk",
     restrictions: Optional[Dict[str, Any]] = None,
     serial: Optional[str] = None
@@ -190,7 +247,6 @@ async def lock_external_display(
 
     # 1. Apply system-level dock & sleep restrictions
     if restr.get("prevent_sleep", True):
-        # 3 = Stay awake on AC/USB
         await adb.run_adb_shell("settings put global stay_on_while_plugged_in 3", ser)
     
     if restr.get("disable_status_bar", True):
@@ -217,25 +273,52 @@ async def lock_external_display(
     )
     await adb.run_adb_shell(bcast_cmd, ser)
 
-    # 5. Find task ID of the target package or top task on external display and lock it
-    res_tasks = await adb.run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*A=.*\\}' | head -n 5", ser)
-    out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
-    
+    # 5. Distinguish specifically between Markdown Viewer (FilePreviewActivity) and Teams App
+    targets = await find_teams_task_targets(ser)
     task_id_to_lock = None
-    if package_id:
-        pkg_m = re.search(rf'#(\d+)\s+type=\w+\s+A=\d+:{re.escape(package_id)}', out_tasks)
-        if pkg_m:
-            task_id_to_lock = int(pkg_m.group(1))
+    target_desc = "App"
+    resolved_target_type = "generic"
+
+    t_type = (target_type or "auto").lower()
+    if t_type == "markdown_viewer" or (t_type == "auto" and targets.get("is_markdown_viewer_active")):
+        if targets.get("markdown_viewer_task_id"):
+            task_id_to_lock = targets["markdown_viewer_task_id"]
+            target_desc = f"Markdown Viewer (Task #{task_id_to_lock})"
+            resolved_target_type = "markdown_viewer"
+    elif t_type == "teams_app" or (t_type == "auto" and targets.get("is_teams_app_active")):
+        if targets.get("teams_app_task_id"):
+            task_id_to_lock = targets["teams_app_task_id"]
+            target_desc = f"Teams Main App (Task #{task_id_to_lock})"
+            resolved_target_type = "teams_app"
 
     if not task_id_to_lock:
-        # Fallback to top task
+        res_tasks = await adb.run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*A=.*\\}' | head -n 5", ser)
+        out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
+        if package_id:
+            pkg_m = re.search(rf'#(\d+)\s+type=\w+\s+A=\d+:{re.escape(package_id)}', out_tasks)
+            if pkg_m:
+                task_id_to_lock = int(pkg_m.group(1))
+                target_desc = f"{package_id} (Task #{task_id_to_lock})"
+                resolved_target_type = "generic"
+
+    if not task_id_to_lock:
+        # Fallback to top standard task
+        res_tasks = await adb.run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*A=.*\\}' | head -n 5", ser)
+        out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
         top_m = re.search(r'#(\d+)\s+type=standard', out_tasks)
         if top_m:
             task_id_to_lock = int(top_m.group(1))
+            target_desc = f"Task #{task_id_to_lock}"
+            resolved_target_type = "generic"
 
     if task_id_to_lock:
-        lock_res = await adb.run_adb_shell(f"am task lock {task_id_to_lock}", ser)
+        # Bring target task to front first
+        await adb.run_adb_shell(f"cmd activity task to-front {task_id_to_lock}", ser)
+        await asyncio.sleep(0.15)
+        # Lock task in kiosk mode
+        await adb.run_adb_shell(f"am task lock {task_id_to_lock}", ser)
         kiosk_state["locked_task_id"] = task_id_to_lock
+        kiosk_state["locked_target_type"] = resolved_target_type
 
     # Refresh and broadcast state
     await asyncio.sleep(0.2)
@@ -247,7 +330,9 @@ async def lock_external_display(
 
     return {
         "status": "ok",
-        "message": f"Locked external display #{display_id} to {package_id}",
+        "message": f"Locked external display #{display_id} to {target_desc}",
+        "locked_target_type": resolved_target_type,
+        "locked_task_id": task_id_to_lock,
         "kiosk_state": updated
     }
 
@@ -257,8 +342,10 @@ async def release_lock(admin_pin: Optional[str] = None, serial: Optional[str] = 
     if not ser:
         return {"status": "error", "message": "No active device connected"}
 
-    # 1. Stop Task Lock via Android ActivityManager
+    # 1. Stop Task Lock via Android ActivityManager (both LockTask and App Pinning)
+    await adb.run_adb_shell("cmd activity task lock stop", ser)
     await adb.run_adb_shell("am task lock stop", ser)
+    await adb.run_adb_shell("input keycombination 4 187", ser)
 
     # 2. Send Release Broadcast to Android KioskManager
     await adb.run_adb_shell("am broadcast -a com.matrixcapture.app.action.RELEASE_LOCK", ser)
@@ -268,10 +355,17 @@ async def release_lock(admin_pin: Optional[str] = None, serial: Optional[str] = 
 
     kiosk_state["lock_status"] = "UNLOCKED"
     kiosk_state["locked_package"] = ""
+    kiosk_state["locked_target_type"] = "none"
     kiosk_state["locked_task_id"] = -1
 
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.2)
     updated = await query_kiosk_status(ser)
+    updated["lock_status"] = "UNLOCKED"
+    updated["locked_package"] = ""
+    updated["locked_target_type"] = "none"
+    updated["locked_task_id"] = -1
+    kiosk_state.update(updated)
+
     await ws_manager.broadcast({
         "type": "kiosk_state_changed",
         "data": updated

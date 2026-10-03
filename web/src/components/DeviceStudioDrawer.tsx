@@ -3,7 +3,7 @@ import {
   Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle,
   RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, EyeOff, Sliders,
   Key, Cpu, Zap, Activity, Clock, Layers, Keyboard, CheckCircle2, Copy, Trash2,
-  Maximize2, Minimize2, Minus, ArrowDownCircle
+  Maximize2, Minimize2, Minus, ArrowDownCircle, FileText, Layout
 } from 'lucide-react';
 import type {
   ConnectedDisplay, KioskTelemetry, DeviceInfoData, AlignmentData,
@@ -142,6 +142,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   const [displays, setDisplays] = useState<ConnectedDisplay[]>([]);
   const [selectedDisplayId, setSelectedDisplayId] = useState<number>(4);
   const [targetPackage, setTargetPackage] = useState('com.microsoft.teams');
+  const [targetType, setTargetType] = useState<'auto' | 'markdown_viewer' | 'teams_app'>('markdown_viewer');
   const [kioskMode, setKioskMode] = useState<'freeform' | 'mirrored' | 'kiosk'>('kiosk');
   const [suppressHotkeys, setSuppressHotkeys] = useState(true);
   const [disableStatusBar, setDisableStatusBar] = useState(true);
@@ -259,6 +260,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
         body: JSON.stringify({
           display_id: selectedDisplayId,
           package_id: targetPackage,
+          target_type: targetType,
           mode: kioskMode,
           restrictions: {
             suppress_hotkeys: suppressHotkeys,
@@ -931,6 +933,41 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           </button>
                         ))}
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Target Window & Activity Distinction */}
+                  <div className="kiosk-section-card">
+                    <div className="kiosk-section-header">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Layout size={15} color="#38bdf8" />
+                        <h4>TARGET WINDOW & ACTIVITY</h4>
+                      </div>
+                      {kioskTelemetry?.locked_target_type && kioskTelemetry.locked_target_type !== 'none' && (
+                        <span className="kiosk-section-tag" style={{ color: '#00ff9d', borderColor: 'rgba(0,255,157,0.3)' }}>
+                          LOCKED: {kioskTelemetry.locked_target_type === 'markdown_viewer' ? 'MARKDOWN VIEWER' : kioskTelemetry.locked_target_type.toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="kiosk-mode-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+                      {[
+                        ['markdown_viewer', FileText, 'Markdown Viewer', `FilePreviewActivity ${kioskTelemetry?.markdown_viewer_task_id ? `(Task #${kioskTelemetry.markdown_viewer_task_id})` : ''} • Locks document editor & preview in place.`],
+                        ['teams_app', Smartphone, 'Teams Main App', `PersonalFilesActivity ${kioskTelemetry?.teams_app_task_id ? `(Task #${kioskTelemetry.teams_app_task_id})` : ''} • Locks files list and channels window.`],
+                        ['auto', Sliders, 'Auto-Detect', 'Prefers Markdown Viewer if open, otherwise locks the top Teams activity.']
+                      ].map(([t, Icon, title, desc]) => (
+                        <button
+                          key={t as string}
+                          type="button"
+                          className={`kiosk-mode-tile ${targetType === t ? 'active' : ''}`}
+                          onClick={() => setTargetType(t as any)}
+                        >
+                          <div className="mode-tile-header">
+                            <Icon size={14} />
+                            <span>{title as string}</span>
+                          </div>
+                          <p style={{ fontSize: '11px', marginTop: '4px', opacity: 0.85 }}>{desc as string}</p>
+                        </button>
+                      ))}
                     </div>
                   </div>
 

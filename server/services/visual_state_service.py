@@ -306,20 +306,26 @@ async def run_editor_recovery_node(
 
     # 1. Soft keyboard suppression without keyevent 4 (Back)
     await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
-    if disp_id and disp_id > 0:
-        await run_adb_shell(f"input -d {disp_id} keyevent 111", ser)
     actions.append("Suppressed on-screen keyboard policy")
 
-    # 2. Bring Teams task to front on external display (does not launch or restart activity)
+    # 2. Bring Markdown Viewer (FilePreviewActivity) or Teams task to front on external display
     try:
-        res_tasks = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", ser, timeout=2.5)
-        out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
-        if out_tasks:
-            m_t = re.search(r'#(\d+)\s+type=', out_tasks)
-            if m_t:
-                task_id = m_t.group(1)
-                await run_adb_shell(f"cmd activity task to-front {task_id}", ser)
-                actions.append(f"Brought Teams task #{task_id} to front")
+        res_act = await run_adb_shell("dumpsys activity activities | grep -E 'ActivityRecord\\{.*FilePreviewActivity.*t[0-9]+'", ser, timeout=2.5)
+        out_act = res_act.get("stdout", "") if res_act.get("status") == "ok" else ""
+        m_md = re.search(r'FilePreviewActivity\s+t(\d+)', out_act)
+        if m_md:
+            task_id = m_md.group(1)
+            await run_adb_shell(f"cmd activity task to-front {task_id}", ser)
+            actions.append(f"Brought Markdown Viewer task #{task_id} to front")
+        else:
+            res_tasks = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", ser, timeout=2.5)
+            out_tasks = res_tasks.get("stdout", "") if res_tasks.get("status") == "ok" else ""
+            if out_tasks:
+                m_t = re.search(r'#(\d+)\s+type=', out_tasks)
+                if m_t:
+                    task_id = m_t.group(1)
+                    await run_adb_shell(f"cmd activity task to-front {task_id}", ser)
+                    actions.append(f"Brought Teams task #{task_id} to front")
     except Exception:
         pass
 

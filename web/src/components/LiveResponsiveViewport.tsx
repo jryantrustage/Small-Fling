@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Maximize2, Minimize2, RefreshCw, ZoomIn, Copy, Check, Download } from 'lucide-react';
+import { Maximize2, Minimize2, RefreshCw, ZoomIn, Copy, Check } from 'lucide-react';
 import { BoundingBoxesOverlay } from './BoundingBoxesOverlay';
 import type { AlignmentData, DeviceInfoData } from '../types';
 
