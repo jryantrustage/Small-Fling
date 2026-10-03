@@ -7,7 +7,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from fastapi import HTTPException
 from PIL import Image
 from google import genai
@@ -187,101 +187,148 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     state.update_dag_after_frame(frame_id, top_ln, bot_ln)
     return res
 
-async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
-    def _call_ollama_sync():
-        with Image.open(image_path) as img:
-            w, h = img.size
-            max_dim = 1920
-            if max(w, h) > max_dim:
-                scale = max_dim / float(max(w, h))
-                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-            buf = io.BytesIO()
-            # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
-            img.convert("RGB").save(buf, format="PNG", optimize=False)
-            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
+    """
+    Synchronous worker for invoking MiniCPM-V vision models via Ollama.
+    Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, Lion Cove P-cores with AVX-VNNI).
+    """
+    with Image.open(image_path) as img:
+        w, h = img.size
+        max_dim = 1920
+        if max(w, h) > max_dim:
+            scale = max_dim / float(max(w, h))
+            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
+        img.convert("RGB").save(buf, format="PNG", optimize=False)
+        img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        prompt = (
-            "Extract code lines verbatim with gutter line numbers from the image.\n"
-            "Output each line in the strict structured format:\n"
-            "LINE_NUM: code_content\n\n"
-            "Rules:\n"
-            "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
-            "- LINE_NUM must be the integer line number visible in the left gutter.\n"
-            "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
-            "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
-            "- Do not include markdown code fences, headers, or explanations."
-        )
-        models = ["minicpm-v:latest", "minicpm-v", config.OLLAMA_VISION_MODEL]
-        last_ex = None
-        # Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB LPDDR5X-8533, 4 Lion Cove P-cores):
-        # - num_thread: 4 pins token routing to P-cores, avoiding Skymont E-core context switching
-        # - num_batch: 512 maximizes AVX-VNNI throughput
-        # - num_ctx: 4096 takes advantage of 32GB unified RAM
-        # - temperature: 0.0, top_k: 1, min_p: 0.05, repeat_penalty: 1.08 suppresses infinite bracket loops
-        ollama_opts = {
-            "num_predict": 1024,
-            "temperature": 0.0,
-            "top_k": 1,
-            "min_p": 0.05,
-            "repeat_penalty": 1.08,
-            "repeat_last_n": 64,
-            "num_thread": 4,
-            "num_ctx": 4096,
-            "num_batch": 512,
-        }
-        for m in models:
-            try:
-                connection_stats["total_http_requests"] += 1
-                req_data = json.dumps({
-                    "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
-                    "options": ollama_opts
-                }).encode("utf-8")
-                req = urllib.request.Request(f"{config.OLLAMA_URL.rstrip('/')}/api/generate", data=req_data, headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    connection_stats["ollama_available"] = True
-                    return data.get("response", ""), m
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception) as e:
-                connection_stats["http_errors_count"] += 1
-                connection_stats["last_connection_error"] = f"[Ollama {m}] {str(e)}"
-                connection_stats["last_error_timestamp"] = datetime.now().isoformat()
-                last_ex = e
-        raise last_ex or RuntimeError("Ollama vision models failed")
+    prompt = (
+        "Extract code lines verbatim with gutter line numbers from the image.\n"
+        "Output each line in the strict structured format:\n"
+        "LINE_NUM: code_content\n\n"
+        "Rules:\n"
+        "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
+        "- LINE_NUM must be the integer line number visible in the left gutter.\n"
+        "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
+        "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
+        "- Do not include markdown code fences, headers, or explanations."
+    )
+    models = []
+    for cand in [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]:
+        if cand and cand not in models:
+            models.append(cand)
+    last_ex = None
+    ollama_opts = {
+        "num_predict": 1024,
+        "temperature": 0.0,
+        "top_k": 1,
+        "min_p": 0.05,
+        "repeat_penalty": 1.08,
+        "repeat_last_n": 64,
+        "num_thread": 4,
+        "num_ctx": 4096,
+        "num_batch": 512,
+    }
+    timeout_sec = max(config.OLLAMA_TIMEOUT, 60)
+    for m in models:
+        try:
+            connection_stats["total_http_requests"] += 1
+            req_data = json.dumps({
+                "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
+                "options": ollama_opts
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                f"{config.OLLAMA_URL.rstrip('/')}/api/generate",
+                data=req_data,
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                connection_stats["ollama_available"] = True
+                return data.get("response", ""), m
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, Exception) as e:
+            connection_stats["http_errors_count"] += 1
+            connection_stats["last_connection_error"] = f"[Ollama {m}] {str(e)}"
+            connection_stats["last_error_timestamp"] = datetime.now().isoformat()
+            last_ex = e
+    raise last_ex or RuntimeError("Ollama MiniCPM-V vision models failed")
 
-    try:
-        raw_resp, model_used = await asyncio.to_thread(_call_ollama_sync)
-        raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
-        plines = []
-        for line in raw_text.splitlines():
-            line_clean = line.rstrip()
-            if not line_clean.strip():
+
+def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int, str]:
+    """
+    Parses MiniCPM-V textual output with robust multi-delimiter regex and JSON fallback.
+    Supports formats:
+      '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code'
+    """
+    raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
+    plines: List[Dict[str, Any]] = []
+    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?\[?(\d+)\]?\s*(?:[:|.)\]\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
+
+    seen_lines = set()
+    for line in raw_text.splitlines():
+        line_clean = line.rstrip()
+        if not line_clean.strip():
+            continue
+        if match := line_pattern.match(line_clean):
+            ln = int(match.group(1))
+            code = match.group(2)
+            if ln in seen_lines:
                 continue
-            if match := re.match(r"^\s*(?:line[_\s]*|ln\s*)?(\d+)\s*[:|]\s?(.*)$", line_clean, re.IGNORECASE):
-                ln = int(match.group(1))
-                code = match.group(2)
+            seen_lines.add(ln)
+            plines.append({
+                "line_number": ln,
+                "gutter_number": ln,
+                "text": code,
+                "is_blank": not bool(code.strip()),
+                "is_wrapped": False,
+                "wrapped_line_count": 1,
+                "confidence": 0.98,
+                "status": "verified"
+            })
+
+    if not plines:
+        parsed = {}
+        if m := re.search(r'\{.*\}', raw_text, re.DOTALL):
+            try: parsed = json.loads(m.group(0))
+            except Exception: pass
+        elif m := re.search(r'\[.*\]', raw_text, re.DOTALL):
+            try: parsed = {"lines": json.loads(m.group(0))}
+            except Exception: pass
+
+        json_lines = parsed.get("lines", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+        for item in json_lines:
+            if isinstance(item, dict) and item.get("line_number") is not None:
+                ln = int(item["line_number"])
+                code = str(item.get("text", ""))
+                if ln in seen_lines:
+                    continue
+                seen_lines.add(ln)
                 plines.append({
-                    "line_number": ln, "gutter_number": ln, "text": code,
-                    "is_blank": not bool(code.strip()), "is_wrapped": False,
-                    "wrapped_line_count": 1, "confidence": 0.98
+                    "line_number": ln,
+                    "gutter_number": ln,
+                    "text": code,
+                    "is_blank": item.get("is_blank", not bool(code.strip())),
+                    "is_wrapped": item.get("is_wrapped", False),
+                    "wrapped_line_count": item.get("wrapped_line_count", 1),
+                    "confidence": float(item.get("confidence", 0.98)),
+                    "status": "verified"
                 })
 
-        top_g, bot_g = None, None
-        if plines:
-            top_g = min(p["line_number"] for p in plines)
-            bot_g = max(p["line_number"] for p in plines)
-        else:
-            parsed = {}
-            if m := re.search(r'\{.*\}', raw_text, re.DOTALL):
-                try: parsed = json.loads(m.group(0))
-                except Exception: pass
-            elif m := re.search(r'\[.*\]', raw_text, re.DOTALL):
-                try: parsed = {"lines": json.loads(m.group(0))}
-                except Exception: pass
-            top_g = parsed.get("top_gutter_line") if isinstance(parsed, dict) else None
-            bot_g = parsed.get("bottom_gutter_line") if isinstance(parsed, dict) else None
-            plines = parsed.get("lines", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+    plines.sort(key=lambda x: x["line_number"])
+    top_ln = min((p["line_number"] for p in plines), default=0)
+    bot_ln = max((p["line_number"] for p in plines), default=0)
+    formatted = "\n".join(f"{p['line_number']:>3}: {p['text']}" for p in plines) if plines else raw_text
+    return plines, top_ln, bot_ln, formatted
 
-        _apply_extracted_lines(frame_id, plines, top_g, bot_g, f"Ollama Vision ({model_used})")
+
+async def process_frame_with_ollama(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
+    try:
+        raw_resp, model_used = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
+        plines, top_g, bot_g, _ = parse_minicpm_output(raw_resp)
+        top_val = top_g if top_g > 0 else (top_line if top_line > 0 else None)
+        bot_val = bot_g if bot_g > 0 else (bottom_line if bottom_line > 0 else None)
+        _apply_extracted_lines(frame_id, plines, top_val, bot_val, f"Ollama Vision ({model_used})")
         state.captured_frames[frame_id]["model_used"] = f"ollama:{model_used}"
     except Exception as e:
         print(f"[Ollama] Frame {frame_id} failed or timed out: {e}")
@@ -333,77 +380,10 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
 async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
-    """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction, with graceful fallback to RapidOCR."""
-    def _call_minicpm_sync():
-        with Image.open(image_path) as img:
-            w, h = img.size
-            max_dim = 1920
-            if max(w, h) > max_dim:
-                scale = max_dim / float(max(w, h))
-                img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-            buf = io.BytesIO()
-            # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
-            img.convert("RGB").save(buf, format="PNG", optimize=False)
-            img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-        prompt = (
-            "Extract code lines verbatim with gutter line numbers from the image.\n"
-            "Output each line in the strict structured format:\n"
-            "LINE_NUM: code_content\n\n"
-            "Rules:\n"
-            "- Output ONLY lines in 'LINE_NUM: code_content' format, one per line.\n"
-            "- LINE_NUM must be the integer line number visible in the left gutter.\n"
-            "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
-            "- If a line is blank, output 'LINE_NUM:' with no code content.\n"
-            "- Do not include markdown code fences, headers, or explanations."
-        )
-        candidates = [config.OLLAMA_VISION_MODEL or "minicpm-v:latest"]
-        last_ex = None
-        ollama_opts = {
-            "num_predict": 1024,
-            "temperature": 0.0,
-            "top_k": 1,
-            "min_p": 0.05,
-            "repeat_penalty": 1.08,
-            "repeat_last_n": 64,
-            "num_thread": 4,
-            "num_ctx": 4096,
-            "num_batch": 512,
-        }
-        for m in candidates:
-            try:
-                req_data = json.dumps({
-                    "model": m, "prompt": prompt, "images": [img_b64], "stream": False,
-                    "options": ollama_opts
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    f"{config.OLLAMA_URL.rstrip('/')}/api/generate",
-                    data=req_data,
-                    headers={"Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return data.get("response", ""), m
-            except Exception as e:
-                last_ex = e
-        raise last_ex or RuntimeError("MiniCPM-V Ollama vision failed")
-
+    """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction."""
     try:
-        raw_resp, model_name = await asyncio.to_thread(_call_minicpm_sync)
-        raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
-        plines = []
-        for line in raw_text.splitlines():
-            line_clean = line.rstrip()
-            if not line_clean.strip():
-                continue
-            if match := re.match(r"^\s*(?:line[_\s]*|ln\s*)?(\d+)\s*[:|]\s?(.*)$", line_clean, re.IGNORECASE):
-                ln = int(match.group(1))
-                code = match.group(2)
-                plines.append({"line_number": ln, "gutter_number": ln, "text": code})
-
-        top_ln = min((int(p["line_number"]) for p in plines if p.get("line_number")), default=0)
-        bot_ln = max((int(p["line_number"]) for p in plines if p.get("line_number")), default=0)
-        formatted = "\n".join(f"{p['line_number']:>3}: {p['text']}" for p in plines) if plines else raw_text
+        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
+        plines, top_ln, bot_ln, formatted = parse_minicpm_output(raw_resp)
         return {
             "status": "success",
             "top_line": top_ln,

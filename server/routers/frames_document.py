@@ -15,6 +15,8 @@ from services.ocr_service import (
     route_frame_ocr, normalize_model_target, active_pipeline_mode,
     active_model_target, process_frame_with_target, sync_pipeline_mode_with_keys,
 )
+import services.ocr_service as ocr_svc
+
 
 router = APIRouter(tags=["Frames & Document"])
 
@@ -157,22 +159,32 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
     ipath = _get_frame_path(frame_id, finfo.get("filename"))
     mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     try:
-        res = state.ocr_engine.scan_image(str(ipath))
+        res = await ocr_svc.scan_image_with_minicpm(ipath)
         top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
-        finfo.update({"top_line": top_ln, "bottom_line": bot_ln, "extracted_line_count": len(lines), "status": "processed", "bounding_boxes": res.get("bounding_boxes", {})})
+        finfo.update({
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
+            "extracted_line_count": len(lines),
+            "status": "processed",
+            "model_used": res.get("model_used", f"MiniCPM-V ({mt})"),
+            "bounding_boxes": res.get("bounding_boxes", {})
+        })
         for item in lines:
             if item.get("line_number"):
                 ln = int(item["line_number"])
                 state.document_lines[ln] = {
                     "line_number": ln, "gutter_number": ln, "text": item.get("text", ""),
-                    "is_blank": item.get("is_blank", False), "is_wrapped": item.get("is_wrapped", False),
-                    "wrapped_line_count": item.get("wrapped_line_count", 1), "status": "verified",
+                    "is_blank": item.get("is_blank", not bool(item.get("text", "").strip())),
+                    "is_wrapped": item.get("is_wrapped", False),
+                    "wrapped_line_count": item.get("wrapped_line_count", 1),
+                    "status": "verified",
                     "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98),
-                    "notes": f"Gutter OCR ({mt})", "updated_at": datetime.now().isoformat()
+                    "notes": f"Local MiniCPM-V OCR ({mt})", "updated_at": datetime.now().isoformat()
                 }
         state.save_persisted_state()
         data = {"status": "success", "frame_id": frame_id, "top_line": top_ln, "bottom_line": bot_ln,
                 "extracted_line_count": len(lines), "bounding_boxes": res.get("bounding_boxes", {}), "lines": lines, "model_target": mt}
+        await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
         await state.ws_manager.broadcast({"type": "ocr_completed", **data})
         return data
     except Exception as e:

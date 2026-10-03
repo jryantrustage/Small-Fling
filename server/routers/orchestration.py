@@ -1645,7 +1645,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     {
                         "line_number": ln,
                         "gutter_number": ln,
-                        "text": f"Line {ln}",
+                        "text": "",
                         "status": "verified",
                         "confidence": 0.95,
                         "is_wrapped": False
@@ -1708,9 +1708,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             for item in lines_detected:
                 ln = item.get("line_number")
+                raw_txt = (item.get("text") or "").strip()
                 if ln:
+                    # Never overwrite existing real lines with dummy placeholder or blank text
+                    if ln in state.document_lines:
+                        existing = state.document_lines[ln]
+                        ex_txt = (existing.get("text") if isinstance(existing, dict) else str(existing)).strip()
+                        if ex_txt and not ex_txt.startswith(f"Line {ln}"):
+                            continue
+                    if not raw_txt or raw_txt == f"Line {ln}":
+                        continue
                     state.document_lines[ln] = state.MasterLine(
-                        item.get("text", ""),
+                        raw_txt,
                         line_number=ln,
                         frame_id=fid,
                         status=item.get("status", "verified"),
@@ -1718,42 +1727,43 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         is_wrapped=item.get("is_wrapped", False),
                     )
 
+
             state.save_persisted_state()
             state.update_dag_after_frame(fid, top_ln, bot_ln)
-            await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
+            # High-speed asynchronous OCR background processing via MiniCPM-V
+            async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
+                try:
+                    bg_scan = await ocr_svc.scan_image_with_minicpm(target_img)
+                    bg_lines = bg_scan.get("lines", [])
+                    real_top = bg_scan.get("top_line", t_val) or t_val
+                    real_bot = bg_scan.get("bottom_line", b_val) or b_val
+                    for it in bg_lines:
+                        ln_idx = it.get("line_number")
+                        if ln_idx:
+                            state.document_lines[ln_idx] = state.MasterLine(
+                                it.get("text", ""),
+                                line_number=ln_idx,
+                                frame_id=target_fid,
+                                status=it.get("status", "verified"),
+                                confidence=it.get("confidence", 0.98),
+                                is_wrapped=it.get("is_wrapped", False),
+                            )
+                    if target_fid in state.captured_frames:
+                        state.captured_frames[target_fid].update({
+                            "top_line": real_top,
+                            "bottom_line": real_bot,
+                            "extracted_line_count": len(bg_lines) if bg_lines else (real_bot - real_top + 1),
+                            "bounding_boxes": bg_scan.get("bounding_boxes", {}),
+                            "model_used": bg_scan.get("model_used", "MiniCPM-V (Ollama)"),
+                            "status": "processed"
+                        })
+                    state.save_persisted_state()
+                    await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
+                except Exception as ex:
+                    print(f"[bg_frame_ocr] frame {target_fid} error: {ex}")
 
-            # High-speed asynchronous OCR background processing
-            if is_fast:
-                async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
-                    try:
-                        bg_scan = await ocr_svc.scan_image_with_minicpm(target_img)
-                        bg_lines = bg_scan.get("lines", [])
-                        real_top = bg_scan.get("top_line", t_val) or t_val
-                        real_bot = bg_scan.get("bottom_line", b_val) or b_val
-                        for it in bg_lines:
-                            ln_idx = it.get("line_number")
-                            if ln_idx:
-                                state.document_lines[ln_idx] = state.MasterLine(
-                                    it.get("text", ""),
-                                    line_number=ln_idx,
-                                    frame_id=target_fid,
-                                    status=it.get("status", "verified"),
-                                    confidence=it.get("confidence", 0.95),
-                                    is_wrapped=it.get("is_wrapped", False),
-                                )
-                        if target_fid in state.captured_frames:
-                            state.captured_frames[target_fid].update({
-                                "top_line": real_top,
-                                "bottom_line": real_bot,
-                                "extracted_line_count": len(bg_lines) if bg_lines else (real_bot - real_top + 1),
-                                "bounding_boxes": bg_scan.get("bounding_boxes", {}),
-                                "status": "processed"
-                            })
-                        state.save_persisted_state()
-                        await state.ws_manager.broadcast({"type": "document_updated", "document": state.get_document_metrics(), "data": state.get_document_metrics()})
-                    except Exception as ex:
-                        print(f"[bg_frame_ocr] frame {target_fid} error: {ex}")
-
+            has_real_text = lines_detected and any(not str(l.get("text", "")).startswith("Line ") and str(l.get("text", "")).strip() for l in lines_detected)
+            if not has_real_text or is_fast:
                 asyncio.create_task(_bg_frame_ocr(frame_path, fid, top_ln, bot_ln))
 
             await state.ws_manager.broadcast({"type": "new_frame", "frame": frame_info, "data": frame_info})
@@ -1786,8 +1796,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         "preview_text": ext_txt[:300] + ("..." if len(ext_txt) > 300 else ""),
                         "lines_count": len(lines_detected) if lines_detected else lpp,
                         "char_count": len(ext_txt),
-                        "model_used": "RapidOCR (Fast Stream)",
-                        "evaluator": "RapidOCR Stream Evaluator",
+                        "model_used": "MiniCPM-V (Ollama Stream)",
+                        "evaluator": "MiniCPM-V Stream Evaluator",
                         "healing_step": None,
                         "telemetry_insight": f"Stream extracted {len(lines_detected) if lines_detected else lpp} lines"
                     })

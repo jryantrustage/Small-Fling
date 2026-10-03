@@ -1,0 +1,115 @@
+import asyncio
+import os
+import pytest
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
+
+import config
+from main import app
+from services import state
+import services.ocr_service as ocr_svc
+
+def test_minicpm_line_parsing_formats():
+    """Verify that parse_minicpm_output handles all line number delimiter formats emitted by MiniCPM-V."""
+    raw_output = """
+1: import os
+2. import sys
+3 | import json
+[4] from pathlib import Path
+5) def main():
+Line 6:     x = 42
+7:
+8
+9    return x
+"""
+    plines, top_ln, bot_ln, formatted = ocr_svc.parse_minicpm_output(raw_output)
+    assert top_ln == 1
+    assert bot_ln == 9
+    assert len(plines) == 9
+    
+    line_map = {p["line_number"]: p for p in plines}
+    assert line_map[1]["text"] == "import os"
+    assert line_map[2]["text"] == "import sys"
+    assert line_map[3]["text"] == "import json"
+    assert line_map[4]["text"] == "from pathlib import Path"
+    assert line_map[5]["text"] == "def main():"
+    assert line_map[6]["text"] == "    x = 42"
+    assert line_map[7]["text"] == ""
+    assert line_map[7]["is_blank"] is True
+    assert line_map[8]["text"] == ""
+    assert line_map[8]["is_blank"] is True
+    assert line_map[9]["text"] == "return x"
+
+def test_minicpm_json_fallback():
+    """Verify fallback JSON parsing if MiniCPM-V returns structured JSON."""
+    raw_json = """```json
+{
+  "top_gutter_line": 10,
+  "bottom_gutter_line": 12,
+  "lines": [
+    {"line_number": 10, "text": "const a = 1;"},
+    {"line_number": 11, "text": "const b = 2;"},
+    {"line_number": 12, "text": "console.log(a + b);"}
+  ]
+}
+```"""
+    plines, top_ln, bot_ln, formatted = ocr_svc.parse_minicpm_output(raw_json)
+    assert top_ln == 10
+    assert bot_ln == 12
+    assert len(plines) == 3
+    assert plines[0]["text"] == "const a = 1;"
+    assert plines[2]["text"] == "console.log(a + b);"
+
+@pytest.mark.asyncio
+async def test_scan_image_with_minicpm():
+    """Verify scan_image_with_minicpm delegates to call_minicpm_ollama_sync and formats properly."""
+    dummy_img = state.FRAMES_DIR / "test_dummy_mock.png"
+    from PIL import Image
+    Image.new("RGB", (100, 100), color="white").save(dummy_img)
+    try:
+        with patch("services.ocr_service.call_minicpm_ollama_sync", return_value=("1: print('hello')\n2: print('world')", "minicpm-v:latest")):
+            res = await ocr_svc.scan_image_with_minicpm(dummy_img)
+            assert res["status"] == "success"
+            assert res["top_line"] == 1
+            assert res["bottom_line"] == 2
+            assert len(res["lines"]) == 2
+            assert res["model_used"] == "MiniCPM-V (minicpm-v:latest)"
+    finally:
+        if dummy_img.exists():
+            dummy_img.unlink()
+
+def test_scan_endpoint_uses_minicpm():
+    """Verify /api/frames/{id}/scan calls MiniCPM-V and updates state."""
+    client = TestClient(app)
+    fid = "test_frame_minicpm_1"
+    fpath = state.FRAMES_DIR / f"{fid}.png"
+    from PIL import Image
+    Image.new("RGB", (100, 100), color="white").save(fpath)
+    state.captured_frames[fid] = {
+        "frame_id": fid,
+        "filename": f"{fid}.png",
+        "top_line": 0,
+        "bottom_line": 0,
+        "status": "raw"
+    }
+
+    try:
+        with patch("services.ocr_service.call_minicpm_ollama_sync", return_value=("50: def compute():\n51:     return 100", "minicpm-v:latest")):
+            resp = client.post(f"/api/frames/{fid}/scan")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "success"
+            assert data["top_line"] == 50
+            assert data["bottom_line"] == 51
+            assert data["extracted_line_count"] == 2
+            assert 50 in state.document_lines
+            assert state.document_lines[50]["text"] == "def compute():"
+            assert 51 in state.document_lines
+            assert state.document_lines[51]["text"] == "    return 100"
+    finally:
+        if fpath.exists():
+            fpath.unlink()
+        state.captured_frames.pop(fid, None)
+        state.document_lines.pop(50, None)
+        state.document_lines.pop(51, None)
