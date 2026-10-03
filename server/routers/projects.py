@@ -391,25 +391,25 @@ async def delete_project(project_id: str):
     active_pid = active_proj["id"] if active_proj else None
 
     # Broadcast project deletion and state synchronization to all connected clients
-    await state.ws_manager.broadcast({
-        "type": "project_deleted",
-        "project_id": project_id,
-        "active_project": active_proj,
-        "projects": db.get_projects()
-    })
-    await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
-    await state.ws_manager.broadcast({
-        "type": "frames_purged" if not active_proj else "frame_deleted",
-        "frames": db.get_frames(active_pid)
-    })
     try:
+        await state.ws_manager.broadcast({
+            "type": "project_deleted",
+            "project_id": project_id,
+            "active_project": active_proj,
+            "projects": db.get_projects()
+        })
+        await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
+        await state.ws_manager.broadcast({
+            "type": "frames_purged" if not active_proj else "frame_deleted",
+            "frames": db.get_frames(active_pid)
+        })
         from routers.frames_document import _doc_payload
         await state.ws_manager.broadcast({
             "type": "document_updated",
             "data": _doc_payload()
         })
-    except Exception:
-        pass
+    except Exception as be:
+        print(f"[delete_project] Broadcast warning: {be}")
 
     return {
         "status": "success",

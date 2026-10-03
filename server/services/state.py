@@ -86,7 +86,11 @@ class WebSocketManager:
             self.active.remove(ws)
 
     async def broadcast(self, message: Any):
-        payload = json.dumps(message, cls=NumpySafeJSONEncoder) if not isinstance(message, str) else message
+        try:
+            payload = json.dumps(message, cls=NumpySafeJSONEncoder) if not isinstance(message, str) else message
+        except Exception as e:
+            print(f"[WebSocketManager] broadcast serialization error: {e}")
+            return
         for ws in list(self.active):
             try:
                 await ws.send_text(payload)
@@ -646,6 +650,10 @@ def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]
         last_f = sorted_f[-1]
         status = last_f.get("status", "")
         cnt = last_f.get("extracted_line_count", 0)
+        t_line = last_f.get("top_line", 0)
+        b_line = last_f.get("bottom_line", 0)
+        has_valid_bounds = bool(t_line > 0 and b_line >= t_line)
+
         if status.startswith("error"):
             issue_map["ocr_degraded"] = {
                 "classifier_id": "ocr_degraded",
@@ -656,14 +664,14 @@ def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]
         elif len(sorted_f) >= 2:
             prev_f = sorted_f[-2]
             prev_cnt = prev_f.get("extracted_line_count", 0)
-            if prev_cnt >= 20 and cnt < 5:
+            if prev_cnt >= 20 and cnt < 5 and not has_valid_bounds:
                 issue_map["ocr_degraded"] = {
                     "classifier_id": "ocr_degraded",
                     "issue_detected": True,
                     "issue_name": "previous ocr capture degraded",
                     "details": f"OCR line count dropped severely ({prev_cnt} -> {cnt} lines)"
                 }
-        elif cnt == 0 and status == "processed":
+        elif cnt == 0 and status == "processed" and not has_valid_bounds:
             issue_map["ocr_degraded"] = {
                 "classifier_id": "ocr_degraded",
                 "issue_detected": True,

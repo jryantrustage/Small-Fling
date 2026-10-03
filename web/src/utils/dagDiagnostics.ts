@@ -89,9 +89,9 @@ export function calculateNodeLiveStatus(
     };
   }
 
-  const effectiveTotal = dagStatus.target_total_lines || targetTotalLines;
-  const effectiveTop = dagStatus.current_top_line || 1;
-  const effectiveBottom = dagStatus.current_bottom_line || 49;
+  const effectiveTotal = dagStatus.target_total_lines !== undefined ? dagStatus.target_total_lines : targetTotalLines;
+  const effectiveTop = dagStatus.current_top_line !== undefined ? dagStatus.current_top_line : 1;
+  const effectiveBottom = dagStatus.current_bottom_line !== undefined ? dagStatus.current_bottom_line : 0;
   const nextTargetTop = Math.max(1, effectiveBottom + 1);
 
   // Dynamic overrides per node type
