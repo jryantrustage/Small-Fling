@@ -130,6 +130,7 @@ _frame_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
 # Per-serial display mapping cache
 _display_map_cache: Dict[str, Dict[str, str]] = {}
 _display_map_cache_ts: Dict[str, float] = {}
+_cached_external_display_id: Dict[str, Tuple[int, float]] = {}
 
 # Active serial cache & reconnect debounce
 _active_serial_cache: Optional[str] = None
@@ -304,30 +305,43 @@ def sanitize_input_display_id(display_id: Any) -> Optional[int]:
     except (ValueError, TypeError):
         return None
 
-async def detect_external_display_id(serial: Optional[str] = None) -> int:
-    global current_device_model
+async def detect_external_display_id(serial: Optional[str] = None, force_refresh: bool = False) -> int:
+    global current_device_model, _cached_external_display_id
     if serial and "mock" in str(serial).lower():
         return 14
     ser = await get_active_adb_serial(serial)
-    if ser:
-        res = await run_adb_shell("dumpsys display", ser, timeout=2.5)
-        if res.get("status") == "ok" and res.get("stdout"):
-            out = res["stdout"]
-            # 1. First priority: look for DisplayViewport with type=EXTERNAL
-            m = re.search(r'DisplayViewport\{type=EXTERNAL.*?displayId=(\d+)', out)
-            if m and 0 < int(m.group(1)) <= 255:
-                return int(m.group(1))
-            # 2. Look for DisplayInfo with displayId X ... type EXTERNAL
+    if not ser:
+        return 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+
+    now = time.time()
+    if not force_refresh and ser in _cached_external_display_id:
+        cached_id, ts = _cached_external_display_id[ser]
+        if (now - ts) < 30.0:
+            return cached_id
+
+    detected_id = None
+    res = await run_adb_shell("dumpsys display", ser, timeout=2.5)
+    if res.get("status") == "ok" and res.get("stdout"):
+        out = res["stdout"]
+        # 1. First priority: look for DisplayViewport with type=EXTERNAL
+        m = re.search(r'DisplayViewport\{type=EXTERNAL.*?displayId=(\d+)', out)
+        if m and 0 < int(m.group(1)) <= 255:
+            detected_id = int(m.group(1))
+        # 2. Look for DisplayInfo with displayId X ... type EXTERNAL
+        if not detected_id:
             m = re.search(r'displayId\s+(\d+).*?type\s+EXTERNAL', out, re.DOTALL)
             if m and 0 < int(m.group(1)) <= 255:
-                return int(m.group(1))
-            # 3. Check for any non-zero displayId associated with EXTERNAL
+                detected_id = int(m.group(1))
+        # 3. Check for any non-zero displayId associated with EXTERNAL
+        if not detected_id:
             for line in out.splitlines():
                 if "EXTERNAL" in line:
                     m = re.search(r'(?:mDisplayId|displayId)[= ]+(\d+)', line)
                     if m and 0 < int(m.group(1)) <= 255:
-                        return int(m.group(1))
-            # 4. Check which display is actively hosting Teams
+                        detected_id = int(m.group(1))
+                        break
+        # 4. Check which display is actively hosting Teams
+        if not detected_id:
             try:
                 res_win = await run_adb_shell("dumpsys window windows | grep -E 'Display #[0-9]+|com.microsoft.teams'", ser, timeout=2.0)
                 if res_win.get("status") == "ok" and res_win.get("stdout"):
@@ -337,15 +351,23 @@ async def detect_external_display_id(serial: Optional[str] = None) -> int:
                         if m_d:
                             cur_disp = int(m_d.group(1))
                         if cur_disp and 0 < cur_disp <= 255 and "com.microsoft.teams" in line:
-                            return cur_disp
+                            detected_id = cur_disp
+                            break
             except Exception:
                 pass
-            # 5. Fallback search for any non-zero display id in dumpsys
+        # 5. Fallback search for any non-zero display id in dumpsys
+        if not detected_id:
             for line in out.splitlines():
                 m = re.search(r'(?:mDisplayId|displayId)=(\d+)', line)
                 if m and 0 < int(m.group(1)) <= 255:
-                    return int(m.group(1))
-    return 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+                    detected_id = int(m.group(1))
+                    break
+
+    if detected_id is None:
+        detected_id = 8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4
+
+    _cached_external_display_id[ser] = (detected_id, now)
+    return detected_id
 
 async def fetch_current_display_dpi_factor(serial: Optional[str] = None, display_id: Optional[int] = None) -> Tuple[float, int]:
     """
@@ -1044,6 +1066,16 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
+        # Check and ensure window focus on target display to prevent InputDispatcher 5000ms hang/ANR
+        try:
+            focus_chk = await run_adb_shell(f"dumpsys window displays | grep -A 2 'Display: mDisplayId={target_d}'", ser, timeout=1.0)
+            focus_out = focus_chk.get("stdout", "")
+            if "FilePreviewActivity" not in focus_out:
+                # Tap title bar safely at (200, 80) to acquire focus without cursor disruption
+                await run_adb_shell(f"input -d {target_d} tap 200 80 >/dev/null 2>&1", ser, timeout=1.0)
+        except Exception:
+            pass
+
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
             f"input -d {target_d} keyevent 111 >/dev/null 2>&1" if target_d else "input keyevent 111 >/dev/null 2>&1",
@@ -1051,19 +1083,17 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         ]
         if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
-            # If Ctrl+End: execute dual-navigation with high-speed inertial EOF fling to ensure navigation even if Teams WebView ignores HID shortcut
+            # If Ctrl+End: execute single smooth inertial EOF fling assist (never flood input queue with 8 rapid swipes)
             if key1 == 113 and key2 == 123:
-                for _ in range(8):
-                    base_cmds.append(f"input -d {target_d} swipe 300 900 300 100 60")
-            # If Ctrl+Home: execute dual-navigation with high-speed inertial Home fling to ensure snap to Line 1
+                base_cmds.append(f"input -d {target_d} swipe 300 850 300 150 200")
+            # If Ctrl+Home: execute single smooth inertial Home fling assist
             elif key1 == 113 and key2 == 122:
-                for _ in range(8):
-                    base_cmds.append(f"input -d {target_d} swipe 400 350 400 950 40")
+                base_cmds.append(f"input -d {target_d} swipe 400 250 400 900 200")
         else:
             base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
         full_cmd = "; ".join(base_cmds)
-        await run_adb_shell(full_cmd, ser, timeout=8.0)
+        await run_adb_shell(full_cmd, ser, timeout=5.0)
         dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
         await record_dispatched_key_event(
@@ -1143,7 +1173,8 @@ async def dispatch_accelerated_viewport_step(
     delta_lines: int,
     serial: Optional[str] = None,
     display_id: Optional[int] = None,
-    method: str = "auto"
+    method: str = "auto",
+    details: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Accelerated Viewport Stepping Engine:
@@ -1177,12 +1208,7 @@ async def dispatch_accelerated_viewport_step(
             "command": "mock"
         }
 
-    pre_act = ""
-    try:
-        res_w = await run_adb_shell("dumpsys activity activities | grep -E topResumedActivity", ser, timeout=1.5)
-        pre_act = res_w.get("stdout", "").strip() if res_w.get("status") == "ok" else ""
-    except Exception:
-        pass
+    pre_act = (details or {}).get("pre_activity", "") if details else ""
 
     did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
     valid_d = sanitize_input_display_id(did)
@@ -1226,20 +1252,21 @@ async def dispatch_accelerated_viewport_step(
         # Fast 120ms crisp gesture
         shell_cmds.append(f"input {disp_cmd}swipe 960 {y_from} 960 {y_to} 120 >/dev/null 2>&1")
     else:
-        # Option B: Batched ADB Keyevents in a single shell command
+        # Option B: Batched ADB Keyevents in a single concatenated shell command
         count = max(1, min(delta_lines, 80))
         key_sequence = ["20"] * count
         keys_str = " ".join(key_sequence)
         shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
 
     full_cmd = "; ".join(shell_cmds)
-    res = await run_adb_shell(full_cmd, ser, timeout=3.0)
+    res = await run_adb_shell(full_cmd, ser, timeout=2.0)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     ev_name = f"PageDown(93)" if chosen_method == "pagedown" else (f"DownArrow(20) x{delta_lines}" if chosen_method != "swipe" else "TouchSwipe")
     keycodes_list = [int(k) for k in key_sequence] if key_sequence else []
 
-    await record_dispatched_key_event(
+    # Record telemetry asynchronously without stalling the main pipeline thread
+    asyncio.create_task(record_dispatched_key_event(
         key_name=ev_name,
         keycodes=keycodes_list,
         shell_command=full_cmd,
@@ -1252,8 +1279,8 @@ async def dispatch_accelerated_viewport_step(
             "method": chosen_method,
             "pre_activity": pre_act
         },
-        check_window_state=True
-    )
+        check_window_state=False
+    ))
 
     return {
         "status": "ok" if res.get("status") == "ok" else "error",

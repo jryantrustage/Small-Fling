@@ -456,6 +456,25 @@ async def auto_heal_pipeline_environment(
     issues_observed: List[str] = []
     node = state.dag_state["nodes"].get(node_id, {})
 
+    # 0. ANR / Unresponsive App Dialog check & dismissal
+    try:
+        dlg_chk = await run_adb_shell("dumpsys window windows | grep -iE 'Application Not Responding|isn\'t responding'", serial, timeout=1.5)
+        dlg_out = dlg_chk.get("stdout", "")
+        if "Application Not Responding" in dlg_out or "isn't responding" in dlg_out:
+            issues_observed.append("Application Not Responding (ANR) dialog detected")
+            node.update({
+                "evaluator": "ANR Recovery Evaluator",
+                "healing_step": "Dismissing unresponsive app dialog",
+                "telemetry_insight": "ANR dialog detected • Dismissing prompt to keep Teams alive..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+            # Send Back key on display 0 to dismiss the system dialog without killing Teams
+            await run_adb_shell("input -d 0 keyevent 4 >/dev/null 2>&1; input keyevent 4 >/dev/null 2>&1", serial, timeout=1.5)
+            await asyncio.sleep(0.3)
+            actions_taken.append("Dismissed Application Not Responding dialog")
+    except Exception as anr_e:
+        print(f"[auto_heal] ANR check note: {anr_e}")
+
     # 1. Keyboard trigger check & fix
     try:
         if await is_ime_visible(serial):
@@ -502,45 +521,44 @@ async def auto_heal_pipeline_environment(
     if snap and len(snap) > 2000:
         c_ctx = ClassifierContext(serial=serial, display_id=disp_id, image_bytes=snap)
 
-        # Check Edit Mode (pencil icon / split-screen duplication) - only for capture nodes
-        if node_id not in ("init_end", "reset_home"):
-            try:
-                edit_clf = EditModeClassifier()
-                edit_res = await edit_clf.detect(c_ctx)
-                if edit_res.issue_detected:
-                    issues_observed.append(edit_res.details or "Editor not in single-pane edit mode")
-                    node.update({
-                        "evaluator": "Editor Mode Evaluator",
-                        "healing_step": "Tapping pencil to enter edit mode",
-                        "telemetry_insight": "Split screen / read-only preview detected • Tapping pencil to enter edit mode..."
-                    })
-                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-                    fix_edit = await enable_edit_mode(serial=serial, display_id=disp_id)
-                    actions_taken.extend(fix_edit.get("actions", ["Tapped pencil icon"]))
-                    # Refresh snapshot after edit mode change
-                    snap = await capture_external_screenshot(serial, max_cache_age_s=0.0)
-                    if snap:
-                        c_ctx.image_bytes = snap
-                        c_ctx.image_cv = None
-            except Exception as ee:
-                print(f"[auto_heal] Edit mode check note: {ee}")
+        # Check Edit Mode (pencil icon / split-screen duplication)
+        try:
+            edit_clf = EditModeClassifier()
+            edit_res = await edit_clf.detect(c_ctx)
+            if edit_res.issue_detected:
+                issues_observed.append(edit_res.details or "Editor not in single-pane edit mode")
+                node.update({
+                    "evaluator": "Editor Mode Evaluator",
+                    "healing_step": "Tapping pencil to enter edit mode",
+                    "telemetry_insight": "Split screen / read-only preview detected • Tapping pencil to enter edit mode..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                fix_edit = await enable_edit_mode(serial=serial, display_id=disp_id)
+                actions_taken.extend(fix_edit.get("actions", ["Tapped pencil icon"]))
+                # Refresh snapshot after edit mode change
+                snap = await capture_external_screenshot(serial, max_cache_age_s=0.0)
+                if snap:
+                    c_ctx.image_bytes = snap
+                    c_ctx.image_cv = None
+        except Exception as ee:
+            print(f"[auto_heal] Edit mode check note: {ee}")
 
-            # Check Dark Mode (theme pull-down)
-            try:
-                light_clf = LightModeClassifier()
-                light_res = await light_clf.detect(c_ctx)
-                if light_res.issue_detected:
-                    issues_observed.append(light_res.details or "Light mode is active (screen washed out)")
-                    node.update({
-                        "evaluator": "Theme Luminance Evaluator",
-                        "healing_step": "Selecting dark mode from pull-down",
-                        "telemetry_insight": f"High luminance ({light_res.metadata.get('mean_luminance')}) • Selecting Dark Mode from pull-down..."
-                    })
-                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-                    fix_dm = await select_dark_mode(serial=serial, display_id=disp_id)
-                    actions_taken.extend(fix_dm.get("actions", ["Switched to Dark Mode"]))
-            except Exception as le:
-                print(f"[auto_heal] Dark mode check note: {le}")
+        # Check Dark Mode (theme pull-down)
+        try:
+            light_clf = LightModeClassifier()
+            light_res = await light_clf.detect(c_ctx)
+            if light_res.issue_detected:
+                issues_observed.append(light_res.details or "Light mode is active (screen washed out)")
+                node.update({
+                    "evaluator": "Theme Luminance Evaluator",
+                    "healing_step": "Selecting dark mode from pull-down",
+                    "telemetry_insight": f"High luminance ({light_res.metadata.get('mean_luminance')}) • Selecting Dark Mode from pull-down..."
+                })
+                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+                fix_dm = await select_dark_mode(serial=serial, display_id=disp_id)
+                actions_taken.extend(fix_dm.get("actions", ["Switched to Dark Mode"]))
+        except Exception as le:
+            print(f"[auto_heal] Dark mode check note: {le}")
 
     dur_h_ms = max(0, int((time.perf_counter() - t_h_start) * 1000))
     return {
@@ -732,18 +750,21 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     global _current_running_node_task, _current_running_node_id
     curr_task = asyncio.current_task()
 
-    # If any other node is currently running, ABORT IT IMMEDIATELY
-    if _current_running_node_task and _current_running_node_task is not curr_task and not _current_running_node_task.done():
+    allow_concurrent = bool(payload.get("allow_concurrent") or payload.get("pipelined") or payload.get("fast_loop"))
+
+    # If any other node is currently running, abort it unless concurrent/pipelined execution is explicitly permitted
+    if not allow_concurrent and _current_running_node_task and _current_running_node_task is not curr_task and not _current_running_node_task.done():
         prev_id = _current_running_node_id or "previous"
         await abort_running_node(reason=f"Operation aborted: Preempted by Node {target_key}")
 
-    # Enforce strictly 1 running node at a time across DAG state
-    for k, v in state.dag_state.get("nodes", {}).items():
-        if k != target_key:
-            v["is_active"] = False
-            if v.get("status") == "active":
-                v["status"] = "aborted"
-                v["error"] = f"Preempted by Node {target_key}"
+    # Enforce strictly 1 running node at a time across DAG state (unless concurrent execution is permitted)
+    if not allow_concurrent:
+        for k, v in state.dag_state.get("nodes", {}).items():
+            if k != target_key:
+                v["is_active"] = False
+                if v.get("status") == "active":
+                    v["status"] = "aborted"
+                    v["error"] = f"Preempted by Node {target_key}"
 
     start_time = datetime.now()
     t_start = time.perf_counter()
@@ -777,8 +798,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     try:
         disp_id = await detect_external_display_id(active_serial)
 
-        # Proactively heal environment triggers before executing node action (only for continuous capture nodes, never disturb user's open document during init/reset)
-        if not payload.get("skip_env_heal") and target_key not in ("init_end", "reset_home"):
+        # Proactively heal environment triggers before executing node action (keyboard, fullscreen, edit mode, dark mode)
+        if not payload.get("skip_env_heal"):
             t_pre_0 = time.perf_counter()
             heal_env = await auto_heal_pipeline_environment(active_serial, disp_id, target_key)
             precheck_ms = max(0, int((time.perf_counter() - t_pre_0) * 1000))
@@ -2742,7 +2763,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
 
-    opts = {"serial": active_serial, "fast_loop": True}
+    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": True, "pipelined": True}
 
     from services.performance_analyzer import format_duration_min_sec
     loop_idx = len(state.get_dag2_loop_history()) + 1

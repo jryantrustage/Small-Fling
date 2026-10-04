@@ -74,8 +74,8 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     - 'theme_dropdown' (sun/moon theme dropdown anchor)
     """
     h, w = img.shape[:2]
-    # Search upper right quadrant (y: 8%..20%, x: 50%..100%)
-    tb_y1, tb_y2 = int(h * 0.08), int(h * 0.20)
+    # Search upper right quadrant of header bar (y: 5%..15%, x: 50%..100%)
+    tb_y1, tb_y2 = int(h * 0.05), int(h * 0.15)
     tb_x1, tb_x2 = int(w * 0.50), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
@@ -91,7 +91,7 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
 
     matching_rows = np.where(row_counts > 0.4 * crop.shape[1])[0]
     if len(matching_rows) == 0:
-        bar_y1, bar_y2 = 10, crop.shape[0] - 10
+        bar_y1, bar_y2 = 5, crop.shape[0] - 5
     else:
         bar_y1, bar_y2 = matching_rows[0], matching_rows[-1]
 
@@ -120,8 +120,8 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     center_y = tb_y1 + (bar_y1 + bar_y2) // 2
     results: Dict[str, Tuple[int, int]] = {}
 
-    # The action group is at the far right of the toolbar:
-    # [Pencil] [Split] [Preview] | [Theme Dropdown (Sun/Moon + Chevron)]
+    # The action group is at the far right of the header bar:
+    # [Pencil] [Split/Share] [Preview] | [Theme Dropdown / Overflow]
     if len(significant_blobs) >= 4:
         action_blobs = significant_blobs[-4:]
         results["pencil"] = (tb_x1 + (action_blobs[0][0] + action_blobs[0][1]) // 2, center_y)
@@ -132,10 +132,10 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
         # Fallback to known relative offsets on 1920x1080 display
         scale_x = w / 1920.0
         scale_y = h / 1080.0
-        results["pencil"] = (int(1777 * scale_x), int(149 * scale_y))
-        results["split"] = (int(1804 * scale_x), int(149 * scale_y))
-        results["preview"] = (int(1831 * scale_x), int(149 * scale_y))
-        results["theme_dropdown"] = (int(1877 * scale_x), int(149 * scale_y))
+        results["pencil"] = (int(1732 * scale_x), int(82 * scale_y))
+        results["split"] = (int(1800 * scale_x), int(82 * scale_y))
+        results["preview"] = (int(1831 * scale_x), int(82 * scale_y))
+        results["theme_dropdown"] = (int(1870 * scale_x), int(83 * scale_y))
 
     return results
 
@@ -177,10 +177,10 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
                 target_coords = ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
                 actions.append(f"Located pencil edit icon at {target_coords} via UIAutomator tree")
 
-    # 3. Default resolution-scaled coordinates fallback
+    # 3. Default resolution-scaled coordinates fallback (Pencil icon at header right)
     if not target_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        target_coords = (int(1777 * disp_w / 1920), int(149 * disp_h / 1080))
+        target_coords = (int(1732 * disp_w / 1920), int(82 * disp_h / 1080))
         actions.append(f"Using calibrated toolbar coordinates {target_coords} on display {disp_id}")
 
     # 4. Dispatch touch motion
@@ -243,7 +243,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
 
     if not anchor_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        anchor_coords = (int(1877 * disp_w / 1920), int(149 * disp_h / 1080))
+        anchor_coords = (int(1870 * disp_w / 1920), int(83 * disp_h / 1080))
         actions.append(f"Using calibrated theme dropdown anchor {anchor_coords}")
 
     # 3. Touch motion to open the theme pull-down menu
@@ -252,7 +252,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Tapped theme pull-down menu trigger at ({ax}, {ay}) on display {disp_id}")
 
     # 4. Settle dwell for dropdown menu animation (~250-300ms)
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.35)
 
     # 5. Capture screenshot with open dropdown menu
     menu_snap = await capture_external_screenshot(ser, bypass_lock=True)
@@ -262,10 +262,10 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
         menu_img = cv2.imdecode(np.frombuffer(menu_snap, np.uint8), cv2.IMREAD_COLOR)
         if menu_img is not None:
             mh, mw = menu_img.shape[:2]
-            # Crop the dropdown area below the anchor: y in [ay..ay+250], x in [ax-280..ax+50]
+            # Crop the dropdown area below the anchor
             y1_d = max(0, ay - 10)
-            y2_d = min(mh, ay + 260)
-            x1_d = max(0, ax - 300)
+            y2_d = min(mh, ay + 350)
+            x1_d = max(0, ax - 350)
             x2_d = min(mw, ax + 50)
             menu_crop = menu_img[y1_d:y2_d, x1_d:x2_d]
 
@@ -276,7 +276,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                 if ocr_results:
                     for box, txt, score in ocr_results:
                         t_clean = txt.lower()
-                        if "dark" in t_clean or "mode" in t_clean and "light" not in t_clean:
+                        if "dark" in t_clean or ("mode" in t_clean and "light" not in t_clean):
                             cx = int(sum(pt[0] for pt in box) / 4)
                             cy = int(sum(pt[1] for pt in box) / 4)
                             dark_mode_coords = (x1_d + cx, y1_d + cy)
@@ -286,8 +286,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
     # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit
     if not dark_mode_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        # In the opened popup card, Dark Mode is the first row, ~19px below the toolbar center
-        dark_mode_coords = (int(1797 * disp_w / 1920), int(168 * disp_h / 1080))
+        dark_mode_coords = (int(1780 * disp_w / 1920), int(160 * disp_h / 1080))
         actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
