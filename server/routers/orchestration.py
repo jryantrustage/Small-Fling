@@ -2566,6 +2566,16 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             f"input -d 0 keyevent 111 >/dev/null 2>&1",
             active_serial
         )
+        # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before scanning begins
+        init_group["progress"] = {"percent": 15, "stage": "Verifying single-pane edit mode and dark mode...", "status": "running"}
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": "Verifying single-pane edit mode and dark mode...",
+            "percent": 15,
+            "status": "running",
+            "dag": state.dag_state
+        })
+        await auto_heal_pipeline_environment(active_serial, disp_id, "init_end")
 
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
@@ -3017,6 +3027,10 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     state.orchestration_state["status"] = "RUNNING"
 
     try:
+        # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
+        disp_id = await detect_external_display_id(active_serial)
+        await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
+
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)
             if res.get("status") in ("error", "prevented"):
