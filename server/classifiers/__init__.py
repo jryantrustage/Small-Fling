@@ -12,6 +12,7 @@ from .editor_classifiers import (
     Line1StuckClassifier,
     TeamsMarkdownVisibleClassifier,
     EditorCursorFocusedClassifier,
+    MarkdownFullScreenClassifier,
 )
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "Line1StuckClassifier",
     "TeamsMarkdownVisibleClassifier",
     "EditorCursorFocusedClassifier",
+    "MarkdownFullScreenClassifier",
 ]
 
 

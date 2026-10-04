@@ -189,8 +189,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")
     await asyncio.sleep(0.3)
 
-    # 5. CRITICAL: Suppress soft keyboard immediately
-    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+    # 5. CRITICAL: Suppress soft keyboard immediately on target display and primary screen
+    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
     actions.append("Suppressed on-screen keyboard policy")
 
     await asyncio.sleep(0.4)

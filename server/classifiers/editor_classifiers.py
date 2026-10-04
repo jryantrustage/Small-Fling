@@ -7,7 +7,8 @@ import numpy as np
 from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
-    is_ime_visible, ensure_adb_keyboard_closed, auto_fix_viewport, capture_external_screenshot
+    is_ime_visible, ensure_adb_keyboard_closed, auto_fix_viewport, capture_external_screenshot,
+    is_editor_full_screen
 )
 
 def _get_cv_img(ctx: ClassifierContext) -> Optional[np.ndarray]:
@@ -757,5 +758,74 @@ class EditorCursorFocusedClassifier(BaseClassifier):
             message="Ensured Teams task is in front and suppressed virtual keyboard without screen taps",
             actions_taken=actions
         )
+
+
+class MarkdownFullScreenClassifier(BaseClassifier):
+    id = "markdown_fullscreen"
+    issue_description = "Markdown editor is not in full screen mode"
+    fix_description = "Maximize markdown editor window and auto-fix viewport layout"
+    severity = "warning"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="No active Android device connected via ADB",
+                metadata={"connected": False}
+            )
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        snap = context.image_bytes
+        fs_status = await is_editor_full_screen(serial, disp_id, image_bytes=snap)
+
+        is_fs = fs_status.get("is_fullscreen", True)
+        if not is_fs:
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details=fs_status.get("reason", "Markdown editor is not in full screen mode"),
+                target_coordinates=None,
+                metadata=fs_status
+            )
+
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=False,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            details="Markdown editor is verified running in full screen mode",
+            target_coordinates=None,
+            metadata=fs_status
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return FixResult(classifier_id=self.id, success=False, message="No Android device connected via ADB", actions_taken=[])
+
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        fix_res = await auto_fix_viewport(serial, disp_id)
+
+        actions = [
+            f"Resized and maximized top task to full display bounds on display #{disp_id}",
+            "Brought markdown editor task to front",
+            "Suppressed soft keyboard on desktop and primary displays"
+        ]
+        is_fs = fix_res.get("is_fullscreen", True)
+        return FixResult(
+            classifier_id=self.id,
+            success=is_fs,
+            message="Auto-fixed viewport and maximized markdown editor to full screen" if is_fs else "Auto-fix applied; editor may still be transitioning",
+            actions_taken=actions
+        )
+
 
 

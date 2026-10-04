@@ -106,7 +106,9 @@ class DesktopPaginationService : AccessibilityService() {
 
     suspend fun ensureKeyboardClosed(targetDisplayId: Int? = null) = withContext(Dispatchers.Default) {
         setSoftKeyboardHidden(true)
-        val cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1"
+        val resolved = resolveTargetDisplayId(targetDisplayId)
+        val dCmd = if (resolved > 0) "input -d $resolved keyevent 111; " else ""
+        val cmd = "settings put secure show_ime_with_hard_keyboard 0; ${dCmd}input -d 0 keyevent 111; am broadcast -a com.matrixcapture.app.ACTION_CLOSE_KEYBOARD >/dev/null 2>&1"
         executeShellCommand(cmd)
         delay(150)
     }
@@ -249,10 +251,15 @@ class DesktopPaginationService : AccessibilityService() {
 
     suspend fun dispatchKeyCombination(displayId: Int = 0, key1: Int = 113, key2: Int = 123): Boolean {
         val resolved = resolveTargetDisplayId(displayId)
+        val flingCmd = if (key1 == 113 && key2 == 123) {
+            "; for i in 1 2 3 4 5 6 7 8; do input -d $resolved swipe 300 900 300 100 60; done"
+        } else if (key1 == 113 && key2 == 122) {
+            "; for i in 1 2 3 4 5 6 7 8; do input -d $resolved swipe 400 350 400 950 40; done"
+        } else ""
         val cmd = if (resolved > 0) {
-            "input -d $resolved keycombination -t 150 $key1 $key2; input keycombination -t 150 $key1 $key2"
+            "settings put secure show_ime_with_hard_keyboard 0; input -d $resolved keyevent 111; input -d $resolved keycombination -t 150 $key1 $key2$flingCmd"
         } else {
-            "input keycombination -t 150 $key1 $key2"
+            "settings put secure show_ime_with_hard_keyboard 0; input keyevent 111; input keycombination -t 150 $key1 $key2"
         }
         return executeShellCommand(cmd)
     }
