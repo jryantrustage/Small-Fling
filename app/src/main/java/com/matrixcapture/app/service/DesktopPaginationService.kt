@@ -252,9 +252,9 @@ class DesktopPaginationService : AccessibilityService() {
     suspend fun dispatchKeyCombination(displayId: Int = 0, key1: Int = 113, key2: Int = 123): Boolean {
         val resolved = resolveTargetDisplayId(displayId)
         val flingCmd = if (key1 == 113 && key2 == 123) {
-            "; for i in 1 2 3 4 5 6 7 8; do input -d $resolved swipe 300 900 300 100 60; done"
+            "; input -d $resolved swipe 300 850 300 150 200"
         } else if (key1 == 113 && key2 == 122) {
-            "; for i in 1 2 3 4 5 6 7 8; do input -d $resolved swipe 400 350 400 950 40; done"
+            "; input -d $resolved swipe 400 250 400 900 200"
         } else ""
         val cmd = if (resolved > 0) {
             "settings put secure show_ime_with_hard_keyboard 0; input -d $resolved keyevent 111; input -d $resolved keycombination -t 150 $key1 $key2$flingCmd"

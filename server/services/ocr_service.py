@@ -203,9 +203,9 @@ def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Ima
     Applies empirical image filter recommendations to prevent thin character erosion
     ('|', '\\', '/', '-', ';', brackets) and eliminate toolbar/status bar distractions:
       1. Region of Interest (ROI) Cropping:
-         Excludes top toolbar (y: 0..160) and bottom taskbar/dock to prevent
+         Excludes top toolbar (y: 0..160) and bottom taskbar/dock (y > 1040) to prevent
          hallucination of window title bar text as Line 1 or ASCII grid loops.
-      2. Adaptive Contrast Stretch (+12%):
+      2. Adaptive Contrast Stretch (+20%):
          Broadens dynamic range of faint syntax colors against dark code backgrounds.
       3. Unsharp Masking on Text ROI:
          Sharpens thin stems of pipes, slashes, brackets, and line numbers.
@@ -213,20 +213,20 @@ def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Ima
     w, h = pil_img.size
     img = pil_img
 
-    # 1. ROI crop to active editor text and gutter region (exclude title bar and dock if standard 1080p desktop)
+    # 1. ROI crop strictly to active editor text and gutter region (x: 0..1400, y: 160..1040)
     if roi_crop and w >= 1200 and h >= 800:
-        y_top = max(0, min(160, int(h * 0.14)))
-        y_bot = min(h, max(y_top + 400, int(h * 0.96)))
+        y_top = max(160, int(h * 0.148))
+        y_bot = min(h - 40, max(y_top + 400, int(h * 0.963)))
         x_left = 0
-        x_right = min(w, max(1400, int(w * 0.88)))
+        x_right = min(w, 1400)
         img = img.crop((x_left, y_top, x_right, y_bot))
 
-    # 2. Adaptive contrast stretch (+12%)
+    # 2. Adaptive contrast stretch (+20%)
     contrast_enhancer = ImageEnhance.Contrast(img)
-    img = contrast_enhancer.enhance(1.12)
+    img = contrast_enhancer.enhance(1.20)
 
-    # 3. Unsharp masking to preserve character fidelity
-    img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=130, threshold=3))
+    # 3. Unsharp masking to preserve character fidelity and prevent thin character erosion
+    img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=150, threshold=2))
 
     return img
 
@@ -237,7 +237,7 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, Lion Cove P-cores with AVX-VNNI).
     """
     with Image.open(image_path) as raw_img:
-        # Preprocess with ROI crop, +12% adaptive contrast stretch, and unsharp masking
+        # Preprocess with ROI crop, +20% adaptive contrast stretch, and unsharp masking
         img = preprocess_frame_for_ocr(raw_img, roi_crop=True)
         w, h = img.size
         max_dim = 1344
@@ -262,6 +262,7 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
         "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
         "- If a gutter line is blank, output 'LINE_NUM:' with no code content.\n"
         "- If a line number is not visible in the left gutter, NEVER hallucinate it. State 'Not visible' or omit it.\n"
+        "- If no gutter line numbers are visible in the image, output 'Not visible'.\n"
         "- Do not include markdown code fences, headers, or explanations."
     )
     models = []
@@ -270,15 +271,16 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
             models.append(cand)
     last_ex = None
     ollama_opts = {
-        "num_predict": 1024,
+        "num_predict": 512,
         "temperature": 0.0,
         "top_k": 1,
         "min_p": 0.05,
-        "repeat_penalty": 1.18,
-        "repeat_last_n": 64,
-        "num_thread": 4,
-        "num_ctx": 4096,
+        "repeat_penalty": 1.20,
+        "repeat_last_n": 128,
+        "num_thread": 6,
+        "num_ctx": 2048,
         "num_batch": 512,
+        "stop": ["\n\n\n\n", "Not visible", "<|endoftext|>", "<|im_end|>"]
     }
     timeout_sec = max(config.OLLAMA_TIMEOUT, 180)
     for m in models:
