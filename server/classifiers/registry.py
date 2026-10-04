@@ -17,6 +17,7 @@ from .editor_classifiers import (
     Line1StuckClassifier,
     TeamsMarkdownVisibleClassifier,
     EditorCursorFocusedClassifier,
+    MarkdownFullScreenClassifier,
 )
 
 
@@ -28,6 +29,7 @@ class ClassifierRegistry:
 
         # Register default general-purpose classifiers
         self.register(KeyboardOpenClassifier())
+        self.register(MarkdownFullScreenClassifier())
         self.register(EditModeClassifier())
         self.register(ViewModeClassifier())
         self.register(LightModeClassifier())
@@ -118,8 +120,8 @@ class ClassifierRegistry:
         """Execute fix actions for all detected issues in priority order."""
         eval_results = await self.evaluate_all(context)
         fix_results: List[FixResult] = []
-        # Priority order: close keyboard first so toolbar is unobstructed, then edit mode, then view mode, then light mode
-        priority = ["keyboard_open", "edit_mode", "view_mode", "light_mode"]
+        # Priority order: close keyboard and maximize window first so toolbar and layout are unobstructed, then edit mode, then view mode, then light mode
+        priority = ["keyboard_open", "markdown_fullscreen", "edit_mode", "view_mode", "light_mode"]
         sorted_detected = sorted(
             [r for r in eval_results if r.issue_detected],
             key=lambda r: priority.index(r.classifier_id) if r.classifier_id in priority else 99,
@@ -130,8 +132,8 @@ class ClassifierRegistry:
             fix_results.append(fix_res)
             # Allow display and input server to settle
             await asyncio.sleep(0.35)
-            # If keyboard was closed, refresh external screenshot for subsequent fixes
-            if res.classifier_id == "keyboard_open":
+            # If keyboard was closed or viewport resized, refresh external screenshot for subsequent fixes
+            if res.classifier_id in ("keyboard_open", "markdown_fullscreen"):
                 try:
                     from services.adb_service import capture_external_screenshot
                     new_snap = await capture_external_screenshot(context.serial)

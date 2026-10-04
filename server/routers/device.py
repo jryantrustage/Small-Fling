@@ -215,6 +215,18 @@ async def get_keyboard_status(serial: Optional[str] = None):
         "hard_keyboard_suppression": suppressed
     }
 
+@router.get("/api/device/fullscreen-status")
+async def get_fullscreen_status(serial: Optional[str] = None, display_id: Optional[int] = None):
+    ser = await adb.get_active_adb_serial(serial)
+    if not ser:
+        return {"connected": False, "is_fullscreen": False, "mode": "unknown", "reason": "No active device connected via ADB"}
+    status = await adb.is_editor_full_screen(ser, display_id)
+    return {
+        "connected": True,
+        "serial": ser,
+        **status
+    }
+
 @router.post("/api/adb/connect")
 @router.post("/api/device/connect-ip")
 async def adb_connect(req: Request):

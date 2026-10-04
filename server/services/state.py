@@ -531,6 +531,12 @@ dag_state: Dict[str, Any] = {
                         "enabled": True,
                         "severity": "warning"
                     },
+                    "markdown_fullscreen": {
+                        "name": "Full Screen Window Qualifier",
+                        "description": "Ensure markdown editor is maximized and running in full screen mode",
+                        "enabled": True,
+                        "severity": "warning"
+                    },
                     "light_mode": {
                         "name": "Theme Qualifier",
                         "description": "Ensure editor is in dark mode (prevent light theme wash out)",
@@ -783,8 +789,8 @@ def evaluate_dag_node_5_trigger_sync(eval_results: Optional[List[Dict[str, Any]]
             "details": (issue.get("details") or issue.get("issue_name")) if has_issue else "Clean / Satisfied"
         }
 
-        # Keyboard & view mode issues are auto-remediated in background; never halt or block capture
-        if q_id in ("keyboard_open", "view_mode"):
+        # Keyboard, fullscreen & view mode issues are auto-remediated in background; never halt or block capture
+        if q_id in ("keyboard_open", "view_mode", "markdown_fullscreen"):
             qualifier_statuses[q_id]["severity"] = "warning"
 
         if prevent_enforced and is_enabled and has_issue and qualifier_statuses[q_id].get("severity") == "blocking":

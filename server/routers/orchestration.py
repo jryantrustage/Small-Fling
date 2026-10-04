@@ -473,7 +473,25 @@ async def auto_heal_pipeline_environment(
     except Exception as ke:
         print(f"[auto_heal] Keyboard check note: {ke}")
 
-    # 2. Frame check for edit mode & dark mode
+    # 2. Markdown editor fullscreen check & auto-fix
+    try:
+        from services.adb_service import is_editor_full_screen
+        fs_status = await is_editor_full_screen(serial, disp_id, image_bytes=snap_bytes)
+        if not fs_status.get("is_fullscreen", True):
+            issues_observed.append("Markdown editor is not in full screen mode")
+            node.update({
+                "evaluator": "Fullscreen Viewport Evaluator",
+                "healing_step": "Maximizing editor to full 1080p viewport",
+                "telemetry_insight": f"Windowed editor detected ({fs_status.get('mode', 'freeform')}) • Auto-fixing viewport to full display bounds..."
+            })
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
+            await auto_fix_viewport(serial, disp_id)
+            await asyncio.sleep(0.2)
+            actions_taken.append("Maximized markdown editor task and reflowed viewport")
+    except Exception as fse:
+        print(f"[auto_heal] Fullscreen check note: {fse}")
+
+    # 3. Frame check for edit mode & dark mode
     snap = snap_bytes
     if not snap:
         try:
@@ -782,20 +800,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             )
 
             # Silently ensure virtual keyboard is closed without tapping or resizing
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
-
-            # 1. Ensure Teams FilePreviewActivity is focused on external display and dispatch dual navigation:
-            # Hardware Ctrl+End on focused window + Scrollbar Drag directly to EOF
             valid_disp_id = sanitize_input_display_id(disp_id)
             d_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
-            disp_w, disp_h = await get_display_dimensions(active_serial, valid_disp_id or disp_id or 0)
-            sb_x = max(100, disp_w - 5)
             await run_adb_shell(
-                f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
-                f"input {d_pfx}keycombination 113 123; input keycombination 113 123; "
-                f"input {d_pfx}draganddrop {sb_x} 250 {sb_x} {disp_h - 80} 300",
+                f"settings put secure show_ime_with_hard_keyboard 0; "
+                f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
+                f"input -d 0 keyevent 111 >/dev/null 2>&1",
                 active_serial
             )
+
+            # 1. Ensure Teams FilePreviewActivity navigates to EOF via hardware Ctrl+End and calibrated inertial fling
+            await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end")
             settle_s = float(cfg.get("settle_delay_ms", 800)) / 1000.0
             await asyncio.sleep(settle_s)
 
@@ -859,7 +874,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await asyncio.sleep(0.35)
 
             # 3. Silently suppress soft keyboard without resizing task or reloading window
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+            await run_adb_shell(
+                f"settings put secure show_ime_with_hard_keyboard 0; "
+                f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
+                f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                active_serial
+            )
 
             # Re-read gutter to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
@@ -869,9 +889,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 if b_fix > total_lines: total_lines = b_fix
                 if t_fix > 0 and top_line <= 0: top_line = t_fix
 
+            if cfg.get("manual_total_lines", 0) <= 0:
+                if proj := db.get_active_project():
+                    if proj.get("target_total_lines", 0) > 0:
+                        cfg["manual_total_lines"] = int(proj["target_total_lines"])
+
+            if cfg.get("manual_total_lines", 0) > 0 and total_lines < int(cfg["manual_total_lines"]):
+                total_lines = int(cfg["manual_total_lines"])
+
             # Evaluate whether editor is still displaying line 1 or partial scroll (< 500 lines)
             is_stuck_on_line_1 = False
-            if 0 < top_line <= 15:
+            if cfg.get("manual_total_lines", 0) > 0:
+                is_stuck_on_line_1 = False
+            elif 0 < top_line <= 15:
                 is_stuck_on_line_1 = True
             elif total_lines < 500:
                 is_stuck_on_line_1 = True
@@ -892,16 +922,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     serial=active_serial
                 )
                 try:
-                    await run_adb_shell(f"input -d {disp_id} tap 960 500", active_serial)
-                    await asyncio.sleep(0.2)
-                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
-                    await asyncio.sleep(0.1)
-                    await run_adb_shell(
-                        f"input -d {disp_id} keycombination 113 123; "
-                        f"input -d {disp_id} draganddrop {sb_x} 250 {sb_x} {disp_h - 80} 300",
-                        active_serial
-                    )
-                    await asyncio.sleep(1.0)
+                    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                    await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
+                    await asyncio.sleep(0.8)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
                         "healing_step": "Refreshing page capture",
@@ -1137,14 +1160,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Ensure window focus, suppress soft keyboard, and send Ctrl+Home + reverse scrollbar drag
+                # Suppress soft keyboard and send Ctrl+Home + reverse inertial flings without tapping text
                 await run_adb_shell(
-                    f"input {d_pfx}tap {disp_w // 2} {disp_h // 2}; "
-                    f"settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; "
-                    f"input {d_pfx}keycombination 113 122; "
-                    f"input {d_pfx}draganddrop {sb_x} {disp_h - 80} {sb_x} 250 300",
+                    f"settings put secure show_ime_with_hard_keyboard 0; "
+                    f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
+                    f"input -d 0 keyevent 111 >/dev/null 2>&1",
                     active_serial
                 )
+                await send_hid_keycombination(113, 122, serial=active_serial, caller_node="reset_home")
                 await asyncio.sleep(0.4)
 
                 # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
@@ -1180,7 +1203,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             break
 
                 if is_verified:
-                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                    await run_adb_shell(
+                        f"settings put secure show_ime_with_hard_keyboard 0; "
+                        f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
+                        f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                        active_serial
+                    )
                     break
 
                 print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), retrying Ctrl+Home...")
@@ -2509,7 +2537,14 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     try:
         # Ensure external display is identified and soft keyboard suppressed silently
         disp_id = await detect_external_display_id(active_serial)
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+        valid_disp_id = sanitize_input_display_id(disp_id)
+        d_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
+        await run_adb_shell(
+            f"settings put secure show_ime_with_hard_keyboard 0; "
+            f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
+            f"input -d 0 keyevent 111 >/dev/null 2>&1",
+            active_serial
+        )
 
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
