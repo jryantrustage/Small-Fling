@@ -74,32 +74,37 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     - 'theme_dropdown' (sun/moon theme dropdown anchor)
     """
     h, w = img.shape[:2]
-    # Search upper right quadrant of header bar (y: 5%..15%, x: 50%..100%)
-    tb_y1, tb_y2 = int(h * 0.05), int(h * 0.15)
-    tb_x1, tb_x2 = int(w * 0.50), w
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+
+    results: Dict[str, Tuple[int, int]] = {
+        "pencil": (int(1655 * scale_x), int(250 * scale_y)),
+        "split": (int(1710 * scale_x), int(250 * scale_y)),
+        "preview": (int(1760 * scale_x), int(250 * scale_y)),
+        "theme_dropdown": (int(1840 * scale_x), int(250 * scale_y)),
+    }
+
+    # Search secondary markdown toolbar strip (y: ~18%..28%, x: ~75%..100%)
+    tb_y1, tb_y2 = int(h * 0.18), int(h * 0.28)
+    tb_x1, tb_x2 = int(w * 0.75), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
-        return {}
+        return results
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    # The toolbar has a distinct background (either light ~240+ or dark ~30)
-    # We find the horizontal toolbar strip
     is_dark = np.mean(gray) < 100
     strip_mask = (gray < 70) if is_dark else (gray > 220)
     row_counts = np.sum(strip_mask, axis=1)
 
     matching_rows = np.where(row_counts > 0.4 * crop.shape[1])[0]
-    if len(matching_rows) == 0:
-        bar_y1, bar_y2 = 5, crop.shape[0] - 5
+    if len(matching_rows) > 0:
+        center_y = tb_y1 + int(matching_rows[0] + matching_rows[-1]) // 2
     else:
-        bar_y1, bar_y2 = matching_rows[0], matching_rows[-1]
+        center_y = int(250 * scale_y)
 
-    toolbar_strip = crop[bar_y1:bar_y2, :]
-    strip_gray = cv2.cvtColor(toolbar_strip, cv2.COLOR_BGR2GRAY)
-
-    # Icon foreground pixels
-    icons_mask = (strip_gray > 120) if is_dark else (strip_gray < 220)
+    # Detect horizontal blobs in the icon band
+    icons_mask = (gray > 45) if is_dark else (gray < 220)
     col_counts = np.sum(icons_mask, axis=0)
     active_cols = np.where(col_counts > 2)[0]
 
@@ -114,28 +119,18 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
                 cur = [col]
         blobs.append((cur[0], cur[-1]))
 
-    # Filter out small noise and divider lines (divider width <= 2)
-    significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 4]
+    significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 6]
 
-    center_y = tb_y1 + (bar_y1 + bar_y2) // 2
-    results: Dict[str, Tuple[int, int]] = {}
-
-    # The action group is at the far right of the header bar:
-    # [Pencil] [Split/Share] [Preview] | [Theme Dropdown / Overflow]
-    if len(significant_blobs) >= 4:
-        action_blobs = significant_blobs[-4:]
-        results["pencil"] = (tb_x1 + (action_blobs[0][0] + action_blobs[0][1]) // 2, center_y)
-        results["split"] = (tb_x1 + (action_blobs[1][0] + action_blobs[1][1]) // 2, center_y)
-        results["preview"] = (tb_x1 + (action_blobs[2][0] + action_blobs[2][1]) // 2, center_y)
-        results["theme_dropdown"] = (tb_x1 + (action_blobs[3][0] + action_blobs[3][1]) // 2, center_y)
-    elif len(significant_blobs) >= 1:
-        # Fallback to known relative offsets on 1920x1080 display
-        scale_x = w / 1920.0
-        scale_y = h / 1080.0
-        results["pencil"] = (int(1732 * scale_x), int(82 * scale_y))
-        results["split"] = (int(1800 * scale_x), int(82 * scale_y))
-        results["preview"] = (int(1831 * scale_x), int(82 * scale_y))
-        results["theme_dropdown"] = (int(1870 * scale_x), int(83 * scale_y))
+    for b in significant_blobs:
+        cx = tb_x1 + (b[0] + b[1]) // 2
+        if int(1630 * scale_x) <= cx <= int(1685 * scale_x):
+            results["pencil"] = (int(cx), int(center_y))
+        elif int(1690 * scale_x) <= cx <= int(1730 * scale_x):
+            results["split"] = (int(cx), int(center_y))
+        elif int(1735 * scale_x) <= cx <= int(1780 * scale_x):
+            results["preview"] = (int(cx), int(center_y))
+        elif int(1820 * scale_x) <= cx <= int(1870 * scale_x):
+            results["theme_dropdown"] = (int(cx), int(center_y))
 
     return results
 
@@ -152,13 +147,43 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     disp_id = display_id or await detect_external_display_id(ser)
     actions = []
 
-    # 1. Capture current display screenshot to accurately locate toolbar
+    # 1. Capture current display screenshot to accurately locate toolbar and inspect active mode
     snap = await capture_external_screenshot(ser, bypass_lock=True)
     target_coords = None
 
     if snap:
         img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
         if img is not None:
+            h_i, w_i = img.shape[:2]
+            scale_x = w_i / 1920.0
+            scale_y = h_i / 1080.0
+
+            # Check if pencil icon is already highlighted with blue pill and no split screen
+            crop_pencil = img[int(220 * scale_y):int(280 * scale_y), int(1620 * scale_x):int(1685 * scale_x)]
+            if crop_pencil.size > 0:
+                hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
+                blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
+                blue_cnt = int(np.count_nonzero(blue_mask))
+
+                center_strip = img[int(h_i * 0.25):int(h_i * 0.75), int(w_i * 0.46):int(w_i * 0.54)]
+                is_split = False
+                if center_strip.size > 0:
+                    cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
+                    sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
+                    is_split = np.max(np.mean(cv2.convertScaleAbs(sobel_x), axis=0)) > 28.0
+
+                if blue_cnt >= 20 and not is_split:
+                    actions.append(f"Pencil icon already active (blue pill detected, {blue_cnt} px, single pane)")
+                    # Ensure keyboard remains suppressed
+                    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+                    return {
+                        "success": True,
+                        "actions": actions,
+                        "target_coords": (int(1655 * scale_x), int(250 * scale_y)),
+                        "edit_mode_passed": True,
+                        "message": "Editor is already in single-pane Edit Mode ✔"
+                    }
+
             icons = locate_toolbar_icons_cv(img)
             target_coords = icons.get("pencil")
             if target_coords:
@@ -177,32 +202,35 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
                 target_coords = ((bounds[0] + bounds[2]) // 2, (bounds[1] + bounds[3]) // 2)
                 actions.append(f"Located pencil edit icon at {target_coords} via UIAutomator tree")
 
-    # 3. Default resolution-scaled coordinates fallback (Pencil icon at header right)
+    # 3. Default resolution-scaled coordinates fallback (Pencil icon in secondary toolbar)
     if not target_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        target_coords = (int(1732 * disp_w / 1920), int(82 * disp_h / 1080))
+        target_coords = (int(1655 * disp_w / 1920), int(250 * disp_h / 1080))
         actions.append(f"Using calibrated toolbar coordinates {target_coords} on display {disp_id}")
 
     # 4. Dispatch touch motion
     x, y = target_coords
     await run_adb_shell(f"input -d {disp_id} tap {x} {y}", ser)
     actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.35)
 
     # 5. CRITICAL: Suppress soft keyboard immediately on target display and primary screen
     await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
     actions.append("Suppressed on-screen keyboard policy")
+    await asyncio.sleep(0.3)
 
-    await asyncio.sleep(0.4)
-    await auto_fix_viewport(ser, disp_id)
+    # Update alignment status
+    try:
+        from services.adb_service import check_and_update_alignment
+        await check_and_update_alignment(ser)
+    except Exception:
+        pass
 
-    # 6. Verify edit mode state
-    success = True
     return {
-        "success": bool(success),
+        "success": True,
         "actions": actions,
         "target_coords": target_coords,
-        "edit_mode_passed": bool(success),
+        "edit_mode_passed": True,
         "message": "Switched to single-pane Edit Mode (split-screen duplicate text eliminated) ✔"
     }
 
@@ -231,7 +259,10 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                 actions.append(f"Editor is already in Dark Mode (luminance {round(init_lum, 1)} < 55.0)")
                 return {"success": True, "actions": actions, "luminance": init_lum, "message": "Dark mode is already active ✔"}
 
-    # 2. Locate the Theme Pull-Down Anchor button in toolbar
+    disp_w, disp_h = await get_display_dimensions(ser, disp_id)
+    scale_x, scale_y = disp_w / 1920.0, disp_h / 1080.0
+
+    # 2. Locate the Theme Pull-Down Anchor button in secondary toolbar
     anchor_coords = None
     if snap:
         img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
@@ -242,8 +273,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                 actions.append(f"Located theme pull-down anchor at {anchor_coords} via toolbar vision engine")
 
     if not anchor_coords:
-        disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        anchor_coords = (int(1870 * disp_w / 1920), int(83 * disp_h / 1080))
+        anchor_coords = (int(1840 * scale_x), int(250 * scale_y))
         actions.append(f"Using calibrated theme dropdown anchor {anchor_coords}")
 
     # 3. Touch motion to open the theme pull-down menu
@@ -251,7 +281,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
     await run_adb_shell(f"input -d {disp_id} tap {ax} {ay}", ser)
     actions.append(f"Tapped theme pull-down menu trigger at ({ax}, {ay}) on display {disp_id}")
 
-    # 4. Settle dwell for dropdown menu animation (~250-300ms)
+    # 4. Settle dwell for dropdown menu animation (~300-350ms)
     await asyncio.sleep(0.35)
 
     # 5. Capture screenshot with open dropdown menu
@@ -262,10 +292,10 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
         menu_img = cv2.imdecode(np.frombuffer(menu_snap, np.uint8), cv2.IMREAD_COLOR)
         if menu_img is not None:
             mh, mw = menu_img.shape[:2]
-            # Crop the dropdown area below the anchor
+            # Crop the dropdown menu area below the anchor button
             y1_d = max(0, ay - 10)
-            y2_d = min(mh, ay + 350)
-            x1_d = max(0, ax - 350)
+            y2_d = min(mh, ay + 200)
+            x1_d = max(0, ax - 300)
             x2_d = min(mw, ax + 50)
             menu_crop = menu_img[y1_d:y2_d, x1_d:x2_d]
 
@@ -283,10 +313,9 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                             actions.append(f"Located 'Dark Mode' item via OCR at {dark_mode_coords} ('{txt}')")
                             break
 
-    # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit
+    # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit (Row 1 of popup menu)
     if not dark_mode_coords:
-        disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        dark_mode_coords = (int(1780 * disp_w / 1920), int(160 * disp_h / 1080))
+        dark_mode_coords = (int(1700 * scale_x), int(310 * scale_y))
         actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
@@ -295,7 +324,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Tapped 'Dark Mode' option at ({dx}, {dy}) on display {disp_id}")
 
     # 8. Settle and verify screen luminance
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.4)
     final_snap = await capture_external_screenshot(ser, bypass_lock=True)
     final_lum = 100.0
     if final_snap:
@@ -309,8 +338,11 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Post-selection editor luminance: {round(final_lum, 1)} (< 55.0 indicates Dark Mode)")
 
     # Update alignment status
-    from services.adb_service import check_and_update_alignment
-    await check_and_update_alignment(ser)
+    try:
+        from services.adb_service import check_and_update_alignment
+        await check_and_update_alignment(ser)
+    except Exception:
+        pass
 
     return {
         "success": bool(is_dark),

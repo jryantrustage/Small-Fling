@@ -795,18 +795,8 @@ async def is_editor_full_screen(
         w_span = r - l
         h_span = b - t
 
-        if mode == "freeform":
-            return {
-                "is_fullscreen": False,
-                "mode": mode,
-                "bounds": bounds,
-                "task_id": tid,
-                "display_id": did,
-                "display_dimensions": [disp_w, disp_h],
-                "reason": f"Activity task #{tid} is running in freeform window mode (bounds: {bounds})"
-            }
-
-        # Check bounds coverage: task must span almost full width and height
+        # In Android Desktop Mode, all maximized windows have mode='freeform' spanning display bounds.
+        # Only treat as not fullscreen if bounds are significantly smaller than the display.
         if w_span < (disp_w - 80) or h_span < (disp_h - 160) or l > 60 or t > 100:
             return {
                 "is_fullscreen": False,
@@ -815,7 +805,7 @@ async def is_editor_full_screen(
                 "task_id": tid,
                 "display_id": did,
                 "display_dimensions": [disp_w, disp_h],
-                "reason": f"Activity task #{tid} bounds {bounds} are smaller than display viewport ({disp_w}x{disp_h})"
+                "reason": f"Activity task #{tid} is running in {mode} window mode (bounds {bounds} are smaller than display viewport {disp_w}x{disp_h})"
             }
 
     # Computer Vision fallback / sanity check if image_bytes provided
@@ -859,10 +849,10 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     """
     High-speed viewport auto-fix & keyboard dismiss for external desktop displays:
     1. Sends AUTO_REFRESH_DISPLAY broadcast to MatrixCapture Kiosk app.
-    2. Resizes and maximizes the editor task on the external display to full bounds.
-    3. Brings the editor task to front.
-    4. Dismisses any visible IME / soft keyboard cleanly without sending Back key to editor.
-    5. Enforces hardware keyboard IME suppression.
+    2. Brings the editor task to front, and ONLY resizes if not already fullscreen
+       (resizing an already-maximized FilePreviewActivity resets Teams to light mode and split view!).
+    3. Dismisses any visible IME / soft keyboard cleanly without sending Back key to editor.
+    4. Enforces hardware keyboard IME suppression.
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -878,15 +868,24 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     calib = await calibrate_display_dpi(ser, display_id)
     act_dpi = calib.get("active_dpi", 220)
 
-    # Only resize the top foreground task on the external display (e.g. FilePreviewActivity),
-    # bringing it to front and expanding to full display dimensions.
-    # Dismiss soft keyboard on both the target display and the default display
+    # Check fullscreen status beforehand
+    fs_status = await is_editor_full_screen(ser, display_id)
+    is_fs = fs_status.get("is_fullscreen", False)
+
+    # Only resize if the task is NOT already fullscreen.
+    # Invoking task resize on an already maximized FilePreviewActivity reloads the document,
+    # resetting user settings back to Light Mode and Split/Preview view!
+    if not is_fs:
+        resize_block = f"cmd activity task resize \"$top_tid\" 0 0 {disp_w} {disp_h} >/dev/null 2>&1; "
+    else:
+        resize_block = ""
+
     cmd = (
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
         f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
         f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'topResumedActivity|mFocusedApp' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
         f"if [ -n \"$top_tid\" ]; then "
-        f"  cmd activity task resize \"$top_tid\" 0 0 {disp_w} {disp_h} >/dev/null 2>&1; "
+        f"  {resize_block}"
         f"  cmd activity task to-front \"$top_tid\" >/dev/null 2>&1; "
         f"fi; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
@@ -930,12 +929,21 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     }
 
 async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
+    """
+    Suppresses the on-screen soft keyboard without resizing tasks or reflowing documents.
+    """
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
         disp_id = await detect_external_display_id(ser)
-        fix_res = await auto_fix_viewport(ser, disp_id)
-        return fix_res.get("keyboard_closed", True)
+        await run_adb_shell(
+            f"settings put secure show_ime_with_hard_keyboard 0; "
+            f"input -d {disp_id} keyevent 111 >/dev/null 2>&1; "
+            f"input -d 0 keyevent 111 >/dev/null 2>&1",
+            ser, timeout=2.0
+        )
+        is_open = await is_ime_visible(ser, force_check=True)
+        return not is_open
     except Exception: return False
 
 async def get_device_info() -> Dict[str, Any]:

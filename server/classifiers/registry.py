@@ -4,6 +4,7 @@ Allows dynamic registration of general-purpose classifiers and coordinated fix a
 """
 
 import asyncio
+import time
 from typing import Dict, List, Optional, Any
 from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
 from .editor_classifiers import (
@@ -25,7 +26,9 @@ class ClassifierRegistry:
     def __init__(self):
         self._classifiers: Dict[str, BaseClassifier] = {}
         self._latest_results: List[ClassificationResult] = []
-        self._auto_fix_enabled: bool = False
+        self._auto_fix_enabled: bool = True
+        self._is_fixing: bool = False
+        self._last_fix_time: float = 0.0
 
         # Register default general-purpose classifiers
         self.register(KeyboardOpenClassifier())
@@ -118,32 +121,42 @@ class ClassifierRegistry:
 
     async def fix_all(self, context: ClassifierContext) -> List[FixResult]:
         """Execute fix actions for all detected issues in priority order."""
-        eval_results = await self.evaluate_all(context)
-        fix_results: List[FixResult] = []
-        # Priority order: close keyboard and maximize window first so toolbar and layout are unobstructed, then edit mode, then view mode, then light mode
-        priority = ["keyboard_open", "markdown_fullscreen", "edit_mode", "view_mode", "light_mode"]
-        sorted_detected = sorted(
-            [r for r in eval_results if r.issue_detected],
-            key=lambda r: priority.index(r.classifier_id) if r.classifier_id in priority else 99,
-        )
+        if self._is_fixing:
+            return []
+        now = time.time()
+        if now - self._last_fix_time < 3.0:
+            return []
+        self._is_fixing = True
+        try:
+            eval_results = await self.evaluate_all(context)
+            fix_results: List[FixResult] = []
+            # Priority order: close keyboard and maximize window first so toolbar and layout are unobstructed, then edit mode, then view mode, then light mode
+            priority = ["keyboard_open", "markdown_fullscreen", "edit_mode", "view_mode", "light_mode"]
+            sorted_detected = sorted(
+                [r for r in eval_results if r.issue_detected],
+                key=lambda r: priority.index(r.classifier_id) if r.classifier_id in priority else 99,
+            )
 
-        for res in sorted_detected:
-            fix_res = await self.fix_classifier(res.classifier_id, context)
-            fix_results.append(fix_res)
-            # Allow display and input server to settle
-            await asyncio.sleep(0.35)
-            # If keyboard was closed or viewport resized, refresh external screenshot for subsequent fixes
-            if res.classifier_id in ("keyboard_open", "markdown_fullscreen"):
-                try:
-                    from services.adb_service import capture_external_screenshot
-                    new_snap = await capture_external_screenshot(context.serial)
-                    if new_snap:
-                        context.image_bytes = new_snap
-                        context.image_cv = None
-                except Exception:
-                    pass
+            for res in sorted_detected:
+                fix_res = await self.fix_classifier(res.classifier_id, context)
+                fix_results.append(fix_res)
+                # Allow display and input server to settle
+                await asyncio.sleep(0.35)
+                # If keyboard was closed or viewport resized, refresh external screenshot for subsequent fixes
+                if res.classifier_id in ("keyboard_open", "markdown_fullscreen"):
+                    try:
+                        from services.adb_service import capture_external_screenshot
+                        new_snap = await capture_external_screenshot(context.serial)
+                        if new_snap:
+                            context.image_bytes = new_snap
+                            context.image_cv = None
+                    except Exception:
+                        pass
 
-        return fix_results
+            self._last_fix_time = time.time()
+            return fix_results
+        finally:
+            self._is_fixing = False
 
     def get_latest_issues(self) -> List[Dict[str, Any]]:
         """Return only active detected issues."""
