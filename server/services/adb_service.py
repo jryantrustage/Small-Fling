@@ -709,10 +709,9 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
     ser = await get_active_adb_serial(serial)
     if not ser: return True
     try:
-        did = display_id or await detect_external_display_id(ser)
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open:
-            cmd = f"settings put secure show_ime_with_hard_keyboard 0; input -d {did} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1"
+            cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1"
             await run_adb_shell(cmd, ser, timeout=2.0)
             await asyncio.sleep(0.08)
             is_open = await is_ime_visible(ser, force_check=True)
@@ -768,45 +767,46 @@ async def is_editor_full_screen(
     d_match = re.search(rf'Display #{did}\b.*?(?=Display #|\Z)', stdout, re.DOTALL)
     search_block = d_match.group(0) if d_match else stdout
 
-    # Match Task for FilePreviewActivity:
-    task_pattern = re.compile(
-        r'\*\s+Task\{[0-9a-fA-F]+\s+#(?P<tid>\d+)[^}]*?mode=(?P<mode>\w+)[^}]*?\}.*?'
-        r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\)).*?'
-        r'FilePreviewActivity',
-        re.DOTALL
-    )
-    m = task_pattern.search(search_block)
-    if not m:
-        m = task_pattern.search(stdout)
+    # Match exact Task hosting FilePreviewActivity:
+    m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
+    if not m_act:
+        m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
 
     tid: Optional[int] = None
     mode = "unknown"
     bounds = [0, 0, disp_w, disp_h]
 
-    if m:
-        tid = int(m.group("tid"))
-        mode = m.group("mode").lower()
-        l = int(m.group("bl") or m.group("rl") or 0)
-        t = int(m.group("bt") or m.group("rt") or 0)
-        r = int(m.group("br") or m.group("rr") or disp_w)
-        b = int(m.group("bb") or m.group("rb") or disp_h)
-        bounds = [l, t, r, b]
+    if m_act:
+        tid = int(m_act.group(1))
+        m_task = re.search(
+            rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}.*?'
+            r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\))',
+            stdout,
+            re.DOTALL
+        )
+        if m_task:
+            mode = m_task.group("mode").lower()
+            l = int(m_task.group("bl") or m_task.group("rl") or 0)
+            t = int(m_task.group("bt") or m_task.group("rt") or 0)
+            r = int(m_task.group("br") or m_task.group("rr") or disp_w)
+            b = int(m_task.group("bb") or m_task.group("rb") or disp_h)
+            bounds = [l, t, r, b]
 
-        w_span = r - l
-        h_span = b - t
+            w_span = r - l
+            h_span = b - t
 
-        # In Android Desktop Mode, all maximized windows have mode='freeform' spanning display bounds.
-        # Only treat as not fullscreen if bounds are significantly smaller than the display.
-        if w_span < (disp_w - 80) or h_span < (disp_h - 160) or l > 60 or t > 100:
-            return {
-                "is_fullscreen": False,
-                "mode": mode,
-                "bounds": bounds,
-                "task_id": tid,
-                "display_id": did,
-                "display_dimensions": [disp_w, disp_h],
-                "reason": f"Activity task #{tid} is running in {mode} window mode (bounds {bounds} are smaller than display viewport {disp_w}x{disp_h})"
-            }
+            # In Android Desktop Mode, windows operate in freeform mode.
+            # If the editor window is reasonably large (w >= 1000, h >= 600), it comfortably hosts all 6 bounding box areas.
+            if w_span < 1000 or h_span < 600:
+                return {
+                    "is_fullscreen": False,
+                    "mode": mode,
+                    "bounds": bounds,
+                    "task_id": tid,
+                    "display_id": did,
+                    "display_dimensions": [disp_w, disp_h],
+                    "reason": f"Activity task #{tid} is running in {mode} window mode (bounds {bounds} are smaller than minimum desktop editor workspace)"
+                }
 
     # Computer Vision fallback / sanity check if image_bytes provided
     if image_bytes and len(image_bytes) > 2000:
@@ -822,7 +822,9 @@ async def is_editor_full_screen(
                 lum_right = float(np.mean(right_strip)) if right_strip.size > 0 else 0.0
                 lum_center = float(np.mean(center_strip)) if center_strip.size > 0 else 0.0
 
-                if (lum_left < 10.0 or lum_right < 10.0) and lum_center > 25.0:
+                # Only check CV margins if we have a bright white document canvas (light mode) with dark margins.
+                # In dark mode (lum_center < 80.0), borders are naturally dark and must NOT be mistaken for desktop margins!
+                if lum_center > 140.0 and (lum_left < 15.0 or lum_right < 15.0):
                     return {
                         "is_fullscreen": False,
                         "mode": mode if mode != "unknown" else "windowed_margins",
@@ -851,7 +853,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     1. Sends AUTO_REFRESH_DISPLAY broadcast to MatrixCapture Kiosk app.
     2. Brings the editor task to front, and ONLY resizes if not already fullscreen
        (resizing an already-maximized FilePreviewActivity resets Teams to light mode and split view!).
-    3. Dismisses any visible IME / soft keyboard cleanly without sending Back key to editor.
+    3. Dismisses any visible IME / soft keyboard cleanly on primary display (disp 0) without sending Escape to editor.
     4. Enforces hardware keyboard IME suppression.
     """
     ser = await get_active_adb_serial(serial)
@@ -868,36 +870,25 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     calib = await calibrate_display_dpi(ser, display_id)
     act_dpi = calib.get("active_dpi", 220)
 
-    # Check fullscreen status beforehand
-    fs_status = await is_editor_full_screen(ser, display_id)
-    is_fs = fs_status.get("is_fullscreen", False)
-
-    # Only resize if the task is NOT already fullscreen.
-    # Invoking task resize on an already maximized FilePreviewActivity reloads the document,
-    # resetting user settings back to Light Mode and Split/Preview view!
-    if not is_fs:
-        resize_block = f"cmd activity task resize \"$top_tid\" 0 0 {disp_w} {disp_h} >/dev/null 2>&1; "
-    else:
-        resize_block = ""
-
+    # Do NOT execute cmd activity task resize on FilePreviewActivity; doing so corrupts the Chromium WebView
+    # and forces Teams to reload, blanking out the editor and turning the canvas white.
     cmd = (
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
-        f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
-        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'topResumedActivity|mFocusedApp' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
+        f"top_tid=$(dumpsys activity activities | grep -E 'topResumedActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
+        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'mFocusedApp.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
+        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
         f"if [ -n \"$top_tid\" ]; then "
-        f"  {resize_block}"
         f"  cmd activity task to-front \"$top_tid\" >/dev/null 2>&1; "
         f"fi; "
         f"settings put secure show_ime_with_hard_keyboard 0; "
-        f"input -d {display_id} keyevent 111 >/dev/null 2>&1; "
         f"input -d 0 keyevent 111 >/dev/null 2>&1"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
 
     is_open = await is_ime_visible(ser, force_check=True)
     if is_open:
-        # Dismiss on target external display as well as primary screen
-        await run_adb_shell(f"input -d {display_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser, timeout=2.0)
+        # Dismiss on primary screen (display 0) where IME lives without sending Escape to target external display
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser, timeout=2.0)
         is_open = await is_ime_visible(ser, force_check=True)
 
     # Check fullscreen status post-fix
@@ -935,11 +926,9 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
     try:
         ser = await get_active_adb_serial(serial)
         if not ser: return False
-        disp_id = await detect_external_display_id(ser)
         await run_adb_shell(
-            f"settings put secure show_ime_with_hard_keyboard 0; "
-            f"input -d {disp_id} keyevent 111 >/dev/null 2>&1; "
-            f"input -d 0 keyevent 111 >/dev/null 2>&1",
+            "settings put secure show_ime_with_hard_keyboard 0; "
+            "input -d 0 keyevent 111 >/dev/null 2>&1",
             ser, timeout=2.0
         )
         is_open = await is_ime_visible(ser, force_check=True)
@@ -1086,7 +1075,6 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
 
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
-            f"input -d {target_d} keyevent 111 >/dev/null 2>&1" if target_d else "input keyevent 111 >/dev/null 2>&1",
             "input -d 0 keyevent 111 >/dev/null 2>&1",
         ]
         if target_d and target_d > 0:
@@ -1341,14 +1329,7 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 classifier_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_bytes, alignment_data=res)
                 await classifier_registry.evaluate_all(classifier_ctx)
                 c_report = classifier_registry.get_status_report()
-                if c_report.get("has_issues") and getattr(classifier_registry, "_auto_fix_enabled", False):
-                    try:
-                        await classifier_registry.fix_all(classifier_ctx)
-                        # Re-evaluate after auto-fix
-                        await classifier_registry.evaluate_all(classifier_ctx)
-                        c_report = classifier_registry.get_status_report()
-                    except Exception as fe:
-                        print(f"[check_and_update_alignment] Auto-fix error: {fe}")
+                # Telemetry monitor loop is strictly passive/read-only: record classifier report without tactile interference
                 res["classifiers"], res["classifier_issues"] = c_report, c_report.get("issues", [])
                 if c_report.get("has_issues"): state.latest_telemetry["classifier_issues"] = c_report.get("issues", [])
             except Exception as ce: print(f"[check_and_update_alignment] Classifier error: {ce}")

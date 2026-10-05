@@ -821,12 +821,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             )
 
             # Silently ensure virtual keyboard is closed without tapping or resizing
-            valid_disp_id = sanitize_input_display_id(disp_id)
-            d_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
             await run_adb_shell(
-                f"settings put secure show_ime_with_hard_keyboard 0; "
-                f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
-                f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                "settings put secure show_ime_with_hard_keyboard 0; "
+                "input -d 0 keyevent 111 >/dev/null 2>&1",
                 active_serial
             )
 
@@ -896,9 +893,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             # 3. Silently suppress soft keyboard without resizing task or reloading window
             await run_adb_shell(
-                f"settings put secure show_ime_with_hard_keyboard 0; "
-                f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
-                f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                "settings put secure show_ime_with_hard_keyboard 0; "
+                "input -d 0 keyevent 111 >/dev/null 2>&1",
                 active_serial
             )
 
@@ -943,7 +939,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     serial=active_serial
                 )
                 try:
-                    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
                     await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
                     await asyncio.sleep(0.8)
                     node.update({
@@ -1183,9 +1179,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             for attempt in range(1, 4):
                 # Suppress soft keyboard and send Ctrl+Home + reverse inertial flings without tapping text
                 await run_adb_shell(
-                    f"settings put secure show_ime_with_hard_keyboard 0; "
-                    f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
-                    f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                    "settings put secure show_ime_with_hard_keyboard 0; "
+                    "input -d 0 keyevent 111 >/dev/null 2>&1",
                     active_serial
                 )
                 await send_hid_keycombination(113, 122, serial=active_serial, caller_node="reset_home")
@@ -1225,9 +1220,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
                 if is_verified:
                     await run_adb_shell(
-                        f"settings put secure show_ime_with_hard_keyboard 0; "
-                        f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
-                        f"input -d 0 keyevent 111 >/dev/null 2>&1",
+                        "settings put secure show_ime_with_hard_keyboard 0; "
+                        "input -d 0 keyevent 111 >/dev/null 2>&1",
                         active_serial
                     )
                     break
@@ -2556,14 +2550,11 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     })
 
     try:
-        # Ensure external display is identified and soft keyboard suppressed silently
+        # Ensure external display is identified and soft keyboard suppressed silently on phone screen
         disp_id = await detect_external_display_id(active_serial)
-        valid_disp_id = sanitize_input_display_id(disp_id)
-        d_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
         await run_adb_shell(
-            f"settings put secure show_ime_with_hard_keyboard 0; "
-            f"input {d_pfx}keyevent 111 >/dev/null 2>&1; "
-            f"input -d 0 keyevent 111 >/dev/null 2>&1",
+            "settings put secure show_ime_with_hard_keyboard 0; "
+            "input -d 0 keyevent 111 >/dev/null 2>&1",
             active_serial
         )
         # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before scanning begins

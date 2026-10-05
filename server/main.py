@@ -3,7 +3,7 @@ import json
 import sys
 from datetime import datetime
 from typing import Optional
-
+# Trigger hot reload: neutralized tactile background fixes, eliminated task resize & keyevent 111 on display 3
 # Ensure standard output can handle UTF-8 / emojis on Windows without cp1252 encoding crashes
 if sys.platform == "win32":
     try:
@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
         pass
 
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0", lifespan=lifespan)
-# Reload trigger: 2026-10-01-v2
+# Reload trigger: 2026-10-04-v3
 
 app.add_middleware(
     CORSMiddleware,

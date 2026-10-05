@@ -26,7 +26,7 @@ class ClassifierRegistry:
     def __init__(self):
         self._classifiers: Dict[str, BaseClassifier] = {}
         self._latest_results: List[ClassificationResult] = []
-        self._auto_fix_enabled: bool = True
+        self._auto_fix_enabled: bool = False
         self._is_fixing: bool = False
         self._last_fix_time: float = 0.0
 
@@ -39,7 +39,7 @@ class ClassifierRegistry:
         self.register(ModalOverlayClassifier())
         self.register(MatrixAppOverlayClassifier())
         self.register(OcrDegradedClassifier())
-        self.register(Line1StuckClassifier())
+        # Line1StuckClassifier is DAG-node specific, not general background
         self.register(TeamsMarkdownVisibleClassifier())
         self.register(EditorCursorFocusedClassifier())
 

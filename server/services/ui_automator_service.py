@@ -174,8 +174,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
 
                 if blue_cnt >= 20 and not is_split:
                     actions.append(f"Pencil icon already active (blue pill detected, {blue_cnt} px, single pane)")
-                    # Ensure keyboard remains suppressed
-                    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+                    # Ensure keyboard remains suppressed on phone display
+                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
                     return {
                         "success": True,
                         "actions": actions,
@@ -214,8 +214,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")
     await asyncio.sleep(0.35)
 
-    # 5. CRITICAL: Suppress soft keyboard immediately on target display and primary screen
-    await run_adb_shell(f"settings put secure show_ime_with_hard_keyboard 0; input -d {disp_id} keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+    # 5. CRITICAL: Suppress soft keyboard exclusively on primary phone screen (display 0)
+    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
     actions.append("Suppressed on-screen keyboard policy")
     await asyncio.sleep(0.3)
 
@@ -255,8 +255,8 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
             h0, w0 = img0.shape[:2]
             body_sample = img0[int(h0 * 0.20):int(h0 * 0.80), int(w0 * 0.20):int(w0 * 0.80)]
             init_lum = float(np.mean(cv2.cvtColor(body_sample, cv2.COLOR_BGR2GRAY)))
-            if init_lum < 55.0:
-                actions.append(f"Editor is already in Dark Mode (luminance {round(init_lum, 1)} < 55.0)")
+            if init_lum < 65.0:
+                actions.append(f"Editor is already in Dark Mode (luminance {round(init_lum, 1)} < 65.0)")
                 return {"success": True, "actions": actions, "luminance": init_lum, "message": "Dark mode is already active ✔"}
 
     disp_w, disp_h = await get_display_dimensions(ser, disp_id)
@@ -319,9 +319,11 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
         actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
-    dx, dy = dark_mode_coords
-    await run_adb_shell(f"input -d {disp_id} tap {dx} {dy}", ser)
-    actions.append(f"Tapped 'Dark Mode' option at ({dx}, {dy}) on display {disp_id}")
+    if dark_mode_coords:
+        dx, dy = dark_mode_coords
+        await run_adb_shell(f"input -d {disp_id} tap {dx} {dy}", ser)
+        actions.append(f"Tapped 'Dark Mode' option at ({dx}, {dy}) on display {disp_id}")
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
 
     # 8. Settle and verify screen luminance
     await asyncio.sleep(0.4)
