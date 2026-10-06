@@ -874,12 +874,7 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     # and forces Teams to reload, blanking out the editor and turning the canvas white.
     cmd = (
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
-        f"top_tid=$(dumpsys activity activities | grep -E 'topResumedActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
-        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'mFocusedApp.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
-        f"if [ -z \"$top_tid\" ]; then top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); fi; "
-        f"if [ -n \"$top_tid\" ]; then "
-        f"  cmd activity task to-front \"$top_tid\" >/dev/null 2>&1; "
-        f"fi; "
+        f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
         f"settings put secure show_ime_with_hard_keyboard 0; "
         f"input -d 0 keyevent 111 >/dev/null 2>&1"
     )
@@ -1063,13 +1058,14 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
-        # Check and ensure window focus on target display to prevent InputDispatcher 5000ms hang/ANR
+        # Ensure FilePreviewActivity is in front on target display without tactile screen taps
         try:
-            focus_chk = await run_adb_shell(f"dumpsys window displays | grep -A 2 'Display: mDisplayId={target_d}'", ser, timeout=1.0)
-            focus_out = focus_chk.get("stdout", "")
-            if "FilePreviewActivity" not in focus_out:
-                # Tap title bar safely at (200, 80) to acquire focus without cursor disruption
-                await run_adb_shell(f"input -d {target_d} tap 200 80 >/dev/null 2>&1", ser, timeout=1.0)
+            top_chk = await run_adb_shell("dumpsys activity activities | grep -E 'topResumedActivity'", ser, timeout=1.0)
+            if "FilePreviewActivity" not in top_chk.get("stdout", ""):
+                t_res = await run_adb_shell("dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'", ser, timeout=1.0)
+                tid = t_res.get("stdout", "").strip()
+                if tid and tid.isdigit():
+                    await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.0)
         except Exception:
             pass
 
@@ -1079,12 +1075,6 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         ]
         if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
-            # If Ctrl+End: execute single smooth inertial EOF fling assist (never flood input queue with 8 rapid swipes)
-            if key1 == 113 and key2 == 123:
-                base_cmds.append(f"input -d {target_d} swipe 300 850 300 150 200")
-            # If Ctrl+Home: execute single smooth inertial Home fling assist
-            elif key1 == 113 and key2 == 122:
-                base_cmds.append(f"input -d {target_d} swipe 400 250 400 900 200")
         else:
             base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
