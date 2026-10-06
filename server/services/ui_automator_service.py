@@ -84,9 +84,9 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
         "theme_dropdown": (int(1840 * scale_x), int(250 * scale_y)),
     }
 
-    # Search secondary markdown toolbar strip (y: ~18%..28%, x: ~75%..100%)
-    tb_y1, tb_y2 = int(h * 0.18), int(h * 0.28)
-    tb_x1, tb_x2 = int(w * 0.75), w
+    # Search secondary markdown toolbar strip (y: ~18%..32%, x: >= 1350)
+    tb_y1, tb_y2 = int(h * 0.18), int(h * 0.32)
+    tb_x1, tb_x2 = int(1350 * scale_x), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
@@ -97,7 +97,7 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     strip_mask = (gray < 70) if is_dark else (gray > 220)
     row_counts = np.sum(strip_mask, axis=1)
 
-    matching_rows = np.where(row_counts > 0.4 * crop.shape[1])[0]
+    matching_rows = np.where(row_counts > 0.25 * crop.shape[1])[0]
     if len(matching_rows) > 0:
         center_y = tb_y1 + int(matching_rows[0] + matching_rows[-1]) // 2
     else:
@@ -120,17 +120,23 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
         blobs.append((cur[0], cur[-1]))
 
     significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 6]
+    centers = [tb_x1 + (b[0] + b[1]) // 2 for b in significant_blobs]
 
-    for b in significant_blobs:
-        cx = tb_x1 + (b[0] + b[1]) // 2
-        if int(1630 * scale_x) <= cx <= int(1685 * scale_x):
-            results["pencil"] = (int(cx), int(center_y))
-        elif int(1690 * scale_x) <= cx <= int(1730 * scale_x):
-            results["split"] = (int(cx), int(center_y))
-        elif int(1735 * scale_x) <= cx <= int(1780 * scale_x):
-            results["preview"] = (int(cx), int(center_y))
-        elif int(1820 * scale_x) <= cx <= int(1870 * scale_x):
-            results["theme_dropdown"] = (int(cx), int(center_y))
+    # The right-hand toolbar cluster contains: [pencil, (split), (preview), theme_dropdown]
+    if len(centers) >= 2:
+        results["pencil"] = (int(centers[0]), int(center_y))
+        # Theme dropdown is the rightmost cluster
+        results["theme_dropdown"] = (int(centers[-1]), int(center_y))
+        if len(centers) >= 3:
+            results["preview"] = (int(centers[-2]), int(center_y))
+        if len(centers) >= 4:
+            results["split"] = (int(centers[1]), int(center_y))
+    else:
+        for cx in centers:
+            if cx < int(1550 * scale_x):
+                results["pencil"] = (int(cx), int(center_y))
+            else:
+                results["theme_dropdown"] = (int(cx), int(center_y))
 
     return results
 
@@ -159,7 +165,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
             scale_y = h_i / 1080.0
 
             # Check if pencil icon is already highlighted with blue pill and no split screen
-            crop_pencil = img[int(220 * scale_y):int(280 * scale_y), int(1620 * scale_x):int(1685 * scale_x)]
+            crop_pencil = img[int(180 * scale_y):int(320 * scale_y), int(1200 * scale_x):int(1800 * scale_x)]
             if crop_pencil.size > 0:
                 hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
                 blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
@@ -313,10 +319,10 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                             actions.append(f"Located 'Dark Mode' item via OCR at {dark_mode_coords} ('{txt}')")
                             break
 
-    # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit (Row 1 of popup menu)
+    # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit (Row 1 of popup menu relative to anchor)
     if not dark_mode_coords:
-        dark_mode_coords = (int(1700 * scale_x), int(310 * scale_y))
-        actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
+        dark_mode_coords = (max(100, ax - int(85 * scale_x)), ay + int(60 * scale_y))
+        actions.append(f"Using relative 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
     if dark_mode_coords:

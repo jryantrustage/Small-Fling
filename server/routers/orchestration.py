@@ -468,8 +468,8 @@ async def auto_heal_pipeline_environment(
                 "telemetry_insight": "ANR dialog detected • Dismissing prompt to keep Teams alive..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-            # Send Back key on display 0 to dismiss the system dialog without killing Teams
-            await run_adb_shell("input -d 0 keyevent 4 >/dev/null 2>&1; input keyevent 4 >/dev/null 2>&1", serial, timeout=1.5)
+            # Send Back key on primary display 0 where system dialogs appear, NEVER sending Back to external display
+            await run_adb_shell("input -d 0 keyevent 4 >/dev/null 2>&1", serial, timeout=1.5)
             await asyncio.sleep(0.3)
             actions_taken.append("Dismissed Application Not Responding dialog")
     except Exception as anr_e:
@@ -492,21 +492,10 @@ async def auto_heal_pipeline_environment(
     except Exception as ke:
         print(f"[auto_heal] Keyboard check note: {ke}")
 
-    # 2. Markdown editor fullscreen check & auto-fix
+    # 2. Viewport status check (never resize active window to prevent Teams activity reloads)
     try:
         from services.adb_service import is_editor_full_screen
         fs_status = await is_editor_full_screen(serial, disp_id, image_bytes=snap_bytes)
-        if not fs_status.get("is_fullscreen", True):
-            issues_observed.append("Markdown editor is not in full screen mode")
-            node.update({
-                "evaluator": "Fullscreen Viewport Evaluator",
-                "healing_step": "Maximizing editor to full 1080p viewport",
-                "telemetry_insight": f"Windowed editor detected ({fs_status.get('mode', 'freeform')}) • Auto-fixing viewport to full display bounds..."
-            })
-            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-            await auto_fix_viewport(serial, disp_id)
-            await asyncio.sleep(0.2)
-            actions_taken.append("Maximized markdown editor task and reflowed viewport")
     except Exception as fse:
         print(f"[auto_heal] Fullscreen check note: {fse}")
 
@@ -827,9 +816,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 active_serial
             )
 
-            # 1. Ensure Teams FilePreviewActivity navigates to EOF via hardware Ctrl+End and calibrated inertial fling
+            # Ensure Teams editor body has caret focus so Ctrl+End reaches document
+            target_d = disp_id if (disp_id and disp_id > 0) else 3
+            await run_adb_shell(f"input -d {target_d} tap 500 450", active_serial)
+            await asyncio.sleep(0.15)
+
+            # 1. Send Ctrl+End to navigate to EOF
             await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end")
-            settle_s = float(cfg.get("settle_delay_ms", 800)) / 1000.0
+            settle_s = max(0.8, float(cfg.get("settle_delay_ms", 800)) / 1000.0)
             await asyncio.sleep(settle_s)
 
             # 2. Fetch current density/DPI from the phone right before running OCR to normalize gutter search bounding boxes
@@ -2557,17 +2551,6 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "input -d 0 keyevent 111 >/dev/null 2>&1",
             active_serial
         )
-        # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before scanning begins
-        init_group["progress"] = {"percent": 15, "stage": "Verifying single-pane edit mode and dark mode...", "status": "running"}
-        await state.ws_manager.broadcast({
-            "type": "project_init_progress",
-            "stage": "Verifying single-pane edit mode and dark mode...",
-            "percent": 15,
-            "status": "running",
-            "dag": state.dag_state
-        })
-        await auto_heal_pipeline_environment(active_serial, disp_id, "init_end")
-
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
         await state.ws_manager.broadcast({
@@ -2578,7 +2561,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "dag": state.dag_state
         })
 
-        node1_res = await run_single_dag_node("init_end", {"serial": active_serial, "skip_precheck": True})
+        node1_res = await run_single_dag_node("init_end", {"serial": active_serial, "skip_precheck": True, "skip_env_heal": True})
         total_lines = node1_res.get("total_lines", 0)
 
         if node1_res.get("status") == "error" or total_lines <= 0:
@@ -2613,7 +2596,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             serial=active_serial
         )
 
-        node2_res = await run_single_dag_node("reset_home", {"serial": active_serial})
+        node2_res = await run_single_dag_node("reset_home", {"serial": active_serial, "skip_env_heal": True})
         is_verified = node2_res.get("verified", False)
         first_line = node2_res.get("first_line", 1)
 
