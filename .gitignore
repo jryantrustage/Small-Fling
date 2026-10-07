@@ -63,6 +63,7 @@ server/storage/data/*
 *.bmp
 *.gif
 !server/storage/frames/.gitkeep
+!tests/test_images/**
 
 # General Databases & SQLite
 *.db
