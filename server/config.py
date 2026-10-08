@@ -43,6 +43,7 @@ CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in
 
 TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
+DEVICE_PIN: str = os.environ.get("DEVICE_PIN", "1213").strip()
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip()

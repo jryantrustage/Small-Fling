@@ -282,3 +282,35 @@ def test_cursor_line1_and_precise_arrow_down_determination():
 
     asyncio.run(run_test())
 
+
+def test_viewport_26_lines_page_alignment():
+    import asyncio
+    from services import state
+    import routers.orchestration as orch
+
+    async def run_test():
+        L = 26
+        # Calibration: page 1 gutter shows Ln 1..26 -> capacity 26 (not the 49 profile default)
+        top, bot = orch._resolve_viewport_bounds(1, 26, 49)
+        assert (top, bot) == (1, 26)
+        assert state.orchestration_state["viewport_lines"] == L
+        # Bottom detection failure falls back to calibrated capacity, not profile 49
+        assert orch._resolve_viewport_bounds(27, 0, 49) == (27, 52)
+
+        cursor, cur_top = 1, 1
+        for page in range(1, 6):
+            prev_bottom = cur_top + L - 1
+            res = await orch.run_single_dag_node("arrow_down", {
+                "serial": "mock:9999",
+                "cur_top": cur_top,
+                "prev_bottom": prev_bottom,
+                "cursor_line": cursor
+            })
+            expected_presses = (2 * L - 1) if page == 1 else L
+            assert res["arrow_count"] == expected_presses
+            assert res["target_top_line"] == prev_bottom + 1
+            cur_top = res["target_top_line"]
+            cursor = res["cursor_line"]
+
+    asyncio.run(run_test())
+

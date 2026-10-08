@@ -828,4 +828,163 @@ class MarkdownFullScreenClassifier(BaseClassifier):
         )
 
 
+class PinCodeRequestedClassifier(BaseClassifier):
+    id = "pin_code_requested"
+    issue_description = "PIN Code / Intune Authentication Prompt Active"
+    fix_description = "Enter PIN Code from .env and submit to unlock editor"
+    severity = "blocking"
+
+    async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        # Mock / test hook
+        if context.metadata.get("mock_pin_requested") is not None:
+            detected = bool(context.metadata["mock_pin_requested"])
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=detected,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="PIN Code requested (simulated)" if detected else "No PIN requested (simulated)",
+                metadata={"mock": True}
+            )
+
+        serial = await get_active_adb_serial(context.serial)
+        if not serial or "mock" in str(serial).lower():
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="No PIN prompt detected (mock device)",
+                metadata={"mock": True}
+            )
+
+        reasons = []
+
+        # 1. Check window manager for MAM/Authenticator/Keyguard prompts
+        try:
+            auth_chk = await run_adb_shell(
+                "dumpsys window windows | grep -iE 'MAMStartupActivity|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity'",
+                serial,
+                timeout=1.2
+            )
+            auth_out = auth_chk.get("stdout", "")
+            if any(k.lower() in auth_out.lower() for k in [
+                "mamstartupactivity", "confirmcredential", "pinactivity",
+                "authenticationactivity", "lockpatternactivity", "mammsalauthactivity",
+                "brokerauthorizationactivity", "accountchooseractivity"
+            ]):
+                reasons.append("Intune / Teams MAM PIN authentication window active in WindowManager")
+        except Exception:
+            pass
+
+        # 2. Check lockscreen / keyguard status
+        try:
+            kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", serial, timeout=1.2)
+            kg_out = kg_chk.get("stdout", "")
+            if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
+                reasons.append("Device keyguard / lockscreen is currently showing")
+        except Exception:
+            pass
+
+        # 3. Visual OCR inspection if screen image is available
+        img = _get_cv_img(context)
+        if img is not None:
+            try:
+                from ocr_engine import get_rapid_ocr
+                r = get_rapid_ocr()
+                res, _ = r(img)
+                lines_text = [str(x[1]).strip().lower() for x in (res or [])]
+                full_screen_text = " ".join(lines_text)
+                if any(phrase in full_screen_text for phrase in [
+                    "enter your pin", "wrong pin", "enter pin", "confirm your pin",
+                    "managed by your organization"
+                ]):
+                    reasons.append("PIN entry dialog text detected on screen via OCR")
+            except Exception:
+                pass
+
+        has_issue = len(reasons) > 0
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=has_issue,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details="; ".join(reasons) if has_issue else "No PIN prompt active (clean)",
+            metadata={"reasons": reasons}
+        )
+
+    async def fix(self, context: ClassifierContext) -> FixResult:
+        import config
+        pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
+
+        # Mock / test hook
+        if context.metadata.get("mock_pin_requested") is not None or "mock" in str(context.serial).lower():
+            return FixResult(
+                classifier_id=self.id,
+                success=True,
+                message=f"Supplied PIN {pin} to authentication prompt and unlocked editor (simulated)",
+                actions_taken=[f"Entered PIN {pin} from .env", "Tapped OK / sent Enter to unlock"]
+            )
+
+        serial = await get_active_adb_serial(context.serial)
+        if not serial:
+            return FixResult(classifier_id=self.id, success=False, message="No active device connected via ADB")
+
+        raw_disp = context.display_id if context.display_id is not None else await detect_external_display_id(serial)
+        disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else 0
+
+        actions = []
+
+        # 1. Dismiss Keyguard if active
+        try:
+            kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", serial, timeout=1.2)
+            if "isKeyguardShowing=true" in kg_chk.get("stdout", ""):
+                await run_adb_shell(
+                    f"input -d 0 keyevent 224; input -d 0 keyevent 82; input -d 0 swipe 540 1800 540 600 200; sleep 0.1; input -d 0 text {pin}; input -d 0 keyevent 66; wm dismiss-keyguard",
+                    serial,
+                    timeout=3.0
+                )
+                actions.append(f"Unlocked device keyguard with PIN {pin}")
+        except Exception:
+            pass
+
+        # 2. Enter PIN on External Desktop Display (e.g. Teams MAM Startup PIN dialog)
+        try:
+            if disp_id > 0:
+                # Tap PIN input field, backspace existing characters, enter PIN, tap OK button and send Enter
+                await run_adb_shell(
+                    f"input -d {disp_id} tap 960 660; "
+                    f"input -d {disp_id} keyevent 67 67 67 67 67 67 67 67; "
+                    f"input -d {disp_id} text {pin}; "
+                    f"sleep 0.2; "
+                    f"input -d {disp_id} tap 960 734; "
+                    f"input -d {disp_id} keyevent 66",
+                    serial,
+                    timeout=3.0
+                )
+                actions.append(f"Submitted PIN {pin} to Intune MAM prompt on display #{disp_id}")
+        except Exception:
+            pass
+
+        # 3. Enter PIN on Primary Display (in case prompt is on display 0)
+        try:
+            await run_adb_shell(f"input -d 0 text {pin}; input -d 0 keyevent 66", serial, timeout=1.5)
+            actions.append(f"Dispatched PIN {pin} and Enter on primary display")
+        except Exception:
+            pass
+
+        await asyncio.sleep(0.4)
+
+        return FixResult(
+            classifier_id=self.id,
+            success=True,
+            message=f"Supplied PIN {pin} to authentication prompt and unlocked editor",
+            actions_taken=actions,
+            metadata={"pin_length": len(pin)}
+        )
+
+
 

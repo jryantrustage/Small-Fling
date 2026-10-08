@@ -19,6 +19,7 @@ from .editor_classifiers import (
     TeamsMarkdownVisibleClassifier,
     EditorCursorFocusedClassifier,
     MarkdownFullScreenClassifier,
+    PinCodeRequestedClassifier,
 )
 
 
@@ -31,6 +32,7 @@ class ClassifierRegistry:
         self._last_fix_time: float = 0.0
 
         # Register default general-purpose classifiers
+        self.register(PinCodeRequestedClassifier())
         self.register(KeyboardOpenClassifier())
         self.register(MarkdownFullScreenClassifier())
         self.register(EditModeClassifier())
@@ -130,8 +132,8 @@ class ClassifierRegistry:
         try:
             eval_results = await self.evaluate_all(context)
             fix_results: List[FixResult] = []
-            # Priority order: close keyboard and maximize window first so toolbar and layout are unobstructed, then edit mode, then view mode, then light mode
-            priority = ["keyboard_open", "markdown_fullscreen", "edit_mode", "view_mode", "light_mode"]
+            # Priority order: solve PIN authentication prompt first, then close keyboard and maximize window so toolbar and layout are unobstructed, then edit mode, then view mode, then light mode
+            priority = ["pin_code_requested", "keyboard_open", "markdown_fullscreen", "edit_mode", "view_mode", "light_mode"]
             sorted_detected = sorted(
                 [r for r in eval_results if r.issue_detected],
                 key=lambda r: priority.index(r.classifier_id) if r.classifier_id in priority else 99,

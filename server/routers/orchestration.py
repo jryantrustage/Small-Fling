@@ -458,11 +458,12 @@ async def auto_heal_pipeline_environment(
 
     # 0a. Display Awake & Keyguard/Auth Policy Enforcement
     try:
-        awake_res = await configure_display_awake_policies(serial, pin="1213")
+        active_pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
+        awake_res = await configure_display_awake_policies(serial, pin=active_pin)
         if awake_res.get("keyguard_unlocked"):
-            actions_taken.append("Unlocked device keyguard with PIN 1213")
+            actions_taken.append(f"Unlocked device keyguard with PIN {active_pin}")
         if awake_res.get("auth_handled"):
-            actions_taken.append("Supplied PIN 1213 to authentication prompt")
+            actions_taken.append(f"Supplied PIN {active_pin} to authentication prompt")
     except Exception as awake_e:
         print(f"[auto_heal] Awake policy note: {awake_e}")
 
@@ -790,6 +791,28 @@ async def trigger_auto_heal(payload: Optional[Dict[str, Any]] = None):
     disp_id = await detect_external_display_id(ser)
     target_node = payload.get("node_id", "init_end")
     return await auto_heal_pipeline_environment(ser, disp_id, target_node)
+
+
+def _resolve_viewport_bounds(top_ln: int, bot_ln: int, fallback_lpp: int):
+    """
+    Deterministic pager model. The visible gutter capacity L (e.g. 26 lines) is calibrated from the
+    first page (top == 1) and persisted; the device-profile lines_per_page is only a last-resort fallback.
+      Page 1 -> 2 : (L - 1) cursor presses + L scroll presses = 2L - 1 arrow downs (cursor starts on Ln 1).
+      Page n -> n+1 (n >= 2): L arrow downs (cursor already rests on the bottom line).
+    This guarantees bottom(page n) + 1 == top(page n + 1).
+    """
+    stored = state.orchestration_state.get("viewport_lines")
+    if top_ln and top_ln > 0 and bot_ln and bot_ln >= top_ln:
+        observed = bot_ln - top_ln + 1
+        if 5 <= observed <= 80 and (top_ln == 1 or not stored):
+            state.orchestration_state["viewport_lines"] = observed
+            stored = observed
+        elif stored and observed > stored:
+            # A viewport can never show more lines than its calibrated capacity (wrapping only reduces it)
+            bot_ln = top_ln + stored - 1
+    elif top_ln and top_ln > 0:
+        bot_ln = top_ln + (stored or fallback_lpp) - 1
+    return top_ln, bot_ln
 
 
 @router.post("/api/dag/nodes/{node_id}/run")
@@ -1360,7 +1383,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 )
 
             prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_10", {"lines_per_page": 49}))
-            lpp = prof.get("lines_per_page", 49)
+            lpp = state.orchestration_state.get("viewport_lines") or prof.get("lines_per_page", 49)
             predicted_arrows = (lpp - 1) + lpp
 
             node.update({
@@ -1774,8 +1797,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             if is_fast:
                 t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
-                top_ln = t_det if t_det > 0 else (state.latest_telemetry.get("current_top_line", 1) or 1)
-                bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
+                top_ln = t_det if t_det > 0 else (expected_top or state.latest_telemetry.get("current_top_line", 1) or 1)
+                top_ln, bot_ln = _resolve_viewport_bounds(top_ln, b_det if b_det > 0 else 0, lpp)
                 lines_detected = [
                     {
                         "line_number": ln,
@@ -1799,6 +1822,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     node_id="frame_ocr",
                     expected_top=expected_top
                 )
+                top_ln, bot_ln = _resolve_viewport_bounds(top_ln, bot_ln, lpp)
                 if heal_meta.get("actions_taken"):
                     healing_ms += 150 * len(heal_meta["actions_taken"])
                 # Re-read snap bytes in case image was refreshed

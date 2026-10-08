@@ -513,6 +513,12 @@ dag_state: Dict[str, Any] = {
                         "enabled": True,
                         "severity": "blocking"
                     },
+                    "pin_code_requested": {
+                        "name": "PIN Code Authentication Qualifier",
+                        "description": "Detects if Intune/device PIN authentication is requested and resolves with stored PIN",
+                        "enabled": True,
+                        "severity": "blocking"
+                    },
                     "matrix_app_overlay": {
                         "name": "Matrix App Capture Check",
                         "description": "Is the mobile app matrix capture appearing over the teams markdown?",

@@ -630,11 +630,13 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             return jpg
     return _get_or_create_standby_frame(mode)
 
-async def configure_display_awake_policies(serial: Optional[str] = None, pin: str = "1213") -> Dict[str, Any]:
+async def configure_display_awake_policies(serial: Optional[str] = None, pin: Optional[str] = None) -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
         return {"status": "mock", "stay_on": True}
-    
+
+    import config
+    active_pin = pin or getattr(config, "DEVICE_PIN", "1213") or "1213"
     result = {"status": "ok", "stay_on": True, "keyguard_unlocked": False, "auth_handled": False}
     try:
         # 1. Enforce permanent stay-awake policy across all power connections (AC, USB, Wireless)
@@ -660,7 +662,7 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: st
                 f"input -d 0 keyevent 82; "
                 f"input -d 0 swipe 540 1800 540 600 200; "
                 f"sleep 0.1; "
-                f"input -d 0 text {pin}; "
+                f"input -d 0 text {active_pin}; "
                 f"input -d 0 keyevent 66; "
                 f"wm dismiss-keyguard",
                 ser,
@@ -670,13 +672,30 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: st
 
         # 3. Check if Teams or Intune Company Portal is prompting for authentication on internal or external display
         ext_id = await detect_external_display_id(ser)
-        auth_chk = await run_adb_shell("dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity'", ser, timeout=1.2)
+        auth_chk = await run_adb_shell(
+            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity'",
+            ser,
+            timeout=1.2
+        )
         auth_out = auth_chk.get("stdout", "")
-        if any(k in auth_out for k in ["CompanyPortal", "ConfirmCredential", "PinActivity", "AuthenticationActivity", "LockPatternActivity"]):
-            # Enter PIN on both internal phone display and external display to ensure it handles wherever focused
-            await run_adb_shell(f"input -d 0 text {pin}; input -d 0 keyevent 66", ser, timeout=1.5)
+        if any(k.lower() in auth_out.lower() for k in [
+            "companyportal", "confirmcredential", "pinactivity", "authenticationactivity",
+            "lockpatternactivity", "mamstartupactivity", "mammsalauthactivity",
+            "brokerauthorizationactivity", "accountchooseractivity"
+        ]):
+            # Enter PIN on both external display and internal phone display
             if ext_id and ext_id > 0:
-                await run_adb_shell(f"input -d {ext_id} text {pin}; input -d {ext_id} keyevent 66", ser, timeout=1.5)
+                await run_adb_shell(
+                    f"input -d {ext_id} tap 960 660; "
+                    f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
+                    f"input -d {ext_id} text {active_pin}; "
+                    f"sleep 0.2; "
+                    f"input -d {ext_id} tap 960 734; "
+                    f"input -d {ext_id} keyevent 66",
+                    ser,
+                    timeout=3.0
+                )
+            await run_adb_shell(f"input -d 0 text {active_pin}; input -d 0 keyevent 66", ser, timeout=1.5)
             result["auth_handled"] = True
     except Exception as e:
         print(f"[configure_display_awake_policies] Note: {e}")

@@ -130,6 +130,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     prevent_trigger_on_issue: true,
     qualifiers: {
       modal_overlay: { name: 'Modal Overlay Check', description: 'Is a modal appearing over the teams markdown?', enabled: true, severity: 'blocking' },
+      pin_code_requested: { name: 'PIN Code Authentication Qualifier', description: 'Detects if Intune/device PIN authentication is requested and resolves with stored PIN', enabled: true, severity: 'blocking' },
       matrix_app_overlay: { name: 'Matrix App Capture Check', description: 'Is the mobile app matrix capture appearing over teams markdown?', enabled: true, severity: 'blocking' },
       ocr_degraded: { name: 'OCR Quality Degradation Check', description: 'Has previous ocr capture degraded?', enabled: true, severity: 'blocking' },
       keyboard_open: { name: 'Virtual Keyboard Check', description: 'Is software keyboard active or covering content?', enabled: true, severity: 'warning' },
