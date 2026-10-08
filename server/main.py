@@ -12,8 +12,11 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 import config
 import db
@@ -98,6 +101,51 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger = logging.getLogger("matrix_capture")
+
+def _sanitize_for_json(obj):
+    try:
+        return jsonable_encoder(obj)
+    except Exception:
+        if isinstance(obj, dict):
+            return {str(k): _sanitize_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple, set)):
+            return [_sanitize_for_json(v) for v in obj]
+        elif hasattr(obj, "item"):
+            try:
+                return obj.item()
+            except Exception:
+                return str(obj)
+        return str(obj)
+
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    headers = getattr(exc, "headers", None)
+    sanitized = _sanitize_for_json(exc.detail)
+    msg = sanitized.get("message") if isinstance(sanitized, dict) else str(sanitized)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "status": "error",
+            "detail": sanitized,
+            "message": msg
+        },
+        headers=headers,
+    )
+
+@app.exception_handler(Exception)
+async def custom_generic_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled server exception on %s %s: %s", request.method, request.url.path, exc)
+    err_str = str(exc) or "Internal Server Error"
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "detail": err_str,
+            "message": f"Server error: {err_str}"
+        }
+    )
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

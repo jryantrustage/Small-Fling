@@ -495,6 +495,12 @@ function AppContent() {
           }
         } catch {}
       }
+      if (queueRes.ok) {
+        try {
+          const q = await queueRes.json();
+          if (Array.isArray(q)) setRecaptureQueue(q);
+        } catch {}
+      }
       if (cfgRes.ok) {
         try {
           const c = await cfgRes.json();
@@ -1054,12 +1060,19 @@ function AppContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer })
       });
-      const d = await res.json();
+      let d: any = {};
+      const text = await res.text();
+      try {
+        d = text ? JSON.parse(text) : {};
+      } catch {
+        d = { message: text || `HTTP ${res.status} ${res.statusText}` };
+      }
       if (res.ok) {
         addTelemetryEvent('SYSTEM', 'Triggered Ctrl+End / Ctrl+Home Calibration sequence ✔');
         await fetchData();
       } else {
-        addTelemetryEvent('SYSTEM', d.detail || 'Failed to trigger calibration', undefined, 'system');
+        const errorMsg = d?.detail?.message || d?.detail || d?.message || d?.error || text || 'Failed to trigger calibration';
+        addTelemetryEvent('SYSTEM', errorMsg, undefined, 'system');
       }
     } catch (e: any) {
       addTelemetryEvent('SYSTEM', `Calibration error: ${e.message}`, undefined, 'system');

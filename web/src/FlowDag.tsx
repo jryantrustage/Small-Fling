@@ -207,6 +207,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   const selectedNodeMeta = NODES_METADATA.find(n => n.id === activeSelectedNodeId) || NODES_METADATA[0];
 
+  // Helper to safely parse JSON or plain text errors from API responses
+  const parseApiResponse = async (res: Response) => {
+    let data: any = {};
+    const text = await res.text();
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { message: text || `HTTP ${res.status} ${res.statusText}` };
+    }
+    return { ok: res.ok, status: res.status, data, text };
+  };
+
   // Actions
   const handleRunNode = async (nodeId: string) => {
     setRunningNodeId(nodeId);
@@ -217,9 +229,12 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serial: activeDeviceSerial })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.message || `Failed to run ${nodeId}`);
-      setNodeFeedback({ id: nodeId, message: data.message || `Node ${nodeId} ran successfully ✔`, isError: data.status === 'warning' });
+      const { ok, status, data, text } = await parseApiResponse(res);
+      if (!ok) {
+        const errorMsg = data?.detail?.message || data?.detail || data?.message || data?.error || (typeof text === 'string' && text ? text : `Failed to run ${nodeId} (HTTP ${status})`);
+        throw new Error(errorMsg);
+      }
+      setNodeFeedback({ id: nodeId, message: data.message || `Node ${nodeId} ran successfully ✔`, isError: data.status === 'warning' || data.status === 'error' });
       onRefresh?.();
     } catch (err: any) {
       setNodeFeedback({ id: nodeId, message: `Node execution error: ${err.message}`, isError: true });
@@ -232,9 +247,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     try {
       const url = nodeId ? `${apiBase}/api/dag/nodes/${nodeId}/abort` : `${apiBase}/api/dag/nodes/abort`;
       const res = await fetch(url, { method: 'POST' });
-      const data = await res.json();
+      const { data } = await parseApiResponse(res);
       setRunningNodeId(null);
-      setNodeFeedback({ id: nodeId || 'abort', message: data.message || 'Operation aborted ⏹' });
+      setNodeFeedback({ id: nodeId || 'abort', message: data?.message || 'Operation aborted ⏹' });
       onRefresh?.();
     } catch (err: any) {
       setNodeFeedback({ id: nodeId || 'abort', message: `Abort error: ${err.message}`, isError: true });
@@ -250,12 +265,19 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ serial: activeDeviceSerial, project_id: activeProjectId, ...(extraPayload || {}) })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || data.message || `Failed to run DAG group ${groupId}`);
+      const { ok, status, data, text } = await parseApiResponse(res);
+      if (!ok) {
+        const errorMsg = data?.detail?.message || data?.detail || data?.message || data?.error || (typeof text === 'string' && text ? text : `Failed to run DAG group ${groupId} (HTTP ${status})`);
+        throw new Error(errorMsg);
+      }
+      const isErr = data.status === 'error' || data.status === 'warning';
+      const msg = isErr
+        ? (data.message || data.error || data.detail || 'Execution failed')
+        : (data.status === 'success' ? `DAG Group executed successfully ✔` : (data.error || data.message || 'Execution completed'));
       setNodeFeedback({
         id: groupId,
-        message: data.status === 'success' ? `DAG Group executed successfully ✔` : (data.error || 'Execution completed'),
-        isError: data.status === 'error'
+        message: msg,
+        isError: isErr
       });
       onRefresh?.();
     } catch (err: any) {
@@ -268,17 +290,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const handleToggleLoop = async () => {
     try {
       if (isLoopRunning) {
-        await fetch(`${apiBase}/api/dag/loop/stop`, { method: 'POST' });
+        const res = await fetch(`${apiBase}/api/dag/loop/stop`, { method: 'POST' });
+        const { data } = await parseApiResponse(res);
         setIsLoopRunning(false);
-        setNodeFeedback({ id: 'loop', message: 'Continuous capture loop stopped' });
+        setNodeFeedback({ id: 'loop', message: data?.message || 'Continuous capture loop stopped' });
       } else {
-        await fetch(`${apiBase}/api/dag/loop/start`, {
+        const res = await fetch(`${apiBase}/api/dag/loop/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ serial: activeDeviceSerial })
         });
+        const { ok, status, data, text } = await parseApiResponse(res);
+        if (!ok) {
+          const errorMsg = data?.detail?.message || data?.detail || data?.message || text || `Failed to start loop (HTTP ${status})`;
+          throw new Error(errorMsg);
+        }
         setIsLoopRunning(true);
-        setNodeFeedback({ id: 'loop', message: 'Continuous capture loop started ✔' });
+        setNodeFeedback({ id: 'loop', message: data?.message || 'Continuous capture loop started ✔' });
       }
       onRefresh?.();
     } catch (err: any) {

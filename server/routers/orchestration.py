@@ -2641,7 +2641,6 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
       4. Transition: Mark 'initialize' group as 'completed' and activate 'capture_entire_markdown' group (Node 3: frame_acquire ready).
     Streams progress percentage and telemetry over WebSocket.
     """
-    active_serial = await get_active_adb_serial(serial)
     state.dag_state.setdefault("groups", {})
     init_group = state.dag_state["groups"].setdefault("initialize", {
         "id": "initialize", "title": "Initialize", "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
@@ -2653,21 +2652,22 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
     })
 
-    init_group["status"] = "active"
-    init_group["progress"] = {"percent": 10, "stage": "Checking editor cursor focus and display...", "status": "running"}
-    state.dag_state["current_active_group"] = "initialize"
-    state.dag_state["current_active_node"] = "init_end"
-    state.latest_telemetry["status_message"] = "Initializing: checking editor cursor and display..."
-
-    await state.ws_manager.broadcast({
-        "type": "project_init_progress",
-        "stage": "Checking editor cursor focus and display...",
-        "percent": 10,
-        "status": "running",
-        "dag": state.dag_state
-    })
-
     try:
+        active_serial = await get_active_adb_serial(serial)
+        init_group["status"] = "active"
+        init_group["progress"] = {"percent": 10, "stage": "Checking editor cursor focus and display...", "status": "running"}
+        state.dag_state["current_active_group"] = "initialize"
+        state.dag_state["current_active_node"] = "init_end"
+        state.latest_telemetry["status_message"] = "Initializing: checking editor cursor and display..."
+
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": "Checking editor cursor focus and display...",
+            "percent": 10,
+            "status": "running",
+            "dag": state.dag_state
+        })
+
         # Ensure external display is identified and soft keyboard suppressed silently on phone screen
         disp_id = await detect_external_display_id(active_serial)
         await run_adb_shell(
@@ -2827,6 +2827,10 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     except Exception as e:
         init_group["status"] = "error"
         err = str(e)
+        if isinstance(e, HTTPException) and isinstance(e.detail, dict):
+            err = e.detail.get("message") or str(e.detail)
+        elif isinstance(e, HTTPException):
+            err = str(e.detail)
         clean_stage = err
         try:
             import re
@@ -2848,7 +2852,13 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "error": err,
             "dag": state.dag_state
         })
-        return {"status": "error", "group": "initialize", "error": err}
+        return {
+            "status": "error",
+            "group": "initialize",
+            "error": err,
+            "message": f"Initialization failed: {clean_stage}",
+            "detail": err
+        }
 
 def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: int, status: str, nodes: List[Dict[str, Any]], loop_id: Optional[str] = None):
     from services.performance_analyzer import format_duration_min_sec
@@ -2873,7 +2883,7 @@ def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: in
     state.current_dag2_loop_index = None
     state.active_dag2_loop_key_events = []
 
-async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Dict[str, Any]:
+async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None) -> Dict[str, Any]:
     active_serial = await get_active_adb_serial(serial)
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
@@ -3133,6 +3143,33 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         "node8": n8_res
     }
 
+async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Dict[str, Any]:
+    try:
+        return await _execute_dag_group_capture_markdown_impl(serial=serial)
+    except Exception as e:
+        capture_group = state.dag_state.get("groups", {}).get("capture_entire_markdown")
+        if capture_group:
+            capture_group["status"] = "error"
+        err_msg = str(e)
+        if isinstance(e, HTTPException) and isinstance(e.detail, dict):
+            err_msg = e.detail.get("message") or str(e.detail)
+        elif isinstance(e, HTTPException):
+            err_msg = str(e.detail)
+        state.latest_telemetry["status_message"] = f"DAG 2 error: {err_msg}"
+        await state.ws_manager.broadcast({
+            "type": "dag2_loop_error",
+            "error": err_msg,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+        return {
+            "status": "error",
+            "group": "capture_entire_markdown",
+            "error": err_msg,
+            "detail": err_msg,
+            "message": f"Capture cycle failed: {err_msg}"
+        }
+
 capture_loop_task: Optional[asyncio.Task] = None
 
 async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
@@ -3230,17 +3267,29 @@ async def get_dag_loop_status():
 
 @router.post("/api/dag/groups/{group_id}/run")
 async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
-    payload = payload or {}
-    serial = payload.get("serial")
-    if group_id in {"initialize", "init"}:
-        return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"))
-    elif group_id in {"capture_entire_markdown", "capture"}:
-        if payload.get("single_cycle"):
-            return await execute_dag_group_capture_markdown(serial=serial)
+    try:
+        payload = payload or {}
+        serial = payload.get("serial")
+        if group_id in {"initialize", "init"}:
+            return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"))
+        elif group_id in {"capture_entire_markdown", "capture"}:
+            if payload.get("single_cycle"):
+                return await execute_dag_group_capture_markdown(serial=serial)
+            else:
+                return await start_dag_loop({"serial": serial})
         else:
-            return await start_dag_loop({"serial": serial})
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
+            raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        err_msg = str(e)
+        return {
+            "status": "error",
+            "group": group_id,
+            "error": err_msg,
+            "detail": err_msg,
+            "message": f"DAG group '{group_id}' execution failed: {err_msg}"
+        }
 
 
 @router.get("/api/pipeline/mode")
