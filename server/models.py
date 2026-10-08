@@ -10,7 +10,10 @@ class FramePositionRequest(BaseModel):
     custom_offset_y: float
 
 class ConfigRequest(BaseModel):
-    api_key: str
+    api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+    auto_enter_pin: Optional[bool] = None
+    device_pin: Optional[str] = None
 
 class LineEditRequest(BaseModel):
     text: str

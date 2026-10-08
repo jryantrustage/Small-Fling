@@ -1,7 +1,7 @@
 """MatrixCapture Server Configuration Module."""
 import os, json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 try:
     from dotenv import load_dotenv
@@ -21,12 +21,16 @@ if load_dotenv:
     for env_path in [PROJECT_ROOT / ".env", SERVER_DIR / ".env"]:
         if env_path.exists(): load_dotenv(dotenv_path=env_path, override=False)
 
-_persisted_key = ""
+_persisted_cfg = {}
 if CONFIG_FILE.exists():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            _persisted_key = json.load(f).get("api_key", "").strip()
+            _persisted_cfg = json.load(f)
     except Exception: pass
+
+_persisted_key = _persisted_cfg.get("api_key", "").strip()
+_persisted_auto_pin = _persisted_cfg.get("auto_enter_pin", False)
+_persisted_device_pin = _persisted_cfg.get("device_pin", "").strip()
 
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "").strip() or _persisted_key
 GEMINI_PRIMARY_MODEL: str = os.environ.get("GEMINI_PRIMARY_MODEL", "gemini-3.6-flash").strip()
@@ -43,7 +47,9 @@ CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in
 
 TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
-DEVICE_PIN: str = os.environ.get("DEVICE_PIN", "1213").strip()
+# Safety default: AUTO_ENTER_PIN defaults to False so users retain full control and avoid corporate lockout
+AUTO_ENTER_PIN: bool = bool(_persisted_auto_pin if "auto_enter_pin" in _persisted_cfg else os.environ.get("AUTO_ENTER_PIN", "false").lower() in ("true", "1", "yes"))
+DEVICE_PIN: str = os.environ.get("DEVICE_PIN", "").strip() or _persisted_device_pin or "1213"
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip()
@@ -53,12 +59,26 @@ OLLAMA_MODEL: str = os.environ.get("OLLAMA_MODEL", OLLAMA_VISION_MODEL).strip()
 OLLAMA_TIMEOUT: int = int(os.environ.get("OLLAMA_TIMEOUT", "180"))
 
 def set_api_key(new_key: str) -> None:
-    global GEMINI_API_KEY
-    GEMINI_API_KEY = new_key.strip()
+    update_config(api_key=new_key)
+
+def update_config(api_key: Optional[str] = None, auto_enter_pin: Optional[bool] = None, device_pin: Optional[str] = None) -> None:
+    global GEMINI_API_KEY, AUTO_ENTER_PIN, DEVICE_PIN
+    if api_key is not None:
+        GEMINI_API_KEY = api_key.strip()
+    if auto_enter_pin is not None:
+        AUTO_ENTER_PIN = bool(auto_enter_pin)
+    if device_pin is not None:
+        DEVICE_PIN = device_pin.strip()
     try:
+        data = {
+            "api_key": GEMINI_API_KEY,
+            "auto_enter_pin": AUTO_ENTER_PIN,
+            "device_pin": DEVICE_PIN
+        }
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump({"api_key": GEMINI_API_KEY}, f, indent=2)
-    except Exception as e: print(f"Error persisting API key: {e}")
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Error persisting config: {e}")
 
 def get_candidate_models() -> List[str]:
     return [GEMINI_PRIMARY_MODEL] + [fb for fb in GEMINI_FALLBACK_MODELS if fb != GEMINI_PRIMARY_MODEL]

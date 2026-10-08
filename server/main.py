@@ -2,7 +2,7 @@ import asyncio
 import json
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 # Trigger hot reload: neutralized tactile background fixes, eliminated task resize & keyevent 111 on display 3
 # Ensure standard output can handle UTF-8 / emojis on Windows without cp1252 encoding crashes
 if sys.platform == "win32":
@@ -168,15 +168,26 @@ async def get_config():
     ocr_svc.sync_pipeline_mode_with_keys()
     return {
         "api_key_configured": bool(config.GEMINI_API_KEY),
-        "api_key_preview": config.get_api_key_preview()
+        "api_key_preview": config.get_api_key_preview(),
+        "auto_enter_pin": config.AUTO_ENTER_PIN,
+        "device_pin_configured": bool(config.DEVICE_PIN),
+        "device_pin": config.DEVICE_PIN
     }
 
 @app.post("/api/config")
 async def set_config(req: ConfigRequest):
-    config.set_api_key(req.api_key)
-    ocr_svc.sync_pipeline_mode_with_keys()
+    key = req.api_key if req.api_key is not None else req.gemini_api_key
+    config.update_config(
+        api_key=key,
+        auto_enter_pin=req.auto_enter_pin,
+        device_pin=req.device_pin
+    )
+    if key is not None:
+        ocr_svc.sync_pipeline_mode_with_keys()
     await state.ws_manager.broadcast({
-        "type": "pipeline_mode_changed",
+        "type": "config_updated",
+        "auto_enter_pin": config.AUTO_ENTER_PIN,
+        "device_pin": config.DEVICE_PIN,
         "pipeline_mode": ocr_svc.active_pipeline_mode,
         "mode": ocr_svc.active_pipeline_mode,
         "model_target": ocr_svc.active_model_target,
@@ -184,7 +195,48 @@ async def set_config(req: ConfigRequest):
         "engine": ocr_svc.active_ocr_engine,
         "gemini_available": bool(config.GEMINI_API_KEY)
     })
-    return {"status": "success", "message": "API key updated."}
+    return {
+        "status": "success",
+        "message": "Configuration updated.",
+        "auto_enter_pin": config.AUTO_ENTER_PIN,
+        "device_pin": config.DEVICE_PIN
+    }
+
+@app.post("/api/security/enter-pin")
+async def manual_enter_pin(payload: Optional[Dict[str, Any]] = None):
+    """
+    Explicitly dispatches one-shot PIN entry on the device under manual user control.
+    Prevents account lockouts by ensuring user observes and confirms the action.
+    """
+    serial = (payload or {}).get("serial")
+    from classifiers.base import ClassifierContext
+    from classifiers.editor_classifiers import PinCodeRequestedClassifier
+    classifier = PinCodeRequestedClassifier()
+    ctx = ClassifierContext(serial=serial)
+    fix_res = await classifier.fix(ctx)
+    await state.ws_manager.broadcast({
+        "type": "pin_entry_executed",
+        "success": fix_res.success,
+        "message": fix_res.message,
+        "actions": fix_res.actions_taken
+    })
+    return fix_res.to_dict()
+
+@app.get("/api/security/pin-status")
+async def get_pin_status(serial: Optional[str] = None):
+    """Checks whether a PIN prompt is currently detected on the device."""
+    from classifiers.base import ClassifierContext
+    from classifiers.editor_classifiers import PinCodeRequestedClassifier
+    classifier = PinCodeRequestedClassifier()
+    ctx = ClassifierContext(serial=serial)
+    detect_res = await classifier.detect(ctx)
+    return {
+        "status": "success",
+        "pin_prompt_active": detect_res.issue_detected,
+        "auto_enter_pin": config.AUTO_ENTER_PIN,
+        "device_pin": config.DEVICE_PIN,
+        "details": detect_res.details
+    }
 
 @app.get("/api/token-stats")
 async def get_token_stats():

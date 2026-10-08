@@ -48,15 +48,28 @@ async def test_pin_classifier_detection_simulated():
 
 @pytest.mark.asyncio
 async def test_pin_classifier_fix_with_stored_pin():
-    """Verify classifier fix executes using the configured PIN (1213)."""
+    """Verify classifier fix respects safety toggle and executes when authorized using PIN 1213."""
     classifier = PinCodeRequestedClassifier()
-    ctx = ClassifierContext(serial="mock:9999", metadata={"mock_pin_requested": True})
-    fix_res = await classifier.fix(ctx)
 
+    # 1. When AUTO_ENTER_PIN is False (Safe Mode default), verify fix is blocked to prevent lockouts
+    original_setting = config.AUTO_ENTER_PIN
+    config.AUTO_ENTER_PIN = False
+    ctx_safe = ClassifierContext(serial="mock:9999", metadata={"mock_pin_requested": True})
+    safe_res = await classifier.fix(ctx_safe)
+    assert safe_res.success is False
+    assert safe_res.metadata.get("blocked_by_safety") is True
+    assert "disabled in Settings" in safe_res.message
+
+    # 2. When explicitly forced (manual user trigger from gear settings) or enabled, verify PIN 1213 entry succeeds
+    ctx_forced = ClassifierContext(serial="mock:9999", metadata={"mock_pin_requested": True, "force_enter_pin": True})
+    fix_res = await classifier.fix(ctx_forced)
     assert fix_res.success is True
     assert fix_res.classifier_id == "pin_code_requested"
     assert "1213" in fix_res.message
     assert any("1213" in action for action in fix_res.actions_taken)
+
+    # Restore config setting
+    config.AUTO_ENTER_PIN = original_setting
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 """Implementations of general-purpose classifiers for Teams Markdown editor and mobile setup."""
 import asyncio
 import re
+import config
 from typing import Optional, Tuple
 import cv2
 import numpy as np
@@ -906,19 +907,39 @@ class PinCodeRequestedClassifier(BaseClassifier):
                 pass
 
         has_issue = len(reasons) > 0
+        auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", False)
+        if has_issue and not auto_pin_enabled:
+            details_msg = f"PIN authentication prompt active ({'; '.join(reasons)}). Auto-enter is OFF in Settings to prevent lockout."
+        elif has_issue:
+            details_msg = f"PIN authentication prompt active ({'; '.join(reasons)})"
+        else:
+            details_msg = "No PIN prompt active (clean)"
+
         return ClassificationResult(
             classifier_id=self.id,
             issue_detected=has_issue,
             issue_name=self.issue_description,
             fix_name=self.fix_description,
             severity=self.severity,
-            details="; ".join(reasons) if has_issue else "No PIN prompt active (clean)",
-            metadata={"reasons": reasons}
+            details=details_msg,
+            metadata={"reasons": reasons, "auto_enter_pin": auto_pin_enabled}
         )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
         import config
         pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
+        auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", False)
+        force_entry = bool(context.metadata.get("force_enter_pin", False))
+
+        # SAFETY LOCK: If Auto Enter PIN is disabled and not explicitly triggered by user, halt without sending keys!
+        if not auto_pin_enabled and not force_entry:
+            return FixResult(
+                classifier_id=self.id,
+                success=False,
+                message="Automated PIN entry is disabled in Settings (Safe Lock). Please unlock manually or enable 'Auto Enter PIN' in Settings.",
+                actions_taken=["Suppressed automated PIN entry to prevent corporate account lockout"],
+                metadata={"auto_enter_pin": False, "blocked_by_safety": True}
+            )
 
         # Mock / test hook
         if context.metadata.get("mock_pin_requested") is not None or "mock" in str(context.serial).lower():

@@ -27,7 +27,7 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         viewport: { width: 1440, height: 900 }
       },
-      testMatch: /.*(web-ui|project-delete)\.spec\.ts/
+      testMatch: /.*(web-ui|project-delete|pin-qualifier)\.spec\.ts/
     },
     {
       name: 'Mobile UI - Mirror Viewport',

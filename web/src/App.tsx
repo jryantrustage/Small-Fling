@@ -3,7 +3,8 @@ import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  ZoomIn, ZoomOut, Copy, Check, ListTree
+  ZoomIn, ZoomOut, Copy, Check, ListTree,
+  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -136,9 +137,17 @@ function AppContent() {
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
   const [editText, setEditText] = useState('');
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets'>('pipeline');
+  const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets' | 'security'>('pipeline');
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
+  const [autoEnterPin, setAutoEnterPin] = useState(false);
+  const [devicePinInput, setDevicePinInput] = useState('1213');
+  const [showPinPassword, setShowPinPassword] = useState(false);
+  const [isSavingPin, setIsSavingPin] = useState(false);
+  const [isCheckingPinPrompt, setIsCheckingPinPrompt] = useState(false);
+  const [pinPromptStatus, setPinPromptStatus] = useState<{ active: boolean; details?: string; checkedAt?: number } | null>(null);
+  const [isEnteringPinManually, setIsEnteringPinManually] = useState(false);
+  const [manualPinFeedback, setManualPinFeedback] = useState<{ success: boolean; message: string; timestamp: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<'all' | 'issues'>('all');
   const [isScanningOcr, setIsScanningOcr] = useState(false);
@@ -486,8 +495,14 @@ function AppContent() {
           }
         } catch {}
       }
-      if (queueRes.ok) { try { setRecaptureQueue(await queueRes.json()); } catch {} }
-      if (cfgRes.ok) { try { const c = await cfgRes.json(); setApiKeyConfigured(c.gemini_api_key_configured); } catch {} }
+      if (cfgRes.ok) {
+        try {
+          const c = await cfgRes.json();
+          setApiKeyConfigured(Boolean(c.api_key_configured ?? c.gemini_api_key_configured));
+          if (typeof c.auto_enter_pin === 'boolean') setAutoEnterPin(c.auto_enter_pin);
+          if (c.device_pin) setDevicePinInput(c.device_pin);
+        } catch {}
+      }
       if (modeRes.ok) { try { const m = await modeRes.json(); setPipelineMode(m.pipeline_mode); } catch {} }
       if (telRes.ok) { try { setTelemetry(await telRes.json()); } catch {} }
       if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
@@ -833,6 +848,15 @@ function AppContent() {
           } else if (msg.type === 'alignment_status') {
             const d = msg.alignment || msg.data;
             if (d) setAlignmentData(d);
+          } else if (msg.type === 'config_updated') {
+            if (typeof msg.auto_enter_pin === 'boolean') setAutoEnterPin(msg.auto_enter_pin);
+            if (msg.device_pin) setDevicePinInput(msg.device_pin);
+          } else if (msg.type === 'pin_entry_executed') {
+            setManualPinFeedback({
+              success: Boolean(msg.success),
+              message: msg.message || (msg.success ? 'PIN submitted successfully' : 'PIN entry failed'),
+              timestamp: Date.now()
+            });
           }
         } catch {}
       };
@@ -894,6 +918,113 @@ function AppContent() {
       await fetchData();
     }
     else { await showAlert({ title: 'Invalid API Key', message: 'The provided key could not be verified.', variant: 'danger' }); }
+  };
+
+  const handleToggleAutoEnterPin = async (enabled: boolean) => {
+    try {
+      const res = await api('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_enter_pin: enabled })
+      });
+      if (res.ok) {
+        setAutoEnterPin(enabled);
+        addTelemetryEvent(
+          'SYSTEM',
+          enabled
+            ? 'Auto Enter PIN ENABLED (Sensitive mode active)'
+            : 'Auto Enter PIN DISABLED (Safe Mode: Corporate lockout prevention active)',
+          undefined,
+          'system'
+        );
+      } else {
+        const err = await res.json().catch(() => ({}));
+        await showAlert({ title: 'Config Error', message: err.detail || 'Failed to update PIN setting', variant: 'danger' });
+      }
+    } catch (e: any) {
+      await showAlert({ title: 'Network Error', message: e.message, variant: 'danger' });
+    }
+  };
+
+  const handleSaveDevicePin = async () => {
+    setIsSavingPin(true);
+    try {
+      const pin = devicePinInput.trim();
+      const res = await api('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_pin: pin })
+      });
+      if (res.ok) {
+        addTelemetryEvent('SYSTEM', 'Device PIN updated in secure configuration ✔', undefined, 'system');
+        setManualPinFeedback({
+          success: true,
+          message: 'PIN successfully saved to server config and .env',
+          timestamp: Date.now()
+        });
+      } else {
+        const err = await res.json().catch(() => ({}));
+        await showAlert({ title: 'Save Failed', message: err.detail || 'Failed to save PIN', variant: 'danger' });
+      }
+    } catch (e: any) {
+      await showAlert({ title: 'Error', message: e.message, variant: 'danger' });
+    } finally {
+      setIsSavingPin(false);
+    }
+  };
+
+  const handleCheckPinPromptStatus = async () => {
+    setIsCheckingPinPrompt(true);
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      const url = activeSer ? `/api/security/pin-status?serial=${encodeURIComponent(activeSer)}` : '/api/security/pin-status';
+      const res = await api(url);
+      if (res.ok) {
+        const d = await res.json();
+        setPinPromptStatus({
+          active: Boolean(d.pin_prompt_active),
+          details: d.details || (d.pin_prompt_active ? 'PIN authentication requested' : 'No PIN prompt active'),
+          checkedAt: Date.now()
+        });
+      }
+    } catch {
+    } finally {
+      setIsCheckingPinPrompt(false);
+    }
+  };
+
+  const handleManualEnterPin = async () => {
+    setIsEnteringPinManually(true);
+    setManualPinFeedback(null);
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      const res = await api('/api/security/enter-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: activeSer })
+      });
+      const d = await res.json();
+      setManualPinFeedback({
+        success: Boolean(d.success),
+        message: d.message || (d.success ? 'PIN submitted successfully' : 'PIN entry failed'),
+        timestamp: Date.now()
+      });
+      addTelemetryEvent(
+        'SYSTEM',
+        d.success ? `One-shot PIN entered: ${d.message}` : `PIN entry attempt: ${d.message}`,
+        undefined,
+        'system'
+      );
+      setTimeout(handleCheckPinPromptStatus, 1500);
+    } catch (e: any) {
+      setManualPinFeedback({
+        success: false,
+        message: `Failed to dispatch PIN: ${e.message}`,
+        timestamp: Date.now()
+      });
+    } finally {
+      setIsEnteringPinManually(false);
+    }
   };
 
   const handleAutoFixViewport = async () => {
@@ -2349,10 +2480,17 @@ function AppContent() {
       )}
 
       {showConfigModal && (
-        <Modal title="Studio Settings" width="520px" onClose={() => setShowConfigModal(false)} onConfirm={settingsTab === 'secrets' ? handleSaveApiKey : undefined} confirmText="Save Key">
+        <Modal
+          title="Studio Settings"
+          width="560px"
+          onClose={() => setShowConfigModal(false)}
+          onConfirm={settingsTab === 'secrets' ? handleSaveApiKey : undefined}
+          confirmText={settingsTab === 'secrets' ? "Save Key" : undefined}
+        >
           <div className="modal-tabs">
             <button className={`modal-tab ${settingsTab === 'pipeline' ? 'active' : ''}`} onClick={() => setSettingsTab('pipeline')} type="button"><Cpu size={14} /><span>Pipeline Engine</span></button>
             <button className={`modal-tab ${settingsTab === 'secrets' ? 'active' : ''}`} onClick={() => setSettingsTab('secrets')} type="button"><Key size={14} /><span>Secrets</span></button>
+            <button className={`modal-tab ${settingsTab === 'security' ? 'active' : ''}`} onClick={() => { setSettingsTab('security'); handleCheckPinPromptStatus(); }} type="button"><Lock size={14} /><span>PIN &amp; Security</span></button>
           </div>
           {settingsTab === 'pipeline' ? (
             <div className="settings-tab-content">
@@ -2408,13 +2546,299 @@ function AppContent() {
                 </div>
               </div>
             </div>
-          ) : (
+          ) : settingsTab === 'secrets' ? (
             <div className="settings-tab-content">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                 <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 600 }}>GEMINI API KEY</label>
                 <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', fontWeight: 700, padding: '2px 8px', borderRadius: '12px', background: apiKeyConfigured ? 'rgba(0, 255, 157, 0.12)' : 'rgba(255, 123, 114, 0.12)', color: apiKeyConfigured ? 'var(--color-primary)' : '#ff7b72' }}>{apiKeyConfigured ? '● ACTIVE' : '○ NOT CONFIGURED'}</span>
               </div>
               <input type="password" placeholder={apiKeyConfigured ? '••••••••••••••••' : 'AIzaSy...'} className="modal-input" style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }} value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)} autoFocus />
+            </div>
+          ) : (
+            <div className="settings-tab-content" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div style={{
+                background: autoEnterPin ? 'rgba(210, 153, 34, 0.1)' : 'rgba(35, 134, 54, 0.1)',
+                border: `1px solid ${autoEnterPin ? 'rgba(210, 153, 34, 0.35)' : 'rgba(35, 134, 54, 0.35)'}`,
+                borderRadius: '8px',
+                padding: '12px 14px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {autoEnterPin ? (
+                      <ShieldAlert size={16} color="#d29922" />
+                    ) : (
+                      <ShieldCheck size={16} color="#00ff9d" />
+                    )}
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: autoEnterPin ? '#e3b341' : '#00ff9d' }}>
+                      {autoEnterPin ? 'AUTONOMOUS PIN ENTRY ACTIVE' : 'CORPORATE LOCKOUT PREVENTION ACTIVE (SAFE)'}
+                    </span>
+                  </div>
+                  <span style={{
+                    fontSize: '9px',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: autoEnterPin ? 'rgba(210, 153, 34, 0.2)' : 'rgba(0, 255, 157, 0.15)',
+                    color: autoEnterPin ? '#e3b341' : '#00ff9d'
+                  }}>
+                    {autoEnterPin ? 'AUTO SUBMIT' : 'SAFE MODE'}
+                  </span>
+                </div>
+                <p style={{ fontSize: '11px', color: '#c9d1d9', margin: 0, lineHeight: 1.45 }}>
+                  {autoEnterPin
+                    ? 'Autonomous PIN entry is enabled. The pipeline will automatically type and submit your configured PIN (1213) whenever Intune/MAM or device prompts appear.'
+                    : 'To prevent Okta Authenticator 2FA resets and corporate account lockouts from failed attempts, Small-Fling will NOT enter the PIN automatically without your permission. You can observe the screen and trigger PIN entry manually below.'}
+                </p>
+              </div>
+
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-main)', marginBottom: '3px' }}>
+                    Auto Enter PIN
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Automatically enter device PIN ({devicePinInput || '1213'}) when Intune / MAM authentication is detected
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  id="toggle-auto-enter-pin-btn"
+                  onClick={() => handleToggleAutoEnterPin(!autoEnterPin)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: `1px solid ${autoEnterPin ? '#2ea043' : '#30363d'}`,
+                    background: autoEnterPin ? '#238636' : '#21262d',
+                    color: '#fff',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {autoEnterPin ? (
+                    <>
+                      <ToggleRight size={16} />
+                      <span>ENABLED</span>
+                    </>
+                  ) : (
+                    <>
+                      <ToggleLeft size={16} />
+                      <span>DISABLED (SAFE)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 600 }}>
+                    DEVICE PIN CODE (.ENV: DEVICE_PIN)
+                  </label>
+                  <span style={{ fontSize: '10px', color: '#8b949e', fontFamily: 'var(--font-mono)' }}>
+                    Stored in .env &amp; config.json
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      id="device-pin-input"
+                      type={showPinPassword ? 'text' : 'password'}
+                      placeholder="1213"
+                      className="modal-input"
+                      style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '13px', letterSpacing: '2px', paddingRight: '36px' }}
+                      value={devicePinInput}
+                      onChange={e => setDevicePinInput(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPinPassword(!showPinPassword)}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: '#8b949e',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        padding: '2px'
+                      }}
+                      title={showPinPassword ? "Hide PIN" : "Show PIN"}
+                    >
+                      {showPinPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    id="save-device-pin-btn"
+                    disabled={isSavingPin || !devicePinInput.trim()}
+                    onClick={handleSaveDevicePin}
+                    style={{
+                      padding: '0 14px',
+                      background: '#21262d',
+                      border: '1px solid #30363d',
+                      borderRadius: '6px',
+                      color: '#58a6ff',
+                      fontSize: '11px',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 700,
+                      cursor: isSavingPin ? 'wait' : 'pointer'
+                    }}
+                  >
+                    {isSavingPin ? 'Saving...' : 'Save PIN'}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Activity size={14} color="#58a6ff" />
+                    <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#f0f6fc' }}>
+                      DEVICE OBSERVER &amp; MANUAL CONTROL
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    id="check-pin-screen-btn"
+                    onClick={handleCheckPinPromptStatus}
+                    disabled={isCheckingPinPrompt}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      background: 'none',
+                      border: 'none',
+                      color: '#58a6ff',
+                      fontSize: '10px',
+                      fontFamily: 'var(--font-mono)',
+                      cursor: isCheckingPinPrompt ? 'wait' : 'pointer',
+                      padding: '2px 4px'
+                    }}
+                  >
+                    <RefreshCw size={11} className={isCheckingPinPrompt ? 'spin' : ''} />
+                    <span>{isCheckingPinPrompt ? 'Checking...' : 'Check Screen'}</span>
+                  </button>
+                </div>
+
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 10px',
+                  background: '#0a0d12',
+                  borderRadius: '6px',
+                  marginBottom: '10px',
+                  border: '1px solid #21262d'
+                }}>
+                  <div style={{ fontSize: '11px', color: '#8b949e' }}>
+                    PIN Prompt Detector:
+                  </div>
+                  <div>
+                    {pinPromptStatus ? (
+                      <span style={{
+                        fontSize: '10px',
+                        fontFamily: 'var(--font-mono)',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        background: pinPromptStatus.active ? 'rgba(248, 81, 73, 0.2)' : 'rgba(35, 134, 54, 0.2)',
+                        color: pinPromptStatus.active ? '#ff7b72' : '#00ff9d',
+                        border: `1px solid ${pinPromptStatus.active ? '#f85149' : '#238636'}`
+                      }}>
+                        {pinPromptStatus.active ? '● PIN PROMPT DETECTED' : '○ NO PROMPT (READY)'}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '10px', color: '#8b949e', fontFamily: 'var(--font-mono)' }}>
+                        Ready to verify
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                  <p style={{ fontSize: '11px', color: '#8b949e', margin: 0, lineHeight: 1.4 }}>
+                    Observe Display 4. When the PIN input box is visible, click to enter PIN {devicePinInput || '1213'} under your direct observation.
+                  </p>
+                  <button
+                    type="button"
+                    id="enter-pin-now-btn"
+                    onClick={handleManualEnterPin}
+                    disabled={isEnteringPinManually}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      borderRadius: '6px',
+                      background: isEnteringPinManually ? '#21262d' : '#1f6feb',
+                      color: '#fff',
+                      fontSize: '11px',
+                      fontFamily: 'var(--font-mono)',
+                      fontWeight: 800,
+                      border: 'none',
+                      cursor: isEnteringPinManually ? 'wait' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      boxShadow: '0 0 10px rgba(31, 111, 235, 0.3)'
+                    }}
+                  >
+                    {isEnteringPinManually ? (
+                      <>
+                        <RefreshCw size={13} className="spin" />
+                        <span>Entering...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Lock size={13} />
+                        <span>Enter PIN Now</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {manualPinFeedback && (
+                  <div style={{
+                    marginTop: '10px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: manualPinFeedback.success ? 'rgba(35, 134, 54, 0.15)' : 'rgba(248, 81, 73, 0.15)',
+                    border: `1px solid ${manualPinFeedback.success ? '#238636' : '#f85149'}`,
+                    fontSize: '11px',
+                    color: manualPinFeedback.success ? '#7ee787' : '#ff7b72',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    {manualPinFeedback.success ? <Check size={14} /> : <AlertTriangle size={14} />}
+                    <span>{manualPinFeedback.message}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </Modal>
