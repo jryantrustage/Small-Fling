@@ -5,6 +5,62 @@ class ProjectCreateRequest(BaseModel):
     name: str
     description: Optional[str] = ""
     target_total_lines: Optional[int] = 0
+    device_model: Optional[str] = None
+    device_name: Optional[str] = None
+    device_serial: Optional[str] = None
+    target_dpi: Optional[int] = None
+    display_width: Optional[int] = None
+    display_height: Optional[int] = None
+    display_id: Optional[int] = None
+    lines_per_page: Optional[int] = None
+    step_size: Optional[int] = None
+    arrow_count_init: Optional[int] = None
+    arrow_count_step: Optional[int] = None
+    settle_delay_ms: Optional[int] = None
+    lock_device: Optional[bool] = False
+    hid_config: Optional[Dict[str, Any]] = None
+
+class ProjectDeviceSettingsRequest(BaseModel):
+    device_model: Optional[str] = None
+    device_name: Optional[str] = None
+    device_serial: Optional[str] = None
+    target_dpi: Optional[int] = None
+    display_width: Optional[int] = None
+    display_height: Optional[int] = None
+    display_id: Optional[int] = None
+    lines_per_page: Optional[int] = None
+    step_size: Optional[int] = None
+    arrow_count_init: Optional[int] = None
+    arrow_count_step: Optional[int] = None
+    settle_delay_ms: Optional[int] = None
+    lock_device: Optional[bool] = None
+    hid_config: Optional[Dict[str, Any]] = None
+
+class DeviceProfileRequest(BaseModel):
+    id: Optional[str] = None
+    name: str
+    display_name: Optional[str] = None
+    model_name: Optional[str] = None
+    manufacturer: Optional[str] = None
+    serial: Optional[str] = None
+    target_dpi: Optional[int] = 220
+    display_width: Optional[int] = 1920
+    display_height: Optional[int] = 1080
+    display_id: Optional[int] = 0
+    lines_per_page: Optional[int] = 49
+    step_size: Optional[int] = 48
+    arrow_count_init: Optional[int] = 99
+    arrow_count_step: Optional[int] = 48
+    settle_delay_ms: Optional[int] = 50
+    hid_config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = False
+
+class ApplyCharacteristicsRequest(BaseModel):
+    serial: Optional[str] = None
+    target_dpi: Optional[int] = None
+    display_id: Optional[int] = None
+    display_width: Optional[int] = None
+    display_height: Optional[int] = None
 
 class FramePositionRequest(BaseModel):
     custom_offset_y: float

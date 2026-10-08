@@ -11,6 +11,21 @@ export interface ProjectData {
   line_count?: number;
   min_line?: number | null;
   max_line?: number | null;
+  device_model?: string;
+  device_name?: string;
+  device_serial?: string;
+  target_dpi?: number;
+  display_width?: number;
+  display_height?: number;
+  display_id?: number;
+  lines_per_page?: number;
+  step_size?: number;
+  arrow_count_init?: number;
+  arrow_count_step?: number;
+  settle_delay_ms?: number;
+  lock_device?: number | boolean;
+  hid_config_json?: string;
+  hid_config?: any;
 }
 
 export interface LineData {
@@ -155,11 +170,56 @@ export interface DeviceItem {
 
 export interface DeviceProfile {
   id: string;
-  displayName: string;
+  name?: string;
+  displayName?: string;
+  display_name?: string;
+  model_name?: string;
+  manufacturer?: string;
+  serial?: string;
+  target_dpi?: number;
+  display_width?: number;
+  display_height?: number;
+  display_id?: number;
   lines_per_page: number;
-  arrow_count_init: number;
-  arrow_count_step: number;
+  arrow_count_init?: number;
+  arrow_count_step?: number;
   step_size: number;
+  settle_delay_ms?: number;
+  hid_config?: {
+    ctrl_key?: number;
+    home_key?: number;
+    end_key?: number;
+    down_key?: number;
+    repeat_delay_ms?: number;
+    action_settle_ms?: number;
+  };
+  is_active?: number;
+}
+
+export interface DeviceHardwareSpecs {
+  model: string;
+  manufacturer: string;
+  serial: string;
+  display_id: number;
+  physical_resolution: string;
+  override_resolution: string | null;
+  display_width: number;
+  display_height: number;
+  physical_dpi: number;
+  override_dpi: number | null;
+  active_dpi: number;
+  dpi_factor: number;
+  lines_per_page: number;
+  step_size: number;
+  settle_delay_ms: number;
+  hid_config: {
+    ctrl_key: number;
+    home_key: number;
+    end_key: number;
+    down_key: number;
+    repeat_delay_ms: number;
+    action_settle_ms: number;
+  };
 }
 
 export interface DeviceInfoData {

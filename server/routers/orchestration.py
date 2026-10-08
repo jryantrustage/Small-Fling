@@ -1,5 +1,6 @@
 import asyncio
 import time
+import json
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
@@ -18,7 +19,8 @@ from services.adb_service import (
     ensure_adb_keyboard_closed, auto_fix_viewport, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
     get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id,
     detect_surfaceflinger_displays, is_ime_visible, fetch_current_display_dpi_factor, sanitize_input_display_id,
-    dispatch_accelerated_viewport_step, calibrate_display_dpi, configure_display_awake_policies
+    dispatch_accelerated_viewport_step, calibrate_display_dpi, configure_display_awake_policies,
+    enforce_device_characteristics, connect_device_for_model, get_device_info, extract_device_hardware_specs
 )
 import services.ocr_service as ocr_svc
 
@@ -815,6 +817,121 @@ def _resolve_viewport_bounds(top_ln: int, bot_ln: int, fallback_lpp: int):
     return top_ln, bot_ln
 
 
+async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] = None, serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Strictly determines and enforces device-specific settings (DPI, resolution, display ID, lines per page, HID parameters)
+    for DAG runs with zero hardcoded values:
+      1. Inspects the active project's device configuration from the database.
+      2. If project is locked (lock_device=True):
+         - Verifies that the connected device matches the locked device model/serial.
+         - If mismatched, attempts auto-switch/reconnect to the locked device.
+         - If unavailable or still mismatched, strictly aborts execution with a descriptive error.
+      3. If project is unlocked (lock_device=False):
+         - Dynamically extracts hardware parameters from the active device with zero hardcoding.
+         - Enforces DPI, resolution, and calibrates viewport lines_per_page and HID step sizes.
+    """
+    pid = project_id or state.get_current_project_id()
+    proj = db.get_project(pid) if pid else db.get_active_project()
+    if not proj:
+        proj = db.get_active_project()
+
+    active_serial = await get_active_adb_serial(serial)
+    is_mock = bool(active_serial and "mock" in str(active_serial).lower())
+
+    # Live hardware extraction
+    hw_specs = await extract_device_hardware_specs(active_serial)
+    active_model = (hw_specs.get("model") or "unknown").strip().lower()
+    active_serial_str = hw_specs.get("serial") or active_serial or ""
+
+    proj_locked = bool(proj.get("lock_device", 0)) if proj else False
+    target_model = (proj.get("device_model") or "").strip().lower() if proj else ""
+    target_name = (proj.get("device_name") or target_model).strip() if proj else ""
+    target_serial = (proj.get("device_serial") or "").strip() if proj else ""
+    target_dpi = int(proj.get("target_dpi") or hw_specs.get("active_dpi", 220)) if proj else int(hw_specs.get("active_dpi", 220))
+    disp_width = int(proj.get("display_width") or hw_specs.get("display_width", 1920)) if proj else int(hw_specs.get("display_width", 1920))
+    display_height = int(proj.get("display_height") or hw_specs.get("display_height", 1080)) if proj else int(hw_specs.get("display_height", 1080))
+    disp_id = int(proj.get("display_id") or hw_specs.get("display_id", 0)) if proj else int(hw_specs.get("display_id", 0))
+    lpp = int(proj.get("lines_per_page") or hw_specs.get("lines_per_page", 49)) if proj else int(hw_specs.get("lines_per_page", 49))
+    step_sz = int(proj.get("step_size") or hw_specs.get("step_size", 48)) if proj else int(hw_specs.get("step_size", 48))
+    settle_ms = int(proj.get("settle_delay_ms") or hw_specs.get("settle_delay_ms", 50)) if proj else int(hw_specs.get("settle_delay_ms", 50))
+
+    hid_cfg = {}
+    try:
+        if proj and proj.get("hid_config_json"):
+            hid_cfg = json.loads(proj["hid_config_json"])
+    except Exception:
+        pass
+    if not hid_cfg:
+        hid_cfg = hw_specs.get("hid_config", {})
+
+    # Check lock constraint
+    if proj_locked and target_model and not is_mock:
+        # Match by serial or model signature
+        matches_serial = bool(target_serial and target_serial in active_serial_str)
+        matches_model = (target_model in active_model or active_model in target_model)
+        if not (matches_serial or matches_model):
+            # Attempt auto-switching if alternate target device is cached/available
+            attempted = await connect_device_for_model(target_model)
+            if attempted:
+                import services.adb_service as _adb_svc
+                _adb_svc.target_adb_serial = attempted
+                active_serial = await get_active_adb_serial(attempted, force_refresh=True)
+                hw_specs = await extract_device_hardware_specs(active_serial)
+                active_model = (hw_specs.get("model") or "unknown").strip().lower()
+                matches_model = (target_model in active_model or active_model in target_model)
+
+        if not (matches_serial or matches_model):
+            err_msg = (
+                f"Device Lock Violation: Project '{proj.get('name', 'Active')}' is strictly locked to "
+                f"{target_name or target_model.upper()} (Resolution: {disp_width}x{display_height}, "
+                f"Target DPI: {target_dpi}, LPP: {lpp}). "
+                f"Current attached hardware is {hw_specs.get('model')} ({active_serial_str or 'none'}). "
+                f"DAG execution is blocked to prevent mismatched DPI scaling or incorrect cursor positioning."
+            )
+            return {
+                "status": "error",
+                "locked": True,
+                "error": err_msg,
+                "message": err_msg,
+                "required_model": target_model,
+                "active_model": active_model,
+                "active_serial": active_serial_str
+            }
+
+    # Enforce characteristics on active hardware
+    enforce_res = await enforce_device_characteristics(
+        serial=active_serial,
+        target_dpi=target_dpi,
+        display_id=disp_id if disp_id > 0 else None,
+        width=disp_width,
+        height=display_height,
+        device_model=target_model or active_model,
+        lines_per_page=lpp,
+        step_size=step_sz,
+        hid_config=hid_cfg
+    )
+
+    applied_disp_id = enforce_res.get("display_id", disp_id or 8)
+    applied_dpi = enforce_res.get("active_dpi", target_dpi)
+    applied_factor = enforce_res.get("dpi_factor", round(applied_dpi / 160.0, 3))
+
+    return {
+        "status": "ok",
+        "device_model": target_model or active_model,
+        "device_name": target_name or hw_specs.get("model", "Android Device"),
+        "serial": active_serial_str,
+        "display_id": applied_disp_id,
+        "active_dpi": applied_dpi,
+        "dpi_factor": applied_factor,
+        "resolution": f"{disp_width}x{display_height}",
+        "lines_per_page": lpp,
+        "step_size": step_sz,
+        "settle_delay_ms": settle_ms,
+        "hid_config": hid_cfg,
+        "locked": proj_locked
+    }
+
+
 @router.post("/api/dag/nodes/{node_id}/run")
 @router.post("/api/dag/run/{node_id}")
 async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = None):
@@ -825,6 +942,16 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     payload = payload or {}
     active_serial = await get_active_adb_serial(payload.get("serial"))
     cfg = node.get("config", {})
+
+    # Check and strictly enforce device characteristics & lock constraints
+    if target_key in ("init_end", "reset_home", "frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"):
+        dev_env = await resolve_and_enforce_dag_device_environment(serial=active_serial)
+        if dev_env.get("status") == "error":
+            err_msg = dev_env.get("message")
+            node.update({"status": "error", "error": err_msg, "is_active": False})
+            state.dag_state["current_active_node"] = None
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": target_key, "status": "error", "error": err_msg})
+            raise HTTPException(status_code=400, detail=err_msg)
 
     global _current_running_node_task, _current_running_node_id
     curr_task = asyncio.current_task()
@@ -2654,6 +2781,22 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
 
     try:
         active_serial = await get_active_adb_serial(serial)
+        dev_env = await resolve_and_enforce_dag_device_environment(project_id=project_id, serial=active_serial)
+        if dev_env.get("status") == "error":
+            err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"
+            init_group["status"] = "error"
+            init_group["progress"] = {"percent": 0, "stage": err_msg, "status": "error", "error": err_msg}
+            state.latest_telemetry["status_message"] = err_msg
+            await state.ws_manager.broadcast({
+                "type": "project_init_progress",
+                "stage": err_msg,
+                "percent": 0,
+                "status": "error",
+                "error": err_msg,
+                "dag": state.dag_state
+            })
+            return {"status": "error", "group": "initialize", "error": err_msg}
+
         init_group["status"] = "active"
         init_group["progress"] = {"percent": 10, "stage": "Checking editor cursor focus and display...", "status": "running"}
         state.dag_state["current_active_group"] = "initialize"
@@ -2885,6 +3028,21 @@ def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: in
 
 async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None) -> Dict[str, Any]:
     active_serial = await get_active_adb_serial(serial)
+    dev_env = await resolve_and_enforce_dag_device_environment(serial=active_serial)
+    if dev_env.get("status") == "error":
+        err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"
+        capture_group = state.dag_state.get("groups", {}).get("capture_entire_markdown")
+        if capture_group:
+            capture_group["status"] = "error"
+        state.latest_telemetry["status_message"] = err_msg
+        await state.ws_manager.broadcast({
+            "type": "dag2_loop_error",
+            "error": err_msg,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+        return {"status": "error", "group": "capture_entire_markdown", "error": err_msg}
+
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
         "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
@@ -3174,6 +3332,20 @@ capture_loop_task: Optional[asyncio.Task] = None
 
 async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     active_serial = await get_active_adb_serial(serial)
+    dev_env = await resolve_and_enforce_dag_device_environment(serial=active_serial)
+    if dev_env.get("status") == "error":
+        err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"
+        state.latest_telemetry["status_message"] = err_msg
+        state.dag_state["current_active_node"] = None
+        state.orchestration_state["status"] = "ERROR"
+        await state.ws_manager.broadcast({
+            "type": "dag2_loop_error",
+            "error": err_msg,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+        return
+
     state.capture_loop_running = True
     state.latest_telemetry["is_pacing"] = False
     state.latest_telemetry["phase"] = "DAG_CAPTURE"

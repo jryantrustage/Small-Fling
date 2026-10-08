@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
-  Maximize2, Minimize2, Square, Minus, Activity
+  Maximize2, Minimize2, Square, Minus, Activity, Lock, Sliders
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
+import type { ProjectData } from './types';
 import type {
   DagStatusData, Node5ConfigState, TriggerDecisionState, PerformanceDiagnosis
 } from './types/dag';
@@ -28,6 +29,8 @@ import {
 export interface FlowDagProps {
   apiBase: string;
   activeProjectId?: string | null;
+  activeProject?: ProjectData | null;
+  onOpenSettings?: (tab?: string) => void;
   activeDeviceSerial?: string | null;
   currentTopLine?: number;
   currentBottomLine?: number;
@@ -64,7 +67,7 @@ export interface FlowDagProps {
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
-  apiBase, activeProjectId, activeDeviceSerial, currentTopLine = 0, currentBottomLine = 0,
+  apiBase, activeProjectId, activeProject, onOpenSettings, activeDeviceSerial, currentTopLine = 0, currentBottomLine = 0,
   targetTotalLines = 0, currentPage = 1, isOrchestrating: _isOrchestrating = false, onRefresh,
   selectedDag = 'all', onSelectDag, selectedNodeId, onSelectNodeId,
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
@@ -570,6 +573,34 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             }}>
               {isCaptureGroupRunning ? 'LOOP ACTIVE' : (isInitGroupRunning ? 'INITIALIZING' : 'READY')}
             </span>
+
+            {/* Device Characteristic & Lock Badge */}
+            <button
+              type="button"
+              onClick={() => onOpenSettings?.('device')}
+              title={activeProject?.lock_device
+                ? `Locked to ${activeProject.device_name || activeProject.device_model || 'Hardware'} (${activeProject.target_dpi || 220} DPI) • Click to configure`
+                : `Hardware Dynamic (${activeProject?.target_dpi || 220} DPI) • Click to configure in Settings`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 7px',
+                borderRadius: '4px',
+                background: activeProject?.lock_device ? 'rgba(210, 153, 34, 0.18)' : 'rgba(56, 139, 253, 0.12)',
+                border: `1px solid ${activeProject?.lock_device ? 'rgba(210, 153, 34, 0.45)' : 'rgba(56, 139, 253, 0.3)'}`,
+                color: activeProject?.lock_device ? '#e3b341' : '#58a6ff',
+                fontSize: '9px',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: 700,
+                cursor: 'pointer',
+                height: '22px'
+              }}
+            >
+              {activeProject?.lock_device ? <Lock size={10} /> : <Sliders size={10} />}
+              <span>{activeProject?.lock_device ? (activeProject.device_name || (activeProject.device_model ? activeProject.device_model.toUpperCase() : 'LOCKED')) : 'DYNAMIC'}</span>
+              <span style={{ opacity: 0.75 }}>{activeProject?.target_dpi ? `${activeProject.target_dpi}DPI` : ''}</span>
+            </button>
 
             {/* Filter buttons */}
             <div style={{ display: 'inline-flex', background: '#161b22', padding: '2px', borderRadius: '5px', border: '1px solid #30363d', gap: '2px' }}>

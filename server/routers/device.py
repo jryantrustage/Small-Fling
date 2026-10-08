@@ -5,7 +5,11 @@ from pathlib import Path
 import json
 import time
 
-from models import DeviceSelectRequest, AdbCommandRequest, AdbConnectRequest, AdbPairRequest
+import db
+from models import (
+    DeviceSelectRequest, AdbCommandRequest, AdbConnectRequest, AdbPairRequest,
+    DeviceProfileRequest, ApplyCharacteristicsRequest
+)
 from services import adb_service as adb
 from services.state import ws_manager, latest_telemetry, orchestration_state
 
@@ -15,6 +19,46 @@ router = APIRouter(tags=["device"])
 @router.get("/api/device/info")
 async def get_device_info():
     return await adb.get_device_info()
+
+@router.get("/api/device/profiles")
+async def get_device_profiles_endpoint():
+    profs = db.get_device_profiles()
+    if not profs:
+        profs = list(adb.DEVICE_PROFILES.values())
+    return {"status": "success", "profiles": profs}
+
+@router.post("/api/device/profiles")
+async def upsert_device_profile_endpoint(req: DeviceProfileRequest):
+    data = req.dict()
+    saved = db.upsert_device_profile(data)
+    await ws_manager.broadcast({"type": "device_profile_updated", "profile": saved})
+    return {"status": "success", "profile": saved}
+
+@router.delete("/api/device/profiles/{profile_id}")
+async def delete_device_profile_endpoint(profile_id: str):
+    ok = db.delete_device_profile(profile_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    await ws_manager.broadcast({"type": "device_profile_deleted", "profile_id": profile_id})
+    return {"status": "success", "deleted": True}
+
+@router.get("/api/device/extract-specs")
+async def extract_device_specs_endpoint(serial: Optional[str] = None):
+    specs = await adb.extract_device_hardware_specs(serial)
+    return {"status": "ok", "specs": specs}
+
+@router.post("/api/device/apply-characteristics")
+async def apply_device_characteristics_endpoint(req: ApplyCharacteristicsRequest):
+    res = await adb.enforce_device_characteristics(
+        serial=req.serial,
+        target_dpi=req.target_dpi,
+        display_id=req.display_id,
+        width=req.display_width,
+        height=req.display_height
+    )
+    info = await adb.get_device_info()
+    await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    return res
 
 @router.post("/api/device/select")
 async def select_device_api(req: DeviceSelectRequest):

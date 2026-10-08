@@ -27,10 +27,149 @@ def init_db():
         CREATE TABLE IF NOT EXISTS frames (frame_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, filename TEXT NOT NULL, top_line INTEGER NOT NULL, bottom_line INTEGER NOT NULL, page_index INTEGER NOT NULL, file_size INTEGER DEFAULT 0, status TEXT DEFAULT 'processed', extracted_line_count INTEGER DEFAULT 0, custom_offset_y REAL DEFAULT 0.0, token_usage_json TEXT DEFAULT '{}', bounding_boxes_json TEXT DEFAULT '{}', model_used TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS document_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, line_text TEXT NOT NULL, confidence REAL DEFAULT 1.0, frame_id TEXT DEFAULT '', is_verified INTEGER DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (project_id, line_number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS project_telemetry (project_id TEXT PRIMARY KEY, telemetry_json TEXT DEFAULT '{}', token_stats_json TEXT DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS device_profiles (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            display_name TEXT DEFAULT '',
+            model_name TEXT DEFAULT '',
+            manufacturer TEXT DEFAULT '',
+            serial TEXT DEFAULT '',
+            target_dpi INTEGER DEFAULT 220,
+            display_width INTEGER DEFAULT 1920,
+            display_height INTEGER DEFAULT 1080,
+            display_id INTEGER DEFAULT 0,
+            lines_per_page INTEGER DEFAULT 49,
+            step_size INTEGER DEFAULT 48,
+            arrow_count_init INTEGER DEFAULT 99,
+            arrow_count_step INTEGER DEFAULT 48,
+            settle_delay_ms INTEGER DEFAULT 50,
+            hid_config_json TEXT DEFAULT '{}',
+            is_active INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
         """)
+        # Ensure device-specific enforcement columns exist
+        existing_cols = {row["name"] for row in c.execute("PRAGMA table_info(projects);").fetchall()}
+        columns_to_add = [
+            ("device_model", "TEXT DEFAULT 'pixel_8'"),
+            ("device_name", "TEXT DEFAULT ''"),
+            ("device_serial", "TEXT DEFAULT ''"),
+            ("target_dpi", "INTEGER DEFAULT 220"),
+            ("display_width", "INTEGER DEFAULT 1920"),
+            ("display_height", "INTEGER DEFAULT 1080"),
+            ("display_id", "INTEGER DEFAULT 0"),
+            ("lines_per_page", "INTEGER DEFAULT 49"),
+            ("step_size", "INTEGER DEFAULT 48"),
+            ("arrow_count_init", "INTEGER DEFAULT 99"),
+            ("arrow_count_step", "INTEGER DEFAULT 48"),
+            ("settle_delay_ms", "INTEGER DEFAULT 50"),
+            ("lock_device", "INTEGER DEFAULT 0"),
+            ("hid_config_json", "TEXT DEFAULT '{}'")
+        ]
+        for col_name, col_def in columns_to_add:
+            if col_name not in existing_cols:
+                c.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_def};")
+
+        # Seed default editable templates in device_profiles if none exist
+        if c.execute("SELECT COUNT(*) FROM device_profiles;").fetchone()[0] == 0:
+            now = datetime.now().isoformat()
+            default_hid_json = json.dumps({
+                "ctrl_keycode": 113,
+                "home_keycode": 122,
+                "end_keycode": 123,
+                "down_keycode": 20,
+                "settle_delay_ms": 50,
+                "key_repeat_delay_ms": 15,
+                "dispatch_method": "accelerated_batch"
+            })
+            c.execute("""
+            INSERT INTO device_profiles VALUES
+            ('prof_pixel_8', 'Pixel 8 Pro', 'Pixel 8 Pro (1080p @ 220 DPI)', 'pixel_8', 'Google', '', 220, 1920, 1080, 0, 49, 48, 99, 48, 50, ?, 1, ?, ?),
+            ('prof_pixel_10', 'Pixel 10 Pro XL', 'Pixel 10 Pro XL (1080p @ 220 DPI)', 'pixel_10', 'Google', '', 220, 1920, 1080, 0, 49, 48, 99, 48, 50, ?, 0, ?, ?);
+            """, (default_hid_json, now, now, default_hid_json, now, now))
+
         # Clean up any legacy default project and orphaned frames
         c.execute("DELETE FROM projects WHERE id = 'proj_default';")
         conn.commit()
+
+def get_device_profiles() -> List[Dict[str, Any]]:
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM device_profiles ORDER BY is_active DESC, updated_at DESC;")
+        rows = c.fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try: d["hid_config"] = json.loads(d.get("hid_config_json") or "{}")
+            except Exception: d["hid_config"] = {}
+            result.append(d)
+        return result
+
+def get_device_profile(profile_id: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT * FROM device_profiles WHERE id = ?;", (profile_id,))
+        row = c.fetchone()
+        if not row: return None
+        d = dict(row)
+        try: d["hid_config"] = json.loads(d.get("hid_config_json") or "{}")
+        except Exception: d["hid_config"] = {}
+        return d
+
+def upsert_device_profile(data: Dict[str, Any]) -> Dict[str, Any]:
+    prof_id = data.get("id") or f"prof_{int(datetime.now().timestamp())}_{abs(hash(data.get('name', 'dev'))) % 1000}"
+    name = data.get("name") or data.get("display_name") or "Custom Device Profile"
+    disp_name = data.get("display_name") or name
+    model = (data.get("model_name") or data.get("device_model") or "").strip().lower()
+    mfg = data.get("manufacturer") or "Android"
+    serial = data.get("serial") or ""
+    dpi = int(data.get("target_dpi") or 220)
+    width = int(data.get("display_width") or 1920)
+    height = int(data.get("display_height") or 1080)
+    disp_id = int(data.get("display_id") or 0)
+    lpp = int(data.get("lines_per_page") or 49)
+    step = int(data.get("step_size") or (lpp - 1))
+    arr_init = int(data.get("arrow_count_init") or (step * 2 + 1))
+    arr_step = int(data.get("arrow_count_step") or step)
+    settle = int(data.get("settle_delay_ms") or 50)
+    hid_raw = data.get("hid_config") or data.get("hid_config_json") or {}
+    hid_json = json.dumps(hid_raw) if isinstance(hid_raw, dict) else str(hid_raw)
+    is_active = 1 if data.get("is_active") else 0
+    now = datetime.now().isoformat()
+
+    with get_connection() as conn:
+        c = conn.cursor()
+        if is_active:
+            c.execute("UPDATE device_profiles SET is_active = 0;")
+        c.execute("""
+        INSERT INTO device_profiles (
+            id, name, display_name, model_name, manufacturer, serial, target_dpi,
+            display_width, display_height, display_id, lines_per_page, step_size,
+            arrow_count_init, arrow_count_step, settle_delay_ms, hid_config_json,
+            is_active, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name, display_name=excluded.display_name, model_name=excluded.model_name,
+            manufacturer=excluded.manufacturer, serial=excluded.serial, target_dpi=excluded.target_dpi,
+            display_width=excluded.display_width, display_height=excluded.display_height, display_id=excluded.display_id,
+            lines_per_page=excluded.lines_per_page, step_size=excluded.step_size,
+            arrow_count_init=excluded.arrow_count_init, arrow_count_step=excluded.arrow_count_step,
+            settle_delay_ms=excluded.settle_delay_ms, hid_config_json=excluded.hid_config_json,
+            is_active=excluded.is_active, updated_at=excluded.updated_at;
+        """, (
+            prof_id, name, disp_name, model, mfg, serial, dpi, width, height, disp_id,
+            lpp, step, arr_init, arr_step, settle, hid_json, is_active, now, now
+        ))
+        conn.commit()
+    return get_device_profile(prof_id) or {}
+
+def delete_device_profile(profile_id: str) -> bool:
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM device_profiles WHERE id = ?;", (profile_id,))
+        conn.commit()
+        return c.rowcount > 0
 
 def get_active_project() -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
@@ -53,14 +192,141 @@ def get_project(project_id: str) -> Optional[Dict[str, Any]]:
     r = _execute(sql, (project_id,), fetchone=True)
     return dict(r) if r else None
 
-def create_project(name: str, description: str = "", target_total_lines: int = 0) -> Dict[str, Any]:
+def create_project(
+    name: str,
+    description: str = "",
+    target_total_lines: int = 0,
+    device_model: str = "pixel_8",
+    device_name: str = "",
+    device_serial: str = "",
+    target_dpi: int = 220,
+    display_width: int = 1920,
+    display_height: int = 1080,
+    display_id: int = 0,
+    lines_per_page: int = 49,
+    step_size: int = 48,
+    arrow_count_init: int = 99,
+    arrow_count_step: int = 48,
+    settle_delay_ms: int = 50,
+    lock_device: bool = False,
+    hid_config_json: str = "{}"
+) -> Dict[str, Any]:
     now, pid = datetime.now().isoformat(), f"proj_{int(datetime.now().timestamp())}_{abs(hash(name)) % 10000}"
     with get_connection() as conn:
-        c = conn.cursor(); c.execute("UPDATE projects SET is_active = 0;")
-        c.execute("INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?, ?, ?);", (pid, name.strip(), description.strip(), target_total_lines, "active", 1, now, now))
+        c = conn.cursor()
+        c.execute("UPDATE projects SET is_active = 0;")
+        c.execute(
+            """INSERT INTO projects (
+                id, name, description, target_total_lines, status, is_active, created_at, updated_at,
+                device_model, device_name, device_serial, target_dpi, display_width, display_height, display_id,
+                lines_per_page, step_size, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            (
+                pid, name.strip(), description.strip(), target_total_lines, "active", 1, now, now,
+                (device_model or "pixel_8").strip().lower(),
+                (device_name or "").strip(),
+                (device_serial or "").strip(),
+                int(target_dpi or 220),
+                int(display_width or 1920),
+                int(display_height or 1080),
+                int(display_id or 0),
+                int(lines_per_page or 49),
+                int(step_size or 48),
+                int(arrow_count_init or 99),
+                int(arrow_count_step or 48),
+                int(settle_delay_ms or 50),
+                1 if lock_device else 0,
+                hid_config_json or "{}"
+            )
+        )
         c.execute("INSERT INTO project_telemetry VALUES (?, ?, ?, ?);", (pid, "{}", "{}", now))
         conn.commit()
     return get_project(pid) or {}
+
+def update_project_device_settings(
+    project_id: str,
+    device_model: Optional[str] = None,
+    device_name: Optional[str] = None,
+    device_serial: Optional[str] = None,
+    target_dpi: Optional[int] = None,
+    display_width: Optional[int] = None,
+    display_height: Optional[int] = None,
+    display_id: Optional[int] = None,
+    lines_per_page: Optional[int] = None,
+    step_size: Optional[int] = None,
+    arrow_count_init: Optional[int] = None,
+    arrow_count_step: Optional[int] = None,
+    settle_delay_ms: Optional[int] = None,
+    lock_device: Optional[bool] = None,
+    hid_config_json: Optional[str] = None
+) -> bool:
+    proj = get_project(project_id)
+    if not proj:
+        return False
+    updates = []
+    params = []
+    if device_model is not None:
+        updates.append("device_model = ?")
+        params.append(device_model.strip().lower())
+    if device_name is not None:
+        updates.append("device_name = ?")
+        params.append(device_name.strip())
+    if device_serial is not None:
+        updates.append("device_serial = ?")
+        params.append(device_serial.strip())
+    if target_dpi is not None:
+        updates.append("target_dpi = ?")
+        params.append(int(target_dpi))
+    if display_width is not None:
+        updates.append("display_width = ?")
+        params.append(int(display_width))
+    if display_height is not None:
+        updates.append("display_height = ?")
+        params.append(int(display_height))
+    if display_id is not None:
+        updates.append("display_id = ?")
+        params.append(int(display_id))
+    if lines_per_page is not None:
+        updates.append("lines_per_page = ?")
+        params.append(int(lines_per_page))
+    if step_size is not None:
+        updates.append("step_size = ?")
+        params.append(int(step_size))
+    if arrow_count_init is not None:
+        updates.append("arrow_count_init = ?")
+        params.append(int(arrow_count_init))
+    if arrow_count_step is not None:
+        updates.append("arrow_count_step = ?")
+        params.append(int(arrow_count_step))
+    if settle_delay_ms is not None:
+        updates.append("settle_delay_ms = ?")
+        params.append(int(settle_delay_ms))
+    if lock_device is not None:
+        updates.append("lock_device = ?")
+        params.append(1 if lock_device else 0)
+    if hid_config_json is not None:
+        updates.append("hid_config_json = ?")
+        params.append(hid_config_json)
+
+    if not updates:
+        return True
+
+    updates.append("updated_at = ?")
+    params.append(datetime.now().isoformat())
+    params.append(project_id)
+
+    sql = f"UPDATE projects SET {', '.join(updates)} WHERE id = ?;"
+    with get_connection() as conn:
+        conn.cursor().execute(sql, tuple(params))
+        conn.commit()
+    return True
+
+def toggle_project_device_lock(project_id: str, lock_device: Optional[bool] = None) -> bool:
+    proj = get_project(project_id)
+    if not proj:
+        return False
+    new_val = (not bool(proj.get("lock_device", 0))) if lock_device is None else bool(lock_device)
+    return update_project_device_settings(project_id, lock_device=new_val)
 
 def update_project_target_lines(project_id: str, target_total_lines: int) -> bool:
     with get_connection() as conn:

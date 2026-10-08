@@ -1,17 +1,20 @@
 import asyncio
 import base64
+import json
 import re
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Request
 
 import db
-from models import ProjectCreateRequest
+from models import ProjectCreateRequest, ProjectDeviceSettingsRequest
 from services import state
 from services.adb_service import (
     get_active_adb_serial,
     send_hid_keycombination,
     capture_external_screenshot,
     auto_fix_viewport,
+    get_device_info,
+    DEVICE_PROFILES,
 )
 
 try:
@@ -185,7 +188,47 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
 
 @router.post("/api/projects")
 async def create_project(req: ProjectCreateRequest):
-    new_proj = db.create_project(name=req.name, description=req.description or "", target_total_lines=req.target_total_lines or 0)
+    # Auto-resolve device settings if not explicitly provided
+    dev_info = await get_device_info()
+    model = (req.device_model or dev_info.get("device_model") or "pixel_8").lower()
+    available_profs = dev_info.get("available_profiles", [])
+    prof = next((p for p in available_profs if p.get("model_name") == model or p.get("id") == model or model in (p.get("id", "") + " " + p.get("model_name", ""))), None)
+    if not prof:
+        prof = DEVICE_PROFILES.get("pixel_10" if "10" in model else "pixel_8", DEVICE_PROFILES["pixel_8"])
+
+    dev_name = req.device_name or prof.get("friendly_name") or prof.get("name") or dev_info.get("active_model", model)
+    dev_serial = req.device_serial or dev_info.get("active_serial") or ""
+    target_dpi = req.target_dpi if (req.target_dpi and req.target_dpi > 0) else prof.get("target_dpi", prof.get("default_dpi", 220))
+    disp_width = req.display_width if (req.display_width and req.display_width > 0) else prof.get("display_width", 1920)
+    disp_height = req.display_height if (req.display_height and req.display_height > 0) else prof.get("display_height", 1080)
+    disp_id = req.display_id if (req.display_id is not None and req.display_id > 0) else prof.get("display_id", prof.get("default_display_id", 0))
+    lpp = req.lines_per_page if (req.lines_per_page and req.lines_per_page > 0) else prof.get("lines_per_page", 49)
+    step_sz = req.step_size if (req.step_size and req.step_size > 0) else prof.get("step_size", max(1, lpp - 1))
+    arr_init = req.arrow_count_init if (req.arrow_count_init and req.arrow_count_init > 0) else prof.get("arrow_count_init", (step_sz * 2 + 1))
+    arr_step = req.arrow_count_step if (req.arrow_count_step and req.arrow_count_step > 0) else prof.get("arrow_count_step", step_sz)
+    settle_ms = req.settle_delay_ms if (req.settle_delay_ms and req.settle_delay_ms > 0) else prof.get("settle_delay_ms", 50)
+    hid_cfg = json.dumps(req.hid_config) if req.hid_config else (prof.get("hid_config_json") if isinstance(prof.get("hid_config_json"), str) else json.dumps(prof.get("hid_config") or {}))
+    lock_dev = bool(req.lock_device)
+
+    new_proj = db.create_project(
+        name=req.name,
+        description=req.description or "",
+        target_total_lines=req.target_total_lines or 0,
+        device_model=model,
+        device_name=dev_name,
+        device_serial=dev_serial,
+        target_dpi=target_dpi,
+        display_width=disp_width,
+        display_height=disp_height,
+        display_id=disp_id,
+        lines_per_page=lpp,
+        step_size=step_sz,
+        arrow_count_init=arr_init,
+        arrow_count_step=arr_step,
+        settle_delay_ms=settle_ms,
+        lock_device=lock_dev,
+        hid_config_json=hid_cfg
+    )
     state.captured_frames.clear()
     state.document_lines.clear()
     state.load_persisted_state()
@@ -215,7 +258,7 @@ async def create_project(req: ProjectCreateRequest):
     state.latest_telemetry["current_top_line"] = 0
     state.latest_telemetry["current_bottom_line"] = 0
     state.latest_telemetry["phase"] = "INITIALIZING"
-    state.latest_telemetry["status_message"] = "Project created. Running DAG Group: Initialize..."
+    state.latest_telemetry["status_message"] = f"Project created ({model.upper()}{' LOCKED' if lock_dev else ''} @ {target_dpi} DPI). Running DAG Group: Initialize..."
 
     await state.ws_manager.broadcast({
         "type": "project_switched",
@@ -228,6 +271,80 @@ async def create_project(req: ProjectCreateRequest):
     asyncio.create_task(execute_dag_group_initialize(project_id=new_proj["id"]))
 
     return new_proj
+
+@router.get("/api/projects/{project_id}/device-settings")
+async def get_project_device_settings(project_id: str):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    dev_info = await get_device_info()
+    hid_cfg = {}
+    try:
+        hid_cfg = json.loads(proj.get("hid_config_json") or "{}")
+    except Exception:
+        pass
+
+    settings_dict = {
+        "device_model": proj.get("device_model", "pixel_8"),
+        "device_name": proj.get("device_name", ""),
+        "device_serial": proj.get("device_serial", ""),
+        "target_dpi": proj.get("target_dpi", 220),
+        "display_width": proj.get("display_width", 1920),
+        "display_height": proj.get("display_height", 1080),
+        "display_id": proj.get("display_id", 0),
+        "lines_per_page": proj.get("lines_per_page", 49),
+        "step_size": proj.get("step_size", 48),
+        "arrow_count_init": proj.get("arrow_count_init", 99),
+        "arrow_count_step": proj.get("arrow_count_step", 48),
+        "settle_delay_ms": proj.get("settle_delay_ms", 50),
+        "lock_device": bool(proj.get("lock_device", 0)),
+        "hid_config": hid_cfg,
+    }
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "settings": settings_dict,
+        **settings_dict,
+        "active_device": dev_info
+    }
+
+@router.post("/api/projects/{project_id}/device-settings")
+async def update_project_device_settings_api(project_id: str, req: ProjectDeviceSettingsRequest):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    hid_json = json.dumps(req.hid_config) if req.hid_config is not None else None
+    ok = db.update_project_device_settings(
+        project_id=project_id,
+        device_model=req.device_model,
+        device_name=req.device_name,
+        device_serial=req.device_serial,
+        target_dpi=req.target_dpi,
+        display_width=req.display_width,
+        display_height=req.display_height,
+        display_id=req.display_id,
+        lines_per_page=req.lines_per_page,
+        step_size=req.step_size,
+        arrow_count_init=req.arrow_count_init,
+        arrow_count_step=req.arrow_count_step,
+        settle_delay_ms=req.settle_delay_ms,
+        lock_device=req.lock_device,
+        hid_config_json=hid_json
+    )
+    updated = db.get_project(project_id)
+    await state.ws_manager.broadcast({"type": "project_updated", "project": updated})
+    return {"status": "success", "project": updated}
+
+@router.post("/api/projects/{project_id}/lock-device")
+async def toggle_project_lock_api(project_id: str, payload: Optional[Dict[str, Any]] = None):
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+    lock_val = payload.get("lock_device") if payload else None
+    db.toggle_project_device_lock(project_id, lock_val)
+    updated = db.get_project(project_id)
+    await state.ws_manager.broadcast({"type": "project_updated", "project": updated})
+    return {"status": "success", "locked": bool(updated.get("lock_device", 0)), "project": updated}
 
 async def extract_request_image(request: Request) -> Optional[bytes]:
     ct = request.headers.get("content-type", "")

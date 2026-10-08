@@ -11,6 +11,7 @@ import { FlowDag } from './FlowDag';
 import { useConfirm, Modal } from './ConfirmModal';
 import type {
   ProjectData, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
+  DeviceProfile, DeviceHardwareSpecs
 } from './types';
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
@@ -61,7 +62,7 @@ function AppContent() {
   const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0 });
+  const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0, deviceProfileId: 'auto', lockDevice: true });
   const [projectInitProgress, setProjectInitProgress] = useState<{
     active: boolean;
     percent: number;
@@ -137,7 +138,30 @@ function AppContent() {
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
   const [editText, setEditText] = useState('');
   const [showConfigModal, setShowConfigModal] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets' | 'security'>('pipeline');
+  const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets' | 'security' | 'device'>('pipeline');
+  const [deviceProfiles, setDeviceProfiles] = useState<DeviceProfile[]>([]);
+  const [extractedSpecs, setExtractedSpecs] = useState<DeviceHardwareSpecs | null>(null);
+  const [isLoadingSpecs, setIsLoadingSpecs] = useState(false);
+  const [selectedProfileId, setSelectedProfileId] = useState<string>('custom');
+  const [deviceModelInput, setDeviceModelInput] = useState('pixel_8');
+  const [deviceNameInput, setDeviceNameInput] = useState('Pixel 8 Pro');
+  const [targetDpiInput, setTargetDpiInput] = useState<number>(220);
+  const [displayWidthInput, setDisplayWidthInput] = useState<number>(1920);
+  const [displayHeightInput, setDisplayHeightInput] = useState<number>(1080);
+  const [displayIdInput, setDisplayIdInput] = useState<number>(8);
+  const [linesPerPageInput, setLinesPerPageInput] = useState<number>(49);
+  const [stepSizeInput, setStepSizeInput] = useState<number>(48);
+  const [settleDelayInput, setSettleDelayInput] = useState<number>(50);
+  const [lockDeviceInput, setLockDeviceInput] = useState<boolean>(false);
+  const [hidCtrlKey, setHidCtrlKey] = useState<number>(113);
+  const [hidHomeKey, setHidHomeKey] = useState<number>(122);
+  const [hidEndKey, setHidEndKey] = useState<number>(123);
+  const [hidDownKey, setHidDownKey] = useState<number>(20);
+  const [hidRepeatDelay, setHidRepeatDelay] = useState<number>(15);
+  const [hidActionSettle, setHidActionSettle] = useState<number>(50);
+  const [deviceConfigFeedback, setDeviceConfigFeedback] = useState<{ success: boolean; message: string } | null>(null);
+  const [isApplyingCharacteristics, setIsApplyingCharacteristics] = useState(false);
+  const [isSavingDeviceProfile, setIsSavingDeviceProfile] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [autoEnterPin, setAutoEnterPin] = useState(false);
@@ -573,13 +597,31 @@ function AppContent() {
     setShowNewProjectModal(false);
 
     try {
+      const selectedProf = deviceProfiles.find(p => p.id === newProject.deviceProfileId);
+      const payload: any = {
+        name: projName,
+        description: newProject.desc,
+        target_total_lines: newProject.target,
+        lock_device: newProject.lockDevice
+      };
+      if (selectedProf && selectedProf.id !== 'auto') {
+        payload.device_model = selectedProf.model_name || selectedProf.id;
+        payload.device_name = selectedProf.display_name || selectedProf.name;
+        payload.target_dpi = selectedProf.target_dpi;
+        payload.display_width = selectedProf.display_width;
+        payload.display_height = selectedProf.display_height;
+        payload.display_id = selectedProf.display_id;
+        payload.lines_per_page = selectedProf.lines_per_page;
+        payload.step_size = selectedProf.step_size;
+        payload.hid_config = selectedProf.hid_config;
+      }
       const res = await api('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: projName, description: newProject.desc, target_total_lines: newProject.target })
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
-        setNewProject({ name: '', desc: '', target: 0 });
+        setNewProject({ name: '', desc: '', target: 0, deviceProfileId: 'auto', lockDevice: true });
         await fetchData();
       } else {
         const errData = await res.json().catch(() => ({ detail: 'Failed to create project' }));
@@ -587,6 +629,272 @@ function AppContent() {
       }
     } catch (e: any) {
       setProjectInitProgress(prev => prev ? ({ ...prev, status: 'error', error: e.message, stage: 'Network error creating project' }) : null);
+    }
+  };
+
+  const fetchDeviceProfiles = useCallback(async () => {
+    try {
+      const res = await api('/api/device/profiles');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDeviceProfiles(data);
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchDeviceProfiles();
+  }, [fetchDeviceProfiles]);
+
+  useEffect(() => {
+    if (activeProject) {
+      if (activeProject.device_model) setDeviceModelInput(activeProject.device_model);
+      if (activeProject.device_name) setDeviceNameInput(activeProject.device_name);
+      if (activeProject.target_dpi) setTargetDpiInput(activeProject.target_dpi);
+      if (activeProject.display_width) setDisplayWidthInput(activeProject.display_width);
+      if (activeProject.display_height) setDisplayHeightInput(activeProject.display_height);
+      if (activeProject.display_id !== undefined && activeProject.display_id !== null) setDisplayIdInput(activeProject.display_id);
+      if (activeProject.lines_per_page) setLinesPerPageInput(activeProject.lines_per_page);
+      if (activeProject.step_size) setStepSizeInput(activeProject.step_size);
+      if (activeProject.settle_delay_ms) setSettleDelayInput(activeProject.settle_delay_ms);
+      setLockDeviceInput(Boolean(activeProject.lock_device));
+      if (activeProject.hid_config) {
+        const hc = activeProject.hid_config;
+        if (hc.ctrl_key) setHidCtrlKey(hc.ctrl_key);
+        if (hc.home_key) setHidHomeKey(hc.home_key);
+        if (hc.end_key) setHidEndKey(hc.end_key);
+        if (hc.down_key) setHidDownKey(hc.down_key);
+        if (hc.repeat_delay_ms) setHidRepeatDelay(hc.repeat_delay_ms);
+        if (hc.action_settle_ms) setHidActionSettle(hc.action_settle_ms);
+      }
+    }
+  }, [activeProject?.id]);
+
+  const handleExtractDeviceHardwareSpecs = async () => {
+    setIsLoadingSpecs(true);
+    setDeviceConfigFeedback(null);
+    try {
+      const ser = deviceInfo?.active_serial || deviceInfo?.target_serial || '';
+      const res = await api(`/api/device/extract-specs${ser ? `?serial=${encodeURIComponent(ser)}` : ''}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.specs) {
+          const sp: DeviceHardwareSpecs = data.specs;
+          setExtractedSpecs(sp);
+          setDeviceModelInput(sp.model || 'unknown');
+          setDeviceNameInput(`${sp.manufacturer || 'Android'} ${sp.model || 'Device'}`.trim());
+          setTargetDpiInput(sp.active_dpi || 220);
+          setDisplayWidthInput(sp.display_width || 1920);
+          setDisplayHeightInput(sp.display_height || 1080);
+          setDisplayIdInput(sp.display_id ?? 8);
+          setLinesPerPageInput(sp.lines_per_page || 49);
+          setStepSizeInput(sp.step_size || 48);
+          setSettleDelayInput(sp.settle_delay_ms || 50);
+          if (sp.hid_config) {
+            setHidCtrlKey(sp.hid_config.ctrl_key || 113);
+            setHidHomeKey(sp.hid_config.home_key || 122);
+            setHidEndKey(sp.hid_config.end_key || 123);
+            setHidDownKey(sp.hid_config.down_key || 20);
+            setHidRepeatDelay(sp.hid_config.repeat_delay_ms || 15);
+            setHidActionSettle(sp.hid_config.action_settle_ms || 50);
+          }
+          setDeviceConfigFeedback({ success: true, message: `Hardware specs live-extracted from ${sp.model} (${sp.active_dpi} DPI, ${sp.display_width}x${sp.display_height})` });
+        }
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Failed to extract specs' }));
+        setDeviceConfigFeedback({ success: false, message: err.detail || 'Failed to extract hardware specs' });
+      }
+    } catch (e: any) {
+      setDeviceConfigFeedback({ success: false, message: e.message || 'Error extracting hardware specs' });
+    } finally {
+      setIsLoadingSpecs(false);
+    }
+  };
+
+  const handleApplyCharacteristicsToDevice = async () => {
+    setIsApplyingCharacteristics(true);
+    setDeviceConfigFeedback(null);
+    try {
+      const ser = deviceInfo?.active_serial || deviceInfo?.target_serial || '';
+      const res = await api('/api/device/apply-characteristics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serial: ser,
+          target_dpi: Number(targetDpiInput),
+          display_id: Number(displayIdInput),
+          width: Number(displayWidthInput),
+          height: Number(displayHeightInput),
+          device_model: deviceModelInput,
+          lines_per_page: Number(linesPerPageInput),
+          step_size: Number(stepSizeInput),
+          settle_delay_ms: Number(settleDelayInput),
+          hid_config: {
+            ctrl_key: Number(hidCtrlKey),
+            home_key: Number(hidHomeKey),
+            end_key: Number(hidEndKey),
+            down_key: Number(hidDownKey),
+            repeat_delay_ms: Number(hidRepeatDelay),
+            action_settle_ms: Number(hidActionSettle)
+          }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDeviceConfigFeedback({ success: true, message: `Characteristics applied: ${data.active_dpi} DPI, ${data.lines_per_page} LPP, factor ${data.dpi_factor}x ✔` });
+        await fetchData();
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Failed to apply characteristics' }));
+        setDeviceConfigFeedback({ success: false, message: err.detail || 'Failed to apply characteristics' });
+      }
+    } catch (e: any) {
+      setDeviceConfigFeedback({ success: false, message: e.message || 'Error applying characteristics' });
+    } finally {
+      setIsApplyingCharacteristics(false);
+    }
+  };
+
+  const handleSaveProjectDeviceSettings = async () => {
+    if (!activeProject) {
+      setDeviceConfigFeedback({ success: false, message: 'No active project selected' });
+      return;
+    }
+    setDeviceConfigFeedback(null);
+    try {
+      const res = await api(`/api/projects/${activeProject.id}/device-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_model: deviceModelInput,
+          device_name: deviceNameInput,
+          device_serial: deviceInfo?.active_serial || '',
+          target_dpi: Number(targetDpiInput),
+          display_width: Number(displayWidthInput),
+          display_height: Number(displayHeightInput),
+          display_id: Number(displayIdInput),
+          lines_per_page: Number(linesPerPageInput),
+          step_size: Number(stepSizeInput),
+          settle_delay_ms: Number(settleDelayInput),
+          lock_device: Boolean(lockDeviceInput),
+          hid_config: {
+            ctrl_key: Number(hidCtrlKey),
+            home_key: Number(hidHomeKey),
+            end_key: Number(hidEndKey),
+            down_key: Number(hidDownKey),
+            repeat_delay_ms: Number(hidRepeatDelay),
+            action_settle_ms: Number(hidActionSettle)
+          }
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.project) {
+          setActiveProject(data.project);
+        }
+        setDeviceConfigFeedback({ success: true, message: `Project device settings saved (${lockDeviceInput ? '🔒 LOCKED to ' + (deviceNameInput || deviceModelInput) : '🔓 UNLOCKED / Dynamic'})` });
+        await fetchData();
+      } else {
+        const err = await res.json().catch(() => ({ detail: 'Failed to save project device settings' }));
+        setDeviceConfigFeedback({ success: false, message: err.detail || 'Failed to update settings' });
+      }
+    } catch (e: any) {
+      setDeviceConfigFeedback({ success: false, message: e.message || 'Error saving settings' });
+    }
+  };
+
+  const handleToggleProjectLock = async () => {
+    if (!activeProject) return;
+    const nextLocked = !lockDeviceInput;
+    setLockDeviceInput(nextLocked);
+    try {
+      const res = await api(`/api/projects/${activeProject.id}/lock-device`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lock_device: nextLocked })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.project) {
+          setActiveProject(data.project);
+        }
+        setDeviceConfigFeedback({
+          success: true,
+          message: nextLocked ? '🔒 Project locked to this device. DAG runs will enforce exact hardware match.' : '🔓 Project unlocked. DAG runs will dynamically adapt to any connected device.'
+        });
+        await fetchData();
+      }
+    } catch {}
+  };
+
+  const handleSelectProfilePreset = (profId: string) => {
+    setSelectedProfileId(profId);
+    if (profId === 'custom') return;
+    const p = deviceProfiles.find(x => x.id === profId);
+    if (p) {
+      setDeviceModelInput(p.model_name || p.id);
+      setDeviceNameInput(p.display_name || p.name || p.id);
+      if (p.target_dpi) setTargetDpiInput(p.target_dpi);
+      if (p.display_width) setDisplayWidthInput(p.display_width);
+      if (p.display_height) setDisplayHeightInput(p.display_height);
+      if (p.display_id !== undefined && p.display_id !== null) setDisplayIdInput(p.display_id);
+      if (p.lines_per_page) setLinesPerPageInput(p.lines_per_page);
+      if (p.step_size) setStepSizeInput(p.step_size);
+      if (p.settle_delay_ms) setSettleDelayInput(p.settle_delay_ms);
+      if (p.hid_config) {
+        if (p.hid_config.ctrl_key) setHidCtrlKey(p.hid_config.ctrl_key);
+        if (p.hid_config.home_key) setHidHomeKey(p.hid_config.home_key);
+        if (p.hid_config.end_key) setHidEndKey(p.hid_config.end_key);
+        if (p.hid_config.down_key) setHidDownKey(p.hid_config.down_key);
+        if (p.hid_config.repeat_delay_ms) setHidRepeatDelay(p.hid_config.repeat_delay_ms);
+        if (p.hid_config.action_settle_ms) setHidActionSettle(p.hid_config.action_settle_ms);
+      }
+    }
+  };
+
+  const handleSaveNewProfile = async () => {
+    const profName = prompt('Enter a name for this device profile preset:', deviceNameInput || deviceModelInput);
+    if (!profName) return;
+    setIsSavingDeviceProfile(true);
+    try {
+      const profId = profName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+      const res = await api('/api/device/profiles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: profId,
+          name: profName,
+          display_name: profName,
+          model_name: deviceModelInput,
+          manufacturer: extractedSpecs?.manufacturer || 'Android',
+          serial: deviceInfo?.active_serial || '',
+          target_dpi: Number(targetDpiInput),
+          display_width: Number(displayWidthInput),
+          display_height: Number(displayHeightInput),
+          display_id: Number(displayIdInput),
+          lines_per_page: Number(linesPerPageInput),
+          step_size: Number(stepSizeInput),
+          settle_delay_ms: Number(settleDelayInput),
+          hid_config: {
+            ctrl_key: Number(hidCtrlKey),
+            home_key: Number(hidHomeKey),
+            end_key: Number(hidEndKey),
+            down_key: Number(hidDownKey),
+            repeat_delay_ms: Number(hidRepeatDelay),
+            action_settle_ms: Number(hidActionSettle)
+          }
+        })
+      });
+      if (res.ok) {
+        await fetchDeviceProfiles();
+        setSelectedProfileId(profId);
+        setDeviceConfigFeedback({ success: true, message: `Profile preset "${profName}" saved successfully!` });
+      }
+    } catch (e: any) {
+      setDeviceConfigFeedback({ success: false, message: e.message || 'Failed to save profile' });
+    } finally {
+      setIsSavingDeviceProfile(false);
     }
   };
 
@@ -1453,6 +1761,8 @@ function AppContent() {
           <FlowDag
             apiBase={API_BASE}
             activeProjectId={activeProject?.id}
+            activeProject={activeProject}
+            onOpenSettings={(tab) => { if (tab) setSettingsTab(tab as any); setShowConfigModal(true); }}
             activeDeviceSerial={deviceInfo?.active_serial}
             currentTopLine={telemetry.current_top_line !== undefined ? telemetry.current_top_line : (documentData.min_line ?? 0)}
             currentBottomLine={telemetry.current_bottom_line !== undefined ? telemetry.current_bottom_line : (documentData.max_line ?? 0)}
@@ -2495,7 +2805,7 @@ function AppContent() {
       {showConfigModal && (
         <Modal
           title="Studio Settings"
-          width="560px"
+          width={settingsTab === 'device' ? "720px" : "560px"}
           onClose={() => setShowConfigModal(false)}
           onConfirm={settingsTab === 'secrets' ? handleSaveApiKey : undefined}
           confirmText={settingsTab === 'secrets' ? "Save Key" : undefined}
@@ -2504,8 +2814,395 @@ function AppContent() {
             <button className={`modal-tab ${settingsTab === 'pipeline' ? 'active' : ''}`} onClick={() => setSettingsTab('pipeline')} type="button"><Cpu size={14} /><span>Pipeline Engine</span></button>
             <button className={`modal-tab ${settingsTab === 'secrets' ? 'active' : ''}`} onClick={() => setSettingsTab('secrets')} type="button"><Key size={14} /><span>Secrets</span></button>
             <button className={`modal-tab ${settingsTab === 'security' ? 'active' : ''}`} onClick={() => { setSettingsTab('security'); handleCheckPinPromptStatus(); }} type="button"><Lock size={14} /><span>PIN &amp; Security</span></button>
+            <button className={`modal-tab ${settingsTab === 'device' ? 'active' : ''}`} onClick={() => { setSettingsTab('device'); handleExtractDeviceHardwareSpecs(); }} type="button"><Smartphone size={14} /><span>Device &amp; HID</span></button>
           </div>
-          {settingsTab === 'pipeline' ? (
+          {settingsTab === 'device' ? (
+            <div className="settings-tab-content" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Header Status Bar & Extract Button */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <div style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
+                    background: deviceInfo?.connected ? '#00ff9d' : '#ff7b72',
+                    boxShadow: deviceInfo?.connected ? '0 0 8px rgba(0,255,157,0.5)' : 'none',
+                    flexShrink: 0
+                  }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{deviceInfo?.connected ? (deviceInfo.active_model || 'Android Device').toUpperCase() : 'NO DEVICE CONNECTED'}</span>
+                      {deviceInfo?.active_serial && (
+                        <span style={{ fontSize: '10px', color: '#8b949e', fontFamily: 'var(--font-mono)' }}>({deviceInfo.active_serial})</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#8b949e', marginTop: '1px' }}>
+                      {extractedSpecs ? `Physical: ${extractedSpecs.physical_resolution} @ ${extractedSpecs.physical_dpi} DPI • Display ID: ${extractedSpecs.display_id}` : 'Extract live hardware specs directly over ADB with zero hardcoded values'}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExtractDeviceHardwareSpecs}
+                  disabled={isLoadingSpecs}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px',
+                    borderRadius: '6px', background: '#21262d', border: '1px solid #30363d',
+                    color: '#58a6ff', fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    cursor: isLoadingSpecs ? 'wait' : 'pointer', whiteSpace: 'nowrap'
+                  }}
+                >
+                  <RefreshCw size={12} className={isLoadingSpecs ? 'spin' : ''} />
+                  <span>{isLoadingSpecs ? 'Extracting Specs...' : 'Extract Live Specs'}</span>
+                </button>
+              </div>
+
+              {/* Preset Selector */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                  <label style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    PROFILE PRESET:
+                  </label>
+                  <select
+                    className="modal-input"
+                    style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '11px', padding: '4px 8px' }}
+                    value={selectedProfileId}
+                    onChange={e => handleSelectProfilePreset(e.target.value)}
+                  >
+                    <option value="custom">⚙ Custom / Current Extraction</option>
+                    {deviceProfiles.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.display_name || p.name} ({p.target_dpi} DPI • {p.display_width}x{p.display_height})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveNewProfile}
+                  disabled={isSavingDeviceProfile}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px',
+                    borderRadius: '5px', background: '#21262d', border: '1px solid #30363d',
+                    color: '#00ff9d', fontSize: '10px', fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    cursor: 'pointer', whiteSpace: 'nowrap'
+                  }}
+                >
+                  <Plus size={11} /> <span>Save as New Profile</span>
+                </button>
+              </div>
+
+              {/* Display & Resolution Characteristics Card */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Monitor size={14} color="#58a6ff" />
+                    <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#f0f6fc' }}>
+                      DISPLAY &amp; RESOLUTION CHARACTERISTICS
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: '#8b949e' }}>
+                    DPI Scale Factor: <strong style={{ color: '#58a6ff' }}>{(targetDpiInput / 160).toFixed(3)}x</strong>
+                  </span>
+                </div>
+
+                <div className="device-settings-grid">
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Target DPI</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={targetDpiInput}
+                      onChange={e => {
+                        const val = Number(e.target.value);
+                        setTargetDpiInput(val);
+                        if (val > 0 && displayHeightInput > 0) {
+                          const vh = displayHeightInput / (val / 160.0);
+                          setLinesPerPageInput(Math.max(10, Math.floor(vh / 16.0)));
+                          setStepSizeInput(Math.max(9, Math.floor(vh / 16.0) - 1));
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Display Width</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={displayWidthInput}
+                      onChange={e => setDisplayWidthInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Display Height</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={displayHeightInput}
+                      onChange={e => {
+                        const h = Number(e.target.value);
+                        setDisplayHeightInput(h);
+                        if (h > 0 && targetDpiInput > 0) {
+                          const vh = h / (targetDpiInput / 160.0);
+                          setLinesPerPageInput(Math.max(10, Math.floor(vh / 16.0)));
+                          setStepSizeInput(Math.max(9, Math.floor(vh / 16.0) - 1));
+                        }
+                      }}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Display ID</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={displayIdInput}
+                      onChange={e => setDisplayIdInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Lines / Page</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={linesPerPageInput}
+                      onChange={e => setLinesPerPageInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Step Size</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={stepSizeInput}
+                      onChange={e => setStepSizeInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Settle Delay (ms)</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={settleDelayInput}
+                      onChange={e => setSettleDelayInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Device Model</span>
+                    <input
+                      type="text"
+                      className="device-spec-input"
+                      value={deviceModelInput}
+                      onChange={e => setDeviceModelInput(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* HID Controller Card */}
+              <div style={{
+                background: 'var(--bg-main)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Sliders size={14} color="#00ff9d" />
+                    <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#f0f6fc' }}>
+                      HID CONTROLLER &amp; KEYCODES
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: '#8b949e' }}>
+                    Android Linux Input Keycodes
+                  </span>
+                </div>
+
+                <div className="device-settings-grid">
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Ctrl Keycode</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidCtrlKey}
+                      onChange={e => setHidCtrlKey(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Home Keycode</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidHomeKey}
+                      onChange={e => setHidHomeKey(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">End Keycode</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidEndKey}
+                      onChange={e => setHidEndKey(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Down Keycode</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidDownKey}
+                      onChange={e => setHidDownKey(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Repeat Delay (ms)</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidRepeatDelay}
+                      onChange={e => setHidRepeatDelay(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Action Settle (ms)</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={hidActionSettle}
+                      onChange={e => setHidActionSettle(Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Device Lock Card */}
+              <div style={{
+                background: lockDeviceInput ? 'rgba(210, 153, 34, 0.08)' : 'var(--bg-main)',
+                border: `1px solid ${lockDeviceInput ? 'rgba(210, 153, 34, 0.35)' : 'var(--border-color)'}`,
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: lockDeviceInput ? '#e3b341' : '#f0f6fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Lock size={14} color={lockDeviceInput ? '#e3b341' : '#8b949e'} />
+                    <span>Lock Active Project ({activeProject?.name || 'Selected'}) to this Device</span>
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#8b949e', marginTop: '3px', lineHeight: 1.45 }}>
+                    {lockDeviceInput
+                      ? `Project strictly locked to ${deviceNameInput || deviceModelInput} (${targetDpiInput} DPI). DAG runs will block execution if a different device model is connected to avoid mismatched page scaling.`
+                      : 'Project is unlocked. DAG runs will dynamically extract characteristics and adapt settings to whichever device is plugged in.'}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleProjectLock}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px',
+                    borderRadius: '6px', border: `1px solid ${lockDeviceInput ? '#d29922' : '#30363d'}`,
+                    background: lockDeviceInput ? 'rgba(210, 153, 34, 0.25)' : '#21262d',
+                    color: lockDeviceInput ? '#e3b341' : '#8b949e', fontSize: '11px',
+                    fontFamily: 'var(--font-mono)', fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
+                  }}
+                >
+                  {lockDeviceInput ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                  <span>{lockDeviceInput ? 'LOCKED' : 'UNLOCKED'}</span>
+                </button>
+              </div>
+
+              {/* Feedback toast */}
+              {deviceConfigFeedback && (
+                <div style={{
+                  padding: '8px 12px', borderRadius: '6px',
+                  background: deviceConfigFeedback.success ? 'rgba(0, 255, 157, 0.12)' : 'rgba(248, 81, 73, 0.15)',
+                  border: `1px solid ${deviceConfigFeedback.success ? 'rgba(0, 255, 157, 0.3)' : 'rgba(248, 81, 73, 0.35)'}`,
+                  fontSize: '11px', color: deviceConfigFeedback.success ? '#00ff9d' : '#ff7b72',
+                  display: 'flex', alignItems: 'center', gap: '6px'
+                }}>
+                  {deviceConfigFeedback.success ? <Check size={14} /> : <AlertTriangle size={14} />}
+                  <span>{deviceConfigFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Bottom Actions Row */}
+              <div className="device-action-btn-row">
+                <button
+                  type="button"
+                  onClick={handleApplyCharacteristicsToDevice}
+                  disabled={isApplyingCharacteristics}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+                    borderRadius: '6px', background: 'rgba(56, 139, 253, 0.2)', border: '1px solid #388bfd',
+                    color: '#58a6ff', fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 700,
+                    cursor: isApplyingCharacteristics ? 'wait' : 'pointer'
+                  }}
+                >
+                  <Monitor size={13} />
+                  <span>{isApplyingCharacteristics ? 'Applying to Device...' : 'Apply to Device Hardware'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveProjectDeviceSettings}
+                  disabled={!activeProject}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px',
+                    borderRadius: '6px', background: 'var(--color-primary)', border: 'none',
+                    color: '#000', fontSize: '11px', fontFamily: 'var(--font-mono)', fontWeight: 800,
+                    cursor: activeProject ? 'pointer' : 'not-allowed', opacity: activeProject ? 1 : 0.5,
+                    boxShadow: '0 0 12px var(--color-primary-glow)'
+                  }}
+                >
+                  <Check size={13} />
+                  <span>Save to Active Project</span>
+                </button>
+              </div>
+            </div>
+          ) : settingsTab === 'pipeline' ? (
             <div className="settings-tab-content">
               <div className="pipeline-choices">
                 <div
@@ -2859,9 +3556,71 @@ function AppContent() {
 
       {showNewProjectModal && (
         <Modal title="Create New Project" onClose={() => setShowNewProjectModal(false)} onConfirm={handleCreateProject} confirmText="Create & Activate" confirmIcon={Plus} disabled={!newProject.name.trim()}>
-          <div className="modal-form-group">
-            <label>PROJECT NAME *</label>
+          <div className="modal-form-group" style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>PROJECT NAME *</label>
             <input type="text" placeholder="e.g. Small-Fling Core" className="modal-input" value={newProject.name} onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && newProject.name.trim()) { e.preventDefault(); handleCreateProject(); } }} autoFocus />
+          </div>
+
+          <div className="modal-form-group" style={{ marginBottom: '12px' }}>
+            <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>TARGET DEVICE &amp; CHARACTERISTICS</label>
+            <select
+              className="modal-input"
+              style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+              value={newProject.deviceProfileId}
+              onChange={e => setNewProject(p => ({ ...p, deviceProfileId: e.target.value }))}
+            >
+              <option value="auto">⚡ Auto-Detect Connected Hardware (Zero Hardcoding)</option>
+              {deviceProfiles.map(prof => (
+                <option key={prof.id} value={prof.id}>
+                  📱 {prof.display_name || prof.name} ({prof.target_dpi} DPI • {prof.display_width}x{prof.display_height})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{
+            background: 'var(--bg-main)',
+            border: `1px solid ${newProject.lockDevice ? 'rgba(210, 153, 34, 0.35)' : 'var(--border-color)'}`,
+            borderRadius: '8px',
+            padding: '10px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '10px'
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: newProject.lockDevice ? '#e3b341' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Lock size={13} color={newProject.lockDevice ? '#e3b341' : '#8b949e'} />
+                <span>Lock Project to Device Characteristics</span>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.4 }}>
+                {newProject.lockDevice
+                  ? 'DAG execution strictly verifies hardware matches this device profile. Switching devices safely halts runs.'
+                  : 'Unlocked: DAG dynamically extracts DPI & resolution from whichever device is attached.'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setNewProject(p => ({ ...p, lockDevice: !p.lockDevice }))}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 10px',
+                borderRadius: '5px',
+                border: `1px solid ${newProject.lockDevice ? '#d29922' : '#30363d'}`,
+                background: newProject.lockDevice ? 'rgba(210, 153, 34, 0.25)' : '#21262d',
+                color: newProject.lockDevice ? '#e3b341' : '#8b949e',
+                fontSize: '10px',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {newProject.lockDevice ? <Lock size={11} /> : <Sliders size={11} />}
+              <span>{newProject.lockDevice ? 'LOCKED' : 'UNLOCKED'}</span>
+            </button>
           </div>
         </Modal>
       )}

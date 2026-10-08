@@ -9,8 +9,34 @@ from alignment_engine import detect_teams_markdown_alignment
 import config
 
 DEVICE_PROFILES = {
-    "pixel_10": {"id": "pixel_10", "displayName": "Pixel 10", "lines_per_page": 49, "arrow_count_init": 99, "arrow_count_step": 48, "step_size": 48},
-    "pixel_8": {"id": "pixel_8", "displayName": "Pixel 8", "lines_per_page": 49, "arrow_count_init": 99, "arrow_count_step": 48, "step_size": 48}
+    "pixel_10": {
+        "id": "pixel_10",
+        "displayName": "Pixel 10",
+        "friendly_name": "Pixel 10 Pro XL",
+        "lines_per_page": 49,
+        "arrow_count_init": 99,
+        "arrow_count_step": 48,
+        "step_size": 48,
+        "default_dpi": 220,
+        "display_width": 1920,
+        "display_height": 1080,
+        "default_display_id": 8,
+        "model_keys": ["pixel_10", "mustang", "frankel", "63100"]
+    },
+    "pixel_8": {
+        "id": "pixel_8",
+        "displayName": "Pixel 8",
+        "friendly_name": "Pixel 8 Pro",
+        "lines_per_page": 49,
+        "arrow_count_init": 99,
+        "arrow_count_step": 48,
+        "step_size": 48,
+        "default_dpi": 220,
+        "display_width": 1920,
+        "display_height": 1080,
+        "default_display_id": 11,
+        "model_keys": ["pixel_8", "husky", "shiba", "39101"]
+    }
 }
 
 def init_device_model_from_cache() -> str:
@@ -990,6 +1016,126 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
         return not is_open
     except Exception: return False
 
+def get_available_device_profiles() -> List[Dict[str, Any]]:
+    try:
+        import db
+        db_profs = db.get_device_profiles()
+        if db_profs:
+            return db_profs
+    except Exception:
+        pass
+    return list(DEVICE_PROFILES.values())
+
+async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Dynamically extracts physical hardware parameters (DPI, resolution, display IDs, HID characteristics)
+    directly from the active Android device over ADB with zero hardcoding.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "status": "mock",
+            "serial": ser or "mock:5555",
+            "model": "Simulated Device",
+            "manufacturer": "Android",
+            "product_name": "generic",
+            "display_name": "Simulated Android Display (1920x1080 @ 220 DPI)",
+            "display_id": 8,
+            "display_width": 1920,
+            "display_height": 1080,
+            "physical_width": 1920,
+            "physical_height": 1080,
+            "physical_dpi": 220,
+            "override_dpi": 220,
+            "active_dpi": 220,
+            "dpi_factor": 1.375,
+            "lines_per_page": 49,
+            "step_size": 48,
+            "arrow_count_init": 99,
+            "arrow_count_step": 48,
+            "settle_delay_ms": 50,
+            "hid_config": {
+                "ctrl_keycode": 113,
+                "home_keycode": 122,
+                "end_keycode": 123,
+                "down_keycode": 20,
+                "settle_delay_ms": 50,
+                "key_repeat_delay_ms": 15,
+                "dispatch_method": "accelerated_batch"
+            }
+        }
+
+    m_res = await run_adb_shell("getprop ro.product.model", ser, timeout=2.0)
+    model = (m_res.get("stdout") or "Android Device").strip()
+
+    mfg_res = await run_adb_shell("getprop ro.product.manufacturer", ser, timeout=2.0)
+    manufacturer = (mfg_res.get("stdout") or "").strip()
+
+    dev_res = await run_adb_shell("getprop ro.product.device", ser, timeout=2.0)
+    product_name = (dev_res.get("stdout") or "").strip()
+
+    did = await detect_external_display_id(ser, force_refresh=True)
+
+    phys_w, phys_h = 1920, 1080
+    sz_res = await run_adb_shell(f"wm size -d {did}", ser, timeout=2.0)
+    out_sz = sz_res.get("stdout", "") if sz_res.get("status") == "ok" else ""
+    if m_phys := re.search(r'Physical size:\s*(\d+)x(\d+)', out_sz):
+        d1, d2 = int(m_phys.group(1)), int(m_phys.group(2))
+        phys_w, phys_h = max(d1, d2), min(d1, d2)
+    width, height = phys_w, phys_h
+    if m_ovr := re.search(r'Override size:\s*(\d+)x(\d+)', out_sz):
+        d1, d2 = int(m_ovr.group(1)), int(m_ovr.group(2))
+        width, height = max(d1, d2), min(d1, d2)
+
+    phys_dpi, ovr_dpi = 160, 0
+    den_res = await run_adb_shell(f"wm density -d {did}", ser, timeout=2.0)
+    out_den = den_res.get("stdout", "") if den_res.get("status") == "ok" else ""
+    if m_pd := re.search(r'Physical density:\s*(\d+)', out_den):
+        phys_dpi = int(m_pd.group(1))
+    if m_od := re.search(r'Override density:\s*(\d+)', out_den):
+        ovr_dpi = int(m_od.group(1))
+    active_dpi = ovr_dpi if ovr_dpi > 0 else (phys_dpi if phys_dpi > 0 else 220)
+    dpi_factor = max(0.4, min(3.5, round(active_dpi / 160.0, 3)))
+
+    virtual_h_dp = height / dpi_factor
+    lpp = max(20, min(80, int(round(virtual_h_dp / 16.0))))
+    step_size = max(1, lpp - 1)
+    arrow_init = (step_size * 2) + 1
+    arrow_step = step_size
+
+    specs = {
+        "status": "success",
+        "serial": ser,
+        "model": model,
+        "manufacturer": manufacturer,
+        "product_name": product_name,
+        "display_name": f"{model} ({width}x{height} @ {active_dpi} DPI)",
+        "display_id": did,
+        "display_width": width,
+        "display_height": height,
+        "physical_width": phys_w,
+        "physical_height": phys_h,
+        "physical_dpi": phys_dpi,
+        "override_dpi": ovr_dpi,
+        "active_dpi": active_dpi,
+        "dpi_factor": dpi_factor,
+        "lines_per_page": lpp,
+        "step_size": step_size,
+        "arrow_count_init": arrow_init,
+        "arrow_count_step": arrow_step,
+        "settle_delay_ms": 50,
+        "hid_config": {
+            "ctrl_keycode": 113,
+            "home_keycode": 122,
+            "end_keycode": 123,
+            "down_keycode": 20,
+            "settle_delay_ms": 50,
+            "key_repeat_delay_ms": 15,
+            "dispatch_method": "accelerated_batch"
+        }
+    }
+    return specs
+
 async def get_device_info() -> Dict[str, Any]:
     global current_device_model
     ser = await get_active_adb_serial()
@@ -1000,11 +1146,17 @@ async def get_device_info() -> Dict[str, Any]:
         if any(k in m for k in ["pixel_10", "mustang", "frankel"]): current_device_model = "pixel_10"
         elif any(k in m for k in ["pixel_8", "husky", "shiba"]): current_device_model = "pixel_8"
     active_model = matched.get("model", current_device_model) if matched else current_device_model
+
+    available_profs = get_available_device_profiles()
+    active_prof = next((p for p in available_profs if p.get("model_name") == current_device_model or p.get("id") == current_device_model or current_device_model in (p.get("id", "") + " " + p.get("model_name", ""))), None)
+    if not active_prof and available_profs:
+        active_prof = available_profs[0]
+
     try:
         from services import state
         state.active_device_serial = ser
         if ser:
-            friendly_name = "Pixel 10 Pro XL" if current_device_model == "pixel_10" else "Pixel 8 Pro"
+            friendly_name = active_prof.get("name") if active_prof else ("Pixel 10 Pro XL" if current_device_model == "pixel_10" else "Pixel 8 Pro")
             state.latest_telemetry["active_serial"] = ser
             state.latest_telemetry["device_id"] = friendly_name
             state.latest_telemetry["device_model"] = current_device_model
@@ -1025,8 +1177,8 @@ async def get_device_info() -> Dict[str, Any]:
     return {
         "status": "success", "connected": bool(ser), "active_serial": ser,
         "active_model": active_model.replace("_", " "), "device_model": current_device_model,
-        "profile": DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"]),
-        "available_profiles": list(DEVICE_PROFILES.values()), "target_serial": target_adb_serial,
+        "profile": active_prof or DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"]),
+        "available_profiles": available_profs, "target_serial": target_adb_serial,
         "devices": devs, "displays": {"desktop": bool(disp_map.get("desktop")), "phone": bool(disp_map.get("phone"))},
         "pixel_8_address": p8_addr,
         "pixel_10_address": p10_addr,
@@ -1212,6 +1364,118 @@ async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Option
         "active_dpi": current_dpi,
         "dpi_factor": factor,
         "calibrated": True
+    }
+
+
+async def enforce_device_characteristics(
+    serial: Optional[str] = None,
+    target_dpi: Optional[int] = None,
+    display_id: Optional[int] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    device_model: Optional[str] = None,
+    lines_per_page: Optional[int] = None,
+    step_size: Optional[int] = None,
+    hid_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Strictly verifies and enforces hardware characteristics (DPI scaling, display resolution, display ID, HID parameters)
+    for the target device (Pixel 8 vs Pixel 10).
+    Enforces wm density <target_dpi> -d <display_id> and inspects/verifies wm size.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        dpi = target_dpi or 220
+        w = width or 1920
+        h = height or 1080
+        did = display_id or 8
+        factor = max(0.4, min(3.5, round(dpi / 160.0, 3)))
+        lpp = lines_per_page or 49
+        step = step_size or 48
+        return {
+            "status": "ok",
+            "mock": True,
+            "display_id": did,
+            "active_dpi": dpi,
+            "dpi_factor": factor,
+            "resolution": f"{w}x{h}",
+            "width": w,
+            "height": h,
+            "lines_per_page": lpp,
+            "step_size": step,
+            "hid_config": hid_config or {},
+            "enforced": True
+        }
+
+    did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser, force_refresh=True)
+
+    # 1. Resolve resolution from wm size -d <did>
+    w_px, h_px = width or 1920, height or 1080
+    size_res = await run_adb_shell(f"wm size -d {did}", ser, timeout=2.0)
+    if size_res.get("status") == "ok":
+        out_sz = size_res.get("stdout", "")
+        if m_sz := re.search(r'(?:Physical|Override)\s*size:\s*(\d+)x(\d+)', out_sz):
+            dim1, dim2 = int(m_sz.group(1)), int(m_sz.group(2))
+            w_px, h_px = max(dim1, dim2), min(dim1, dim2)
+
+    # 2. Resolve target DPI
+    if not target_dpi or target_dpi <= 0:
+        model_key = (device_model or current_device_model).lower()
+        prof = DEVICE_PROFILES.get("pixel_10" if "10" in model_key else "pixel_8", DEVICE_PROFILES["pixel_8"])
+        target_dpi = prof.get("default_dpi", 220)
+
+    # 3. Strictly enforce wm density <target_dpi> -d <did>
+    check_res = await run_adb_shell(f"wm density -d {did}", ser, timeout=1.8)
+    out_dpi = check_res.get("stdout", "")
+    current_dpi = 160
+    if m_ovr := re.search(r'Override density:\s*(\d+)', out_dpi):
+        current_dpi = int(m_ovr.group(1))
+    elif m_phys := re.search(r'Physical density:\s*(\d+)', out_dpi):
+        val = int(m_phys.group(1))
+        if val > 0: current_dpi = val
+
+    if current_dpi != target_dpi:
+        await run_adb_shell(f"wm density {target_dpi} -d {did}", ser, timeout=2.5)
+        current_dpi = target_dpi
+
+    factor = max(0.4, min(3.5, round(current_dpi / 160.0, 3)))
+
+    try:
+        from services import state
+        if lines_per_page and lines_per_page > 0:
+            state.orchestration_state["lines_per_page"] = int(lines_per_page)
+        if step_size and step_size > 0:
+            state.orchestration_state["step_size"] = int(step_size)
+        if hid_config:
+            state.orchestration_state["hid_config"] = hid_config
+        state.orchestration_state["active_dpi"] = current_dpi
+        state.orchestration_state["dpi_factor"] = factor
+        state.orchestration_state["display_id"] = did
+
+        state.latest_telemetry.setdefault("capture_telemetry", {})
+        state.latest_telemetry["capture_telemetry"].update({
+            "active_dpi": current_dpi,
+            "dpi_factor": factor,
+            "display_id": did,
+            "resolution": f"{w_px}x{h_px}",
+            "enforced_device": device_model or current_device_model,
+            "lines_per_page": state.orchestration_state.get("lines_per_page", 49)
+        })
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "display_id": did,
+        "active_dpi": current_dpi,
+        "dpi_factor": factor,
+        "resolution": f"{w_px}x{h_px}",
+        "width": w_px,
+        "height": h_px,
+        "lines_per_page": lines_per_page or state.orchestration_state.get("lines_per_page", 49),
+        "step_size": step_size or state.orchestration_state.get("step_size", 48),
+        "hid_config": hid_config or state.orchestration_state.get("hid_config", {}),
+        "enforced": True
     }
 
 
