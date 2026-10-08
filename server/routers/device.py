@@ -320,6 +320,17 @@ async def adb_command(req: AdbCommandRequest):
     res = await adb.run_adb_shell(req.command, req.serial)
     return res
 
+@router.post("/api/device/stay-awake")
+@router.post("/api/device/unlock")
+async def device_unlock_and_awake_endpoint(req: Request):
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    pin = data.get("pin", "1213")
+    serial = data.get("serial")
+    res = await adb.configure_display_awake_policies(serial, pin=pin)
+    return {"status": "ok", "details": res}
+
 @router.get("/api/system/hardware-profile")
 async def get_hardware_profile_endpoint():
     """Returns local inference runtime hardware capabilities and Intel Lunar Lake Series 2 tuning profile."""

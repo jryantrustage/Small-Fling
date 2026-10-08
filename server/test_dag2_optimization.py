@@ -72,27 +72,27 @@ async def test_dispatch_accelerated_viewport_step_single_batched_command():
         
         mock_shell.return_value = {"status": "ok", "stdout": ""}
 
-        # Test PageDown (stride >= 35)
+        # Test PageDown when explicitly requested
         res_pagedown = await dispatch_accelerated_viewport_step(
             delta_lines=50,
             serial=serial,
             display_id=9,
-            method="auto"
+            method="pagedown"
         )
         assert res_pagedown["status"] == "ok"
         assert res_pagedown["method"] == "pagedown"
         cmd = res_pagedown["command"]
         assert "keyevent 93" in cmd
 
-        # Test Batched Arrow Down (stride < 35)
+        # Test Tracked Arrow Down (keycode 20)
         res_batched = await dispatch_accelerated_viewport_step(
             delta_lines=10,
             serial=serial,
             display_id=9,
-            method="batched"
+            method="arrow_down"
         )
         assert res_batched["status"] == "ok"
-        assert res_batched["method"] == "batched"
+        assert res_batched["method"] == "arrow_down"
         cmd2 = res_batched["command"]
         # Exactly 10 arrow-down keyevents (20) in a single shell invocation
         assert "20 20 20 20 20 20 20 20 20 20" in cmd2

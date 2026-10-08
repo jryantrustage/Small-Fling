@@ -223,3 +223,62 @@ def test_display_id_sanitization_and_pacer_stall_resilience():
     assert sanitize_input_display_id("invalid") is None
     assert sanitize_input_display_id(256) is None
 
+
+def test_edit_mode_and_dark_mode_enforcement():
+    import asyncio
+    from services import state
+    import routers.orchestration as orch
+
+    async def run_test():
+        # Test auto_heal_pipeline_environment enforces Edit Mode and Dark Mode
+        heal_res = await orch.auto_heal_pipeline_environment("mock:9999", 4, "init_end")
+        assert heal_res["healed"] is True
+        assert state.latest_alignment_status.get("boxes", {}).get("edit_mode", {}).get("passed") is True
+        assert state.latest_alignment_status.get("boxes", {}).get("dark_mode", {}).get("passed") is True
+        assert state.orchestration_state.get("edit_mode") is True
+        assert state.orchestration_state.get("dark_mode") is True
+
+    asyncio.run(run_test())
+
+
+def test_cursor_line1_and_precise_arrow_down_determination():
+    import asyncio
+    from services import state
+    import routers.orchestration as orch
+
+    async def run_test():
+        # Setup: New scan starting with cursor focused on Line 1, page 1 (Ln 1 to 31)
+        state.orchestration_state["cursor_line"] = 1
+        state.dag_state["nodes"]["frame_ocr"].update({"top_line": 1, "bottom_line": 31})
+
+        # When starting a new scan:
+        # Cursor travels down 30 lines (31 - 1) + Viewport scrolls 31 lines to bring Line 32 to 1st line position.
+        # Total = 30 + 31 = 61 arrow downs.
+        res = await orch.run_single_dag_node("arrow_down", {
+            "serial": "mock:9999",
+            "cur_top": 1,
+            "prev_bottom": 31,
+            "cursor_line": 1
+        })
+        assert res["status"] == "success"
+        assert res["target_top_line"] == 32
+        assert res["arrow_count"] == 61
+        assert res["step_count"] == 61
+        assert state.orchestration_state["cursor_line"] == 62
+
+        # Subsequent page transition (Page 2 -> Page 3):
+        # Cursor is already at the bottom of the viewport (Ln 62).
+        # Viewport scrolls down 31 lines to bring Line 63 to 1st line position.
+        res_p2 = await orch.run_single_dag_node("arrow_down", {
+            "serial": "mock:9999",
+            "cur_top": 32,
+            "prev_bottom": 62,
+            "cursor_line": 62
+        })
+        assert res_p2["status"] == "success"
+        assert res_p2["target_top_line"] == 63
+        assert res_p2["arrow_count"] == 31
+        assert res_p2["step_count"] == 31
+
+    asyncio.run(run_test())
+

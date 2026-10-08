@@ -309,14 +309,17 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
 
 def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int, str, Optional[str]]:
     """
-    Parses MiniCPM-V textual output with robust multi-delimiter regex, filename detection, and JSON fallback.
+    Parses MiniCPM-V textual output with robust multi-delimiter regex, multiline code fences,
+    filename detection, and JSON fallback.
     Supports formats:
-      '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code'
+      '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code',
+      and multiline blocks like:
+      'LINE_27:\n```\ncode\n```'
     Extracts FILE_NAME from header and ensures Line 1 of the gutter aligns with Line 1 of document text.
     """
-    raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", (raw_resp or "").strip())
-    plines: List[Dict[str, Any]] = []
-    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?\[?(\d+)\]?\s*(?:[:|.)\]\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
+    raw_text = (raw_resp or "").strip()
+    if raw_text.startswith("```") and raw_text.endswith("```"):
+        raw_text = re.sub(r"^\s*```(?:[a-zA-Z0-9_-]+)?\s*|\s*```\s*$", "", raw_text).strip()
 
     detected_filename: Optional[str] = None
     fn_match = re.search(r"^\s*FILE_NAME\s*:\s*([^\r\n]+)", raw_text, re.MULTILINE | re.IGNORECASE)
@@ -326,29 +329,49 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
         if cand and cand.upper() not in {"NONE", "N/A", "NULL", "UNKNOWN", "NOT VISIBLE"}:
             detected_filename = cand
 
-    seen_lines = set()
-    for line in raw_text.splitlines():
-        line_clean = line.rstrip()
+    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?\[?(\d+)\]?\s*(?:[:|.)\]\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
+
+    line_map: Dict[int, List[str]] = {}
+    current_ln: Optional[int] = None
+    seen_lines = []
+
+    for raw_line in raw_text.splitlines():
+        line_clean = raw_line.rstrip()
         if not line_clean.strip():
             continue
         if re.match(r"^\s*FILE_NAME\s*:", line_clean, re.IGNORECASE):
             continue
-        if match := line_pattern.match(line_clean):
-            ln = int(match.group(1))
-            code = match.group(2)
-            if ln in seen_lines:
+
+        match = line_pattern.match(line_clean)
+        if match:
+            current_ln = int(match.group(1))
+            code_part = match.group(2)
+            if current_ln not in line_map:
+                line_map[current_ln] = []
+                seen_lines.append(current_ln)
+            if code_part and not code_part.strip().startswith("```"):
+                line_map[current_ln].append(code_part)
+        elif current_ln is not None:
+            stripped = line_clean.strip()
+            if stripped.startswith("```"):
                 continue
-            seen_lines.add(ln)
-            plines.append({
-                "line_number": ln,
-                "gutter_number": ln,
-                "text": code,
-                "is_blank": not bool(code.strip()),
-                "is_wrapped": False,
-                "wrapped_line_count": 1,
-                "confidence": 0.98,
-                "status": "verified"
-            })
+            line_map[current_ln].append(line_clean)
+
+    plines: List[Dict[str, Any]] = []
+    for ln in seen_lines:
+        contents = line_map[ln]
+        code = "\n".join(contents).rstrip()
+        is_w = "\n" in code or len(code) > 80
+        plines.append({
+            "line_number": ln,
+            "gutter_number": ln,
+            "text": code,
+            "is_blank": not bool(code.strip()),
+            "is_wrapped": is_w,
+            "wrapped_line_count": max(1, len(contents)),
+            "confidence": 0.98,
+            "status": "verified"
+        })
 
     if not plines:
         parsed = {}
@@ -364,9 +387,6 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
             if isinstance(item, dict) and item.get("line_number") is not None:
                 ln = int(item["line_number"])
                 code = str(item.get("text", ""))
-                if ln in seen_lines:
-                    continue
-                seen_lines.add(ln)
                 plines.append({
                     "line_number": ln,
                     "gutter_number": ln,
@@ -476,10 +496,43 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
 async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
-    """Scan image with MiniCPM-V in Ollama for verbatim code/markdown line extraction."""
+    """
+    Scan image with local vision model (MiniCPM-V in Ollama, with OpenVINO RapidOCR fallback)
+    for verbatim code/markdown line extraction and bounding boxes.
+    """
+    plines = []
+    top_ln = bot_ln = 0
+    formatted = ""
+    detected_filename = None
+    model_used = None
+    bboxes = {}
+
     try:
         raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
         plines, top_ln, bot_ln, formatted, detected_filename = parse_minicpm_output(raw_resp)
+        non_blank = [p for p in plines if (p.get("text") or "").strip()]
+        if non_blank:
+            model_used = f"MiniCPM-V ({model_name})"
+    except Exception as e:
+        print(f"[MiniCPM-V OCR] Ollama call error: {e}")
+
+    # If MiniCPM-V failed, timed out, or produced no lines with text, fallback to OpenVINO RapidOCR
+    if not plines or not any((p.get("text") or "").strip() for p in plines):
+        try:
+            from ocr_engine import worker_scan_image
+            fallback_res = await asyncio.to_thread(worker_scan_image, str(image_path))
+            f_lines = fallback_res.get("lines", [])
+            if f_lines:
+                plines = f_lines
+                top_ln = fallback_res.get("top_line", top_ln)
+                bot_ln = fallback_res.get("bottom_line", bot_ln)
+                bboxes = fallback_res.get("bounding_boxes", {})
+                formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
+                model_used = "Local RapidOCR (OpenVINO Accelerated)"
+        except Exception as ex:
+            print(f"[Local OCR Fallback] error: {ex}")
+
+    if plines:
         return {
             "status": "success",
             "top_line": top_ln,
@@ -487,21 +540,21 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
             "lines": plines,
             "extracted_text": formatted,
             "lines_count": len(plines),
-            "bounding_boxes": {},
-            "model_used": f"MiniCPM-V ({model_name})",
+            "bounding_boxes": bboxes,
+            "model_used": model_used or "Local Vision OCR",
             "detected_filename": detected_filename
         }
-    except Exception as e:
-        print(f"[MiniCPM-V OCR] Ollama call error: {e}")
+    else:
         return {
             "status": "error",
-            "error": str(e),
+            "error": "Local model OCR produced no detected lines",
             "top_line": 0,
             "bottom_line": 0,
             "lines": [],
             "extracted_text": "",
             "lines_count": 0,
             "bounding_boxes": {},
-            "model_used": "MiniCPM-V (Failed)"
+            "model_used": "Local OCR (Empty)"
         }
+
 

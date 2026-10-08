@@ -630,17 +630,58 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             return jpg
     return _get_or_create_standby_frame(mode)
 
-async def configure_display_awake_policies(serial: Optional[str] = None):
+async def configure_display_awake_policies(serial: Optional[str] = None, pin: str = "1213") -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
-    if not ser: return
+    if not ser or "mock" in str(ser).lower():
+        return {"status": "mock", "stay_on": True}
+    
+    result = {"status": "ok", "stay_on": True, "keyguard_unlocked": False, "auth_handled": False}
     try:
-        await run_adb_shell("settings put global stay_on_while_plugged_in 7", ser)
-        await run_adb_shell("settings put system screen_off_timeout 2147483647", ser)
-        await run_adb_shell("settings put global sleep_timeout -1", ser)
-        await run_adb_shell("svc power stayon true", ser)
-        await run_adb_shell("settings put secure doze_enabled 0", ser)
-    except Exception:
-        pass
+        # 1. Enforce permanent stay-awake policy across all power connections (AC, USB, Wireless)
+        await run_adb_shell(
+            "svc power stayon true; "
+            "settings put global stay_on_while_plugged_in 7; "
+            "settings put system screen_off_timeout 2147483647; "
+            "settings put global sleep_timeout -1; "
+            "settings put secure lock_screen_lock_after_timeout 2147483647; "
+            "settings put secure doze_enabled 0; "
+            "wm dismiss-keyguard",
+            ser,
+            timeout=2.0
+        )
+
+        # 2. Check if keyguard is showing or locked
+        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
+        kg_out = kg_chk.get("stdout", "")
+        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
+            # Wake up display 0, send menu/unlock key, swipe up to ensure PIN keypad is active, enter PIN, and enter
+            await run_adb_shell(
+                f"input -d 0 keyevent 224; "
+                f"input -d 0 keyevent 82; "
+                f"input -d 0 swipe 540 1800 540 600 200; "
+                f"sleep 0.1; "
+                f"input -d 0 text {pin}; "
+                f"input -d 0 keyevent 66; "
+                f"wm dismiss-keyguard",
+                ser,
+                timeout=3.0
+            )
+            result["keyguard_unlocked"] = True
+
+        # 3. Check if Teams or Intune Company Portal is prompting for authentication on internal or external display
+        ext_id = await detect_external_display_id(ser)
+        auth_chk = await run_adb_shell("dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity'", ser, timeout=1.2)
+        auth_out = auth_chk.get("stdout", "")
+        if any(k in auth_out for k in ["CompanyPortal", "ConfirmCredential", "PinActivity", "AuthenticationActivity", "LockPatternActivity"]):
+            # Enter PIN on both internal phone display and external display to ensure it handles wherever focused
+            await run_adb_shell(f"input -d 0 text {pin}; input -d 0 keyevent 66", ser, timeout=1.5)
+            if ext_id and ext_id > 0:
+                await run_adb_shell(f"input -d {ext_id} text {pin}; input -d {ext_id} keyevent 66", ser, timeout=1.5)
+            result["auth_handled"] = True
+    except Exception as e:
+        print(f"[configure_display_awake_policies] Note: {e}")
+        result["error"] = str(e)
+    return result
 
 async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
@@ -1202,14 +1243,8 @@ async def dispatch_accelerated_viewport_step(
 
     # Choose method
     chosen_method = method.lower()
-    if chosen_method == "auto":
-        # For large step (~35+ lines), PageDown keycode 93 with micro-trimming is optimal
-        if delta_lines >= 35:
-            chosen_method = "pagedown"
-        elif delta_lines > 0:
-            chosen_method = "batched"
-        else:
-            chosen_method = "batched"
+    if chosen_method in ("auto", "arrow_down", "batched"):
+        chosen_method = "arrow_down"
 
     shell_cmds = [
         "settings put secure show_ime_with_hard_keyboard 0"
@@ -1218,7 +1253,7 @@ async def dispatch_accelerated_viewport_step(
     key_sequence = []
     page_stride = 49  # Standard lines per page for desktop 1080p markdown editor
     if chosen_method == "pagedown":
-        # Option A: Single PageDown command (keycode 93) + micro-adjustment
+        # Option A: Single PageDown command (keycode 93) + micro-adjustment (only when explicitly requested)
         rem = delta_lines - page_stride
         key_sequence = ["93"]  # KEYCODE_PAGE_DOWN
         if rem > 0:
@@ -1238,11 +1273,20 @@ async def dispatch_accelerated_viewport_step(
         # Fast 120ms crisp gesture
         shell_cmds.append(f"input {disp_cmd}swipe 960 {y_from} 960 {y_to} 120 >/dev/null 2>&1")
     else:
-        # Option B: Batched ADB Keyevents in a single concatenated shell command
-        count = max(1, min(delta_lines, 80))
+        # Option B: Batched ADB DownArrow keyevents (keycode 20) paced in non-blocking batches
+        # to prevent Android InputDispatcher from timing out and triggering "Teams isn't responding" ANRs
+        count = max(1, min(delta_lines, 200))
         key_sequence = ["20"] * count
-        keys_str = " ".join(key_sequence)
-        shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
+        chunk_size = 12
+        if count <= chunk_size:
+            keys_str = " ".join(key_sequence)
+            shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
+        else:
+            sub_cmds = []
+            for i in range(0, count, chunk_size):
+                chunk = key_sequence[i:i + chunk_size]
+                sub_cmds.append(f"input {disp_cmd}keyevent {' '.join(chunk)} >/dev/null 2>&1")
+            shell_cmds.append("; sleep 0.02; ".join(sub_cmds))
 
     full_cmd = "; ".join(shell_cmds)
     res = await run_adb_shell(full_cmd, ser, timeout=2.0)

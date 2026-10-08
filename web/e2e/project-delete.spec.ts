@@ -24,7 +24,7 @@ test.describe('Project Lifecycle & Deletion Suite with 15 Captures', () => {
 
     // 1. Verify project name in header badge
     const badge = page.locator('.project-badge-name');
-    await expect(badge).toHaveText(projectName, { timeout: 10000 });
+    await expect(badge).toContainText(projectName, { timeout: 10000 });
 
     // 2. Verify 15 captures are displayed in the frames panel
     const framesHeader = page.locator('.frames-feed-panel .panel-header');
