@@ -3,7 +3,7 @@ import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  ZoomIn, ZoomOut, Copy, Check
+  ZoomIn, ZoomOut, Copy, Check, ListTree
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -14,6 +14,7 @@ import type {
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
 import { DeviceStudioDrawer } from './components/DeviceStudioDrawer';
+import { FrameTracePanel } from './components/FrameTracePanel';
 import { GotoLineModal } from './components/GotoLineModal';
 import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 import { LiveResponsiveViewport } from './components/LiveResponsiveViewport';
@@ -76,6 +77,7 @@ function AppContent() {
   const [telemetry, setTelemetry] = useState<TelemetryData>({});
   const [latencyMs, setLatencyMs] = useState(0);
   const [eventsLog, setEventsLog] = useState<TelemetryEvent[]>([]);
+  const [traceFrameId, setTraceFrameId] = useState<string | null>(null);
   const [streamKey, setStreamKey] = useState(0);
   const { secondsAgo: inspectorAgoSec } = useAgoTimer(streamKey);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
@@ -243,7 +245,7 @@ function AppContent() {
         inferredDag = 'system';
       }
     }
-    setEventsLog(prev => [...prev.slice(-99), { id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toLocaleTimeString(), category, message, data, dag: inferredDag }]);
+    setEventsLog(prev => [...prev.slice(-499), { id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toLocaleTimeString(), ts: Date.now(), category, message, data, dag: inferredDag }]);
   }, []);
 
   const handleDismissItem = async (itemId: string, dismissed: boolean) => {
@@ -698,7 +700,7 @@ function AppContent() {
           if (msg.type === 'new_frame' && newF) {
             setFrames(p => [...p.filter(f => f.frame_id !== newF.frame_id), newF]);
             setSelectedFrameId(newF.frame_id);
-            addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`);
+            addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`, { frame_id: newF.frame_id, top_line: newF.top_line, bottom_line: newF.bottom_line, page_index: newF.page_index }, 'capture_entire_markdown');
             apiJson<any>('/api/document').then(d => { setDocumentData(d); if (d.token_stats) setTokenStats(d.token_stats); });
           } else if (msg.type === 'frame_deleted') {
             setFrames(p => p.filter(f => f.frame_id !== msg.frame_id));
@@ -769,17 +771,36 @@ function AppContent() {
               fetchData();
             }
           } else if (msg.type === 'dag_telemetry_event' && msg.event) {
-            setEventsLog(prev => [...prev.slice(-99), msg.event]);
+            setEventsLog(prev => [...prev.slice(-499), { ...msg.event, ts: Date.now() }]);
+          } else if (msg.type === 'key_event_telemetry' && msg.event) {
+            const k = msg.event;
+            const codes: number[] = Array.isArray(k.keycodes) ? k.keycodes : [];
+            const downs = codes.filter((c: number) => c === 20).length;
+            const caller = k.caller_node || 'system';
+            const isHid = String(k.key_name || '').startsWith('CTRL_');
+            const keyDag = caller === 'arrow_down' ? 'capture_entire_markdown' : (isHid ? 'initialize' : 'system');
+            setEventsLog(prev => [...prev.slice(-499), {
+              id: `ke-${k.id || Date.now()}-${Math.random()}`,
+              timestamp: new Date().toLocaleTimeString(),
+              ts: Date.now(),
+              category: k.navigated_away ? 'ERROR' : 'PACER',
+              message: `⌨ ${k.key_name} • ${codes.length} key(s)${downs ? ` (${downs}× ↓)` : ''} • ${k.duration_ms}ms • display #${k.display_id ?? '?'}${k.navigated_away ? ' • ⚠ navigated away' : ''}`,
+              dag: keyDag,
+              nodeId: caller === 'arrow_down' ? 'arrow_down' : undefined,
+              level: k.navigated_away ? 'error' : 'info',
+              data: { key_event: k }
+            }]);
           } else if (msg.type === 'dag_updated') {
             const dagNodeId = msg.node_id || msg.dag?.current_active_node || 'init_end';
             const devName = deviceInfo?.active_model || (deviceModel === 'pixel_10' ? 'Pixel 10 Pro XL' : 'Pixel 8 Pro');
             if (msg.status === 'error' || msg.error) {
               const errText = typeof msg.error === 'string' ? msg.error : (msg.error?.message || 'Node execution failed');
               setEventsLog(prev => [
-                ...prev.slice(-99),
+                ...prev.slice(-499),
                 {
                   id: `${Date.now()}-${Math.random()}`,
                   timestamp: new Date().toLocaleTimeString(),
+                  ts: Date.now(),
                   category: 'ERROR',
                   message: `${devName}: DAG 1 details of log trace • ${errText}`,
                   dag: 'initialize',
@@ -794,10 +815,11 @@ function AppContent() {
               ]);
             } else if (msg.status === 'completed' && msg.total_lines) {
               setEventsLog(prev => [
-                ...prev.slice(-99),
+                ...prev.slice(-499),
                 {
                   id: `${Date.now()}-${Math.random()}`,
                   timestamp: new Date().toLocaleTimeString(),
+                  ts: Date.now(),
                   category: 'OCR',
                   message: `${devName}: DAG 1 • Calibrated ${Number(msg.total_lines).toLocaleString()} total lines at EOF ✔`,
                   dag: 'initialize',
@@ -1478,6 +1500,14 @@ function AppContent() {
                               <span className="frame-badge">Pg {f.page_index}</span>
                               {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
                               <button className="frame-card-delete-overlay" onClick={(e) => handleDeleteFrame(f.frame_id, e)} disabled={deletingFrameId === f.frame_id} title="Delete frame"><Trash2 size={12} /></button>
+                              <button
+                                type="button"
+                                id={`frame-trace-btn-${f.frame_id.slice(0, 8)}`}
+                                className="frame-card-delete-overlay"
+                                style={{ left: '40px', borderColor: 'rgba(0, 255, 157, 0.45)', color: '#00ff9d' }}
+                                onClick={(e) => { e.stopPropagation(); setSelectedFrameId(f.frame_id); setTraceFrameId(f.frame_id); }}
+                                title="View detailed event trace (key presses, DAG events) for this capture"
+                              ><ListTree size={12} /></button>
                             </div>
                             <div className="frame-card-info">
                               <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
@@ -2427,6 +2457,11 @@ function AppContent() {
         alignmentData={alignmentData}
         liveMode={liveMode}
       />
+
+      {traceFrameId && (() => {
+        const tf = frames.find(fr => fr.frame_id === traceFrameId);
+        return tf ? <FrameTracePanel frame={tf} eventsLog={eventsLog} onClose={() => setTraceFrameId(null)} /> : null;
+      })()}
 
       <TelemetryToaster
         telemetry={telemetry} tokenStats={tokenStats}

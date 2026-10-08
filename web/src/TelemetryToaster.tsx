@@ -5,6 +5,7 @@ import { StructuredLogEntry } from './components/StructuredLogEntry';
 export interface TelemetryEvent {
   id: string;
   timestamp: string;
+  ts?: number;
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;

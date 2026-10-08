@@ -293,6 +293,8 @@ export interface KioskTelemetry {
 export interface TelemetryEvent {
   id: string;
   timestamp: string;
+  /** Epoch milliseconds when the event was received (used for per-frame trace windows). */
+  ts?: number;
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;
