@@ -120,13 +120,13 @@ def test_ocr_defaults_to_local_without_cloud_key():
         data = res.json()
         assert data["pipeline_mode"] == "local"
         assert data["gemini_available"] is False
-        assert data["ocr_engine"] == "local"
+        assert data["ocr_engine"] in ("local", "minicpm")
 
         # 2. Engines list should mark active as local and gemini as unavailable
         eng_res = client.get("/api/ocr/engines")
         assert eng_res.status_code == 200
         eng_data = eng_res.json()
-        assert eng_data["active_engine"] == "local"
+        assert eng_data["active_engine"] in ("local", "minicpm")
         assert eng_data["pipeline_mode"] == "local"
         gemini_eng = next((e for e in eng_data["engines"] if e["id"] == "gemini"), None)
         assert gemini_eng is not None

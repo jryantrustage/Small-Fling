@@ -152,6 +152,10 @@ function AppContent() {
   const [linesPerPageInput, setLinesPerPageInput] = useState<number>(49);
   const [stepSizeInput, setStepSizeInput] = useState<number>(48);
   const [settleDelayInput, setSettleDelayInput] = useState<number>(50);
+  const [scrollPaddingLinesInput, setScrollPaddingLinesInput] = useState<number>(4);
+  const [arrowCountInitInput, setArrowCountInitInput] = useState<number>(56);
+  const [arrowCountStepInput, setArrowCountStepInput] = useState<number>(28);
+  const [hidDispatchMethod, setHidDispatchMethod] = useState<string>('accelerated_batch');
   const [lockDeviceInput, setLockDeviceInput] = useState<boolean>(false);
   const [hidCtrlKey, setHidCtrlKey] = useState<number>(113);
   const [hidHomeKey, setHidHomeKey] = useState<number>(122);
@@ -159,6 +163,16 @@ function AppContent() {
   const [hidDownKey, setHidDownKey] = useState<number>(20);
   const [hidRepeatDelay, setHidRepeatDelay] = useState<number>(15);
   const [hidActionSettle, setHidActionSettle] = useState<number>(50);
+
+  const updateLinesAndPadding = (lpp: number, pad: number) => {
+    setLinesPerPageInput(lpp);
+    setScrollPaddingLinesInput(pad);
+    const step = Math.max(1, lpp + pad);
+    const init = step * 2;
+    setStepSizeInput(step);
+    setArrowCountStepInput(step);
+    setArrowCountInitInput(init);
+  };
   const [deviceConfigFeedback, setDeviceConfigFeedback] = useState<{ success: boolean; message: string } | null>(null);
   const [isApplyingCharacteristics, setIsApplyingCharacteristics] = useState(false);
   const [isSavingDeviceProfile, setIsSavingDeviceProfile] = useState(false);
@@ -613,6 +627,9 @@ function AppContent() {
         payload.display_id = selectedProf.display_id;
         payload.lines_per_page = selectedProf.lines_per_page;
         payload.step_size = selectedProf.step_size;
+        payload.scroll_padding_lines = selectedProf.scroll_padding_lines ?? 4;
+        payload.arrow_count_init = selectedProf.arrow_count_init ?? ((selectedProf.lines_per_page + (selectedProf.scroll_padding_lines ?? 4)) * 2);
+        payload.arrow_count_step = selectedProf.arrow_count_step ?? (selectedProf.lines_per_page + (selectedProf.scroll_padding_lines ?? 4));
         payload.hid_config = selectedProf.hid_config;
       }
       const res = await api('/api/projects', {
@@ -658,6 +675,15 @@ function AppContent() {
       if (activeProject.display_id !== undefined && activeProject.display_id !== null) setDisplayIdInput(activeProject.display_id);
       if (activeProject.lines_per_page) setLinesPerPageInput(activeProject.lines_per_page);
       if (activeProject.step_size) setStepSizeInput(activeProject.step_size);
+      if (activeProject.scroll_padding_lines !== undefined && activeProject.scroll_padding_lines !== null) {
+        setScrollPaddingLinesInput(activeProject.scroll_padding_lines);
+      }
+      if (activeProject.arrow_count_init !== undefined && activeProject.arrow_count_init !== null) {
+        setArrowCountInitInput(activeProject.arrow_count_init);
+      }
+      if (activeProject.arrow_count_step !== undefined && activeProject.arrow_count_step !== null) {
+        setArrowCountStepInput(activeProject.arrow_count_step);
+      }
       if (activeProject.settle_delay_ms) setSettleDelayInput(activeProject.settle_delay_ms);
       setLockDeviceInput(Boolean(activeProject.lock_device));
       if (activeProject.hid_config) {
@@ -668,6 +694,7 @@ function AppContent() {
         if (hc.down_key) setHidDownKey(hc.down_key);
         if (hc.repeat_delay_ms) setHidRepeatDelay(hc.repeat_delay_ms);
         if (hc.action_settle_ms) setHidActionSettle(hc.action_settle_ms);
+        if (hc.dispatch_method) setHidDispatchMethod(hc.dispatch_method);
       }
     }
   }, [activeProject?.id]);
@@ -691,6 +718,9 @@ function AppContent() {
           setDisplayIdInput(sp.display_id ?? 8);
           setLinesPerPageInput(sp.lines_per_page || 49);
           setStepSizeInput(sp.step_size || 48);
+          if (sp.scroll_padding_lines !== undefined) setScrollPaddingLinesInput(sp.scroll_padding_lines);
+          if (sp.arrow_count_init !== undefined) setArrowCountInitInput(sp.arrow_count_init);
+          if (sp.arrow_count_step !== undefined) setArrowCountStepInput(sp.arrow_count_step);
           setSettleDelayInput(sp.settle_delay_ms || 50);
           if (sp.hid_config) {
             setHidCtrlKey(sp.hid_config.ctrl_key || 113);
@@ -699,6 +729,7 @@ function AppContent() {
             setHidDownKey(sp.hid_config.down_key || 20);
             setHidRepeatDelay(sp.hid_config.repeat_delay_ms || 15);
             setHidActionSettle(sp.hid_config.action_settle_ms || 50);
+            if (sp.hid_config.dispatch_method) setHidDispatchMethod(sp.hid_config.dispatch_method);
           }
           setDeviceConfigFeedback({ success: true, message: `Hardware specs live-extracted from ${sp.model} (${sp.active_dpi} DPI, ${sp.display_width}x${sp.display_height})` });
         }
@@ -730,6 +761,9 @@ function AppContent() {
           device_model: deviceModelInput,
           lines_per_page: Number(linesPerPageInput),
           step_size: Number(stepSizeInput),
+          scroll_padding_lines: Number(scrollPaddingLinesInput),
+          arrow_count_init: Number(arrowCountInitInput),
+          arrow_count_step: Number(arrowCountStepInput),
           settle_delay_ms: Number(settleDelayInput),
           hid_config: {
             ctrl_key: Number(hidCtrlKey),
@@ -737,7 +771,11 @@ function AppContent() {
             end_key: Number(hidEndKey),
             down_key: Number(hidDownKey),
             repeat_delay_ms: Number(hidRepeatDelay),
-            action_settle_ms: Number(hidActionSettle)
+            action_settle_ms: Number(hidActionSettle),
+            scroll_padding_lines: Number(scrollPaddingLinesInput),
+            arrow_count_init: Number(arrowCountInitInput),
+            arrow_count_step: Number(arrowCountStepInput),
+            dispatch_method: hidDispatchMethod
           }
         })
       });
@@ -776,6 +814,9 @@ function AppContent() {
           display_id: Number(displayIdInput),
           lines_per_page: Number(linesPerPageInput),
           step_size: Number(stepSizeInput),
+          scroll_padding_lines: Number(scrollPaddingLinesInput),
+          arrow_count_init: Number(arrowCountInitInput),
+          arrow_count_step: Number(arrowCountStepInput),
           settle_delay_ms: Number(settleDelayInput),
           lock_device: Boolean(lockDeviceInput),
           hid_config: {
@@ -784,7 +825,11 @@ function AppContent() {
             end_key: Number(hidEndKey),
             down_key: Number(hidDownKey),
             repeat_delay_ms: Number(hidRepeatDelay),
-            action_settle_ms: Number(hidActionSettle)
+            action_settle_ms: Number(hidActionSettle),
+            scroll_padding_lines: Number(scrollPaddingLinesInput),
+            arrow_count_init: Number(arrowCountInitInput),
+            arrow_count_step: Number(arrowCountStepInput),
+            dispatch_method: hidDispatchMethod
           }
         })
       });
@@ -841,6 +886,9 @@ function AppContent() {
       if (p.display_id !== undefined && p.display_id !== null) setDisplayIdInput(p.display_id);
       if (p.lines_per_page) setLinesPerPageInput(p.lines_per_page);
       if (p.step_size) setStepSizeInput(p.step_size);
+      if (p.scroll_padding_lines !== undefined) setScrollPaddingLinesInput(p.scroll_padding_lines);
+      if (p.arrow_count_init !== undefined) setArrowCountInitInput(p.arrow_count_init);
+      if (p.arrow_count_step !== undefined) setArrowCountStepInput(p.arrow_count_step);
       if (p.settle_delay_ms) setSettleDelayInput(p.settle_delay_ms);
       if (p.hid_config) {
         if (p.hid_config.ctrl_key) setHidCtrlKey(p.hid_config.ctrl_key);
@@ -849,6 +897,7 @@ function AppContent() {
         if (p.hid_config.down_key) setHidDownKey(p.hid_config.down_key);
         if (p.hid_config.repeat_delay_ms) setHidRepeatDelay(p.hid_config.repeat_delay_ms);
         if (p.hid_config.action_settle_ms) setHidActionSettle(p.hid_config.action_settle_ms);
+        if (p.hid_config.dispatch_method) setHidDispatchMethod(p.hid_config.dispatch_method);
       }
     }
   };
@@ -875,6 +924,9 @@ function AppContent() {
           display_id: Number(displayIdInput),
           lines_per_page: Number(linesPerPageInput),
           step_size: Number(stepSizeInput),
+          scroll_padding_lines: Number(scrollPaddingLinesInput),
+          arrow_count_init: Number(arrowCountInitInput),
+          arrow_count_step: Number(arrowCountStepInput),
           settle_delay_ms: Number(settleDelayInput),
           hid_config: {
             ctrl_key: Number(hidCtrlKey),
@@ -882,7 +934,11 @@ function AppContent() {
             end_key: Number(hidEndKey),
             down_key: Number(hidDownKey),
             repeat_delay_ms: Number(hidRepeatDelay),
-            action_settle_ms: Number(hidActionSettle)
+            action_settle_ms: Number(hidActionSettle),
+            scroll_padding_lines: Number(scrollPaddingLinesInput),
+            arrow_count_init: Number(arrowCountInitInput),
+            arrow_count_step: Number(arrowCountStepInput),
+            dispatch_method: hidDispatchMethod
           }
         })
       });
@@ -2931,6 +2987,27 @@ function AppContent() {
                   </span>
                 </div>
 
+                {/* Dynamic Calibration Formula Banner */}
+                <div style={{
+                  background: 'rgba(88, 166, 255, 0.08)',
+                  border: '1px solid rgba(88, 166, 255, 0.25)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  fontSize: '11px',
+                  fontFamily: 'var(--font-mono)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: '#58a6ff', fontWeight: 700 }}>
+                    <span>📐 VIEWPORT SCROLL &amp; ARROW DOWN CALIBRATION</span>
+                    <span style={{ color: '#00ff9d' }}>Page 1 → 2: {arrowCountInitInput} keys | Page N: {arrowCountStepInput} keys</span>
+                  </div>
+                  <div style={{ color: '#8b949e', fontSize: '10px', lineHeight: 1.45 }}>
+                    <strong>Formula:</strong> Frame 1 (Ln 1..{linesPerPageInput}): ({linesPerPageInput} visible + {scrollPaddingLinesInput} pad) + ({linesPerPageInput} scroll + {scrollPaddingLinesInput} pad) = <span style={{ color: '#00ff9d', fontWeight: 700 }}>{arrowCountInitInput} down arrows</span> → Frame 2 displays Ln {linesPerPageInput + 1}..{linesPerPageInput * 2 + 1}. Subsequent frames: {linesPerPageInput} + {scrollPaddingLinesInput} = <span style={{ color: '#58a6ff', fontWeight: 700 }}>{arrowCountStepInput} down arrows</span>.
+                  </div>
+                </div>
+
                 <div className="device-settings-grid">
                   <div className="device-spec-card">
                     <span className="device-spec-label">Target DPI</span>
@@ -2943,8 +3020,8 @@ function AppContent() {
                         setTargetDpiInput(val);
                         if (val > 0 && displayHeightInput > 0) {
                           const vh = displayHeightInput / (val / 160.0);
-                          setLinesPerPageInput(Math.max(10, Math.floor(vh / 16.0)));
-                          setStepSizeInput(Math.max(9, Math.floor(vh / 16.0) - 1));
+                          const lpp = Math.max(10, Math.floor(vh / 16.0));
+                          updateLinesAndPadding(lpp, scrollPaddingLinesInput);
                         }
                       }}
                     />
@@ -2971,8 +3048,8 @@ function AppContent() {
                         setDisplayHeightInput(h);
                         if (h > 0 && targetDpiInput > 0) {
                           const vh = h / (targetDpiInput / 160.0);
-                          setLinesPerPageInput(Math.max(10, Math.floor(vh / 16.0)));
-                          setStepSizeInput(Math.max(9, Math.floor(vh / 16.0) - 1));
+                          const lpp = Math.max(10, Math.floor(vh / 16.0));
+                          updateLinesAndPadding(lpp, scrollPaddingLinesInput);
                         }
                       }}
                     />
@@ -2994,7 +3071,37 @@ function AppContent() {
                       type="number"
                       className="device-spec-input"
                       value={linesPerPageInput}
-                      onChange={e => setLinesPerPageInput(Number(e.target.value))}
+                      onChange={e => updateLinesAndPadding(Number(e.target.value), scrollPaddingLinesInput)}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Scroll Padding</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={scrollPaddingLinesInput}
+                      onChange={e => updateLinesAndPadding(linesPerPageInput, Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Init Arrows (Ln 1)</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={arrowCountInitInput}
+                      onChange={e => setArrowCountInitInput(Number(e.target.value))}
+                    />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Step Arrows</span>
+                    <input
+                      type="number"
+                      className="device-spec-input"
+                      value={arrowCountStepInput}
+                      onChange={e => setArrowCountStepInput(Number(e.target.value))}
                     />
                   </div>
 
@@ -3111,6 +3218,20 @@ function AppContent() {
                       value={hidActionSettle}
                       onChange={e => setHidActionSettle(Number(e.target.value))}
                     />
+                  </div>
+
+                  <div className="device-spec-card">
+                    <span className="device-spec-label">Dispatch Method</span>
+                    <select
+                      className="device-spec-input"
+                      style={{ height: '28px', padding: '0 4px', fontSize: '11px', fontFamily: 'var(--font-mono)' }}
+                      value={hidDispatchMethod}
+                      onChange={e => setHidDispatchMethod(e.target.value)}
+                    >
+                      <option value="accelerated_batch">⚡ Accelerated Batch</option>
+                      <option value="single">Sequential Single</option>
+                      <option value="piped">Piped Shell</option>
+                    </select>
                   </div>
                 </div>
               </div>

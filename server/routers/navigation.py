@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 
+import db
 from models import AdvancePageRequest, GotoLineRequest
 from services import state
 from services.adb_service import (
@@ -52,9 +53,12 @@ async def advance_page_api(req: Optional[AdvancePageRequest] = None):
         await state.ws_manager.broadcast({"type": "alignment_status", "alignment": align_res, "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry})
         return {"status": "paused", "error": "teams markdown not aligned", "reason": align_res.get("reason"), "alignment": align_res}
 
+    active_proj = db.get_active_project() or {}
     profile = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"])
     cur_page = state.orchestration_state.get("page", 1)
-    arrow_count = profile["arrow_count_init"] if cur_page <= 1 else profile["arrow_count_step"]
+    arr_init = active_proj.get("arrow_count_init") or profile.get("arrow_count_init", 56)
+    arr_step = active_proj.get("arrow_count_step") or profile.get("arrow_count_step", 28)
+    arrow_count = arr_init if cur_page <= 1 else arr_step
 
     await _input_tap(active_serial, disp_id, 500, 120, 0.08)
     await ensure_adb_keyboard_closed(active_serial)

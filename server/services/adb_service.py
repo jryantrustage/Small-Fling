@@ -13,10 +13,11 @@ DEVICE_PROFILES = {
         "id": "pixel_10",
         "displayName": "Pixel 10",
         "friendly_name": "Pixel 10 Pro XL",
-        "lines_per_page": 49,
-        "arrow_count_init": 99,
-        "arrow_count_step": 48,
-        "step_size": 48,
+        "lines_per_page": 24,
+        "scroll_padding_lines": 4,
+        "arrow_count_init": 56,
+        "arrow_count_step": 28,
+        "step_size": 28,
         "default_dpi": 220,
         "display_width": 1920,
         "display_height": 1080,
@@ -27,10 +28,11 @@ DEVICE_PROFILES = {
         "id": "pixel_8",
         "displayName": "Pixel 8",
         "friendly_name": "Pixel 8 Pro",
-        "lines_per_page": 49,
-        "arrow_count_init": 99,
-        "arrow_count_step": 48,
-        "step_size": 48,
+        "lines_per_page": 24,
+        "scroll_padding_lines": 4,
+        "arrow_count_init": 56,
+        "arrow_count_step": 28,
+        "step_size": 28,
         "default_dpi": 220,
         "display_width": 1920,
         "display_height": 1080,
@@ -1049,10 +1051,11 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
             "override_dpi": 220,
             "active_dpi": 220,
             "dpi_factor": 1.375,
-            "lines_per_page": 49,
-            "step_size": 48,
-            "arrow_count_init": 99,
-            "arrow_count_step": 48,
+            "lines_per_page": 24,
+            "scroll_padding_lines": 4,
+            "step_size": 28,
+            "arrow_count_init": 56,
+            "arrow_count_step": 28,
             "settle_delay_ms": 50,
             "hid_config": {
                 "ctrl_keycode": 113,
@@ -1061,7 +1064,10 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
                 "down_keycode": 20,
                 "settle_delay_ms": 50,
                 "key_repeat_delay_ms": 15,
-                "dispatch_method": "accelerated_batch"
+                "dispatch_method": "accelerated_batch",
+                "scroll_padding_lines": 4,
+                "arrow_count_init": 56,
+                "arrow_count_step": 28
             }
         }
 
@@ -1099,9 +1105,10 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
 
     virtual_h_dp = height / dpi_factor
     lpp = max(20, min(80, int(round(virtual_h_dp / 16.0))))
-    step_size = max(1, lpp - 1)
-    arrow_init = (step_size * 2) + 1
+    scroll_padding = 4
+    step_size = lpp + scroll_padding
     arrow_step = step_size
+    arrow_init = arrow_step * 2
 
     specs = {
         "status": "success",
@@ -1120,6 +1127,7 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
         "active_dpi": active_dpi,
         "dpi_factor": dpi_factor,
         "lines_per_page": lpp,
+        "scroll_padding_lines": scroll_padding,
         "step_size": step_size,
         "arrow_count_init": arrow_init,
         "arrow_count_step": arrow_step,
@@ -1131,7 +1139,10 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
             "down_keycode": 20,
             "settle_delay_ms": 50,
             "key_repeat_delay_ms": 15,
-            "dispatch_method": "accelerated_batch"
+            "dispatch_method": "accelerated_batch",
+            "scroll_padding_lines": scroll_padding,
+            "arrow_count_init": arrow_init,
+            "arrow_count_step": arrow_step
         }
     }
     return specs
@@ -1376,6 +1387,9 @@ async def enforce_device_characteristics(
     device_model: Optional[str] = None,
     lines_per_page: Optional[int] = None,
     step_size: Optional[int] = None,
+    scroll_padding_lines: Optional[int] = None,
+    arrow_count_init: Optional[int] = None,
+    arrow_count_step: Optional[int] = None,
     hid_config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
@@ -1390,8 +1404,26 @@ async def enforce_device_characteristics(
         h = height or 1080
         did = display_id or 8
         factor = max(0.4, min(3.5, round(dpi / 160.0, 3)))
-        lpp = lines_per_page or 49
-        step = step_size or 48
+        lpp = lines_per_page or 24
+        pad = scroll_padding_lines if scroll_padding_lines is not None else 4
+        step = step_size or (lpp + pad)
+        a_step = arrow_count_step or step
+        a_init = arrow_count_init or (a_step * 2)
+        h_cfg = hid_config or {}
+        if isinstance(h_cfg, dict):
+            h_cfg.setdefault("scroll_padding_lines", pad)
+            h_cfg.setdefault("arrow_count_init", a_init)
+            h_cfg.setdefault("arrow_count_step", a_step)
+        try:
+            from services import state
+            state.orchestration_state["lines_per_page"] = lpp
+            state.orchestration_state["step_size"] = step
+            state.orchestration_state["scroll_padding_lines"] = pad
+            state.orchestration_state["arrow_count_init"] = a_init
+            state.orchestration_state["arrow_count_step"] = a_step
+            state.orchestration_state["hid_config"] = h_cfg
+        except Exception:
+            pass
         return {
             "status": "ok",
             "mock": True,
@@ -1403,7 +1435,10 @@ async def enforce_device_characteristics(
             "height": h,
             "lines_per_page": lpp,
             "step_size": step,
-            "hid_config": hid_config or {},
+            "scroll_padding_lines": pad,
+            "arrow_count_init": a_init,
+            "arrow_count_step": a_step,
+            "hid_config": h_cfg,
             "enforced": True
         }
 
@@ -1440,13 +1475,24 @@ async def enforce_device_characteristics(
 
     factor = max(0.4, min(3.5, round(current_dpi / 160.0, 3)))
 
+    pad = scroll_padding_lines if scroll_padding_lines is not None else 4
+    resolved_lpp = int(lines_per_page) if (lines_per_page and lines_per_page > 0) else 24
+    resolved_step = int(step_size) if (step_size and step_size > 0) else (resolved_lpp + pad)
+    resolved_arr_step = int(arrow_count_step) if (arrow_count_step and arrow_count_step > 0) else resolved_step
+    resolved_arr_init = int(arrow_count_init) if (arrow_count_init and arrow_count_init > 0) else (resolved_arr_step * 2)
+
     try:
         from services import state
-        if lines_per_page and lines_per_page > 0:
-            state.orchestration_state["lines_per_page"] = int(lines_per_page)
-        if step_size and step_size > 0:
-            state.orchestration_state["step_size"] = int(step_size)
+        state.orchestration_state["lines_per_page"] = resolved_lpp
+        state.orchestration_state["step_size"] = resolved_step
+        state.orchestration_state["scroll_padding_lines"] = pad
+        state.orchestration_state["arrow_count_init"] = resolved_arr_init
+        state.orchestration_state["arrow_count_step"] = resolved_arr_step
         if hid_config:
+            if isinstance(hid_config, dict):
+                hid_config.setdefault("scroll_padding_lines", pad)
+                hid_config.setdefault("arrow_count_init", resolved_arr_init)
+                hid_config.setdefault("arrow_count_step", resolved_arr_step)
             state.orchestration_state["hid_config"] = hid_config
         state.orchestration_state["active_dpi"] = current_dpi
         state.orchestration_state["dpi_factor"] = factor
@@ -1459,7 +1505,10 @@ async def enforce_device_characteristics(
             "display_id": did,
             "resolution": f"{w_px}x{h_px}",
             "enforced_device": device_model or current_device_model,
-            "lines_per_page": state.orchestration_state.get("lines_per_page", 49)
+            "lines_per_page": resolved_lpp,
+            "scroll_padding_lines": pad,
+            "arrow_count_init": resolved_arr_init,
+            "arrow_count_step": resolved_arr_step
         })
     except Exception:
         pass
@@ -1472,8 +1521,11 @@ async def enforce_device_characteristics(
         "resolution": f"{w_px}x{h_px}",
         "width": w_px,
         "height": h_px,
-        "lines_per_page": lines_per_page or state.orchestration_state.get("lines_per_page", 49),
-        "step_size": step_size or state.orchestration_state.get("step_size", 48),
+        "lines_per_page": resolved_lpp,
+        "step_size": resolved_step,
+        "scroll_padding_lines": pad,
+        "arrow_count_init": resolved_arr_init,
+        "arrow_count_step": resolved_arr_step,
         "hid_config": hid_config or state.orchestration_state.get("hid_config", {}),
         "enforced": True
     }

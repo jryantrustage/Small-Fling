@@ -469,7 +469,7 @@ dag_state: Dict[str, Any] = {
             "title": "6. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
-            "arrow_count": 47,
+            "arrow_count": 56,
             "evaluator": None,
             "healing_step": None,
             "telemetry_insight": None,
@@ -482,7 +482,7 @@ dag_state: Dict[str, Any] = {
             "is_active": False,
             "config": {
                 "step_mode": "auto",
-                "step_count": 47,
+                "step_count": 56,
                 "key_delay_ms": 8
             }
         },
@@ -844,12 +844,17 @@ def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
     dag_state["nodes"]["frame_acquire"].update({"status": "completed"})
     dag_state["nodes"]["frame_ocr"].update({"status": "completed", "top_line": top_line, "bottom_line": bottom_line})
     target_top = bottom_line + 1
+    visible_lines = max(1, bottom_line - top_line + 1)
+    pad = orchestration_state.get("scroll_padding_lines", 4)
+    step_arrows = orchestration_state.get("arrow_count_step") or (visible_lines + pad)
+    init_arrows = orchestration_state.get("arrow_count_init") or (step_arrows * 2)
+    predicted_arrows = init_arrows if top_line == 1 else step_arrows
     if "arrow_down" in dag_state["nodes"]:
         dag_state["nodes"]["arrow_down"].update({
             "target_top_line": target_top,
             "target_top": target_top,
             "prev_bottom": bottom_line,
-            "arrow_count": max(1, target_top - top_line)
+            "arrow_count": predicted_arrows
         })
     if "verification_trigger" in dag_state["nodes"]:
         dag_state["nodes"]["verification_trigger"].update({

@@ -202,12 +202,19 @@ async def create_project(req: ProjectCreateRequest):
     disp_width = req.display_width if (req.display_width and req.display_width > 0) else prof.get("display_width", 1920)
     disp_height = req.display_height if (req.display_height and req.display_height > 0) else prof.get("display_height", 1080)
     disp_id = req.display_id if (req.display_id is not None and req.display_id > 0) else prof.get("display_id", prof.get("default_display_id", 0))
-    lpp = req.lines_per_page if (req.lines_per_page and req.lines_per_page > 0) else prof.get("lines_per_page", 49)
-    step_sz = req.step_size if (req.step_size and req.step_size > 0) else prof.get("step_size", max(1, lpp - 1))
-    arr_init = req.arrow_count_init if (req.arrow_count_init and req.arrow_count_init > 0) else prof.get("arrow_count_init", (step_sz * 2 + 1))
-    arr_step = req.arrow_count_step if (req.arrow_count_step and req.arrow_count_step > 0) else prof.get("arrow_count_step", step_sz)
+    lpp = req.lines_per_page if (req.lines_per_page and req.lines_per_page > 0) else prof.get("lines_per_page", 24)
+    scroll_pad = req.scroll_padding_lines if (req.scroll_padding_lines is not None and req.scroll_padding_lines >= 0) else prof.get("scroll_padding_lines", 4)
+    default_step = lpp + scroll_pad
+    step_sz = req.step_size if (req.step_size and req.step_size > 0) else (default_step if (req.lines_per_page or req.scroll_padding_lines is not None) else prof.get("step_size", default_step))
+    arr_step = req.arrow_count_step if (req.arrow_count_step and req.arrow_count_step > 0) else (step_sz if (req.lines_per_page or req.scroll_padding_lines is not None) else prof.get("arrow_count_step", step_sz))
+    arr_init = req.arrow_count_init if (req.arrow_count_init and req.arrow_count_init > 0) else ((arr_step * 2) if (req.lines_per_page or req.scroll_padding_lines is not None) else prof.get("arrow_count_init", (arr_step * 2)))
     settle_ms = req.settle_delay_ms if (req.settle_delay_ms and req.settle_delay_ms > 0) else prof.get("settle_delay_ms", 50)
-    hid_cfg = json.dumps(req.hid_config) if req.hid_config else (prof.get("hid_config_json") if isinstance(prof.get("hid_config_json"), str) else json.dumps(prof.get("hid_config") or {}))
+    hid_raw = req.hid_config if req.hid_config else (prof.get("hid_config") if isinstance(prof.get("hid_config"), dict) else {})
+    if isinstance(hid_raw, dict):
+        hid_raw.setdefault("scroll_padding_lines", scroll_pad)
+        hid_raw.setdefault("arrow_count_init", arr_init)
+        hid_raw.setdefault("arrow_count_step", arr_step)
+    hid_cfg = json.dumps(hid_raw)
     lock_dev = bool(req.lock_device)
 
     new_proj = db.create_project(
@@ -223,6 +230,7 @@ async def create_project(req: ProjectCreateRequest):
         display_id=disp_id,
         lines_per_page=lpp,
         step_size=step_sz,
+        scroll_padding_lines=scroll_pad,
         arrow_count_init=arr_init,
         arrow_count_step=arr_step,
         settle_delay_ms=settle_ms,
@@ -292,10 +300,11 @@ async def get_project_device_settings(project_id: str):
         "display_width": proj.get("display_width", 1920),
         "display_height": proj.get("display_height", 1080),
         "display_id": proj.get("display_id", 0),
-        "lines_per_page": proj.get("lines_per_page", 49),
-        "step_size": proj.get("step_size", 48),
-        "arrow_count_init": proj.get("arrow_count_init", 99),
-        "arrow_count_step": proj.get("arrow_count_step", 48),
+        "lines_per_page": proj.get("lines_per_page", 24),
+        "step_size": proj.get("step_size", 28),
+        "scroll_padding_lines": proj.get("scroll_padding_lines", 4),
+        "arrow_count_init": proj.get("arrow_count_init", 56),
+        "arrow_count_step": proj.get("arrow_count_step", 28),
         "settle_delay_ms": proj.get("settle_delay_ms", 50),
         "lock_device": bool(proj.get("lock_device", 0)),
         "hid_config": hid_cfg,
@@ -325,6 +334,7 @@ async def update_project_device_settings_api(project_id: str, req: ProjectDevice
         display_id=req.display_id,
         lines_per_page=req.lines_per_page,
         step_size=req.step_size,
+        scroll_padding_lines=req.scroll_padding_lines,
         arrow_count_init=req.arrow_count_init,
         arrow_count_step=req.arrow_count_step,
         settle_delay_ms=req.settle_delay_ms,

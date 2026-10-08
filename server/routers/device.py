@@ -54,7 +54,14 @@ async def apply_device_characteristics_endpoint(req: ApplyCharacteristicsRequest
         target_dpi=req.target_dpi,
         display_id=req.display_id,
         width=req.display_width,
-        height=req.display_height
+        height=req.display_height,
+        device_model=req.device_model,
+        lines_per_page=req.lines_per_page,
+        step_size=req.step_size,
+        scroll_padding_lines=req.scroll_padding_lines,
+        arrow_count_init=req.arrow_count_init,
+        arrow_count_step=req.arrow_count_step,
+        hid_config=req.hid_config
     )
     info = await adb.get_device_info()
     await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})

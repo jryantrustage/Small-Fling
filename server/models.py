@@ -14,6 +14,7 @@ class ProjectCreateRequest(BaseModel):
     display_id: Optional[int] = None
     lines_per_page: Optional[int] = None
     step_size: Optional[int] = None
+    scroll_padding_lines: Optional[int] = 4
     arrow_count_init: Optional[int] = None
     arrow_count_step: Optional[int] = None
     settle_delay_ms: Optional[int] = None
@@ -30,6 +31,7 @@ class ProjectDeviceSettingsRequest(BaseModel):
     display_id: Optional[int] = None
     lines_per_page: Optional[int] = None
     step_size: Optional[int] = None
+    scroll_padding_lines: Optional[int] = None
     arrow_count_init: Optional[int] = None
     arrow_count_step: Optional[int] = None
     settle_delay_ms: Optional[int] = None
@@ -47,10 +49,11 @@ class DeviceProfileRequest(BaseModel):
     display_width: Optional[int] = 1920
     display_height: Optional[int] = 1080
     display_id: Optional[int] = 0
-    lines_per_page: Optional[int] = 49
-    step_size: Optional[int] = 48
-    arrow_count_init: Optional[int] = 99
-    arrow_count_step: Optional[int] = 48
+    lines_per_page: Optional[int] = 24
+    step_size: Optional[int] = 28
+    scroll_padding_lines: Optional[int] = 4
+    arrow_count_init: Optional[int] = 56
+    arrow_count_step: Optional[int] = 28
     settle_delay_ms: Optional[int] = 50
     hid_config: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = False
@@ -61,6 +64,14 @@ class ApplyCharacteristicsRequest(BaseModel):
     display_id: Optional[int] = None
     display_width: Optional[int] = None
     display_height: Optional[int] = None
+    device_model: Optional[str] = None
+    lines_per_page: Optional[int] = None
+    step_size: Optional[int] = None
+    scroll_padding_lines: Optional[int] = None
+    arrow_count_init: Optional[int] = None
+    arrow_count_step: Optional[int] = None
+    settle_delay_ms: Optional[int] = None
+    hid_config: Optional[Dict[str, Any]] = None
 
 class FramePositionRequest(BaseModel):
     custom_offset_y: float

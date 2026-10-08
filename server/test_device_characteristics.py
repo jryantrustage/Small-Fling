@@ -167,3 +167,79 @@ async def test_dag_device_environment_resolution():
     finally:
         db.delete_project(new_proj["id"])
 
+
+@pytest.mark.asyncio
+async def test_scroll_padding_and_arrow_count_calibration_and_persistence():
+    import uuid
+    import routers.orchestration as orch
+    from services import state
+
+    # 1. Create project with 24 lines per page and 4 padding lines (User's exact scenario)
+    test_name = f"CalibProject_{uuid.uuid4().hex[:6]}"
+    create_res = client.post("/api/projects", json={
+        "name": test_name,
+        "description": "56 arrow down calibration test",
+        "target_total_lines": 100,
+        "lines_per_page": 24,
+        "scroll_padding_lines": 4
+    })
+    assert create_res.status_code == 200
+    pdata = create_res.json()
+    pid = pdata["id"]
+
+    try:
+        # 2. Check that step_size, arrow_count_step, and arrow_count_init are calibrated (28 and 56)
+        assert pdata["scroll_padding_lines"] == 4
+        assert pdata["arrow_count_step"] == 28   # 24 visible + 4 padding
+        assert pdata["arrow_count_init"] == 56   # (24 + 4) * 2 = 56 down arrows
+
+        # 3. Verify get settings returns these
+        get_res = client.get(f"/api/projects/{pid}/device-settings")
+        assert get_res.status_code == 200
+        settings = get_res.json()["settings"]
+        assert settings["scroll_padding_lines"] == 4
+        assert settings["arrow_count_init"] == 56
+        assert settings["arrow_count_step"] == 28
+
+        # 4. Activate project and test arrow_down execution for 24-line viewport
+        db.activate_project(pid)
+        res_init = await orch.run_single_dag_node("arrow_down", {
+            "serial": "mock:9999",
+            "cur_top": 1,
+            "prev_bottom": 24,
+            "cursor_line": 1
+        })
+        assert res_init["status"] == "success"
+        assert res_init["target_top_line"] == 25
+        assert res_init["arrow_count"] == 56
+        assert res_init["step_count"] == 56
+
+        # Step transition to Page 3
+        res_step = await orch.run_single_dag_node("arrow_down", {
+            "serial": "mock:9999",
+            "cur_top": 25,
+            "prev_bottom": 48,
+            "cursor_line": 48
+        })
+        assert res_step["status"] == "success"
+        assert res_step["target_top_line"] == 49
+        assert res_step["arrow_count"] == 28
+        assert res_step["step_count"] == 28
+
+        # 5. Test Gear icon modal save with custom overrides (e.g. 5 padding, 60 init, 30 step)
+        upd_res = client.post(f"/api/projects/{pid}/device-settings", json={
+            "device_model": "pixel_8",
+            "lines_per_page": 24,
+            "scroll_padding_lines": 5,
+            "arrow_count_init": 60,
+            "arrow_count_step": 30
+        })
+        assert upd_res.status_code == 200
+        upd_proj = upd_res.json()["project"]
+        assert upd_proj["scroll_padding_lines"] == 5
+        assert upd_proj["arrow_count_init"] == 60
+        assert upd_proj["arrow_count_step"] == 30
+    finally:
+        db.delete_project(pid)
+
+

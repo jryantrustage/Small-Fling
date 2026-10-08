@@ -40,8 +40,9 @@ def init_db():
             display_id INTEGER DEFAULT 0,
             lines_per_page INTEGER DEFAULT 49,
             step_size INTEGER DEFAULT 48,
-            arrow_count_init INTEGER DEFAULT 99,
-            arrow_count_step INTEGER DEFAULT 48,
+            scroll_padding_lines INTEGER DEFAULT 4,
+            arrow_count_init INTEGER DEFAULT 56,
+            arrow_count_step INTEGER DEFAULT 28,
             settle_delay_ms INTEGER DEFAULT 50,
             hid_config_json TEXT DEFAULT '{}',
             is_active INTEGER DEFAULT 0,
@@ -61,8 +62,9 @@ def init_db():
             ("display_id", "INTEGER DEFAULT 0"),
             ("lines_per_page", "INTEGER DEFAULT 49"),
             ("step_size", "INTEGER DEFAULT 48"),
-            ("arrow_count_init", "INTEGER DEFAULT 99"),
-            ("arrow_count_step", "INTEGER DEFAULT 48"),
+            ("scroll_padding_lines", "INTEGER DEFAULT 4"),
+            ("arrow_count_init", "INTEGER DEFAULT 56"),
+            ("arrow_count_step", "INTEGER DEFAULT 28"),
             ("settle_delay_ms", "INTEGER DEFAULT 50"),
             ("lock_device", "INTEGER DEFAULT 0"),
             ("hid_config_json", "TEXT DEFAULT '{}'")
@@ -70,6 +72,11 @@ def init_db():
         for col_name, col_def in columns_to_add:
             if col_name not in existing_cols:
                 c.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_def};")
+
+        # Also ensure scroll_padding_lines column exists on device_profiles if table was created earlier
+        prof_cols = {row["name"] for row in c.execute("PRAGMA table_info(device_profiles);").fetchall()}
+        if "scroll_padding_lines" not in prof_cols:
+            c.execute("ALTER TABLE device_profiles ADD COLUMN scroll_padding_lines INTEGER DEFAULT 4;")
 
         # Seed default editable templates in device_profiles if none exist
         if c.execute("SELECT COUNT(*) FROM device_profiles;").fetchone()[0] == 0:
@@ -81,12 +88,15 @@ def init_db():
                 "down_keycode": 20,
                 "settle_delay_ms": 50,
                 "key_repeat_delay_ms": 15,
-                "dispatch_method": "accelerated_batch"
+                "dispatch_method": "accelerated_batch",
+                "scroll_padding_lines": 4,
+                "arrow_count_init": 56,
+                "arrow_count_step": 28
             })
             c.execute("""
             INSERT INTO device_profiles VALUES
-            ('prof_pixel_8', 'Pixel 8 Pro', 'Pixel 8 Pro (1080p @ 220 DPI)', 'pixel_8', 'Google', '', 220, 1920, 1080, 0, 49, 48, 99, 48, 50, ?, 1, ?, ?),
-            ('prof_pixel_10', 'Pixel 10 Pro XL', 'Pixel 10 Pro XL (1080p @ 220 DPI)', 'pixel_10', 'Google', '', 220, 1920, 1080, 0, 49, 48, 99, 48, 50, ?, 0, ?, ?);
+            ('prof_pixel_8', 'Pixel 8 Pro', 'Pixel 8 Pro (1080p @ 220 DPI)', 'pixel_8', 'Google', '', 220, 1920, 1080, 0, 24, 28, 4, 56, 28, 50, ?, 1, ?, ?),
+            ('prof_pixel_10', 'Pixel 10 Pro XL', 'Pixel 10 Pro XL (1080p @ 220 DPI)', 'pixel_10', 'Google', '', 220, 1920, 1080, 0, 24, 28, 4, 56, 28, 50, ?, 0, ?, ?);
             """, (default_hid_json, now, now, default_hid_json, now, now))
 
         # Clean up any legacy default project and orphaned frames
@@ -129,11 +139,16 @@ def upsert_device_profile(data: Dict[str, Any]) -> Dict[str, Any]:
     height = int(data.get("display_height") or 1080)
     disp_id = int(data.get("display_id") or 0)
     lpp = int(data.get("lines_per_page") or 49)
-    step = int(data.get("step_size") or (lpp - 1))
-    arr_init = int(data.get("arrow_count_init") or (step * 2 + 1))
+    scroll_pad = int(data.get("scroll_padding_lines") if data.get("scroll_padding_lines") is not None else 4)
+    step = int(data.get("step_size") or (lpp + scroll_pad))
     arr_step = int(data.get("arrow_count_step") or step)
+    arr_init = int(data.get("arrow_count_init") or (arr_step * 2))
     settle = int(data.get("settle_delay_ms") or 50)
     hid_raw = data.get("hid_config") or data.get("hid_config_json") or {}
+    if isinstance(hid_raw, dict):
+        hid_raw.setdefault("scroll_padding_lines", scroll_pad)
+        hid_raw.setdefault("arrow_count_init", arr_init)
+        hid_raw.setdefault("arrow_count_step", arr_step)
     hid_json = json.dumps(hid_raw) if isinstance(hid_raw, dict) else str(hid_raw)
     is_active = 1 if data.get("is_active") else 0
     now = datetime.now().isoformat()
@@ -146,20 +161,21 @@ def upsert_device_profile(data: Dict[str, Any]) -> Dict[str, Any]:
         INSERT INTO device_profiles (
             id, name, display_name, model_name, manufacturer, serial, target_dpi,
             display_width, display_height, display_id, lines_per_page, step_size,
-            arrow_count_init, arrow_count_step, settle_delay_ms, hid_config_json,
+            scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, hid_config_json,
             is_active, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name, display_name=excluded.display_name, model_name=excluded.model_name,
             manufacturer=excluded.manufacturer, serial=excluded.serial, target_dpi=excluded.target_dpi,
             display_width=excluded.display_width, display_height=excluded.display_height, display_id=excluded.display_id,
             lines_per_page=excluded.lines_per_page, step_size=excluded.step_size,
+            scroll_padding_lines=excluded.scroll_padding_lines,
             arrow_count_init=excluded.arrow_count_init, arrow_count_step=excluded.arrow_count_step,
             settle_delay_ms=excluded.settle_delay_ms, hid_config_json=excluded.hid_config_json,
             is_active=excluded.is_active, updated_at=excluded.updated_at;
         """, (
             prof_id, name, disp_name, model, mfg, serial, dpi, width, height, disp_id,
-            lpp, step, arr_init, arr_step, settle, hid_json, is_active, now, now
+            lpp, step, scroll_pad, arr_init, arr_step, settle, hid_json, is_active, now, now
         ))
         conn.commit()
     return get_device_profile(prof_id) or {}
@@ -205,8 +221,9 @@ def create_project(
     display_id: int = 0,
     lines_per_page: int = 49,
     step_size: int = 48,
-    arrow_count_init: int = 99,
-    arrow_count_step: int = 48,
+    scroll_padding_lines: int = 4,
+    arrow_count_init: int = 56,
+    arrow_count_step: int = 28,
     settle_delay_ms: int = 50,
     lock_device: bool = False,
     hid_config_json: str = "{}"
@@ -219,8 +236,8 @@ def create_project(
             """INSERT INTO projects (
                 id, name, description, target_total_lines, status, is_active, created_at, updated_at,
                 device_model, device_name, device_serial, target_dpi, display_width, display_height, display_id,
-                lines_per_page, step_size, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
             (
                 pid, name.strip(), description.strip(), target_total_lines, "active", 1, now, now,
                 (device_model or "pixel_8").strip().lower(),
@@ -232,8 +249,9 @@ def create_project(
                 int(display_id or 0),
                 int(lines_per_page or 49),
                 int(step_size or 48),
-                int(arrow_count_init or 99),
-                int(arrow_count_step or 48),
+                int(scroll_padding_lines if scroll_padding_lines is not None else 4),
+                int(arrow_count_init or 56),
+                int(arrow_count_step or 28),
                 int(settle_delay_ms or 50),
                 1 if lock_device else 0,
                 hid_config_json or "{}"
@@ -254,6 +272,7 @@ def update_project_device_settings(
     display_id: Optional[int] = None,
     lines_per_page: Optional[int] = None,
     step_size: Optional[int] = None,
+    scroll_padding_lines: Optional[int] = None,
     arrow_count_init: Optional[int] = None,
     arrow_count_step: Optional[int] = None,
     settle_delay_ms: Optional[int] = None,
@@ -292,6 +311,9 @@ def update_project_device_settings(
     if step_size is not None:
         updates.append("step_size = ?")
         params.append(int(step_size))
+    if scroll_padding_lines is not None:
+        updates.append("scroll_padding_lines = ?")
+        params.append(int(scroll_padding_lines))
     if arrow_count_init is not None:
         updates.append("arrow_count_init = ?")
         params.append(int(arrow_count_init))

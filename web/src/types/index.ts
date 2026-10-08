@@ -20,6 +20,7 @@ export interface ProjectData {
   display_id?: number;
   lines_per_page?: number;
   step_size?: number;
+  scroll_padding_lines?: number;
   arrow_count_init?: number;
   arrow_count_step?: number;
   settle_delay_ms?: number;
@@ -181,9 +182,10 @@ export interface DeviceProfile {
   display_height?: number;
   display_id?: number;
   lines_per_page: number;
+  step_size: number;
+  scroll_padding_lines?: number;
   arrow_count_init?: number;
   arrow_count_step?: number;
-  step_size: number;
   settle_delay_ms?: number;
   hid_config?: {
     ctrl_key?: number;
@@ -192,6 +194,10 @@ export interface DeviceProfile {
     down_key?: number;
     repeat_delay_ms?: number;
     action_settle_ms?: number;
+    scroll_padding_lines?: number;
+    arrow_count_init?: number;
+    arrow_count_step?: number;
+    dispatch_method?: string;
   };
   is_active?: number;
 }
@@ -211,14 +217,27 @@ export interface DeviceHardwareSpecs {
   dpi_factor: number;
   lines_per_page: number;
   step_size: number;
+  scroll_padding_lines: number;
+  arrow_count_init: number;
+  arrow_count_step: number;
   settle_delay_ms: number;
   hid_config: {
-    ctrl_key: number;
-    home_key: number;
-    end_key: number;
-    down_key: number;
-    repeat_delay_ms: number;
-    action_settle_ms: number;
+    ctrl_key?: number;
+    home_key?: number;
+    end_key?: number;
+    down_key?: number;
+    ctrl_keycode?: number;
+    home_keycode?: number;
+    end_keycode?: number;
+    down_keycode?: number;
+    repeat_delay_ms?: number;
+    action_settle_ms?: number;
+    key_repeat_delay_ms?: number;
+    settle_delay_ms?: number;
+    scroll_padding_lines?: number;
+    arrow_count_init?: number;
+    arrow_count_step?: number;
+    dispatch_method?: string;
   };
 }
 

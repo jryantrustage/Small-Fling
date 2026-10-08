@@ -851,8 +851,11 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
     disp_width = int(proj.get("display_width") or hw_specs.get("display_width", 1920)) if proj else int(hw_specs.get("display_width", 1920))
     display_height = int(proj.get("display_height") or hw_specs.get("display_height", 1080)) if proj else int(hw_specs.get("display_height", 1080))
     disp_id = int(proj.get("display_id") or hw_specs.get("display_id", 0)) if proj else int(hw_specs.get("display_id", 0))
-    lpp = int(proj.get("lines_per_page") or hw_specs.get("lines_per_page", 49)) if proj else int(hw_specs.get("lines_per_page", 49))
-    step_sz = int(proj.get("step_size") or hw_specs.get("step_size", 48)) if proj else int(hw_specs.get("step_size", 48))
+    lpp = int(proj.get("lines_per_page") or hw_specs.get("lines_per_page", 24)) if proj else int(hw_specs.get("lines_per_page", 24))
+    pad_lines = int(proj.get("scroll_padding_lines") if proj and proj.get("scroll_padding_lines") is not None else hw_specs.get("scroll_padding_lines", 4))
+    step_sz = int(proj.get("step_size") or hw_specs.get("step_size", lpp + pad_lines)) if proj else int(hw_specs.get("step_size", lpp + pad_lines))
+    arr_step = int(proj.get("arrow_count_step") or hw_specs.get("arrow_count_step", step_sz)) if proj else int(hw_specs.get("arrow_count_step", step_sz))
+    arr_init = int(proj.get("arrow_count_init") or hw_specs.get("arrow_count_init", arr_step * 2)) if proj else int(hw_specs.get("arrow_count_init", arr_step * 2))
     settle_ms = int(proj.get("settle_delay_ms") or hw_specs.get("settle_delay_ms", 50)) if proj else int(hw_specs.get("settle_delay_ms", 50))
 
     hid_cfg = {}
@@ -863,6 +866,10 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
         pass
     if not hid_cfg:
         hid_cfg = hw_specs.get("hid_config", {})
+    if isinstance(hid_cfg, dict):
+        hid_cfg.setdefault("scroll_padding_lines", pad_lines)
+        hid_cfg.setdefault("arrow_count_init", arr_init)
+        hid_cfg.setdefault("arrow_count_step", arr_step)
 
     # Check lock constraint
     if proj_locked and target_model and not is_mock:
@@ -908,6 +915,9 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
         device_model=target_model or active_model,
         lines_per_page=lpp,
         step_size=step_sz,
+        scroll_padding_lines=pad_lines,
+        arrow_count_init=arr_init,
+        arrow_count_step=arr_step,
         hid_config=hid_cfg
     )
 
@@ -926,6 +936,9 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
         "resolution": f"{disp_width}x{display_height}",
         "lines_per_page": lpp,
         "step_size": step_sz,
+        "scroll_padding_lines": pad_lines,
+        "arrow_count_init": arr_init,
+        "arrow_count_step": arr_step,
         "settle_delay_ms": settle_ms,
         "hid_config": hid_cfg,
         "locked": proj_locked
@@ -1509,9 +1522,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     }
                 )
 
-            prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_10", {"lines_per_page": 49}))
-            lpp = state.orchestration_state.get("viewport_lines") or prof.get("lines_per_page", 49)
-            predicted_arrows = (lpp - 1) + lpp
+            active_proj = db.get_active_project() or {}
+            prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_10", {"lines_per_page": 24}))
+            lpp = state.orchestration_state.get("viewport_lines") or active_proj.get("lines_per_page") or prof.get("lines_per_page", 24)
+            padding = int(active_proj.get("scroll_padding_lines") if active_proj.get("scroll_padding_lines") is not None else state.orchestration_state.get("scroll_padding_lines", 4))
+            step_arrows = active_proj.get("arrow_count_step") or (lpp + padding)
+            predicted_arrows = active_proj.get("arrow_count_init") or (step_arrows * 2)
 
             node.update({
                 "status": "completed",
@@ -2168,20 +2184,70 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             if cursor_line is None:
                 cursor_line = 1 if cur_top == 1 else cur_top
 
-            # Determination of precise arrow down key presses to navigate editor to last line number + 1 at 1st line position:
-            # 1. From cursor line to bottom line of visible page: (prev_bottom - cursor_line) presses without viewport scrolling.
-            # 2. Viewport scroll presses to bring (prev_bottom + 1) to the 1st line position: (target_top - cur_top) presses.
-            # For subsequent pages where cursor is already at bottom gutter, only viewport scroll presses are needed.
+            # Fetch active project configuration & HID settings
+            active_proj = db.get_active_project() or {}
+            hid_cfg = {}
+            if active_proj.get("hid_config_json"):
+                try:
+                    hid_cfg = json.loads(active_proj["hid_config_json"])
+                except Exception:
+                    hid_cfg = {}
+            elif state.orchestration_state.get("hid_config"):
+                hid_cfg = state.orchestration_state.get("hid_config") or {}
+
+            # Viewport scroll padding (margin threshold before scrolling starts)
+            # Default is 4 lines as identified on physical device
+            padding = 4
+            if payload and payload.get("scroll_padding_lines") is not None:
+                padding = int(payload["scroll_padding_lines"])
+            elif hid_cfg.get("scroll_padding_lines") is not None:
+                padding = int(hid_cfg["scroll_padding_lines"])
+            elif active_proj.get("scroll_padding_lines") is not None:
+                padding = int(active_proj["scroll_padding_lines"])
+            elif state.orchestration_state.get("scroll_padding_lines") is not None:
+                padding = int(state.orchestration_state["scroll_padding_lines"])
+
+            visible_span = max(1, prev_bottom - cur_top + 1)
+            # Each page step requires scrolling through visible lines plus viewport scroll margin padding:
+            # e.g., for 24 visible lines + 4 padding lines = 28 down arrows.
+            calibrated_step = visible_span + padding
+            # When cursor is returned to Line 1 (after Ctrl+Home in DAG 2):
+            # 1. Travel from Line 1 to bottom scroll margin: visible_span + padding (24 + 4 = 28 presses).
+            # 2. Viewport scroll to bring next page (prev_bottom + 1) to Line 1: visible_span + padding (24 + 4 = 28 presses).
+            # Total = 28 + 28 = 56 down arrows!
+            calibrated_init = calibrated_step * 2
+
+            # Check for user-configured overrides in payload, project, or hid_cfg (never hardcode)
+            configured_step = None
+            if payload and payload.get("arrow_count_step") is not None and int(payload["arrow_count_step"]) > 0:
+                configured_step = int(payload["arrow_count_step"])
+            elif active_proj.get("lines_per_page") == visible_span and active_proj.get("arrow_count_step") and int(active_proj["arrow_count_step"]) > 0:
+                configured_step = int(active_proj["arrow_count_step"])
+            elif hid_cfg.get("arrow_count_step") and int(hid_cfg["arrow_count_step"]) > 0 and hid_cfg.get("lines_per_page", visible_span) == visible_span:
+                configured_step = int(hid_cfg["arrow_count_step"])
+
+            configured_init = None
+            if payload and payload.get("arrow_count_init") is not None and int(payload["arrow_count_init"]) > 0:
+                configured_init = int(payload["arrow_count_init"])
+            elif active_proj.get("lines_per_page") == visible_span and active_proj.get("arrow_count_init") and int(active_proj["arrow_count_init"]) > 0:
+                configured_init = int(active_proj["arrow_count_init"])
+            elif hid_cfg.get("arrow_count_init") and int(hid_cfg["arrow_count_init"]) > 0 and hid_cfg.get("lines_per_page", visible_span) == visible_span:
+                configured_init = int(hid_cfg["arrow_count_init"])
+
+            step_arrows = configured_step if configured_step is not None else calibrated_step
+            init_arrows = configured_init if configured_init is not None else (step_arrows * 2 if configured_step else calibrated_init)
+
             if cur_top == 1 or cursor_line <= cur_top:
-                cursor_travel = max(0, prev_bottom - cursor_line)
-                viewport_scroll = max(1, target_top - cur_top)
-                tracked_arrow_count = cursor_travel + viewport_scroll
+                tracked_arrow_count = init_arrows
             else:
-                tracked_arrow_count = max(1, target_top - cur_top) if target_top > cur_top else max(1, prev_bottom - cur_top + 1)
+                tracked_arrow_count = step_arrows
 
             # After down-stepping, editor cursor rests at bottom gutter of new page
             new_cursor_line = target_top + (prev_bottom - cur_top)
             state.orchestration_state["cursor_line"] = new_cursor_line
+            state.orchestration_state["scroll_padding_lines"] = padding
+            state.orchestration_state["arrow_count_init"] = init_arrows
+            state.orchestration_state["arrow_count_step"] = step_arrows
             disp_id = await detect_external_display_id(active_serial)
 
             if is_mock:
@@ -2279,11 +2345,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # to align prior page bottom line number + 1 to top first line of the page
             from ocr_engine import detect_top_line_from_image
 
+            dispatch_meth = (
+                (payload.get("dispatch_method") if payload else None)
+                or hid_cfg.get("dispatch_method")
+                or "arrow_down"
+            )
+
             step_res = await dispatch_accelerated_viewport_step(
                 delta_lines=tracked_arrow_count,
                 serial=active_serial,
                 display_id=valid_disp_id,
-                method="arrow_down"
+                method=dispatch_meth
             )
 
             total_arrows_pressed = tracked_arrow_count
