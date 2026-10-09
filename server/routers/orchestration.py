@@ -1720,10 +1720,17 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         }
 
             is_fast = payload.get("fast_loop") is not False and payload.get("sync") is not True
+            exp_top = payload.get("expected_top") or payload.get("top_line")
+            if not exp_top:
+                exp_top = state.dag_state.get("nodes", {}).get("page_gutter_detect", {}).get("top_line")
+            if not exp_top:
+                sorted_f = sorted(state.captured_frames.values(), key=lambda x: x.get("created_at", ""), reverse=True)
+                if sorted_f:
+                    exp_top = sorted_f[0].get("top_line")
 
             async def _run_minicpm_background(target_calib: Path):
                 try:
-                    s_res = await ocr_svc.scan_image_with_minicpm(target_calib)
+                    s_res = await ocr_svc.scan_image_with_minicpm(target_calib, expected_top=exp_top)
                     ext_text = s_res.get("extracted_text", "")
                     l_det = s_res.get("lines", [])
                     l_cnt = s_res.get("lines_count", len(l_det))
@@ -1791,7 +1798,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     })
 
             try:
-                scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib)
+                scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=exp_top)
             except Exception as e:
                 print(f"[local_ai_ocr] MiniCPM-V invocation error: {e}")
                 scan_res = {
@@ -2020,7 +2027,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # High-speed asynchronous OCR background processing via MiniCPM-V
             async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
                 try:
-                    bg_scan = await ocr_svc.scan_image_with_minicpm(target_img)
+                    bg_scan = await ocr_svc.scan_image_with_minicpm(target_img, expected_top=t_val)
                     bg_lines = bg_scan.get("lines", [])
                     real_top = bg_scan.get("top_line", t_val) or t_val
                     real_bot = bg_scan.get("bottom_line", b_val) or b_val
@@ -2036,10 +2043,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                                 is_wrapped=it.get("is_wrapped", False),
                             )
                     if target_fid in state.captured_frames:
+                        # CRITICAL: Preserve physical viewport bounds (t_val, b_val). Do NOT overwrite with partial OCR spans.
                         state.captured_frames[target_fid].update({
-                            "top_line": real_top,
-                            "bottom_line": real_bot,
-                            "extracted_line_count": len(bg_lines) if bg_lines else (real_bot - real_top + 1),
+                            "top_line": t_val,
+                            "bottom_line": b_val,
+                            "ocr_top_line": real_top,
+                            "ocr_bottom_line": real_bot,
+                            "extracted_line_count": len(bg_lines) if bg_lines else (b_val - t_val + 1),
+                            "ocr_extracted_count": len(bg_lines),
                             "bounding_boxes": bg_scan.get("bounding_boxes", {}),
                             "model_used": bg_scan.get("model_used", "MiniCPM-V (Ollama)"),
                             "status": "processed"

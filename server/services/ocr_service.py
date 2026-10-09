@@ -79,17 +79,24 @@ def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, 
     added = state.ocr_engine.stitcher.stitch_frame_lines(state.document_lines, plines, frame_id, model_desc)
     min_d = min((int(l["line_number"]) for l in plines if l.get("line_number") is not None), default=999999)
     max_d = max((int(l["line_number"]) for l in plines if l.get("line_number") is not None), default=0)
-    if top_g and int(top_g) > 0:
-        min_d = min(min_d, int(top_g))
-    if bot_g and int(bot_g) > 0:
-        max_d = max(max_d, int(bot_g))
-    if min_d <= max_d and min_d < 999999:
-        state.captured_frames[frame_id]["top_line"], state.captured_frames[frame_id]["bottom_line"] = min_d, max_d
-        state.latest_telemetry["current_top_line"], state.latest_telemetry["current_bottom_line"] = min_d, max_d
-    elif top_g and bot_g:
-        state.captured_frames[frame_id]["top_line"], state.captured_frames[frame_id]["bottom_line"] = int(top_g), int(bot_g)
-        state.latest_telemetry["current_top_line"], state.latest_telemetry["current_bottom_line"] = int(top_g), int(bot_g)
-    state.captured_frames[frame_id]["status"], state.captured_frames[frame_id]["extracted_line_count"] = "processed", added
+    
+    if frame_id in state.captured_frames:
+        cf = state.captured_frames[frame_id]
+        # Never overwrite the physical captured frame viewport bounds with partial OCR outputs!
+        cur_top = cf.get("top_line", 0)
+        cur_bot = cf.get("bottom_line", 0)
+        if cur_top <= 0 and top_g and int(top_g) > 0:
+            cf["top_line"] = int(top_g)
+        if cur_bot <= 0 and bot_g and int(bot_g) > 0:
+            cf["bottom_line"] = int(bot_g)
+        
+        cf["ocr_top_line"] = min_d if min_d < 999999 else (top_g or cur_top)
+        cf["ocr_bottom_line"] = max_d if max_d > 0 else (bot_g or cur_bot)
+        cf["ocr_extracted_count"] = added
+        cf["extracted_line_count"] = added
+        cf["status"] = "processed"
+        cf["model_used"] = model_desc
+
     state.update_dag_after_frame(frame_id, state.captured_frames[frame_id].get("top_line", 0), state.captured_frames[frame_id].get("bottom_line", 0))
     return added
 
@@ -203,67 +210,51 @@ def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Ima
     Applies empirical image filter recommendations to prevent thin character erosion
     ('|', '\\', '/', '-', ';', brackets) and eliminate toolbar/status bar distractions:
       1. Region of Interest (ROI) Cropping:
-         Excludes top toolbar (y: 0..160) and bottom taskbar/dock (y > 1040) to prevent
+         Excludes top toolbar/file tabs (y: < 260) and bottom taskbar/dock (y > 970) to prevent
          hallucination of window title bar text as Line 1 or ASCII grid loops.
-      2. Adaptive Contrast Stretch (+20%):
-         Broadens dynamic range of faint syntax colors against dark code backgrounds.
-      3. Unsharp Masking on Text ROI:
-         Sharpens thin stems of pipes, slashes, brackets, and line numbers.
+      2. Gentle Contrast Stretch (+12%):
+         Broadens dynamic range of faint syntax colors against dark code backgrounds without
+         distorting bracket terminals.
     """
     w, h = pil_img.size
     img = pil_img
 
-    # 1. ROI crop strictly to active editor text and gutter region (x: 0..1400, y: 160..1040)
+    # 1. ROI crop strictly to active editor text and gutter region (below formatting toolbar y: ~270, above Android dock y: ~970)
     if roi_crop and w >= 1200 and h >= 800:
-        y_top = max(160, int(h * 0.148))
-        y_bot = min(h - 40, max(y_top + 400, int(h * 0.963)))
+        y_top = max(260, int(h * 0.260))
+        y_bot = min(h - 40, int(h * 0.900))
         x_left = 0
-        x_right = min(w, 1400)
+        x_right = min(w, 1600)
         img = img.crop((x_left, y_top, x_right, y_bot))
 
-    # 2. Adaptive contrast stretch (+20%)
+    # 2. Gentle contrast stretch (+12%)
     contrast_enhancer = ImageEnhance.Contrast(img)
-    img = contrast_enhancer.enhance(1.20)
-
-    # 3. Unsharp masking to preserve character fidelity and prevent thin character erosion
-    img = img.filter(ImageFilter.UnsharpMask(radius=1.5, percent=150, threshold=2))
+    img = contrast_enhancer.enhance(1.12)
 
     return img
 
 
-def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
+def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = None) -> Tuple[str, str]:
     """
     Synchronous worker for invoking MiniCPM-V vision models via Ollama.
-    Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, Lion Cove P-cores with AVX-VNNI).
+    Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, 4 Lion Cove P-cores with AVX-VNNI).
     """
     with Image.open(image_path) as raw_img:
-        # Preprocess with ROI crop, +20% adaptive contrast stretch, and unsharp masking
+        # Preprocess with ROI crop strictly to editor content area
         img = preprocess_frame_for_ocr(raw_img, roi_crop=True)
-        w, h = img.size
-        max_dim = 1344
-        if max(w, h) > max_dim:
-            scale = max_dim / float(max(w, h))
-            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
         buf = io.BytesIO()
         # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
         img.convert("RGB").save(buf, format="PNG", optimize=False)
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+    start_ex = expected_top if (expected_top and expected_top > 0) else 1
     prompt = (
-        "Extract code lines verbatim with gutter line numbers from the image.\n"
-        "If a document/file name is visible in the tab or header, output it first as:\n"
-        "FILE_NAME: <detected file name>\n"
-        "Output each code/text line in the strict structured format:\n"
-        "LINE_NUM: code_content\n\n"
-        "CRITICAL RULES:\n"
-        "- The window title bar or app header is NOT part of the editor gutter. NEVER output it as LINE_1 or any line number.\n"
-        "- LINE_NUM must strictly be the integer line number visible in the left gutter inside the editor.\n"
-        "- Line 1 starts at gutter line number 1. Line 1 content in your output must align with gutter line 1.\n"
-        "- code_content must be the verbatim code with exact indentation, brackets, and symbols.\n"
-        "- If a gutter line is blank, output 'LINE_NUM:' with no code content.\n"
-        "- If a line number is not visible in the left gutter, NEVER hallucinate it. State 'Not visible' or omit it.\n"
-        "- If no gutter line numbers are visible in the image, output 'Not visible'.\n"
-        "- Do not include markdown code fences, headers, or explanations."
+        "Transcribe the text in this image line by line.\n"
+        "For example:\n"
+        f"{start_ex}: first line code\n"
+        f"{start_ex + 1}:\n"
+        f"{start_ex + 2}: third line code\n\n"
+        "Output only the transcribed lines with their line numbers:"
     )
     models = []
     for cand in [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]:
@@ -271,16 +262,14 @@ def call_minicpm_ollama_sync(image_path: Path) -> Tuple[str, str]:
             models.append(cand)
     last_ex = None
     ollama_opts = {
-        "num_predict": 512,
-        "temperature": 0.0,
-        "top_k": 1,
-        "min_p": 0.05,
-        "repeat_penalty": 1.20,
-        "repeat_last_n": 128,
-        "num_thread": 6,
-        "num_ctx": 2048,
+        "num_predict": 1024,
+        "temperature": 0.1,
+        "top_k": 20,
+        "repeat_penalty": 1.05,
+        "num_thread": 4,
+        "num_ctx": 4096,
         "num_batch": 512,
-        "stop": ["\n\n\n\n", "Not visible", "<|endoftext|>", "<|im_end|>"]
+        "stop": ["<|endoftext|>", "<|im_end|>"]
     }
     timeout_sec = max(config.OLLAMA_TIMEOUT, 180)
     for m in models:
@@ -400,28 +389,16 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
 
     plines.sort(key=lambda x: x["line_number"])
 
-    # File name detection fallback & gutter line alignment:
-    # If the first line is the window title bar filename (e.g. filename.md), exclude it from the scan
-    # and align gutter line 1 with line 1 of the document text.
+    # Optional file name detection if line matches standalone filename pattern
     FILENAME_EXT_REGEX = re.compile(
         r"^[a-zA-Z0-9_\-.]+\.(?:md|markdown|py|js|ts|tsx|jsx|json|html|css|yaml|yml|c|cpp|h|hpp|go|rs|java|kt|sh|rb|sql|txt)$",
         re.IGNORECASE
     )
-    if plines:
+    if plines and not detected_filename:
         first_txt = (plines[0].get("text") or "").strip()
         first_ln = plines[0].get("line_number", 0)
         if first_ln <= 2 and FILENAME_EXT_REGEX.match(first_txt):
-            if not detected_filename:
-                detected_filename = first_txt
-            plines.pop(0)
-            if plines and not (plines[0].get("text") or "").strip():
-                plines.pop(0)
-            if plines:
-                offset = plines[0]["line_number"] - 1
-                if offset > 0:
-                    for p in plines:
-                        p["line_number"] -= offset
-                        p["gutter_number"] = p["line_number"]
+            detected_filename = first_txt
 
     top_ln = min((p["line_number"] for p in plines), default=0)
     bot_ln = max((p["line_number"] for p in plines), default=0)
@@ -495,7 +472,7 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
         await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
-async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
+async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] = None) -> Dict[str, Any]:
     """
     Scan image with local vision model (MiniCPM-V in Ollama, with OpenVINO RapidOCR fallback)
     for verbatim code/markdown line extraction and bounding boxes.
@@ -508,7 +485,7 @@ async def scan_image_with_minicpm(image_path: Path) -> Dict[str, Any]:
     bboxes = {}
 
     try:
-        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path))
+        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path), expected_top)
         plines, top_ln, bot_ln, formatted, detected_filename = parse_minicpm_output(raw_resp)
         non_blank = [p for p in plines if (p.get("text") or "").strip()]
         if non_blank:

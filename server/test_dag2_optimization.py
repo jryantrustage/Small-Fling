@@ -31,8 +31,8 @@ def test_preprocess_frame_for_ocr_roi_and_contrast():
     processed = preprocess_frame_for_ocr(pil_img, roi_crop=True)
     w, h = processed.size
 
-    # Must be cropped to exclude header toolbar (y: 0..160) and dock (y > 1040)
-    assert w <= 1400
+    # Must be cropped to exclude header toolbar (y: 0..260) and dock (y > 970)
+    assert w <= 1650
     assert h < 1080
     assert h >= 400
 

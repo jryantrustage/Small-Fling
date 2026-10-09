@@ -159,7 +159,8 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
     ipath = _get_frame_path(frame_id, finfo.get("filename"))
     mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     try:
-        res = await ocr_svc.scan_image_with_minicpm(ipath)
+        exp_top = finfo.get("top_line")
+        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top)
         top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
         det_fn = res.get("detected_filename")
         if det_fn:
@@ -172,10 +173,18 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
                     await state.ws_manager.broadcast({"type": "project_switched", "project": proj})
                 except Exception:
                     pass
+        orig_top = finfo.get("top_line", 0)
+        orig_bot = finfo.get("bottom_line", 0)
+        final_top = orig_top if orig_top > 0 else (top_ln or 1)
+        final_bot = orig_bot if orig_bot > 0 else (bot_ln or (final_top + len(lines) - 1 if lines else final_top + 23))
+
         finfo.update({
-            "top_line": top_ln,
-            "bottom_line": bot_ln,
+            "top_line": final_top,
+            "bottom_line": final_bot,
+            "ocr_top_line": top_ln,
+            "ocr_bottom_line": bot_ln,
             "extracted_line_count": len(lines),
+            "ocr_extracted_count": len(lines),
             "status": "processed",
             "model_used": res.get("model_used", f"MiniCPM-V ({mt})"),
             "bounding_boxes": res.get("bounding_boxes", {})
@@ -525,3 +534,101 @@ async def get_page_report():
 
     report_text = "\n".join(lines_report)
     return PlainTextResponse(report_text, headers={"Content-Type": "text/markdown; charset=utf-8"})
+
+
+@router.get("/api/document/verified-lines-report")
+async def get_verified_lines_report():
+    pid = state.get_current_project_id()
+    frames = db.get_frames(pid)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    doc_lines = state.document_lines
+    sorted_line_keys = sorted([int(k) for k in doc_lines.keys() if int(k) > 0])
+    min_ln = sorted_line_keys[0] if sorted_line_keys else 0
+    max_ln = sorted_line_keys[-1] if sorted_line_keys else 0
+    total_chars = sum(len(str(getattr(v, "text", "") if hasattr(v, "text") else (v.get("text", "") if isinstance(v, dict) else str(v)))) for v in doc_lines.values())
+
+    report_lines = [
+        "# Matrix OCR - Verified Lines & Precision Diagnostics Report",
+        f"Generated: {now_str}",
+        f"Active Project: {pid or 'Default'}",
+        f"Total Master Lines: {len(doc_lines)} (Ln {min_ln} → {max_ln})",
+        f"Total Extracted Characters: {total_chars:,}",
+        f"Total Physical Frames: {len(frames)}",
+        "",
+        "## Per-Page OCR Extraction Breakdown",
+        "| Page | Viewport Range | Expected | OCR Extracted Lines | Extracted Count | Completeness | Engine / Model | Status |",
+        "|---|---|---|---|---|---|---|---|"
+    ]
+
+    all_missing = []
+    for idx, f in enumerate(frames):
+        p_num = f.get("page_index", idx + 1)
+        top = f.get("top_line", 0)
+        bot = f.get("bottom_line", 0)
+        expected_span = (bot - top + 1) if (bot >= top and top > 0) else 0
+
+        # Lines present in doc_lines belonging to this viewport range
+        page_doc_lines = [ln for ln in sorted_line_keys if top <= ln <= bot]
+        extracted_cnt = len(page_doc_lines)
+        pct = round((extracted_cnt / max(1, expected_span)) * 100, 1) if expected_span > 0 else 0.0
+
+        ocr_min = min(page_doc_lines) if page_doc_lines else "-"
+        ocr_max = max(page_doc_lines) if page_doc_lines else "-"
+        ocr_range_str = f"Ln {ocr_min} → {ocr_max}" if page_doc_lines else "None"
+
+        # Check for missing lines in this page's expected range
+        missing_on_page = [ln for ln in range(top, bot + 1) if ln not in doc_lines] if top > 0 and bot >= top else []
+        if missing_on_page:
+            all_missing.extend(missing_on_page)
+
+        status_flag = "✔ 100%" if pct >= 100 else (f"⚠️ {pct}%" if pct > 0 else "❌ 0%")
+        model_name = f.get("model_used") or "MiniCPM-V (Ollama)"
+
+        report_lines.append(
+            f"| Page {p_num:2d} | Ln {top:4d} → {bot:4d} | {expected_span:2d} lines | {ocr_range_str} | {extracted_cnt:2d} lines | {pct:5.1f}% | {model_name} | {status_flag} |"
+        )
+
+    report_lines.append("")
+    report_lines.append("## Unverified / Missing Line Diagnostics")
+    if not all_missing:
+        report_lines.append("✔ Zero missing lines! All lines within physical viewport boundaries have been extracted and verified.")
+    else:
+        missing_ranges = []
+        cur_start = None
+        cur_prev = None
+        for ln in sorted(set(all_missing)):
+            if cur_start is None:
+                cur_start = ln
+                cur_prev = ln
+            elif ln == cur_prev + 1:
+                cur_prev = ln
+            else:
+                missing_ranges.append((cur_start, cur_prev))
+                cur_start = ln
+                cur_prev = ln
+        if cur_start is not None:
+            missing_ranges.append((cur_start, cur_prev))
+
+        for s, e in missing_ranges:
+            if s == e:
+                report_lines.append(f"- Missing Line {s}")
+            else:
+                report_lines.append(f"- Missing Lines {s} → {e} ({e - s + 1} lines)")
+
+    report_lines.append("")
+    report_lines.append("## Line Fidelity & Verbatim Sampling")
+    sample_indices = sorted_line_keys[:5]
+    if len(sorted_line_keys) > 10:
+        sample_indices += sorted_line_keys[len(sorted_line_keys)//2 : len(sorted_line_keys)//2 + 3]
+        sample_indices += sorted_line_keys[-3:]
+    sample_indices = sorted(list(set(sample_indices)))
+
+    for ln in sample_indices:
+        entry = doc_lines[ln]
+        txt = getattr(entry, "text", "") if hasattr(entry, "text") else (entry.get("text", "") if isinstance(entry, dict) else str(entry))
+        report_lines.append(f"- Ln {ln:4d}: `{txt}`")
+
+    report_text = "\n".join(report_lines)
+    return PlainTextResponse(report_text, headers={"Content-Type": "text/markdown; charset=utf-8"})
+

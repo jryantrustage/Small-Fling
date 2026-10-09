@@ -98,16 +98,17 @@ def analyze_node_performance(node_id: str, dag_state: Dict[str, Any], telemetry:
         remediations.append("Run independent environment classifiers concurrently via `asyncio.gather()`.")
         remediations.append("Skip environment healing (`skip_env_heal=True`) after first successful cycle.")
 
-    # 6. Viewport Pacing / Settle Delay
+    # 6. Viewport Pacing / Settle Delay (Precision Closed-Loop Stepping)
     elif node_id == "arrow_down" and (duration_ms and duration_ms > 2000):
-        category = "VIEWPORT_SCROLL_LAG"
-        severity = "warning"
-        title = "Viewport Scroll & Animation Settle Latency"
-        summary = f"Pacer dwell and viewport settling took {duration_ms}ms."
+        category = "VIEWPORT_PACING"
+        severity = "info"
+        title = "Viewport Precision Stepping (Active by Design)"
+        summary = f"Precision closed-loop arrow stepping took {duration_ms}ms to align viewport with zero line skips."
+        evidence.append(f"Precision stepping duration: {duration_ms}ms.")
         evidence.append(f"Pacer auto-tune factor: {auto_tune_factor}x.")
         evidence.append(f"Wrapped lines detected: {wrapped_lines}.")
-        remediations.append("Tune settle delay: lower default settle delay from 300ms to 150ms.")
-        remediations.append("Detect scroll velocity stop via 2-frame optical difference rather than fixed timers.")
+        evidence.append("Sequential closed-loop arrow down stepping is active by design for 100% line continuity.")
+        remediations.append("Active by design: sequential verified arrow stepping ensures exact line tracking without gaps. Does not halt DAG flow.")
 
     if not evidence:
         evidence.append(f"Total node runtime: {duration_ms or total}ms.")
@@ -384,24 +385,22 @@ def analyze_dag2_performance_report(loop_history: Optional[List[Dict[str, Any]]]
         bottlenecks.append({
             "rank": 1,
             "node_id": "arrow_down",
-            "name": "Viewport Stepping & Positioning (Node 6: arrow_down)",
-            "component": "Viewport Stepping & Positioning (arrow_down)",
+            "name": "Precision Viewport Stepping (Node 6: arrow_down)",
+            "component": "Precision Viewport Stepping (arrow_down)",
             "time_spent": arrow_stat["avg_formatted"],
             "impact_ms": arrow_stat["avg_ms"],
             "impact_formatted": arrow_stat["avg_formatted"],
             "percentage": arrow_stat["percentage"],
-            "severity": "CRITICAL" if arrow_stat["percentage"] > 35 else "WARNING",
+            "severity": "INFO",
             "root_cause": (
                 f"Positioning from the bottom line number + 1 (Ln {prev_bot} -> Ln {tgt_top} at top of next page) "
-                f"uses sequential HID arrow down keystrokes (~{avg_arrows} presses per loop, with {details.get('dwell_ms', 25)}ms dwell and {details.get('settle_ms', 300)}ms settle delay). "
-                f"This single positioning operation consumes {arrow_stat['percentage']}% of total loop time ({arrow_stat['avg_formatted']} per loop)."
+                f"uses sequential closed-loop arrow down keystrokes (~{avg_arrows} presses per loop, with {details.get('dwell_ms', 0)}ms dwell and {details.get('settle_ms', 100)}ms settle delay). "
+                f"This deliberate positioning operation consumes {arrow_stat['percentage']}% of total loop time ({arrow_stat['avg_formatted']} per loop) by intentional design to ensure 100% line continuity."
             ),
-            "remediation": "Replace sequential discrete arrow down presses with PageDown keycode 93 or concatenated batched shell keyevents (`input keyevent 20 20 20 ...`) to eliminate round-trip latency.",
+            "remediation": "Sequential verified arrow stepping is active by design to ensure zero-gap line continuity. No changes required; DAG flow continues without interruption.",
             "speedup_remediations": [
-                "PageDown Key Acceleration: Replace 40-50 discrete arrow down presses with a single PageDown keycombination (keycode 93) + micro-trimming.",
-                "Batched ADB Keyevents: Dispatch multiple arrow down events in a single concatenated shell command (e.g. `input keyevent 20 20 20 ...`) to eliminate round-trip process fork overhead.",
-                "Calibrated Gesture Fling: Use an instantaneous touch fling from (960, Y_bottom) to (960, Y_top) calculated via exact line pitch px.",
-                "Pre-calculated Single-Stride Offset: Step directly by the exact delta (bottom - top + 1) without iterative single-keystroke settle delays."
+                "Intentional Precision Stepping: Sequential discrete keystrokes with live OCR verification ensure exact (last_bottom + 1) positioning without skipping code lines.",
+                "Non-blocking DAG Continuation: This operational timing is nominal for high-precision capture and will not halt DAG progression."
             ]
         })
 

@@ -256,6 +256,7 @@ function AppContent() {
   const [selectedLineNumbers, setSelectedLineNumbers] = useState<Set<number>>(new Set());
   const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [copyVerifiedFeedback, setCopyVerifiedFeedback] = useState(false);
 
   // Auto-Fix & Calibrate States
   const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
@@ -1603,6 +1604,20 @@ function AppContent() {
     }
   }, [sortedFrames, documentData]);
 
+  const handleCopyVerifiedLinesReport = useCallback(async () => {
+    try {
+      const res = await api('/api/document/verified-lines-report');
+      if (res.ok) {
+        const reportText = await res.text();
+        await navigator.clipboard.writeText(reportText);
+        setCopyVerifiedFeedback(true);
+        setTimeout(() => setCopyVerifiedFeedback(false), 2500);
+      }
+    } catch (e) {
+      console.error('Failed to copy verified lines report:', e);
+    }
+  }, []);
+
   const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;
     if (searchQuery.trim()) {
@@ -1963,7 +1978,17 @@ function AppContent() {
                         style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
                       >
                         {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                        <span>{copyFeedback ? 'Copied' : 'Report'}</span>
+                        <span>{copyFeedback ? 'Copied' : 'Frames Report'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${copyVerifiedFeedback ? 'btn-success' : 'btn-outline'}`}
+                        onClick={handleCopyVerifiedLinesReport}
+                        title="Copy OCR extraction & verified lines precision diagnostics to clipboard"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                      >
+                        {copyVerifiedFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                        <span>{copyVerifiedFeedback ? 'Copied' : 'OCR Report'}</span>
                       </button>
                       {frames.some(f => f.status.startsWith('error')) && (
                         <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
@@ -2458,7 +2483,17 @@ function AppContent() {
                           style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
                         >
                           {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                          <span>{copyFeedback ? 'Copied' : 'Page Report'}</span>
+                          <span>{copyFeedback ? 'Copied' : 'Frames Report'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn btn-sm ${copyVerifiedFeedback ? 'btn-success' : 'btn-outline'}`}
+                          onClick={handleCopyVerifiedLinesReport}
+                          title="Copy OCR extraction & verified lines precision diagnostics to clipboard"
+                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                        >
+                          {copyVerifiedFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
+                          <span>{copyVerifiedFeedback ? 'Copied' : 'OCR Report'}</span>
                         </button>
                         <div className="window-controls">
                           <button
