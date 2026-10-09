@@ -15,7 +15,7 @@ DEVICE_PROFILES = {
         "friendly_name": "Pixel 10 Pro XL",
         "lines_per_page": 24,
         "scroll_padding_lines": 4,
-        "arrow_count_init": 56,
+        "arrow_count_init": 28,
         "arrow_count_step": 28,
         "step_size": 28,
         "default_dpi": 220,
@@ -30,7 +30,7 @@ DEVICE_PROFILES = {
         "friendly_name": "Pixel 8 Pro",
         "lines_per_page": 24,
         "scroll_padding_lines": 4,
-        "arrow_count_init": 56,
+        "arrow_count_init": 28,
         "arrow_count_step": 28,
         "step_size": 28,
         "default_dpi": 220,
@@ -799,10 +799,27 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
     try:
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open:
-            cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1"
+            # Enforce hardware keyboard policy and dismiss active IME window.
+            # In Android desktop mode, the soft keyboard window lives on display 0.
+            # Sending KEYCODE_ESCAPE (111) or KEYCODE_BACK (4) to display 0 closes IME.
+            # We NEVER dispatch KEYCODE_BACK (4) to the external display (display_id > 0)
+            # because that causes FilePreviewActivity to handle onBackPressed() and close the file!
+            cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 4 >/dev/null 2>&1"
             await run_adb_shell(cmd, ser, timeout=2.0)
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.12)
             is_open = await is_ime_visible(ser, force_check=True)
+            if is_open:
+                # If still open, send KEYCODE_ESCAPE (111) to external display (safe, doesn't close activity)
+                did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+                if did and did > 0:
+                    await run_adb_shell(f"input -d {did} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
+                else:
+                    await run_adb_shell("input keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
+                await asyncio.sleep(0.12)
+                is_open = await is_ime_visible(ser, force_check=True)
+        else:
+            # Maintain hardware keyboard policy without injecting unnecessary keyevents
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0 >/dev/null 2>&1", ser, timeout=1.0)
         return not is_open
     except Exception:
         return True
@@ -963,15 +980,13 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     cmd = (
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
         f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
-        f"settings put secure show_ime_with_hard_keyboard 0; "
-        f"input -d 0 keyevent 111 >/dev/null 2>&1"
+        f"settings put secure show_ime_with_hard_keyboard 0"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
 
     is_open = await is_ime_visible(ser, force_check=True)
     if is_open:
-        # Dismiss on primary screen (display 0) where IME lives without sending Escape to target external display
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser, timeout=2.0)
+        await dismiss_keyboard(ser, display_id)
         is_open = await is_ime_visible(ser, force_check=True)
 
     # Check fullscreen status post-fix
@@ -1006,17 +1021,7 @@ async def ensure_adb_keyboard_closed(serial: Optional[str] = None) -> bool:
     """
     Suppresses the on-screen soft keyboard without resizing tasks or reflowing documents.
     """
-    try:
-        ser = await get_active_adb_serial(serial)
-        if not ser: return False
-        await run_adb_shell(
-            "settings put secure show_ime_with_hard_keyboard 0; "
-            "input -d 0 keyevent 111 >/dev/null 2>&1",
-            ser, timeout=2.0
-        )
-        is_open = await is_ime_visible(ser, force_check=True)
-        return not is_open
-    except Exception: return False
+    return await dismiss_keyboard(serial)
 
 def get_available_device_profiles() -> List[Dict[str, Any]]:
     try:
@@ -1054,7 +1059,7 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
             "lines_per_page": 24,
             "scroll_padding_lines": 4,
             "step_size": 28,
-            "arrow_count_init": 56,
+            "arrow_count_init": 28,
             "arrow_count_step": 28,
             "settle_delay_ms": 50,
             "hid_config": {
@@ -1066,7 +1071,7 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
                 "key_repeat_delay_ms": 15,
                 "dispatch_method": "accelerated_batch",
                 "scroll_padding_lines": 4,
-                "arrow_count_init": 56,
+                "arrow_count_init": 28,
                 "arrow_count_step": 28
             }
         }
@@ -1108,7 +1113,7 @@ async def extract_device_hardware_specs(serial: Optional[str] = None) -> Dict[st
     scroll_padding = 4
     step_size = lpp + scroll_padding
     arrow_step = step_size
-    arrow_init = arrow_step * 2
+    arrow_init = arrow_step
 
     specs = {
         "status": "success",
@@ -1408,7 +1413,7 @@ async def enforce_device_characteristics(
         pad = scroll_padding_lines if scroll_padding_lines is not None else 4
         step = step_size or (lpp + pad)
         a_step = arrow_count_step or step
-        a_init = arrow_count_init or (a_step * 2)
+        a_init = arrow_count_init or a_step
         h_cfg = hid_config or {}
         if isinstance(h_cfg, dict):
             h_cfg.setdefault("scroll_padding_lines", pad)
@@ -1479,7 +1484,7 @@ async def enforce_device_characteristics(
     resolved_lpp = int(lines_per_page) if (lines_per_page and lines_per_page > 0) else 24
     resolved_step = int(step_size) if (step_size and step_size > 0) else (resolved_lpp + pad)
     resolved_arr_step = int(arrow_count_step) if (arrow_count_step and arrow_count_step > 0) else resolved_step
-    resolved_arr_init = int(arrow_count_init) if (arrow_count_init and arrow_count_init > 0) else (resolved_arr_step * 2)
+    resolved_arr_init = int(arrow_count_init) if (arrow_count_init and arrow_count_init > 0) else resolved_arr_step
 
     try:
         from services import state

@@ -17,7 +17,7 @@ from pathlib import Path
 import config
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
-    capture_external_screenshot, auto_fix_viewport, is_ime_visible
+    capture_external_screenshot, auto_fix_viewport, is_ime_visible, dismiss_keyboard
 )
 from ocr_engine import fast_detect_gutter_bounds
 
@@ -304,8 +304,8 @@ async def run_editor_recovery_node(
     disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else None
     actions = []
 
-    # 1. Soft keyboard suppression without keyevent 4 (Back)
-    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+    # 1. Soft keyboard suppression if open
+    await dismiss_keyboard(ser, disp_id)
     actions.append("Suppressed on-screen keyboard policy")
 
     # 2. Bring Markdown Viewer (FilePreviewActivity) or Teams task to front on external display

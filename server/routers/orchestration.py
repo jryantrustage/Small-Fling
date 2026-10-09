@@ -20,7 +20,8 @@ from services.adb_service import (
     get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id,
     detect_surfaceflinger_displays, is_ime_visible, fetch_current_display_dpi_factor, sanitize_input_display_id,
     dispatch_accelerated_viewport_step, calibrate_display_dpi, configure_display_awake_policies,
-    enforce_device_characteristics, connect_device_for_model, get_device_info, extract_device_hardware_specs
+    enforce_device_characteristics, connect_device_for_model, get_device_info, extract_device_hardware_specs,
+    dismiss_keyboard
 )
 import services.ocr_service as ocr_svc
 
@@ -855,7 +856,7 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
     pad_lines = int(proj.get("scroll_padding_lines") if proj and proj.get("scroll_padding_lines") is not None else hw_specs.get("scroll_padding_lines", 4))
     step_sz = int(proj.get("step_size") or hw_specs.get("step_size", lpp + pad_lines)) if proj else int(hw_specs.get("step_size", lpp + pad_lines))
     arr_step = int(proj.get("arrow_count_step") or hw_specs.get("arrow_count_step", step_sz)) if proj else int(hw_specs.get("arrow_count_step", step_sz))
-    arr_init = int(proj.get("arrow_count_init") or hw_specs.get("arrow_count_init", arr_step * 2)) if proj else int(hw_specs.get("arrow_count_init", arr_step * 2))
+    arr_init = int(proj.get("arrow_count_init") or hw_specs.get("arrow_count_init", arr_step)) if proj else int(hw_specs.get("arrow_count_init", arr_step))
     settle_ms = int(proj.get("settle_delay_ms") or hw_specs.get("settle_delay_ms", 50)) if proj else int(hw_specs.get("settle_delay_ms", 50))
 
     hid_cfg = {}
@@ -1040,11 +1041,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             )
 
             # Silently ensure virtual keyboard is closed without tapping or resizing
-            await run_adb_shell(
-                "settings put secure show_ime_with_hard_keyboard 0; "
-                "input -d 0 keyevent 111 >/dev/null 2>&1",
-                active_serial
-            )
+            await dismiss_keyboard(active_serial, disp_id)
 
             # Ensure Teams editor body has caret focus so Ctrl+End reaches document
             target_d = disp_id if (disp_id and disp_id > 0) else 3
@@ -1116,11 +1113,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 await asyncio.sleep(0.35)
 
             # 3. Silently suppress soft keyboard without resizing task or reloading window
-            await run_adb_shell(
-                "settings put secure show_ime_with_hard_keyboard 0; "
-                "input -d 0 keyevent 111 >/dev/null 2>&1",
-                active_serial
-            )
+            await dismiss_keyboard(active_serial, disp_id)
 
             # Re-read gutter to capture any newly revealed bottom lines in full height
             snap_fixed = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
@@ -1163,7 +1156,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     serial=active_serial
                 )
                 try:
-                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                    await dismiss_keyboard(active_serial, disp_id)
                     await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
                     await asyncio.sleep(0.8)
                     node.update({
@@ -1402,11 +1395,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
                 # Suppress soft keyboard and send Ctrl+Home + reverse inertial flings without tapping text
-                await run_adb_shell(
-                    "settings put secure show_ime_with_hard_keyboard 0; "
-                    "input -d 0 keyevent 111 >/dev/null 2>&1",
-                    active_serial
-                )
+                await dismiss_keyboard(active_serial, disp_id)
                 await send_hid_keycombination(113, 122, serial=active_serial, caller_node="reset_home")
                 await asyncio.sleep(0.4)
 
@@ -1443,11 +1432,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             break
 
                 if is_verified:
-                    await run_adb_shell(
-                        "settings put secure show_ime_with_hard_keyboard 0; "
-                        "input -d 0 keyevent 111 >/dev/null 2>&1",
-                        active_serial
-                    )
+                    await dismiss_keyboard(active_serial, disp_id)
                     break
 
                 print(f"[reset_home] Attempt {attempt} not at Line 1 (detected {detected_first}), retrying Ctrl+Home...")
@@ -2208,14 +2193,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 padding = int(state.orchestration_state["scroll_padding_lines"])
 
             visible_span = max(1, prev_bottom - cur_top + 1)
-            # Each page step requires scrolling through visible lines plus viewport scroll margin padding:
-            # e.g., for 24 visible lines + 4 padding lines = 28 down arrows.
-            calibrated_step = visible_span + padding
-            # When cursor is returned to Line 1 (after Ctrl+Home in DAG 2):
-            # 1. Travel from Line 1 to bottom scroll margin: visible_span + padding (24 + 4 = 28 presses).
-            # 2. Viewport scroll to bring next page (prev_bottom + 1) to Line 1: visible_span + padding (24 + 4 = 28 presses).
-            # Total = 28 + 28 = 56 down arrows!
-            calibrated_init = calibrated_step * 2
+            # Base line distance needed to advance from cur_top to target_top (prev_bottom + 1)
+            needed_lines = max(1, target_top - cur_top)
+            calibrated_step = needed_lines
+            # When cursor is on Line 1, moving cursor through initial margin lines requires slight padding
+            calibrated_init = needed_lines + min(padding, 4)
 
             # Check for user-configured overrides in payload, project, or hid_cfg (never hardcode)
             configured_step = None
@@ -2235,7 +2217,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 configured_init = int(hid_cfg["arrow_count_init"])
 
             step_arrows = configured_step if configured_step is not None else calibrated_step
-            init_arrows = configured_init if configured_init is not None else (step_arrows * 2 if configured_step else calibrated_init)
+            init_arrows = configured_init if configured_init is not None else (step_arrows if configured_step else calibrated_init)
 
             if cur_top == 1 or cursor_line <= cur_top:
                 tracked_arrow_count = init_arrows
@@ -2338,7 +2320,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             valid_disp_id = sanitize_input_display_id(disp_id)
 
             # 2. Suppress Soft Keyboard (avoid tapping content to prevent caret trapping)
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+            await dismiss_keyboard(active_serial, valid_disp_id)
             await asyncio.sleep(0.05)
 
             # 3. Viewport Positioning: Dispatches EXACT tracked count of arrow down keyevents (keycode 20)
@@ -2360,86 +2342,71 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             total_arrows_pressed = tracked_arrow_count
             start_top = cur_top
-            current_top = target_top
-            final_top = target_top
-            reached = True
-            advanced = True
-            meta = {"avg_pitch": 16.0, "bottom_gutter_line": target_top + (prev_bottom - cur_top)}
+            await asyncio.sleep(0.18)
+            await dismiss_keyboard(active_serial, valid_disp_id)
 
-            # If manual explicit verification is requested in payload, capture one snapshot
-            if payload and payload.get("verify_position"):
-                await asyncio.sleep(0.15)
+            # 4. Closed-Loop Viewport Verification & Directional Adjustment Loop:
+            # Assure the last line number + 1 is the first line number on the next page.
+            # If the next page does not have target_top at the top, adjust with arrow up/down.
+            max_adjust_attempts = 7
+            matched = False
+            actual_top = None
+            meta = {}
+            from ocr_engine import find_gutter_numbers_cluster
+
+            for attempt in range(1, max_adjust_attempts + 1):
                 snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                if snap:
-                    img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
-                    det_top, meta_new = detect_top_line_from_image(img, target_top=target_top)
-                    if det_top > 0:
-                        current_top = det_top
-                        final_top = det_top
-                        meta = meta_new
-            else:
-                # High-speed settle delay (100ms)
-                await asyncio.sleep(0.10)
+                if not snap:
+                    await asyncio.sleep(0.12)
+                    continue
 
-            # Ensure keyboard is closed before concluding
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", active_serial)
+                img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+                actual_top, meta = detect_top_line_from_image(img, target_top=target_top)
+                gutter = find_gutter_numbers_cluster(img)
+                first_gutter = gutter[0][1] if gutter else actual_top
 
-            advanced = (current_top != start_top) or (abs(current_top - target_top) <= 1)
-            final_top = current_top if current_top > 0 else target_top
+                if actual_top == target_top or first_gutter == target_top:
+                    matched = True
+                    final_top = target_top
+                    break
 
-            # Fallback for extensive line wrapping: if gutter numbers are hidden across the entire page,
-            # use bottom text anchor to move the last line's text to the top of the next page.
-            if not reached and not advanced:
-                bottom_anchor = (payload.get("bottom_text_anchor") if payload else None) or \
-                                node.get("bottom_text_anchor") or \
-                                state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_text_anchor") or \
-                                state.orchestration_state.get("bottom_text_anchor")
+                diff = target_top - actual_top
+                if diff > 0:
+                    # Viewport undershot (target is further down): send DownArrows (keycode 20)
+                    adjust_step = min(diff, 25)
+                    keys = " ".join(["20"] * adjust_step)
+                    total_arrows_pressed += adjust_step
+                    await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", active_serial)
+                else:
+                    # Viewport overshot (target was scrolled past): send UpArrows (keycode 19)
+                    diff_up = abs(diff)
+                    adjust_step = min(diff_up, 25)
+                    keys = " ".join(["19"] * adjust_step)
+                    total_arrows_pressed += adjust_step
+                    await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", active_serial)
 
-                if bottom_anchor:
-                    target_viewport_y = 165
-                    await dispatch_accelerated_viewport_step(50, active_serial, valid_disp_id, method="auto")
-                    total_arrows_pressed += 50
-                    await asyncio.sleep(0.20)
+                await asyncio.sleep(0.18)
+                await dismiss_keyboard(active_serial, valid_disp_id)
 
-                    snap_anchor = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                    if snap_anchor:
-                        from ocr_engine import find_text_anchor_offset
-                        img_anchor = cv2.imdecode(np.frombuffer(snap_anchor, np.uint8), cv2.IMREAD_COLOR)
-                        offset = find_text_anchor_offset(img_anchor, bottom_anchor, target_y=target_viewport_y)
-                        if offset is not None:
-                            if abs(offset) > 3:
-                                dy_clamped = max(-500, min(500, offset))
-                                y_center = 600
-                                y_from = y_center + int(dy_clamped / 2)
-                                y_to = y_center - int(dy_clamped / 2)
-                                duration = max(350, min(800, int(abs(dy_clamped) * 3.5)))
-                                disp_cmd = f"-d {valid_disp_id} " if valid_disp_id else ""
-                                await run_adb_shell(f"input {disp_cmd}swipe 960 {y_from} 960 {y_to} {duration}", active_serial)
-                                await asyncio.sleep(0.25)
-
-                            reached = True
-                            advanced = True
-                            current_top = start_top + 50
-                            final_top = current_top
-                            node.update({
-                                "evaluator": "Text-Anchored Line-Wrap Evaluator",
-                                "telemetry_insight": f"Moved bottom anchor text to top of next page ✔ ('{bottom_anchor[:25]}...')"
-                            })
-
-            if not advanced and not reached:
-                error_msg = f"Navigation failed: arrow_down did not advance viewport to target Line {target_top}. Page remained stuck at Line {start_top} after {total_arrows_pressed} keystrokes."
+            if not matched:
+                # User constraint: If next page doesn't have prev_bottom + 1 on top, DO NOT PROCEED!
+                error_msg = (
+                    f"Navigation alignment blocked: Expected top Line {target_top} "
+                    f"(previous page bottom {prev_bottom} + 1), but viewport settled at Line {actual_top or 'unknown'}. "
+                    f"Halting capture to prevent gaps or duplicate pages."
+                )
                 node.update({
                     "status": "error",
                     "arrow_count": total_arrows_pressed,
                     "target_top_line": target_top,
                     "target_top": target_top,
-                    "new_top_line": start_top,
+                    "new_top_line": actual_top or start_top,
                     "reached": False,
                     "advanced": False,
                     "evaluator": "Pacing & Alignment Evaluator",
                     "healing_step": None,
                     "error": error_msg,
-                    "telemetry_insight": f"Navigation failed to advance from Line {start_top} ⛔"
+                    "telemetry_insight": f"Alignment failed: top is Line {actual_top}, expected Line {target_top} ⛔"
                 })
                 state.latest_telemetry["status_message"] = error_msg
                 await state.ws_manager.broadcast({
@@ -2458,15 +2425,20 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     "reached": False,
                     "advanced": False,
                     "target_top_line": target_top,
-                    "new_top_line": start_top,
+                    "new_top_line": actual_top or start_top,
                     "message": error_msg
                 }
 
-            # Navigation Succeeded!
+            # Viewport successfully matched target_top!
+            reached = True
+            advanced = True
+            final_top = target_top
+            new_cursor_line = target_top + (prev_bottom - cur_top)
+            state.orchestration_state["cursor_line"] = new_cursor_line
             state.latest_telemetry["current_top_line"] = final_top
             if meta and meta.get("bottom_gutter_line"):
                 state.latest_telemetry["current_bottom_line"] = meta["bottom_gutter_line"]
-            effective_steps = tracked_arrow_count
+            effective_steps = total_arrows_pressed
             node.update({
                 "status": "completed",
                 "arrow_count": effective_steps,
@@ -2480,7 +2452,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "evaluator": "Pacing & Alignment Evaluator",
                 "healing_step": None,
                 "error": None,
-                "telemetry_insight": f"Stepped {effective_steps} down arrows to align prior page bottom ({prev_bottom}) + 1 → target top Line {target_top} ✔"
+                "telemetry_insight": f"Stepped {effective_steps} down/up arrows: target top Line {target_top} (prior bottom {prev_bottom} + 1) verified ✔"
             })
             if "verification_trigger" in state.dag_state["nodes"]:
                 state.dag_state["nodes"]["verification_trigger"].update({
@@ -2504,6 +2476,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "status": "success",
                 "node_id": "arrow_down",
                 "step_count": effective_steps,
+                "arrow_count": effective_steps,
                 "target_top_line": target_top,
                 "new_top_line": final_top,
                 "reached": True,
@@ -2514,8 +2487,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
         elif target_key == "verification_trigger":
             # Guard: DAG 7 should not proceed if DAG 6 didn't work!
             n6_info = state.dag_state["nodes"].get("arrow_down", {})
-            if n6_info.get("status") in ("error", "prevented") or n6_info.get("reached") is False or n6_info.get("advanced") is False:
-                error_msg = "Verification trigger blocked: DAG 6 (arrow_down) failed to position target line on top. Halting loop to prevent duplicate capture of identical image."
+            if (
+                n6_info.get("status") in ("error", "prevented")
+                or n6_info.get("reached") is not True
+                or n6_info.get("advanced") is not True
+                or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
+            ):
+                error_msg = f"Verification trigger blocked: DAG 6 (arrow_down) failed to position target line {n6_info.get('target_top')} on top (settled at {n6_info.get('new_top_line')}). Halting loop to prevent duplicate or corrupted capture."
                 node.update({
                     "status": "prevented",
                     "evaluator": "Completion Qualifier Evaluator",
@@ -2883,13 +2861,9 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "dag": state.dag_state
         })
 
-        # Ensure external display is identified and soft keyboard suppressed silently on phone screen
+        # Ensure external display is identified and soft keyboard suppressed silently
         disp_id = await detect_external_display_id(active_serial)
-        await run_adb_shell(
-            "settings put secure show_ime_with_hard_keyboard 0; "
-            "input -d 0 keyevent 111 >/dev/null 2>&1",
-            active_serial
-        )
+        await dismiss_keyboard(active_serial, disp_id)
 
         # Enforce Edit Mode (pencil icon) and Dark Mode (theme pull-down) before proceeding with DAG 1
         init_group["progress"] = {"percent": 15, "stage": "Enforcing Edit Mode and Dark Mode...", "status": "running"}
@@ -3123,18 +3097,20 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
 
-    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": True, "pipelined": True}
-
-    # Enforce Edit Mode and Dark Mode before proceeding with DAG 2 capture
-    disp_id = await detect_external_display_id(active_serial)
-    await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
-
     from services.performance_analyzer import format_duration_min_sec
     loop_idx = len(state.get_dag2_loop_history()) + 1
     loop_id = f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     state.current_dag2_loop_id = loop_id
     state.current_dag2_loop_index = loop_idx
     state.active_dag2_loop_key_events = []
+
+    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": True, "pipelined": True, "skip_env_heal": True}
+
+    # Enforce Edit Mode and Dark Mode ONLY on the initial cycle (loop 1) or if edit_mode isn't verified.
+    # On subsequent cycles, avoid tactile touches or viewport resets so that Node 6's precise alignment is preserved.
+    disp_id = await detect_external_display_id(active_serial)
+    if loop_idx == 1 or not state.orchestration_state.get("edit_mode"):
+        await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
     loop_start_ms = int(time.time() * 1000)
     loop_t0 = time.perf_counter()

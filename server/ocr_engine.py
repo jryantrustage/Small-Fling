@@ -298,8 +298,7 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     """
     if img is None: return []
     h, w = img.shape[:2]
-    top_y = int(h * 0.10)
-    top_y = int(h * 0.08)
+    top_y = max(int(h * 0.12), 270)
     bot_y = int(h * 0.96)
     ocr = get_rapid_ocr()
     if ocr is None: return []
@@ -307,38 +306,33 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # Fast check: scan targeted gutter width scaled by norm_multiplier
-    candidates = []
-    sub_w1 = int(min(w, max(220, int(w * 0.15 * norm_multiplier))))
-    sub_w2 = int(min(w, max(420, int(w * 0.40 * norm_multiplier))))
-    for sub_w in [sub_w1, sub_w2]:
-        sub = img[top_y:bot_y, :sub_w]
-        try:
-            results, _ = ocr(sub)
-        except Exception as e:
-            print(f"[find_gutter_numbers_cluster] Error: {e}")
-            return []
-        if not results:
-            continue
+    sub_w = int(min(w, max(480, int(w * 0.45 * norm_multiplier))))
+    sub = img[top_y:bot_y, :sub_w]
+    try:
+        results, _ = ocr(sub)
+    except Exception as e:
+        print(f"[find_gutter_numbers_cluster] Error: {e}")
+        return []
 
-        candidates = []
-        for bbox, text, score in results:
-            clean = text.strip()
-            pts = np.array(bbox)
-            x_min = int(np.min(pts[:, 0]))
-            y_min = top_y + int(np.min(pts[:, 1]))
-            clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1')
-            if m := re.search(r'^(\d+)', clean_num):
-                try:
-                    num = int(m.group(1))
-                    if 0 < num < 500000:
-                        candidates.append((x_min, y_min, num))
-                except ValueError: pass
-        if candidates:
-            break
+    if not results: return []
+
+    candidates = []
+    for bbox, text, score in results:
+        clean = text.strip()
+        pts = np.array(bbox)
+        x_min = int(np.min(pts[:, 0]))
+        y_min = top_y + int(np.min(pts[:, 1]))
+        clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
+        clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num)
+        if m := re.search(r'^(\d+)', clean_num):
+            try:
+                num = int(m.group(1))
+                if 0 < num < 500000:
+                    candidates.append((x_min, y_min, num))
+            except ValueError: pass
 
     if not candidates: return []
-    
+
     # Cluster candidates by X-coordinate (scaled tolerance by DPI multiplier)
     x_tol = max(18, int(24.0 * norm_multiplier))
     clusters = {}
@@ -352,12 +346,23 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             matched_k = x
             clusters[matched_k] = []
         clusters[matched_k].append((y, num))
-    
-    best_gutter = []
+
+    # Score each cluster based on line count and monotonic ascending progression
+    scored_clusters = []
     for k, items in clusters.items():
-        if len(items) > len(best_gutter):
-            best_gutter = sorted(items, key=lambda it: it[0])
-    
+        sorted_items = sorted(items, key=lambda it: it[0])
+        asc_count = 0
+        for i in range(len(sorted_items) - 1):
+            dn = sorted_items[i+1][1] - sorted_items[i][1]
+            dy = sorted_items[i+1][0] - sorted_items[i][0]
+            if 0 < dn <= 10 and dy > 0:
+                asc_count += 1
+        score = len(sorted_items) + (asc_count * 3)
+        scored_clusters.append((score, sorted_items))
+
+    scored_clusters.sort(key=lambda x: x[0], reverse=True)
+    best_gutter = scored_clusters[0][1] if scored_clusters else []
+
     # Filter and correct gutter numbers using consensus sequence validation
     if best_gutter:
         best_gutter = correct_gutter_sequence(best_gutter)
@@ -369,6 +374,7 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
         elif valid and str(valid[-1][1])[:-2] + str(num) == str(valid[-1][1] + 1):
             valid.append((y_pos, valid[-1][1] + 1))
     return valid if valid else best_gutter
+
 
 def worker_detect_gutter_bounds(image_path: str, dpi_factor: float = 1.0) -> Tuple[int, int]:
     """Worker function to rapidly detect both top line and last line in a single OCR pass."""
@@ -576,32 +582,32 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         return t or 0, {"source": "fast_bounds", "bottom": b}
 
     gutter = correct_gutter_sequence(gutter)
-    # The editor text content begins below the toolbar (at 1080p, toolbar is at ~230-240px)
-    doc_top_y = max(180, int(235 * (h / 1080.0) * max(0.8, dpi_factor)))
+    # The editor text content begins below the toolbar (at 1080p, text rows begin around y=295-350px)
+    doc_top_y = max(260, int(295 * (h / 1080.0)))
 
     pitches = []
     for i in range(len(gutter) - 1):
         y_curr, n_curr = gutter[i]
         y_next, n_next = gutter[i+1]
         line_delta = n_next - n_curr
-        if line_delta == 1 and 10 <= (y_next - y_curr) <= 30:
+        if line_delta == 1 and 10 <= (y_next - y_curr) <= 35:
             pitches.append(float(y_next - y_curr))
-        elif line_delta > 1 and 10 <= (y_next - y_curr) <= 30 * line_delta:
+        elif line_delta > 1 and 10 <= (y_next - y_curr) <= 35 * line_delta:
             pitches.append(float(y_next - y_curr) / float(line_delta))
 
-    avg_pitch = float(np.median(pitches)) if pitches else max(12.0, 18.0 * (h / 1080.0) * dpi_factor)
+    avg_pitch = float(np.median(pitches)) if pitches else max(16.0, 26.0 * (h / 1080.0))
 
     y_first, ln_first = gutter[0]
-    # If the first gutter number is in the top-most editor line slot (y <= doc_top_y + 25), it IS the top line!
-    if y_first <= doc_top_y + 25:
+    y_dist_above = max(0, y_first - doc_top_y)
+    if ln_first == 1 or y_dist_above < avg_pitch * 0.5:
         missing_lines_above = 0
     else:
-        y_dist_above = max(0, y_first - doc_top_y)
         missing_lines_above = int(round(y_dist_above / avg_pitch))
 
     effective_top = max(1, ln_first - missing_lines_above)
     if target_top and abs(effective_top - target_top) <= 0:
         effective_top = target_top
+
 
     caret_info = None
     try:

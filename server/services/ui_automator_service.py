@@ -17,7 +17,8 @@ import numpy as np
 import config
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
-    capture_external_screenshot, ensure_adb_keyboard_closed, auto_fix_viewport
+    capture_external_screenshot, ensure_adb_keyboard_closed, auto_fix_viewport,
+    dismiss_keyboard
 )
 from ocr_engine import get_rapid_ocr
 
@@ -188,8 +189,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
 
                 if blue_cnt >= 20 and not is_split:
                     actions.append(f"Pencil icon already active (blue pill detected, {blue_cnt} px, single pane)")
-                    # Ensure keyboard remains suppressed on phone display
-                    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+                    # Ensure keyboard remains suppressed
+                    await dismiss_keyboard(ser, disp_id)
                     return {
                         "success": True,
                         "actions": actions,
@@ -228,8 +229,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")
     await asyncio.sleep(0.35)
 
-    # 5. CRITICAL: Suppress soft keyboard exclusively on primary phone screen (display 0)
-    await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+    # 5. CRITICAL: Suppress soft keyboard if opened upon gaining editor focus
+    await dismiss_keyboard(ser, disp_id)
     actions.append("Suppressed on-screen keyboard policy")
     await asyncio.sleep(0.3)
 
@@ -344,7 +345,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
         dx, dy = dark_mode_coords
         await run_adb_shell(f"input -d {disp_id} tap {dx} {dy}", ser)
         actions.append(f"Tapped 'Dark Mode' option at ({dx}, {dy}) on display {disp_id}")
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+        await dismiss_keyboard(ser, disp_id)
 
     # 8. Settle and verify screen luminance
     await asyncio.sleep(0.4)

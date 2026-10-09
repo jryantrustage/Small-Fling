@@ -250,10 +250,10 @@ def safe_step_down(
     if not ser:
         return False, "No ADB device connected"
 
-    # 1. Soft keyboard guard (suppress without pressing Back)
+    # 1. Soft keyboard guard (dismisses IME window if visible)
     ime_chk = run_adb("dumpsys input_method | grep -E 'mInputShown=true'", ser)
     if "mInputShown=true" in ime_chk:
-        run_adb("input -d 0 keyevent 111 >/dev/null 2>&1", ser)
+        run_adb("settings put secure show_ime_with_hard_keyboard 0; input keyevent 4 >/dev/null 2>&1", ser)
         time.sleep(0.15)
 
     # 2. Visual inspection

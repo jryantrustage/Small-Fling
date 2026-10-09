@@ -8,7 +8,7 @@ import numpy as np
 from .base import BaseClassifier, ClassifierContext, ClassificationResult, FixResult
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
-    is_ime_visible, ensure_adb_keyboard_closed, auto_fix_viewport, capture_external_screenshot,
+    is_ime_visible, dismiss_keyboard, ensure_adb_keyboard_closed, auto_fix_viewport, capture_external_screenshot,
     is_editor_full_screen
 )
 
@@ -392,19 +392,12 @@ class KeyboardOpenClassifier(BaseClassifier):
     async def fix(self, context: ClassifierContext) -> FixResult:
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.15)
-
-        still_open = await is_ime_visible(serial, force_check=True)
-        if still_open:
-            # Suppress exclusively on phone screen (display 0) to avoid closing desktop FilePreviewActivity
-            await run_adb_shell("input -d 0 keyevent 111 >/dev/null 2>&1", serial)
-            await asyncio.sleep(0.15)
-            still_open = await is_ime_visible(serial, force_check=True)
+        closed = await dismiss_keyboard(serial, disp_id)
+        still_open = not closed
 
         return FixResult(classifier_id=self.id, success=not still_open,
                          message="Keyboard closed successfully ✔" if not still_open else "Dispatched keyboard dismiss",
-                         actions_taken=["Enforced hardware keyboard policy & dismissed IME"],
+                         actions_taken=["Dismissed soft keyboard via system IME back handler & enforced hardware keyboard policy"],
                          metadata={"ime_still_visible": still_open})
 
 
@@ -749,8 +742,9 @@ class EditorCursorFocusedClassifier(BaseClassifier):
         except Exception:
             pass
 
-        # Dismiss on-screen keyboard policy cleanly without Back key or screen taps
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1", serial)
+        # Dismiss on-screen keyboard policy cleanly without disturbing foreground content
+        disp_id = context.display_id or await detect_external_display_id(serial)
+        await dismiss_keyboard(serial, disp_id)
         actions.append("Suppressed soft keyboard policy (show_ime_with_hard_keyboard=0)")
 
         return FixResult(
