@@ -29,6 +29,8 @@ def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
     return ipath
 
 def _doc_payload() -> Dict[str, Any]:
+    if not state.document_lines or not state.captured_frames:
+        state.load_persisted_state()
     sl = state.get_serialized_lines()
     issues = [item for item in sl if item.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
     return {
@@ -477,8 +479,12 @@ async def get_spliced_document_image():
 @router.get("/api/frames/page-report")
 @router.get("/api/document/page-report")
 async def get_page_report():
+    if not state.captured_frames:
+        state.load_persisted_state()
     pid = state.get_current_project_id()
     frames = db.get_frames(pid)
+    if not frames:
+        frames = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0), x.get("created_at", "")))
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     lines_report = [
@@ -538,8 +544,12 @@ async def get_page_report():
 
 @router.get("/api/document/verified-lines-report")
 async def get_verified_lines_report():
+    if not state.document_lines:
+        state.load_persisted_state()
     pid = state.get_current_project_id()
     frames = db.get_frames(pid)
+    if not frames:
+        frames = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0), x.get("created_at", "")))
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     doc_lines = state.document_lines

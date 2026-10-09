@@ -697,6 +697,19 @@ def load_persisted_state():
         if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
         if tel.get("token_stats"): token_stats.update(tel["token_stats"])
         if p.get("target_total_lines"): latest_telemetry["target_total_lines"] = p["target_total_lines"]
+
+        if not document_lines and DOCUMENT_FILE.exists():
+            try:
+                with open(DOCUMENT_FILE, "r", encoding="utf-8") as f:
+                    doc_data = json.load(f)
+                    for k, v in doc_data.get("lines", {}).items():
+                        document_lines[int(k)] = v
+                    if not captured_frames:
+                        captured_frames.update(doc_data.get("frames", {}))
+                    if doc_data.get("latest_telemetry"):
+                        latest_telemetry.update(doc_data["latest_telemetry"])
+            except Exception as ex:
+                print(f"Fallback loading DOCUMENT_FILE error: {ex}")
     except Exception as e:
         print(f"Error loading state from SQLite: {e}")
 

@@ -257,13 +257,15 @@ async def create_project(req: ProjectCreateRequest):
     state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
-    state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "extracted_line_count": 0})
-    state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
-    state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
+    state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "target_top_line": 1, "extracted_line_count": 0})
+    state.dag_state["nodes"]["arrow_down"].update({"status": "idle", "target_top_line": 1, "target_top": 1, "prev_bottom": 0, "arrow_count": 0})
+    state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False, "target_top_line": 1, "target_top": 1, "expected_top": 1})
+    state.orchestration_state["next_target_top"] = 1
+    state.orchestration_state["cursor_line"] = 1
     state.dag_state["current_active_group"] = "initialize"
     state.dag_state["current_active_node"] = "init_end"
     state.latest_telemetry["target_total_lines"] = target_lines
-    state.latest_telemetry["current_top_line"] = 0
+    state.latest_telemetry["current_top_line"] = 1
     state.latest_telemetry["current_bottom_line"] = 0
     state.latest_telemetry["phase"] = "INITIALIZING"
     state.latest_telemetry["status_message"] = f"Project created ({model.upper()}{' LOCKED' if lock_dev else ''} @ {target_dpi} DPI). Running DAG Group: Initialize..."

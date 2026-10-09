@@ -3,7 +3,7 @@ import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  ZoomIn, ZoomOut, Copy, Check, ListTree,
+  ZoomIn, ZoomOut, Check, ListTree, FileText,
   Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
@@ -22,6 +22,8 @@ import { LiveMetaInfoPopover } from './components/LiveMetaInfoPopover';
 import { LiveResponsiveViewport } from './components/LiveResponsiveViewport';
 import { useAgoTimer } from './hooks/useAgoTimer';
 import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
+import { CapturedFramesReportModal } from './components/frames/CapturedFramesReportModal';
+import { OcrDiagnosticsReportModal } from './components/ocr/OcrDiagnosticsReportModal';
 import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
 import { discernNodePerformance } from './utils/dagDiagnostics';
 
@@ -138,6 +140,8 @@ function AppContent() {
   const [editingLine, setEditingLine] = useState<LineData | null>(null);
   const [editText, setEditText] = useState('');
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [isFramesReportOpen, setIsFramesReportOpen] = useState(false);
+  const [isOcrReportOpen, setIsOcrReportOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'pipeline' | 'secrets' | 'security' | 'device'>('pipeline');
   const [deviceProfiles, setDeviceProfiles] = useState<DeviceProfile[]>([]);
   const [extractedSpecs, setExtractedSpecs] = useState<DeviceHardwareSpecs | null>(null);
@@ -255,8 +259,6 @@ function AppContent() {
   const [isBatchDeletingFrames, setIsBatchDeletingFrames] = useState(false);
   const [selectedLineNumbers, setSelectedLineNumbers] = useState<Set<number>>(new Set());
   const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
-  const [copyFeedback, setCopyFeedback] = useState(false);
-  const [copyVerifiedFeedback, setCopyVerifiedFeedback] = useState(false);
 
   // Auto-Fix & Calibrate States
   const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
@@ -1552,72 +1554,6 @@ function AppContent() {
   const sortedFrames = [...frames].sort((a, b) => (a.page_index || 0) - (b.page_index || 0) || (a.created_at || '').localeCompare(b.created_at || '') || (a.top_line || 0) - (b.top_line || 0));
   const activeFrame = frames.find(f => f.frame_id === selectedFrameId) || frames[0] || null;
 
-  const handleCopyPageReport = useCallback(async () => {
-    try {
-      const res = await api('/api/frames/page-report');
-      let reportText = '';
-      if (res.ok) {
-        reportText = await res.text();
-      } else {
-        const lines = [
-          '# Matrix Capture - Page Line Numbers & Coverage Report',
-          `Generated: ${new Date().toLocaleString()}`,
-          `Total Captured Frames: ${sortedFrames.length}`,
-          `Total Verified Lines: ${documentData.total_lines}`,
-          '',
-          '## Sequential Page Breakdown'
-        ];
-        const gaps: string[] = [];
-        sortedFrames.forEach((f, idx) => {
-          const prev = idx > 0 ? sortedFrames[idx - 1] : null;
-          const flags: string[] = [];
-          if (prev && prev.bottom_line > 0) {
-            if (f.top_line === prev.top_line && f.bottom_line === prev.bottom_line) {
-              flags.push('⚠️ DUPLICATE CAPTURE');
-            } else if (f.top_line > prev.bottom_line + 1) {
-              const gStart = prev.bottom_line + 1;
-              const gEnd = f.top_line - 1;
-              const gCount = gEnd - gStart + 1;
-              flags.push(`⚠️ GAP: Missing Ln ${gStart} → ${gEnd} (${gCount} lines)`);
-              gaps.push(`Gap between Pg ${prev.page_index} and Pg ${f.page_index}: Missing Ln ${gStart} → ${gEnd} (${gCount} lines)`);
-            } else if (f.top_line <= prev.bottom_line && f.top_line > 0) {
-              flags.push(`ℹ️ Overlap: Ln ${f.top_line} → ${prev.bottom_line} (${prev.bottom_line - f.top_line + 1} lines)`);
-            }
-          }
-          const flagStr = flags.length > 0 ? ` [${flags.join(' | ')}]` : '';
-          const span = f.bottom_line >= f.top_line && f.top_line > 0 ? f.bottom_line - f.top_line + 1 : 0;
-          lines.push(`- Page ${f.page_index}: Ln ${f.top_line} → ${f.bottom_line} (${span} lines)${flagStr}`);
-        });
-        lines.push('', '## Gaps Summary');
-        if (gaps.length === 0) {
-          lines.push('✔ No gaps detected between consecutive captured pages.');
-        } else {
-          gaps.forEach((g, i) => lines.push(`${i + 1}. ${g}`));
-        }
-        reportText = lines.join('\n');
-      }
-      await navigator.clipboard.writeText(reportText);
-      setCopyFeedback(true);
-      setTimeout(() => setCopyFeedback(false), 2500);
-    } catch (e) {
-      console.error('Failed to copy page report:', e);
-    }
-  }, [sortedFrames, documentData]);
-
-  const handleCopyVerifiedLinesReport = useCallback(async () => {
-    try {
-      const res = await api('/api/document/verified-lines-report');
-      if (res.ok) {
-        const reportText = await res.text();
-        await navigator.clipboard.writeText(reportText);
-        setCopyVerifiedFeedback(true);
-        setTimeout(() => setCopyVerifiedFeedback(false), 2500);
-      }
-    } catch (e) {
-      console.error('Failed to copy verified lines report:', e);
-    }
-  }, []);
-
   const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;
     if (searchQuery.trim()) {
@@ -1972,23 +1908,13 @@ function AppContent() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <button
                         type="button"
-                        className={`btn btn-sm ${copyFeedback ? 'btn-success' : 'btn-outline'}`}
-                        onClick={handleCopyPageReport}
-                        title="Copy page line numbers & gap coverage report to clipboard"
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                        className="btn btn-sm btn-outline"
+                        onClick={() => setIsFramesReportOpen(true)}
+                        title="Open Captured Frames & Viewport Coverage Report Modal"
+                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
                       >
-                        {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                        <span>{copyFeedback ? 'Copied' : 'Frames Report'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className={`btn btn-sm ${copyVerifiedFeedback ? 'btn-success' : 'btn-outline'}`}
-                        onClick={handleCopyVerifiedLinesReport}
-                        title="Copy OCR extraction & verified lines precision diagnostics to clipboard"
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
-                      >
-                        {copyVerifiedFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                        <span>{copyVerifiedFeedback ? 'Copied' : 'OCR Report'}</span>
+                        <Camera size={11} color="#00ff9d" />
+                        <span>Frames Report</span>
                       </button>
                       {frames.some(f => f.status.startsWith('error')) && (
                         <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
@@ -2477,23 +2403,13 @@ function AppContent() {
                         <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
                         <button
                           type="button"
-                          className={`btn btn-sm ${copyFeedback ? 'btn-success' : 'btn-outline'}`}
-                          onClick={handleCopyPageReport}
-                          title="Copy page line numbers & gap coverage report to clipboard"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
+                          className="btn btn-sm btn-outline"
+                          onClick={() => setIsOcrReportOpen(true)}
+                          title="Open OCR Verified Lines & Precision Diagnostics Report Modal"
+                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#58a6ff', borderColor: '#58a6ff55' }}
                         >
-                          {copyFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                          <span>{copyFeedback ? 'Copied' : 'Frames Report'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={`btn btn-sm ${copyVerifiedFeedback ? 'btn-success' : 'btn-outline'}`}
-                          onClick={handleCopyVerifiedLinesReport}
-                          title="Copy OCR extraction & verified lines precision diagnostics to clipboard"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px' }}
-                        >
-                          {copyVerifiedFeedback ? <Check size={11} color="#00ff9d" /> : <Copy size={11} />}
-                          <span>{copyVerifiedFeedback ? 'Copied' : 'OCR Report'}</span>
+                          <FileText size={11} color="#58a6ff" />
+                          <span>OCR Report</span>
                         </button>
                         <div className="window-controls">
                           <button
@@ -3871,6 +3787,20 @@ function AppContent() {
           )}
         />
       )}
+
+      <CapturedFramesReportModal
+        isOpen={isFramesReportOpen}
+        onClose={() => setIsFramesReportOpen(false)}
+        frames={frames}
+        totalVerifiedLines={documentData.total_lines}
+      />
+
+      <OcrDiagnosticsReportModal
+        isOpen={isOcrReportOpen}
+        onClose={() => setIsOcrReportOpen(false)}
+        documentData={documentData}
+        frames={frames}
+      />
     </div>
   );
 }

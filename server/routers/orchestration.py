@@ -1528,6 +1528,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             })
             state.orchestration_state["cursor_line"] = 1
             state.orchestration_state["cursor_focused"] = True
+            state.orchestration_state["next_target_top"] = 1
+            state.dag_state["nodes"].setdefault("frame_ocr", {})
+            state.dag_state["nodes"]["frame_ocr"].update({"top_line": 1, "target_top_line": 1})
+            if "arrow_down" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["arrow_down"].update({"target_top_line": 1, "target_top": 1, "prev_bottom": 0})
+            if "verification_trigger" in state.dag_state["nodes"]:
+                state.dag_state["nodes"]["verification_trigger"].update({"target_top_line": 1, "target_top": 1, "expected_top": 1})
             state.latest_telemetry["current_top_line"] = detected_first or 1
             state.latest_telemetry["status_message"] = f"DAG Node 2: Line 1 verified at top (cursor focused on Ln 1)"
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "reset_home", "verified": True, "first_line": detected_first, "cursor_line": 1, "telemetry": state.latest_telemetry})
@@ -1928,12 +1935,24 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             lpp = prof.get("lines_per_page", 31)
 
             disp_id = await detect_external_display_id(active_serial)
-            expected_top = node.get("target_top_line") or state.dag_state["nodes"].get("arrow_down", {}).get("target_top_line") or state.orchestration_state.get("next_target_top")
+            pidx = len(state.captured_frames) + 1
+
+            # CRITICAL: Page 1 must ALWAYS start at Line 1. It must never inherit stale calibrations from previous projects or EOF checks.
+            if pidx == 1 or len(state.captured_frames) == 0:
+                expected_top = 1
+            else:
+                sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or ""))
+                last_bot = sorted_f[-1].get("bottom_line", 0) if sorted_f else 0
+                expected_top = (last_bot + 1) if last_bot > 0 else (node.get("target_top_line") or 1)
 
             if is_fast:
                 t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
-                top_ln = t_det if t_det > 0 else (expected_top or state.latest_telemetry.get("current_top_line", 1) or 1)
-                top_ln, bot_ln = _resolve_viewport_bounds(top_ln, b_det if b_det > 0 else 0, lpp)
+                if pidx == 1:
+                    top_ln = 1
+                    bot_ln = b_det if (b_det and b_det > 1) else lpp
+                else:
+                    top_ln = t_det if t_det > 0 else expected_top
+                    top_ln, bot_ln = _resolve_viewport_bounds(top_ln, b_det if b_det > 0 else 0, lpp)
                 lines_detected = [
                     {
                         "line_number": ln,
@@ -1957,7 +1976,12 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     node_id="frame_ocr",
                     expected_top=expected_top
                 )
-                top_ln, bot_ln = _resolve_viewport_bounds(top_ln, bot_ln, lpp)
+                if pidx == 1:
+                    top_ln = 1
+                    if bot_ln <= top_ln or bot_ln > 80:
+                        bot_ln = lpp
+                else:
+                    top_ln, bot_ln = _resolve_viewport_bounds(top_ln, bot_ln, lpp)
                 if heal_meta.get("actions_taken"):
                     healing_ms += 150 * len(heal_meta["actions_taken"])
                 # Re-read snap bytes in case image was refreshed
