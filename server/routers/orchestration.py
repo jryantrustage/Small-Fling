@@ -874,9 +874,30 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
 
     # Check lock constraint
     if proj_locked and target_model and not is_mock:
-        # Match by serial or model signature
-        matches_serial = bool(target_serial and target_serial in active_serial_str)
-        matches_model = (target_model in active_model or active_model in target_model)
+        def _norm_sig(s: Optional[str]) -> str:
+            return re.sub(r'[^a-z0-9]', '', (s or "").lower())
+
+        norm_target_model = _norm_sig(target_model)
+        norm_target_name = _norm_sig(target_name)
+        norm_active_model = _norm_sig(active_model)
+        norm_hw_model = _norm_sig(hw_specs.get("model", ""))
+        norm_product = _norm_sig(hw_specs.get("product_name", ""))
+
+        matches_serial = bool(target_serial and (target_serial in active_serial_str or active_serial_str in target_serial))
+        if not matches_serial and target_serial and active_serial_str:
+            ser_tokens_target = set(re.findall(r'[A-Za-z0-9]{8,}', target_serial))
+            ser_tokens_active = set(re.findall(r'[A-Za-z0-9]{8,}', active_serial_str))
+            if ser_tokens_target and ser_tokens_active and (ser_tokens_target & ser_tokens_active):
+                matches_serial = True
+
+        matches_model = bool(
+            (norm_target_model and (norm_target_model in norm_active_model or norm_active_model in norm_target_model)) or
+            (norm_target_name and (norm_target_name in norm_active_model or norm_active_model in norm_target_name)) or
+            (norm_target_model and norm_hw_model and (norm_target_model in norm_hw_model or norm_hw_model in norm_target_model)) or
+            (norm_target_name and norm_hw_model and (norm_target_name in norm_hw_model or norm_hw_model in norm_target_name)) or
+            (norm_product and (norm_product in norm_target_model or norm_product in norm_target_name))
+        )
+
         if not (matches_serial or matches_model):
             # Attempt auto-switching if alternate target device is cached/available
             attempted = await connect_device_for_model(target_model)
@@ -886,9 +907,43 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
                 active_serial = await get_active_adb_serial(attempted, force_refresh=True)
                 hw_specs = await extract_device_hardware_specs(active_serial)
                 active_model = (hw_specs.get("model") or "unknown").strip().lower()
-                matches_model = (target_model in active_model or active_model in target_model)
+                norm_active_model = _norm_sig(active_model)
+                norm_hw_model = _norm_sig(hw_specs.get("model", ""))
+                matches_model = bool(
+                    (norm_target_model and (norm_target_model in norm_active_model or norm_active_model in norm_target_model)) or
+                    (norm_target_name and (norm_target_name in norm_active_model or norm_active_model in norm_target_name)) or
+                    (norm_target_model and norm_hw_model and (norm_target_model in norm_hw_model or norm_hw_model in norm_target_model)) or
+                    (norm_target_name and norm_hw_model and (norm_target_name in norm_hw_model or norm_hw_model in norm_target_name))
+                )
+
+        if matches_model and not matches_serial and active_serial_str and pid:
+            # Model is identical (e.g. Pixel 8 Pro), but connection changed (e.g. Wi-Fi ADB port change or mDNS TLS re-pairing)
+            try:
+                db.update_project_device_settings(pid, device_serial=active_serial_str)
+                target_serial = active_serial_str
+                matches_serial = True
+            except Exception:
+                pass
 
         if not (matches_serial or matches_model):
+            cur_res = f"{hw_specs.get('display_width', disp_width)}x{hw_specs.get('display_height', display_height)}"
+            proj_res = f"{disp_width}x{display_height}"
+            cur_dpi = hw_specs.get('active_dpi', target_dpi)
+            cur_lpp = hw_specs.get('lines_per_page', lpp)
+            cur_did = hw_specs.get('display_id', disp_id)
+
+            reasons = []
+            if norm_target_name != norm_active_model and norm_target_model not in norm_active_model:
+                reasons.append(f"Model mismatch: Project is locked to '{target_name or target_model}', attached hardware is '{hw_specs.get('model', active_model)}'")
+            if target_serial and target_serial != active_serial_str:
+                reasons.append(f"Serial address mismatch: Project locked to '{target_serial}', current connection is '{active_serial_str}'")
+            if cur_res != proj_res:
+                reasons.append(f"Resolution mismatch: Project requires {proj_res}, active display is {cur_res}")
+            if cur_dpi != target_dpi:
+                reasons.append(f"DPI mismatch: Project requires {target_dpi} DPI, active display is {cur_dpi} DPI")
+            if cur_lpp != lpp:
+                reasons.append(f"Lines-per-page capacity mismatch: Project expected {lpp} LPP, current display renders {cur_lpp} LPP")
+
             err_msg = (
                 f"Device Lock Violation: Project '{proj.get('name', 'Active')}' is strictly locked to "
                 f"{target_name or target_model.upper()} (Resolution: {disp_width}x{display_height}, "
@@ -899,11 +954,38 @@ async def resolve_and_enforce_dag_device_environment(project_id: Optional[str] =
             return {
                 "status": "error",
                 "locked": True,
+                "error_type": "device_lock_violation",
                 "error": err_msg,
                 "message": err_msg,
                 "required_model": target_model,
                 "active_model": active_model,
-                "active_serial": active_serial_str
+                "active_serial": active_serial_str,
+                "project_id": pid,
+                "mismatch_details": {
+                    "project_specs": {
+                        "project_name": proj.get("name", "Active"),
+                        "model": target_name or target_model,
+                        "serial": target_serial,
+                        "resolution": proj_res,
+                        "target_dpi": target_dpi,
+                        "display_id": disp_id,
+                        "lines_per_page": lpp
+                    },
+                    "current_hardware_specs": {
+                        "model": hw_specs.get("model", active_model),
+                        "serial": active_serial_str,
+                        "resolution": cur_res,
+                        "active_dpi": cur_dpi,
+                        "display_id": cur_did,
+                        "lines_per_page": cur_lpp
+                    },
+                    "reasons": reasons,
+                    "factors": [
+                        "Wireless ADB assigned a new mDNS TLS socket or IP port upon reconnection.",
+                        "Display ID, resolution, or DPI changed when the external monitor slept or reconnected (Display 0 vs Display 3).",
+                        "Device profile identifier compared raw keys with underscores ('pixel_8') rather than formatted hardware names ('Pixel 8 Pro')."
+                    ]
+                }
             }
 
     # Enforce characteristics on active hardware
@@ -2866,13 +2948,13 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
     })
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
-        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "idle"
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"], "status": "idle"
     })
     position_group = state.dag_state["groups"].setdefault("position_navigation", {
         "id": "position_navigation", "title": "Line Positioning & Navigation",
-        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
-        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+        "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
+        "nodes": ["frame_ocr", "arrow_down"], "status": "idle"
     })
 
     try:
@@ -3137,13 +3219,13 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
 
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
         "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
-        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "active"
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"], "status": "active"
     })
     position_group = state.dag_state["groups"].setdefault("position_navigation", {
         "id": "position_navigation", "title": "Line Positioning & Navigation",
-        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
-        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+        "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
+        "nodes": ["frame_ocr", "arrow_down"], "status": "idle"
     })
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
@@ -3343,6 +3425,12 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
         return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
+    position_group["status"] = "completed"
+
+    # --- DAG GROUP 2 CONTINUATION: VERIFY & ASSEMBLE (Nodes 7 & 8) ---
+    capture_group["status"] = "active"
+    state.dag_state["current_active_group"] = "capture_entire_markdown"
+
     # Node 7: verification_trigger (Settle Assertion & Qualifier Verification)
     n7_t0 = time.perf_counter()
     n7_start_ms = int(time.time() * 1000)
@@ -3369,15 +3457,9 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         or n7_res.get("prevented", False)
     ):
         st = n7_res.get("status", "prevented")
-        position_group["status"] = st
+        capture_group["status"] = st
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "group": "position_navigation", "node_id": "verification_trigger", "result": n7_res}
-
-    position_group["status"] = "completed"
-
-    # --- DAG GROUP 2 CONTINUATION: DOCUMENT ASSEMBLE (Node 8) ---
-    capture_group["status"] = "active"
-    state.dag_state["current_active_group"] = "capture_entire_markdown"
+        return {"status": st, "group": "capture_entire_markdown", "node_id": "verification_trigger", "result": n7_res}
 
     n8_t0 = time.perf_counter()
     n8_start_ms = int(time.time() * 1000)
@@ -3594,8 +3676,8 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
 
     position_group = state.dag_state["groups"].setdefault("position_navigation", {
         "id": "position_navigation", "title": "Line Positioning & Navigation",
-        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
-        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
+        "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
+        "nodes": ["frame_ocr", "arrow_down"], "status": "active"
     })
     position_group["status"] = "active"
     state.dag_state["current_active_group"] = "position_navigation"
@@ -3605,7 +3687,7 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
 
     await emit_dag_telemetry_event(
         category="SYSTEM",
-        message="Running DAG 3: Line Positioning & Navigation (Nodes 5 → 6 → 7 in isolation)...",
+        message="Running DAG 3: Line Positioning & Navigation (Nodes 5 → 6 in isolation)...",
         dag="position_navigation",
         serial=active_serial
     )
@@ -3636,22 +3718,11 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         state.latest_telemetry["status_message"] = f"DAG 3 halted: {err_msg}"
         return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
-    # Node 7: verification_trigger
-    n7_res = await run_single_dag_node("verification_trigger", opts)
-    if (
-        n7_res.get("status") in ("error", "prevented")
-        or not n7_res.get("allowed", True)
-        or n7_res.get("prevented", False)
-    ):
-        st = n7_res.get("status", "prevented")
-        position_group["status"] = st
-        return {"status": st, "group": "position_navigation", "node_id": "verification_trigger", "result": n7_res}
-
     position_group["status"] = "completed"
     tgt_t = opts.get("target_top", bot_ln + 1)
     await emit_dag_telemetry_event(
         category="SYSTEM",
-        message=f"DAG 3 complete ✔ Target Top Line {tgt_t} positioned and verified on external display.",
+        message=f"DAG 3 complete ✔ Target Top Line {tgt_t} positioned via DownArrow stepping.",
         dag="position_navigation",
         level="success",
         serial=active_serial
@@ -3662,7 +3733,6 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         "group": "position_navigation",
         "node5": n5_res,
         "node6": n6_res,
-        "node7": n7_res,
         "target_top": tgt_t
     }
 

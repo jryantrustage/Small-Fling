@@ -181,7 +181,7 @@ export const NODES_METADATA: NodeMeta[] = [
     fullName: '7. VERIFY & TRIGGER',
     subhead: 'Settle Timing & Qualifiers',
     desc: 'Verifies top line is settled and evaluates qualifiers before advancing the capture loop.',
-    group: 'position_navigation',
+    group: 'capture_entire_markdown',
     accentColor: '#58a6ff',
     hasConfig: true
   },

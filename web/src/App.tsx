@@ -289,9 +289,9 @@ function AppContent() {
       const msg = message.toLowerCase();
       if (msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') || msg.includes('ctrl+home') || msg.includes('workspace')) {
         inferredDag = 'initialize';
-      } else if (msg.includes('node 5') || msg.includes('node 6') || msg.includes('node 7') || msg.includes('position') || msg.includes('gutter ocr') || msg.includes('arrow_down') || msg.includes('semaphore')) {
+      } else if (msg.includes('node 5') || msg.includes('node 6') || msg.includes('position') || msg.includes('gutter ocr') || msg.includes('arrow_down') || msg.includes('semaphore')) {
         inferredDag = 'position_navigation';
-      } else if (category === 'FRAME' || category === 'PACER' || msg.includes('frame') || msg.includes('capture') || msg.includes('ocr')) {
+      } else if (category === 'FRAME' || category === 'PACER' || msg.includes('frame') || msg.includes('capture') || msg.includes('ocr') || msg.includes('node 7') || msg.includes('verification')) {
         inferredDag = 'capture_entire_markdown';
       } else {
         inferredDag = 'system';

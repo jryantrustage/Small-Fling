@@ -15,6 +15,7 @@ from services.adb_service import (
     auto_fix_viewport,
     get_device_info,
     DEVICE_PROFILES,
+    extract_device_hardware_specs,
 )
 
 try:
@@ -251,14 +252,15 @@ async def create_project(req: ProjectCreateRequest):
     }
     state.dag_state["groups"]["capture_entire_markdown"] = {
         "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
-        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "idle"
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"], "status": "idle"
     }
     state.dag_state["groups"]["position_navigation"] = {
         "id": "position_navigation", "title": "Line Positioning & Navigation",
-        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
-        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+        "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
+        "nodes": ["frame_ocr", "arrow_down"], "status": "idle"
     }
+    state.dag_state["nodes"]["verification_trigger"]["group"] = "capture_entire_markdown"
     state.dag_state["semaphore_group2_to_3"] = True
     state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
@@ -363,6 +365,45 @@ async def toggle_project_lock_api(project_id: str, payload: Optional[Dict[str, A
     updated = db.get_project(project_id)
     await state.ws_manager.broadcast({"type": "project_updated", "project": updated})
     return {"status": "success", "locked": bool(updated.get("lock_device", 0)), "project": updated}
+
+@router.post("/api/projects/{project_id}/sync-device")
+async def sync_project_device_hardware(project_id: str):
+    """
+    Synchronizes the project's locked device specifications (serial, display ID, resolution, DPI, LPP)
+    with the currently attached hardware. Prevents needing to delete the project when ADB reconnects
+    or when switching between display modes.
+    """
+    proj = db.get_project(project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    serial = await get_active_adb_serial()
+    specs = await extract_device_hardware_specs(serial)
+
+    db.update_project_device_settings(
+        project_id,
+        device_model=specs.get("model", proj.get("device_model", "pixel_8")),
+        device_name=specs.get("model", proj.get("device_name", "Android Device")),
+        device_serial=specs.get("serial") or serial or proj.get("device_serial", ""),
+        target_dpi=specs.get("active_dpi", proj.get("target_dpi", 220)),
+        display_width=specs.get("display_width", proj.get("display_width", 1920)),
+        display_height=specs.get("display_height", proj.get("display_height", 1080)),
+        display_id=specs.get("display_id", proj.get("display_id", 0)),
+        lines_per_page=specs.get("lines_per_page", proj.get("lines_per_page", 24)),
+        step_size=specs.get("step_size", proj.get("step_size", 28)),
+        scroll_padding_lines=specs.get("scroll_padding_lines", proj.get("scroll_padding_lines", 4)),
+        arrow_count_init=specs.get("arrow_count_init", proj.get("arrow_count_init", 28)),
+        arrow_count_step=specs.get("arrow_count_step", proj.get("arrow_count_step", 28)),
+        settle_delay_ms=specs.get("settle_delay_ms", proj.get("settle_delay_ms", 50)),
+        hid_config_json=json.dumps(specs.get("hid_config", {}))
+    )
+    updated = db.get_project(project_id)
+    await state.ws_manager.broadcast({"type": "project_updated", "project": updated})
+    return {
+        "status": "success",
+        "message": f"Project '{proj.get('name')}' successfully synchronized to current hardware {specs.get('model')}.",
+        "project": updated
+    }
 
 async def extract_request_image(request: Request) -> Optional[bytes]:
     ct = request.headers.get("content-type", "")

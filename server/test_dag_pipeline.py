@@ -98,9 +98,9 @@ def test_dag_group_segmentation_and_runner():
         assert "initialize" in dag_data["groups"]
         assert "capture_entire_markdown" in dag_data["groups"]
         assert "position_navigation" in dag_data["groups"]
-        for req_node in ["frame_acquire", "local_ai_ocr", "document_assemble"]:
+        for req_node in ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"]:
             assert req_node in dag_data["groups"]["capture_entire_markdown"]["nodes"]
-        for req_node in ["frame_ocr", "arrow_down", "verification_trigger"]:
+        for req_node in ["frame_ocr", "arrow_down"]:
             assert req_node in dag_data["groups"]["position_navigation"]["nodes"]
         assert len(dag_data["nodes"]) >= 6
         assert "frame_acquire" in dag_data["nodes"]

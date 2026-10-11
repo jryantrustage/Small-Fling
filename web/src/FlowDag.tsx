@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
-  Maximize2, Minimize2, Square, Minus, Activity, Lock, Sliders
+  Maximize2, Minimize2, Square, Minus, Activity, Lock, Sliders,
+  ShieldAlert, Unlock, Info
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -106,7 +107,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
   const [configFeedback, setConfigFeedback] = useState<string | null>(null);
-  const [nodeFeedback, setNodeFeedback] = useState<{ id: string; message: string; isError?: boolean } | null>(null);
+  const [nodeFeedback, setNodeFeedback] = useState<{
+    id: string;
+    message: string;
+    isError?: boolean;
+    isLockViolation?: boolean;
+    mismatchDetails?: any;
+  } | null>(null);
+  const [showMismatchDetails, setShowMismatchDetails] = useState<boolean>(false);
+  const [isSyncingDevice, setIsSyncingDevice] = useState<boolean>(false);
+  const [isUnlockingDevice, setIsUnlockingDevice] = useState<boolean>(false);
   const [copiedNodeId, setCopiedNodeId] = useState<string | null>(null);
 
   const [isLoopRunning, setIsLoopRunning] = useState<boolean>(false);
@@ -205,14 +215,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isPositionGroupRunning = Boolean(
     runningGroupId === 'position_navigation' ||
     positionGroup.status === 'active' ||
-    (activeRunningId !== null && ['frame_ocr', 'arrow_down', 'verification_trigger'].includes(activeRunningId))
+    (activeRunningId !== null && ['frame_ocr', 'arrow_down'].includes(activeRunningId))
   );
 
   const isCaptureGroupRunning = Boolean(
     runningGroupId === 'capture_entire_markdown' ||
     captureGroup.status === 'active' ||
     isLoopRunning ||
-    (activeRunningId !== null && ['frame_acquire', 'local_ai_ocr', 'document_assemble'].includes(activeRunningId))
+    (activeRunningId !== null && ['frame_acquire', 'local_ai_ocr', 'verification_trigger', 'document_assemble'].includes(activeRunningId))
   );
 
   const isSemaphoreOpen = Boolean(dagStatus.dag?.semaphore_group2_to_3 ?? true);
@@ -259,6 +269,60 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   };
 
   // Actions
+  const handleSyncDevice = async () => {
+    const targetPid = activeProjectId || activeProject?.id;
+    if (!targetPid) return;
+    setIsSyncingDevice(true);
+    try {
+      const res = await fetch(`${apiBase}/api/projects/${targetPid}/sync-device`, { method: 'POST' });
+      const { data } = await parseApiResponse(res);
+      setNodeFeedback({
+        id: 'sync_device',
+        message: data?.message || 'Project hardware specifications successfully synchronized to connected device! ✔',
+        isError: false
+      });
+      setShowMismatchDetails(false);
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({
+        id: 'sync_device',
+        message: `Failed to synchronize hardware: ${err.message}`,
+        isError: true
+      });
+    } finally {
+      setIsSyncingDevice(false);
+    }
+  };
+
+  const handleUnlockDevice = async () => {
+    const targetPid = activeProjectId || activeProject?.id;
+    if (!targetPid) return;
+    setIsUnlockingDevice(true);
+    try {
+      const res = await fetch(`${apiBase}/api/projects/${targetPid}/lock-device`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lock_device: false })
+      });
+      const { data } = await parseApiResponse(res);
+      setNodeFeedback({
+        id: 'unlock_device',
+        message: data?.message || 'Project unlocked. DAG execution will now adapt dynamically to any connected hardware! ✔',
+        isError: false
+      });
+      setShowMismatchDetails(false);
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({
+        id: 'unlock_device',
+        message: `Failed to unlock project: ${err.message}`,
+        isError: true
+      });
+    } finally {
+      setIsUnlockingDevice(false);
+    }
+  };
+
   const handleRunNode = async (nodeId: string) => {
     setRunningNodeId(nodeId);
     setNodeFeedback(null);
@@ -271,9 +335,25 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       const { ok, status, data, text } = await parseApiResponse(res);
       if (!ok) {
         const errorMsg = data?.detail?.message || data?.detail || data?.message || data?.error || (typeof text === 'string' && text ? text : `Failed to run ${nodeId} (HTTP ${status})`);
-        throw new Error(errorMsg);
+        const isLock = Boolean(data?.locked || errorMsg.includes('Device Lock'));
+        setNodeFeedback({
+          id: nodeId,
+          message: errorMsg,
+          isError: true,
+          isLockViolation: isLock,
+          mismatchDetails: data?.mismatch_details
+        });
+        return;
       }
-      setNodeFeedback({ id: nodeId, message: data.message || `Node ${nodeId} ran successfully ✔`, isError: data.status === 'warning' || data.status === 'error' });
+      const isErr = data.status === 'warning' || data.status === 'error';
+      const isLock = Boolean(data?.locked || (data?.message && data.message.includes('Device Lock')));
+      setNodeFeedback({
+        id: nodeId,
+        message: data.message || `Node ${nodeId} ran successfully ✔`,
+        isError: isErr,
+        isLockViolation: isLock,
+        mismatchDetails: data?.mismatch_details
+      });
       onRefresh?.();
     } catch (err: any) {
       setNodeFeedback({ id: nodeId, message: `Node execution error: ${err.message}`, isError: true });
@@ -307,16 +387,27 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       const { ok, status, data, text } = await parseApiResponse(res);
       if (!ok) {
         const errorMsg = data?.detail?.message || data?.detail || data?.message || data?.error || (typeof text === 'string' && text ? text : `Failed to run DAG group ${groupId} (HTTP ${status})`);
-        throw new Error(errorMsg);
+        const isLock = Boolean(data?.locked || errorMsg.includes('Device Lock'));
+        setNodeFeedback({
+          id: groupId,
+          message: errorMsg,
+          isError: true,
+          isLockViolation: isLock,
+          mismatchDetails: data?.mismatch_details
+        });
+        return;
       }
       const isErr = data.status === 'error' || data.status === 'warning';
       const msg = isErr
         ? (data.message || data.error || data.detail || 'Execution failed')
         : (data.status === 'success' ? `DAG Group executed successfully ✔` : (data.error || data.message || 'Execution completed'));
+      const isLock = Boolean(data?.locked || msg.includes('Device Lock'));
       setNodeFeedback({
         id: groupId,
         message: msg,
-        isError: isErr
+        isError: isErr,
+        isLockViolation: isLock,
+        mismatchDetails: data?.mismatch_details
       });
       onRefresh?.();
     } catch (err: any) {
@@ -733,20 +824,140 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {/* Action feedback bar */}
         {nodeFeedback && (
           <div style={{
-            fontSize: '9.5px', fontWeight: 700, padding: '3px 8px', borderRadius: '4px',
-            background: nodeFeedback.isError ? 'rgba(248,81,73,0.18)' : 'rgba(0,255,157,0.15)',
-            border: `1px solid ${nodeFeedback.isError ? '#f85149' : '#00ff9d'}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            fontSize: '9.5px',
+            fontWeight: 700,
+            padding: '4px 8px',
+            borderRadius: '6px',
+            background: nodeFeedback.isError
+              ? (nodeFeedback.isLockViolation ? 'rgba(218, 54, 51, 0.18)' : 'rgba(248,81,73,0.18)')
+              : 'rgba(0,255,157,0.15)',
+            border: `1px solid ${nodeFeedback.isError ? (nodeFeedback.isLockViolation ? '#f85149' : '#f85149') : '#00ff9d'}`,
             color: nodeFeedback.isError ? '#ff7b72' : '#00ff9d',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            transition: 'all 0.2s ease'
           }}>
-            <span>{nodeFeedback.message}</span>
-            <button
-              type="button"
-              onClick={() => setNodeFeedback(null)}
-              style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
-            >
-              <X size={11} />
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: 0 }}>
+                {nodeFeedback.isLockViolation && <ShieldAlert size={13} color="#f85149" style={{ flexShrink: 0 }} />}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: showMismatchDetails ? 'normal' : 'nowrap' }}>
+                  {nodeFeedback.message}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                {nodeFeedback.isLockViolation && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleSyncDevice}
+                      disabled={isSyncingDevice}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                        background: 'rgba(56, 139, 253, 0.25)', border: '1px solid #388bfd',
+                        borderRadius: '4px', color: '#58a6ff', fontSize: '9px', fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                      title="Sync project settings to current connected hardware (updates serial, display ID, DPI)"
+                    >
+                      {isSyncingDevice ? <RefreshCw size={9} className="spin" /> : <RefreshCw size={9} />}
+                      <span>Sync to Current Device</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUnlockDevice}
+                      disabled={isUnlockingDevice}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                        background: 'rgba(210, 153, 34, 0.2)', border: '1px solid #d29922',
+                        borderRadius: '4px', color: '#e3b341', fontSize: '9px', fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                      title="Unlock project to allow dynamic execution across any connected device"
+                    >
+                      {isUnlockingDevice ? <RefreshCw size={9} className="spin" /> : <Unlock size={9} />}
+                      <span>Unlock (Dynamic)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowMismatchDetails(prev => !prev)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                        background: 'rgba(139, 148, 158, 0.15)', border: '1px solid #30363d',
+                        borderRadius: '4px', color: '#c9d1d9', fontSize: '9px', fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Info size={9} />
+                      <span>{showMismatchDetails ? 'Hide Details ▲' : 'Mismatch Details ▼'}</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setNodeFeedback(null); setShowMismatchDetails(false); }}
+                  style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', padding: 0 }}
+                  title="Dismiss notification"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+
+            {/* Collapsible Mismatch Breakdown Matrix */}
+            {nodeFeedback.isLockViolation && showMismatchDetails && (
+              <div style={{
+                marginTop: '4px',
+                padding: '6px 8px',
+                borderRadius: '5px',
+                background: 'rgba(13, 17, 23, 0.95)',
+                border: '1px solid #30363d',
+                color: '#c9d1d9',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '5px'
+              }}>
+                <div style={{ fontSize: '9px', fontWeight: 800, color: '#f85149', letterSpacing: '0.4px' }}>
+                  HARDWARE & CONNECTION COMPARISON MATRIX
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr', gap: '4px', fontSize: '8.5px', fontFamily: 'var(--font-mono)' }}>
+                  <span style={{ color: '#8b949e', fontWeight: 700 }}>SPECIFICATION</span>
+                  <span style={{ color: '#58a6ff', fontWeight: 700 }}>PROJECT LOCKED</span>
+                  <span style={{ color: '#00ff9d', fontWeight: 700 }}>ATTACHED HARDWARE</span>
+
+                  <span style={{ color: '#8b949e' }}>Device Model:</span>
+                  <span>{nodeFeedback.mismatchDetails?.project_specs?.model || activeProject?.device_name || activeProject?.device_model || 'Pixel 8 Pro'}</span>
+                  <span style={{ color: '#00ff9d' }}>{nodeFeedback.mismatchDetails?.current_hardware_specs?.model || 'Pixel 8 Pro'}</span>
+
+                  <span style={{ color: '#8b949e' }}>Connection / Serial:</span>
+                  <span style={{ wordBreak: 'break-all' }}>{nodeFeedback.mismatchDetails?.project_specs?.serial || activeProject?.device_serial || 'Unknown'}</span>
+                  <span style={{ wordBreak: 'break-all', color: '#00ff9d' }}>{nodeFeedback.mismatchDetails?.current_hardware_specs?.serial || activeDeviceSerial || 'Current Socket'}</span>
+
+                  <span style={{ color: '#8b949e' }}>Display Resolution:</span>
+                  <span>{nodeFeedback.mismatchDetails?.project_specs?.resolution || `${activeProject?.display_width || 1920}x${activeProject?.display_height || 1080}`}</span>
+                  <span>{nodeFeedback.mismatchDetails?.current_hardware_specs?.resolution || '1920x1080'}</span>
+
+                  <span style={{ color: '#8b949e' }}>Target / Active DPI:</span>
+                  <span>{nodeFeedback.mismatchDetails?.project_specs?.target_dpi || activeProject?.target_dpi || 220} DPI</span>
+                  <span>{nodeFeedback.mismatchDetails?.current_hardware_specs?.active_dpi || 220} DPI</span>
+
+                  <span style={{ color: '#8b949e' }}>Display ID:</span>
+                  <span>Display #{nodeFeedback.mismatchDetails?.project_specs?.display_id ?? activeProject?.display_id ?? 0}</span>
+                  <span>Display #{nodeFeedback.mismatchDetails?.current_hardware_specs?.display_id ?? 3}</span>
+
+                  <span style={{ color: '#8b949e' }}>Lines Per Page:</span>
+                  <span>{nodeFeedback.mismatchDetails?.project_specs?.lines_per_page || activeProject?.lines_per_page || 49} LPP</span>
+                  <span>{nodeFeedback.mismatchDetails?.current_hardware_specs?.lines_per_page || 49} LPP</span>
+                </div>
+
+                <div style={{ marginTop: '4px', borderTop: '1px solid #21262d', paddingTop: '4px', fontSize: '8px', color: '#8b949e' }}>
+                  <div style={{ fontWeight: 700, color: '#e3b341', marginBottom: '2px' }}>Why did this occur?</div>
+                  <div>• <strong>Socket Reconnect:</strong> Wireless ADB assigns a new ephemeral port or mDNS TLS endpoint on reconnection.</div>
+                  <div>• <strong>Display Mode:</strong> External monitors assign Display ID (e.g. 3) vs phone screen (Display 0, 480 DPI).</div>
+                  <div>• <strong>Resolution:</strong> Click <strong>Sync to Current Device</strong> above to instantly adopt active specs without deleting the project.</div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -955,9 +1166,30 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 <>
                   <MicroConnectingArrow
                     fromNode={NODES_METADATA[3]}
+                    toNode={NODES_METADATA[6]}
+                    width={14}
+                    isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[3].id || activeRunningId === NODES_METADATA[6].id}
+                    isHeat={isCaptureGroupRunning}
+                  />
+                  <DagNodeCard
+                    node={NODES_METADATA[6]}
+                    status={getNodeLiveStatus(NODES_METADATA[6].id)}
+                    isSelected={activeSelectedNodeId === NODES_METADATA[6].id}
+                    isPinned={pinnedHoverNodeId === NODES_METADATA[6].id}
+                    isPulsingSwirl={activeRunningId === NODES_METADATA[6].id}
+                    copiedNodeId={copiedNodeId}
+                    onSelect={() => handleSelectNode(NODES_METADATA[6].id)}
+                    onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[6].id ? null : NODES_METADATA[6].id)}
+                    onMouseEnter={() => setHoveredNodeId(NODES_METADATA[6].id)}
+                    onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[6].id ? null : prev)}
+                    onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[6].id)}
+                    onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[6].id)}
+                  />
+                  <MicroConnectingArrow
+                    fromNode={NODES_METADATA[6]}
                     toNode={NODES_METADATA[7]}
                     width={14}
-                    isActive={isCaptureGroupRunning}
+                    isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[6].id || activeRunningId === NODES_METADATA[7].id}
                     isHeat={isCaptureGroupRunning}
                   />
                   <DagNodeCard
@@ -1025,7 +1257,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
         )}
 
-        {/* GROUP 3: LINE POSITIONING & NAVIGATION (Nodes 5, 6, 7) */}
+        {/* GROUP 3: LINE POSITIONING (Nodes 5, 6) */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'position_navigation') && (
           <div
             style={{
@@ -1048,7 +1280,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: '#ffa657' }}>
-                  DAG 3: LINE POSITIONING & NAVIGATION
+                  DAG 3: LINE POSITIONING
                 </span>
                 <span style={{
                   fontSize: '8px', padding: '0 4px', borderRadius: '3px',
@@ -1071,7 +1303,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     fontSize: '8.5px', fontWeight: 800, cursor: 'pointer',
                     boxShadow: '0 0 6px rgba(255, 166, 87, 0.15)'
                   }}
-                  title="Run DAG 3 (Nodes 5→6→7) in complete isolation to diagnose line positioning and overshoot"
+                  title="Run DAG 3 (Nodes 5→6) in complete isolation to diagnose line positioning and overshoot"
                 >
                   <Play size={8} fill="#ffa657" />
                   <span>Run DAG 3</span>
@@ -1079,10 +1311,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px' }}>
-              {[4, 5, 6].map((metaIdx, arrIdx) => {
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: effectiveSelectedDag === 'position_navigation' ? 'center' : 'space-between', gap: effectiveSelectedDag === 'position_navigation' ? '20px' : '3px' }}>
+              {[4, 5].map((metaIdx, arrIdx) => {
                 const nodeMeta = NODES_METADATA[metaIdx];
-                const nextMeta = arrIdx < 2 ? NODES_METADATA[metaIdx + 1] : null;
+                const nextMeta = arrIdx === 0 ? NODES_METADATA[5] : null;
                 return (
                   <React.Fragment key={nodeMeta.id}>
                     <DagNodeCard
@@ -1103,7 +1335,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                       <MicroConnectingArrow
                         fromNode={nodeMeta}
                         toNode={nextMeta}
-                        width={14}
+                        width={effectiveSelectedDag === 'position_navigation' ? 24 : 14}
                         isActive={isPositionGroupRunning || activeRunningId === nodeMeta.id || activeRunningId === nextMeta.id}
                         isHeat={isPositionGroupRunning}
                       />
@@ -1115,14 +1347,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
         )}
 
-        {/* Transition arrow from Group 3 to Node 8 (Assembly) */}
+        {/* Transition arrow from Group 3 to DAG 2 (Verify & Assemble) */}
         {effectiveSelectedDag === 'all' && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Play size={10} color="#00ff9d" fill="#00ff9d" />
           </div>
         )}
 
-        {/* DAG 2 ASSEMBLY & LOOPBACK (Node 8) */}
+        {/* DAG 2 VERIFY & ASSEMBLE (Nodes 7, 8) */}
         {effectiveSelectedDag === 'all' && (
           <div
             style={{
@@ -1141,11 +1373,44 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-              <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
-                DAG 2: ASSEMBLE
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
+                  DAG 2: VERIFY & ASSEMBLE
+                </span>
+                <span style={{
+                  fontSize: '8px', padding: '0 4px', borderRadius: '3px',
+                  background: isCaptureGroupRunning ? 'rgba(0, 255, 157, 0.25)' : 'rgba(0, 255, 157, 0.12)',
+                  color: '#00ff9d',
+                  fontWeight: 800
+                }}>
+                  {isCaptureGroupRunning ? 'ACTIVE' : 'READY'}
+                </span>
+              </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              {/* Node 7: verification_trigger */}
+              <DagNodeCard
+                node={NODES_METADATA[6]}
+                status={getNodeLiveStatus(NODES_METADATA[6].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[6].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[6].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[6].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[6].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[6].id ? null : NODES_METADATA[6].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[6].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[6].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[6].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[6].id)}
+              />
+              <MicroConnectingArrow
+                fromNode={NODES_METADATA[6]}
+                toNode={NODES_METADATA[7]}
+                width={14}
+                isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[6].id || activeRunningId === NODES_METADATA[7].id}
+                isHeat={isCaptureGroupRunning}
+              />
+              {/* Node 8: document_assemble */}
               <DagNodeCard
                 node={NODES_METADATA[7]}
                 status={getNodeLiveStatus(NODES_METADATA[7].id)}

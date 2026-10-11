@@ -332,16 +332,16 @@ dag_state: Dict[str, Any] = {
         "capture_entire_markdown": {
             "id": "capture_entire_markdown",
             "title": "Screen Capture & AI OCR",
-            "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
-            "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"],
+            "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
+            "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"],
             "status": "idle",
             "progress": None
         },
         "position_navigation": {
             "id": "position_navigation",
             "title": "Line Positioning & Navigation",
-            "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
-            "nodes": ["frame_ocr", "arrow_down", "verification_trigger"],
+            "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
+            "nodes": ["frame_ocr", "arrow_down"],
             "status": "idle",
             "progress": None
         }
@@ -498,7 +498,7 @@ dag_state: Dict[str, Any] = {
         },
         "verification_trigger": {
             "id": "verification_trigger",
-            "group": "position_navigation",
+            "group": "capture_entire_markdown",
             "title": "7. Recapture & Verification Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",

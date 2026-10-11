@@ -51,13 +51,13 @@ const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'ca
   }
   if (targetDag === 'capture_entire_markdown') {
     return cat === 'FRAME' || msg.includes('frame_acquire') || msg.includes('local_ai_ocr') ||
-           msg.includes('minicpm') || msg.includes('document_assemble') ||
-           msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 8');
+           msg.includes('minicpm') || msg.includes('document_assemble') || msg.includes('verification') ||
+           msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 7') || msg.includes('node 8');
   }
   if (targetDag === 'position_navigation') {
     return cat === 'PACER' || msg.includes('position') || msg.includes('gutter ocr') ||
-           msg.includes('arrow') || msg.includes('verification') || msg.includes('semaphore') ||
-           msg.includes('node 5') || msg.includes('node 6') || msg.includes('node 7');
+           msg.includes('arrow') || msg.includes('semaphore') ||
+           msg.includes('node 5') || msg.includes('node 6');
   }
   return true;
 };
