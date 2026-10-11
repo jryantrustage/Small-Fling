@@ -250,10 +250,16 @@ async def create_project(req: ProjectCreateRequest):
         "progress": {"percent": 5, "stage": "Starting project initialization...", "status": "running"}
     }
     state.dag_state["groups"]["capture_entire_markdown"] = {
-        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
-        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+        "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "idle"
     }
+    state.dag_state["groups"]["position_navigation"] = {
+        "id": "position_navigation", "title": "Line Positioning & Navigation",
+        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
+        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+    }
+    state.dag_state["semaphore_group2_to_3"] = True
     state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})

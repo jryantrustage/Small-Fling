@@ -900,9 +900,7 @@ async def is_editor_full_screen(
             w_span = r - l
             h_span = b - t
 
-            # In Android Desktop Mode, windows operate in freeform mode.
-            # If the editor window is reasonably large (w >= 1000, h >= 600), it comfortably hosts all 6 bounding box areas.
-            if w_span < 1000 or h_span < 600:
+            if mode == "freeform":
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
@@ -910,7 +908,18 @@ async def is_editor_full_screen(
                     "task_id": tid,
                     "display_id": did,
                     "display_dimensions": [disp_w, disp_h],
-                    "reason": f"Activity task #{tid} is running in {mode} window mode (bounds {bounds} are smaller than minimum desktop editor workspace)"
+                    "reason": f"Activity task #{tid} is running in freeform window mode ({w_span}x{h_span})"
+                }
+
+            if w_span < disp_w - 60 or h_span < disp_h - 100:
+                return {
+                    "is_fullscreen": False,
+                    "mode": mode,
+                    "bounds": bounds,
+                    "task_id": tid,
+                    "display_id": did,
+                    "display_dimensions": [disp_w, disp_h],
+                    "reason": f"Activity task #{tid} bounds ({w_span}x{h_span}) are smaller than display viewport ({disp_w}x{disp_h})"
                 }
 
     # Computer Vision fallback / sanity check if image_bytes provided

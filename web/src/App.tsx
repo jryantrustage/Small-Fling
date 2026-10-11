@@ -86,7 +86,7 @@ function AppContent() {
   const { secondsAgo: inspectorAgoSec } = useAgoTimer(streamKey);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
   const [showDag, setShowDag] = useState(true);
-  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>('all');
+  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation'>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('init_end');
   const [showGotoModal, setShowGotoModal] = useState(false);
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
@@ -283,12 +283,14 @@ function AppContent() {
   useEffect(() => { activeProjectRef.current = activeProject; }, [activeProject]);
   const lineListRef = useRef<HTMLDivElement>(null);
 
-  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all') => {
+  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'system' | 'all') => {
     let inferredDag = dag;
     if (!inferredDag) {
       const msg = message.toLowerCase();
       if (msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') || msg.includes('ctrl+home') || msg.includes('workspace')) {
         inferredDag = 'initialize';
+      } else if (msg.includes('node 5') || msg.includes('node 6') || msg.includes('node 7') || msg.includes('position') || msg.includes('gutter ocr') || msg.includes('arrow_down') || msg.includes('semaphore')) {
+        inferredDag = 'position_navigation';
       } else if (category === 'FRAME' || category === 'PACER' || msg.includes('frame') || msg.includes('capture') || msg.includes('ocr')) {
         inferredDag = 'capture_entire_markdown';
       } else {
@@ -1166,7 +1168,7 @@ function AppContent() {
             const downs = codes.filter((c: number) => c === 20).length;
             const caller = k.caller_node || 'system';
             const isHid = String(k.key_name || '').startsWith('CTRL_');
-            const keyDag = caller === 'arrow_down' ? 'capture_entire_markdown' : (isHid ? 'initialize' : 'system');
+            const keyDag = caller === 'arrow_down' ? 'position_navigation' : (isHid ? 'initialize' : 'system');
             setEventsLog(prev => [...prev.slice(-499), {
               id: `ke-${k.id || Date.now()}-${Math.random()}`,
               timestamp: new Date().toLocaleTimeString(),

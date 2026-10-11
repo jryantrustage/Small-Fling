@@ -97,11 +97,23 @@ def test_dag_group_segmentation_and_runner():
         assert "groups" in dag_data
         assert "initialize" in dag_data["groups"]
         assert "capture_entire_markdown" in dag_data["groups"]
-        for req_node in ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"]:
+        assert "position_navigation" in dag_data["groups"]
+        for req_node in ["frame_acquire", "local_ai_ocr", "document_assemble"]:
             assert req_node in dag_data["groups"]["capture_entire_markdown"]["nodes"]
+        for req_node in ["frame_ocr", "arrow_down", "verification_trigger"]:
+            assert req_node in dag_data["groups"]["position_navigation"]["nodes"]
         assert len(dag_data["nodes"]) >= 6
         assert "frame_acquire" in dag_data["nodes"]
         assert "frame_ocr" in dag_data["nodes"]
+
+        # Test Semaphore API
+        sem_res = client.get("/api/dag/semaphore")
+        assert sem_res.status_code == 200
+        assert sem_res.json()["status"] == "success"
+        toggle_res = client.post("/api/dag/semaphore/toggle")
+        assert toggle_res.status_code == 200
+        # Restore semaphore to True
+        client.post("/api/dag/semaphore", json={"enabled": True})
 
         # 3. Test independent configuration of Node 3 and Node 4
         cfg3_res = client.post("/api/dag/nodes/frame_acquire/config", json={"settle_delay_ms": 400})

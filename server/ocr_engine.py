@@ -786,6 +786,28 @@ class LocalOllamaStitcher:
         self.endpoint = f"{self.ollama_url}/api/generate"
         self.stitch_stats: Dict[str, Any] = {"total_stitches": 0, "conflicts_resolved": 0, "exact_matches": 0, "stitched_lines": 0, "http_errors": 0, "last_error": None}
 
+    @staticmethod
+    def sanitize_line_text(ln: int, text: str) -> str:
+        cleaned = (text or "").rstrip()
+        stripped = cleaned.strip()
+        if not stripped:
+            return ""
+        if stripped.isdigit():
+            val = int(stripped)
+            if abs(val - ln) <= 4:
+                return ""
+        m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
+        if m:
+            val = int(m.group(1))
+            if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
+                return m.group(2).strip()
+        m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
+        if m2:
+            val = int(m2.group(1))
+            if abs(val - ln) <= 4:
+                return m2.group(2).strip()
+        return cleaned
+
     def stitch_frame_lines(self, existing_lines: Dict[int, Any], new_lines: List[Dict[str, Any]], frame_id: str, model_desc: str = "Ollama") -> int:
         added = 0
         self.stitch_stats["total_stitches"] += 1
@@ -793,8 +815,8 @@ class LocalOllamaStitcher:
             ln = item.get("line_number")
             if ln is None: continue
             ln = int(ln)
-            text = item.get("text", "")
-            is_blank = item.get("is_blank", not bool(text.strip()))
+            text = self.sanitize_line_text(ln, item.get("text", ""))
+            is_blank = not bool(text.strip())
             is_wrapped = item.get("is_wrapped", False)
             wcount = item.get("wrapped_line_count", 1)
             flagged = item.get("flagged", False)

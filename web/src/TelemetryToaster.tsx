@@ -9,7 +9,7 @@ export interface TelemetryEvent {
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;
-  dag?: 'initialize' | 'capture_entire_markdown' | 'system' | 'all';
+  dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'system' | 'all';
   device?: string;
   nodeId?: string;
   level?: 'info' | 'warning' | 'error' | 'success';
@@ -36,7 +36,7 @@ export interface CaptureTelemetry {
   error?: string | null;
 }
 
-const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'capture_entire_markdown'): boolean => {
+const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation'): boolean => {
   if (targetDag === 'all') return true;
   if (ev.dag) {
     if (ev.dag === 'all') return true;
@@ -50,10 +50,14 @@ const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'ca
            msg.includes('node 1') || msg.includes('node 2') || msg.includes('workspace');
   }
   if (targetDag === 'capture_entire_markdown') {
-    return cat === 'FRAME' || cat === 'PACER' || msg.includes('frame') ||
-           msg.includes('capture') || msg.includes('ocr') || msg.includes('pacing') ||
-           msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 5') ||
-           msg.includes('node 6') || msg.includes('step') || msg.includes('arrow');
+    return cat === 'FRAME' || msg.includes('frame_acquire') || msg.includes('local_ai_ocr') ||
+           msg.includes('minicpm') || msg.includes('document_assemble') ||
+           msg.includes('node 3') || msg.includes('node 4') || msg.includes('node 8');
+  }
+  if (targetDag === 'position_navigation') {
+    return cat === 'PACER' || msg.includes('position') || msg.includes('gutter ocr') ||
+           msg.includes('arrow') || msg.includes('verification') || msg.includes('semaphore') ||
+           msg.includes('node 5') || msg.includes('node 6') || msg.includes('node 7');
   }
   return true;
 };
@@ -157,8 +161,8 @@ export interface TelemetryToasterProps {
   isAligned?: boolean;
   onReturnAlignmentOverlay?: () => void;
   onOpenStudio?: () => void;
-  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown';
-  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
+  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation';
+  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
   apiBase?: string;
@@ -172,7 +176,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
   selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal
 }) => {
-  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
   const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
   const [isGrabbingNode3, setIsGrabbingNode3] = useState(false);
@@ -211,7 +215,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     }
   }, [selectedDag]);
 
-  const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
+  const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => {
     setIsNodeTracingActive(false);
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);
@@ -391,9 +395,26 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                     fontWeight: 700,
                     cursor: 'pointer'
                   }}
-                  title="Filter to DAG Group 2 (Capture) activity"
+                  title="Filter to DAG Group 2 (Capture & OCR) activity"
                 >
                   DAG 2: CAPTURE
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectDag('position_navigation')}
+                  style={{
+                    background: (!isNodeTracingActive && currentDag === 'position_navigation') ? 'rgba(255, 166, 87, 0.25)' : 'transparent',
+                    border: (!isNodeTracingActive && currentDag === 'position_navigation') ? '1px solid #ffa65766' : 'none',
+                    color: (!isNodeTracingActive && currentDag === 'position_navigation') ? '#ffa657' : '#8b949e',
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Filter to DAG Group 3 (Line Positioning & Navigation) activity"
+                >
+                  DAG 3: NAV
                 </button>
                 {selectedNodeId && (
                   <button
@@ -454,7 +475,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               const labels = {
                 overview: isTracingNode3
                   ? 'Node 3 Telemetry'
-                  : (currentDag === 'initialize' ? 'DAG 1 Overview' : (currentDag === 'capture_entire_markdown' ? 'DAG 2 Overview' : 'Overview')),
+                  : (currentDag === 'initialize' ? 'DAG 1 Overview' : (currentDag === 'capture_entire_markdown' ? 'DAG 2 Overview' : (currentDag === 'position_navigation' ? 'DAG 3 Overview' : 'Overview'))),
                 pacer: 'Device',
                 tokens: 'Tokens & Cost',
                 events: filteredEventsLog.length > 0 ? `Log (${filteredEventsLog.length})` : 'Log'

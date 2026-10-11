@@ -38,8 +38,8 @@ export interface FlowDagProps {
   currentPage?: number;
   isOrchestrating?: boolean;
   onRefresh?: () => void;
-  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown';
-  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown') => void;
+  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation';
+  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
   projectInitProgress?: {
@@ -75,9 +75,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
-  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown'>(selectedDag);
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
-  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown') => {
+  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => {
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);
   };
@@ -186,6 +186,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   const initGroup = dagStatus.dag?.groups?.initialize || {};
   const captureGroup = dagStatus.dag?.groups?.capture_entire_markdown || {};
+  const positionGroup = dagStatus.dag?.groups?.position_navigation || {};
 
   const node1 = dagStatus.dag?.nodes?.init_end || {};
   const node2 = dagStatus.dag?.nodes?.reset_home || {};
@@ -201,7 +202,42 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isInitGroupCompleted = Boolean(!isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified) || projectInitProgress?.status === 'completed'));
   const isInitGroupError = Boolean(!isInitGroupRunning && (initGroup.status === 'error' || isNode1Error || projectInitProgress?.status === 'error'));
 
-  const isCaptureGroupRunning = Boolean(runningGroupId === 'capture_entire_markdown' || captureGroup.status === 'active' || isLoopRunning || (activeRunningId !== null && !['init_end', 'reset_home'].includes(activeRunningId)));
+  const isPositionGroupRunning = Boolean(
+    runningGroupId === 'position_navigation' ||
+    positionGroup.status === 'active' ||
+    (activeRunningId !== null && ['frame_ocr', 'arrow_down', 'verification_trigger'].includes(activeRunningId))
+  );
+
+  const isCaptureGroupRunning = Boolean(
+    runningGroupId === 'capture_entire_markdown' ||
+    captureGroup.status === 'active' ||
+    isLoopRunning ||
+    (activeRunningId !== null && ['frame_acquire', 'local_ai_ocr', 'document_assemble'].includes(activeRunningId))
+  );
+
+  const isSemaphoreOpen = Boolean(dagStatus.dag?.semaphore_group2_to_3 ?? true);
+  const [isTogglingSemaphore, setIsTogglingSemaphore] = useState(false);
+
+  const handleToggleSemaphore = async () => {
+    setIsTogglingSemaphore(true);
+    try {
+      const res = await fetch(`${apiBase}/api/dag/semaphore/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const { data } = await parseApiResponse(res);
+      setNodeFeedback({
+        id: 'semaphore',
+        message: data.message || `Semaphore toggled to ${data.enabled ? 'OPEN' : 'BLOCKED'}`,
+        isError: !data.enabled
+      });
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({ id: 'semaphore', message: `Semaphore error: ${err.message}`, isError: true });
+    } finally {
+      setIsTogglingSemaphore(false);
+    }
+  };
 
   // Single-purpose status resolver
   const getNodeLiveStatus = useCallback((id: string) => {
@@ -604,7 +640,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
             {/* Filter buttons */}
             <div style={{ display: 'inline-flex', background: '#161b22', padding: '2px', borderRadius: '5px', border: '1px solid #30363d', gap: '2px' }}>
-              {(['all', 'initialize', 'capture_entire_markdown'] as const).map(dag => (
+              {(['all', 'initialize', 'capture_entire_markdown', 'position_navigation'] as const).map(dag => (
                 <button
                   key={dag}
                   type="button"
@@ -616,10 +652,29 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     border: 'none', borderRadius: '3px', cursor: 'pointer'
                   }}
                 >
-                  {dag === 'all' ? 'All' : (dag === 'initialize' ? 'DAG 1' : 'DAG 2')}
+                  {dag === 'all' ? 'All' : (dag === 'initialize' ? 'DAG 1' : (dag === 'capture_entire_markdown' ? 'DAG 2' : 'DAG 3'))}
                 </button>
               ))}
             </div>
+
+            {/* Semaphore Quick Toggle */}
+            <button
+              type="button"
+              onClick={handleToggleSemaphore}
+              disabled={isTogglingSemaphore}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px',
+                borderRadius: '5px', border: `1.5px solid ${isSemaphoreOpen ? '#3fb950' : '#f85149'}`,
+                background: isSemaphoreOpen ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                color: isSemaphoreOpen ? '#3fb950' : '#ff7b72',
+                fontSize: '9px', fontWeight: 800, cursor: 'pointer',
+                letterSpacing: '0.3px', height: '24px'
+              }}
+              title={isSemaphoreOpen ? 'Semaphore OPEN (Loop allowed into DAG 3). Click to BLOCK/GATE.' : 'Semaphore BLOCKED (Loop held before DAG 3). Click to OPEN.'}
+            >
+              <span>{isSemaphoreOpen ? '🟢' : '🛑'}</span>
+              <span>{isSemaphoreOpen ? 'SEMAPHORE: OPEN' : 'SEMAPHORE: GATED'}</span>
+            </button>
 
             {/* Continuous Capture Loop Toggle */}
             <button
@@ -795,16 +850,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
         )}
 
-        {/* GROUP 2: CAPTURE ENTIRE MARKDOWN */}
+        {/* GROUP 2: SCREEN CAPTURE & AI OCR (Nodes 3, 4) */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'capture_entire_markdown') && (
           <div
             style={{
-              flex: 1,
+              flex: effectiveSelectedDag === 'capture_entire_markdown' ? 1 : '0 1 auto',
               minWidth: 0,
               background: isCaptureGroupRunning
-                ? 'linear-gradient(180deg, rgba(255, 107, 37, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
+                ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
                 : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isCaptureGroupRunning ? '#ff6b25' : '#30363d'}`,
+              border: `1.5px solid ${isCaptureGroupRunning ? '#00ff9d' : '#30363d'}`,
               borderRadius: '8px',
               padding: '4px 6px',
               display: 'flex',
@@ -815,37 +870,21 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               transition: 'all 0.3s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '9px', fontWeight: 800, color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d' }}>
-                  DAG 2: CAPTURE ENTIRE MARKDOWN
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
+                  DAG 2: CAPTURE & AI OCR
                 </span>
                 <span style={{
                   fontSize: '8px', padding: '0 4px', borderRadius: '3px',
-                  background: isCaptureGroupRunning ? 'rgba(255, 107, 37, 0.25)' : 'rgba(0, 255, 157, 0.12)',
-                  color: isCaptureGroupRunning ? '#ffa657' : '#00ff9d',
+                  background: isCaptureGroupRunning ? 'rgba(0, 255, 157, 0.25)' : 'rgba(0, 255, 157, 0.12)',
+                  color: '#00ff9d',
                   fontWeight: 800
                 }}>
-                  {isCaptureGroupRunning ? '♨️ THERMAL CAPTURING' : 'READY'}
+                  {isCaptureGroupRunning ? 'RUNNING' : 'READY'}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleToggleLoop(); }}
-                  disabled={isInitGroupRunning}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 6px',
-                    borderRadius: '3px', border: `1px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
-                    background: isLoopRunning ? 'rgba(248, 81, 73, 0.25)' : 'rgba(0, 255, 157, 0.18)',
-                    color: isLoopRunning ? '#ff7b72' : '#00ff9d',
-                    fontSize: '8.5px', fontWeight: 800, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer'
-                  }}
-                  title={isLoopRunning ? 'Stop continuous loop' : 'Loop through all pages and concatenate all lines'}
-                >
-                  {isLoopRunning ? <Square size={8} fill="#ff7b72" /> : <Play size={8} fill="#00ff9d" />}
-                  <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
-                </button>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); setIsDag2ReportModalOpen(true); }}
@@ -857,7 +896,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     fontSize: '8.5px', fontWeight: 800, cursor: 'pointer',
                     boxShadow: '0 0 6px rgba(88, 166, 255, 0.12)'
                   }}
-                  title="View detailed millisecond loop timing, bottleneck analytics, and export AI optimization prompt for Gemini 3.8"
+                  title="View millisecond loop timing, bottleneck analytics, and AI prompt for Gemini"
                 >
                   <Activity size={8} />
                   <span>Report</span>
@@ -880,10 +919,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px', width: '100%' }}>
-              {[2, 3, 4, 5, 6, 7].map((metaIdx, arrIdx) => {
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px' }}>
+              {[2, 3].map((metaIdx, arrIdx) => {
                 const nodeMeta = NODES_METADATA[metaIdx];
-                const nextMeta = arrIdx < 5 ? NODES_METADATA[metaIdx + 1] : null;
+                const nextMeta = arrIdx === 0 ? NODES_METADATA[3] : null;
                 return (
                   <React.Fragment key={nodeMeta.id}>
                     <DagNodeCard
@@ -912,9 +951,217 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   </React.Fragment>
                 );
               })}
-              <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+              {effectiveSelectedDag === 'capture_entire_markdown' && (
+                <>
+                  <MicroConnectingArrow
+                    fromNode={NODES_METADATA[3]}
+                    toNode={NODES_METADATA[7]}
+                    width={14}
+                    isActive={isCaptureGroupRunning}
+                    isHeat={isCaptureGroupRunning}
+                  />
+                  <DagNodeCard
+                    node={NODES_METADATA[7]}
+                    status={getNodeLiveStatus(NODES_METADATA[7].id)}
+                    isSelected={activeSelectedNodeId === NODES_METADATA[7].id}
+                    isPinned={pinnedHoverNodeId === NODES_METADATA[7].id}
+                    isPulsingSwirl={activeRunningId === NODES_METADATA[7].id}
+                    copiedNodeId={copiedNodeId}
+                    onSelect={() => handleSelectNode(NODES_METADATA[7].id)}
+                    onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[7].id ? null : NODES_METADATA[7].id)}
+                    onMouseEnter={() => setHoveredNodeId(NODES_METADATA[7].id)}
+                    onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[7].id ? null : prev)}
+                    onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[7].id)}
+                    onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[7].id)}
+                  />
+                  <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+                </>
+              )}
             </div>
 
+            {effectiveSelectedDag === 'capture_entire_markdown' && (
+              <LoopbackReturnTrack isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+            )}
+          </div>
+        )}
+
+        {/* INTERACTIVE SEMAPHORE GATE BETWEEN DAG GROUP 2 AND DAG GROUP 3 */}
+        {effectiveSelectedDag === 'all' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', margin: '0 2px', flexShrink: 0, zIndex: 10 }}>
+            <button
+              type="button"
+              onClick={handleToggleSemaphore}
+              disabled={isTogglingSemaphore}
+              title={isSemaphoreOpen ? 'Semaphore OPEN (Loop allowed to enter DAG 3). Click to GATE / PAUSE.' : 'Semaphore BLOCKED (Loop held at DAG 2). Click to OPEN / RUN.'}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '2px',
+                padding: '4px 6px',
+                borderRadius: '6px',
+                background: isSemaphoreOpen ? 'rgba(35, 134, 54, 0.18)' : 'rgba(218, 54, 51, 0.25)',
+                border: `1.5px solid ${isSemaphoreOpen ? '#3fb950' : '#f85149'}`,
+                color: isSemaphoreOpen ? '#3fb950' : '#ff7b72',
+                cursor: 'pointer',
+                boxShadow: isSemaphoreOpen ? '0 0 8px rgba(63, 185, 80, 0.3)' : '0 0 10px rgba(248, 81, 73, 0.5)',
+                transition: 'all 0.2s ease',
+                minWidth: '56px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                <span style={{ fontSize: '10px' }}>{isSemaphoreOpen ? '🟢' : '🛑'}</span>
+                <span style={{ fontSize: '8.5px', fontWeight: 900, letterSpacing: '0.3px' }}>
+                  {isSemaphoreOpen ? 'OPEN' : 'GATED'}
+                </span>
+              </div>
+              <span style={{ fontSize: '7px', fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>
+                {isSemaphoreOpen ? 'Loop Allowed' : 'Loop Paused'}
+              </span>
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '2px' }}>
+              <Play size={8} color={isSemaphoreOpen ? '#3fb950' : '#f85149'} fill={isSemaphoreOpen ? '#3fb950' : '#f85149'} />
+            </div>
+          </div>
+        )}
+
+        {/* GROUP 3: LINE POSITIONING & NAVIGATION (Nodes 5, 6, 7) */}
+        {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'position_navigation') && (
+          <div
+            style={{
+              flex: effectiveSelectedDag === 'position_navigation' ? 1 : '0 1 auto',
+              minWidth: 0,
+              background: isPositionGroupRunning
+                ? 'linear-gradient(180deg, rgba(255, 166, 87, 0.15) 0%, rgba(13, 17, 23, 0.8) 100%)'
+                : (effectiveSelectedDag === 'position_navigation' ? 'rgba(255, 166, 87, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
+              border: `1.5px solid ${isPositionGroupRunning ? '#ffa657' : (!isSemaphoreOpen ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
+              borderRadius: '8px',
+              padding: '4px 6px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxSizing: 'border-box',
+              cursor: 'default',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#ffa657' }}>
+                  DAG 3: LINE POSITIONING & NAVIGATION
+                </span>
+                <span style={{
+                  fontSize: '8px', padding: '0 4px', borderRadius: '3px',
+                  background: isPositionGroupRunning ? 'rgba(255, 166, 87, 0.25)' : (!isSemaphoreOpen ? 'rgba(248, 81, 73, 0.2)' : 'rgba(255, 166, 87, 0.12)'),
+                  color: isPositionGroupRunning ? '#ffa657' : (!isSemaphoreOpen ? '#ff7b72' : '#ffa657'),
+                  fontWeight: 800
+                }}>
+                  {isPositionGroupRunning ? 'POSITIONING' : (!isSemaphoreOpen ? '🛑 GATED' : 'READY')}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleRunGroup('position_navigation'); }}
+                  disabled={runningGroupId !== null || runningNodeId !== null}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 6px',
+                    borderRadius: '3px', border: '1px solid rgba(255, 166, 87, 0.45)',
+                    background: 'rgba(255, 166, 87, 0.14)', color: '#ffa657',
+                    fontSize: '8.5px', fontWeight: 800, cursor: 'pointer',
+                    boxShadow: '0 0 6px rgba(255, 166, 87, 0.15)'
+                  }}
+                  title="Run DAG 3 (Nodes 5→6→7) in complete isolation to diagnose line positioning and overshoot"
+                >
+                  <Play size={8} fill="#ffa657" />
+                  <span>Run DAG 3</span>
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px' }}>
+              {[4, 5, 6].map((metaIdx, arrIdx) => {
+                const nodeMeta = NODES_METADATA[metaIdx];
+                const nextMeta = arrIdx < 2 ? NODES_METADATA[metaIdx + 1] : null;
+                return (
+                  <React.Fragment key={nodeMeta.id}>
+                    <DagNodeCard
+                      node={nodeMeta}
+                      status={getNodeLiveStatus(nodeMeta.id)}
+                      isSelected={activeSelectedNodeId === nodeMeta.id}
+                      isPinned={pinnedHoverNodeId === nodeMeta.id}
+                      isPulsingSwirl={activeRunningId === nodeMeta.id}
+                      copiedNodeId={copiedNodeId}
+                      onSelect={() => handleSelectNode(nodeMeta.id)}
+                      onDoubleClick={() => setPinnedHoverNodeId(prev => prev === nodeMeta.id ? null : nodeMeta.id)}
+                      onMouseEnter={() => setHoveredNodeId(nodeMeta.id)}
+                      onMouseLeave={() => setHoveredNodeId(prev => prev === nodeMeta.id ? null : prev)}
+                      onCopyForAi={() => handleCopyNodeDetailsForAi(nodeMeta.id)}
+                      onOpenPromptModal={() => handleOpenPromptModal(nodeMeta.id)}
+                    />
+                    {nextMeta && (
+                      <MicroConnectingArrow
+                        fromNode={nodeMeta}
+                        toNode={nextMeta}
+                        width={14}
+                        isActive={isPositionGroupRunning || activeRunningId === nodeMeta.id || activeRunningId === nextMeta.id}
+                        isHeat={isPositionGroupRunning}
+                      />
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Transition arrow from Group 3 to Node 8 (Assembly) */}
+        {effectiveSelectedDag === 'all' && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Play size={10} color="#00ff9d" fill="#00ff9d" />
+          </div>
+        )}
+
+        {/* DAG 2 ASSEMBLY & LOOPBACK (Node 8) */}
+        {effectiveSelectedDag === 'all' && (
+          <div
+            style={{
+              background: isCaptureGroupRunning
+                ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
+                : 'rgba(15, 23, 42, 0.4)',
+              border: `1.5px solid ${isCaptureGroupRunning ? '#00ff9d' : '#30363d'}`,
+              borderRadius: '8px',
+              padding: '4px 6px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              boxSizing: 'border-box',
+              cursor: 'default',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
+                DAG 2: ASSEMBLE
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+              <DagNodeCard
+                node={NODES_METADATA[7]}
+                status={getNodeLiveStatus(NODES_METADATA[7].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[7].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[7].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[7].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[7].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[7].id ? null : NODES_METADATA[7].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[7].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[7].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[7].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[7].id)}
+              />
+              <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+            </div>
             <LoopbackReturnTrack isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
           </div>
         )}

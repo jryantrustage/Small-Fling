@@ -52,6 +52,8 @@ export interface PerformanceDiagnosis {
   promptDataUri: string;
 }
 
+export type DagGroup = 'initialize' | 'capture_entire_markdown' | 'position_navigation';
+
 export interface NodeMeta {
   id: string;
   step: string;
@@ -59,7 +61,7 @@ export interface NodeMeta {
   fullName: string;
   subhead: string;
   desc: string;
-  group: 'initialize' | 'capture_entire_markdown';
+  group: DagGroup;
   accentColor: string;
   hasConfig?: boolean;
 }
@@ -91,7 +93,9 @@ export interface DagStatusData {
     current_active_group?: string;
     groups?: Record<string, any>;
     nodes?: Record<string, any>;
-    edges?: Array<{ from: string; to: string; is_loopback?: boolean }>;
+    edges?: Array<{ from: string; to: string; is_loopback?: boolean; has_semaphore?: boolean }>;
+    semaphore_group2_to_3?: boolean;
+    semaphore_status?: 'open' | 'blocked';
   };
   active_node: string;
   target_total_lines: number;
@@ -153,10 +157,10 @@ export const NODES_METADATA: NodeMeta[] = [
     id: 'frame_ocr',
     step: '5',
     shortName: 'Gutter OCR',
-    fullName: '5. GUTTER OCR',
+    fullName: '5. GUTTER OCR & BOUNDS',
     subhead: 'Lines & Bounds Reader',
-    desc: 'Extracts gutter lines and text bounds from captured frame.',
-    group: 'capture_entire_markdown',
+    desc: 'Extracts gutter line numbers, top/bottom bounds, and verifies target top position for next page.',
+    group: 'position_navigation',
     accentColor: '#8957e5',
     hasConfig: true
   },
@@ -164,20 +168,20 @@ export const NODES_METADATA: NodeMeta[] = [
     id: 'arrow_down',
     step: '6',
     shortName: 'Scroll Down',
-    fullName: '6. DOWN NAVIGATION',
-    subhead: 'Next Top Position',
-    desc: 'Positions next target top line (prev bottom + 1) onto top gutter.',
-    group: 'capture_entire_markdown',
+    fullName: '6. VIEWPORT NAVIGATION',
+    subhead: 'Position Target Top',
+    desc: 'Positions next target top line (prev bottom + 1) onto top gutter using calculated DownArrow presses.',
+    group: 'position_navigation',
     accentColor: '#ffa657'
   },
   {
     id: 'verification_trigger',
     step: '7',
     shortName: 'Verify Trigger',
-    fullName: '7. VERIFY TRIGGER',
-    subhead: 'Target Gutter & Qualifiers',
-    desc: 'Verifies line is on top gutter and evaluates qualifiers before loopback flow.',
-    group: 'capture_entire_markdown',
+    fullName: '7. VERIFY & TRIGGER',
+    subhead: 'Settle Timing & Qualifiers',
+    desc: 'Verifies top line is settled and evaluates qualifiers before advancing the capture loop.',
+    group: 'position_navigation',
     accentColor: '#58a6ff',
     hasConfig: true
   },

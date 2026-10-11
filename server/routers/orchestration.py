@@ -60,7 +60,7 @@ except ImportError:
 import random
 
 def resolve_friendly_device_name(serial: Optional[str] = None) -> str:
-    s = (serial or state.active_device_serial or "").lower()
+    s = (serial or getattr(state, "active_device_serial", None) or getattr(state, "active_serial", "") or "").lower()
     if any(k in s for k in ["63100", "mustang", "frankel", "pixel_10", "pixel 10"]):
         return "Pixel 10"
     if any(k in s for k in ["39101", "husky", "shiba", "pixel_8", "pixel 8"]):
@@ -2028,6 +2028,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 ln = item.get("line_number")
                 raw_txt = (item.get("text") or "").strip()
                 if ln:
+                    raw_txt = ocr_svc.sanitize_line_text(ln, raw_txt)
                     # Never overwrite existing real lines with dummy placeholder or blank text
                     if ln in state.document_lines:
                         existing = state.document_lines[ln]
@@ -2230,9 +2231,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             visible_span = max(1, prev_bottom - cur_top + 1)
             # Base line distance needed to advance from cur_top to target_top (prev_bottom + 1)
             needed_lines = max(1, target_top - cur_top)
-            calibrated_step = needed_lines
-            # When cursor is on Line 1, moving cursor through initial margin lines requires slight padding
-            calibrated_init = needed_lines + min(padding, 4)
+            if padding > 0:
+                calibrated_step = needed_lines + padding
+                calibrated_init = (needed_lines + padding) * 2
+            else:
+                cursor_travel = max(0, prev_bottom - cursor_line)
+                viewport_scroll = max(1, target_top - cur_top)
+                calibrated_init = cursor_travel + viewport_scroll
+                calibrated_step = viewport_scroll
 
             # Check for user-configured overrides in payload, project, or hid_cfg (never hardcode)
             configured_step = None
@@ -2240,7 +2246,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 configured_step = int(payload["arrow_count_step"])
             elif active_proj.get("lines_per_page") == visible_span and active_proj.get("arrow_count_step") and int(active_proj["arrow_count_step"]) > 0:
                 configured_step = int(active_proj["arrow_count_step"])
-            elif hid_cfg.get("arrow_count_step") and int(hid_cfg["arrow_count_step"]) > 0 and hid_cfg.get("lines_per_page", visible_span) == visible_span:
+            elif hid_cfg.get("arrow_count_step") and int(hid_cfg["arrow_count_step"]) > 0 and (hid_cfg.get("lines_per_page") or active_proj.get("lines_per_page")) == visible_span:
                 configured_step = int(hid_cfg["arrow_count_step"])
 
             configured_init = None
@@ -2248,7 +2254,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 configured_init = int(payload["arrow_count_init"])
             elif active_proj.get("lines_per_page") == visible_span and active_proj.get("arrow_count_init") and int(active_proj["arrow_count_init"]) > 0:
                 configured_init = int(active_proj["arrow_count_init"])
-            elif hid_cfg.get("arrow_count_init") and int(hid_cfg["arrow_count_init"]) > 0 and hid_cfg.get("lines_per_page", visible_span) == visible_span:
+            elif hid_cfg.get("arrow_count_init") and int(hid_cfg["arrow_count_init"]) > 0 and (hid_cfg.get("lines_per_page") or active_proj.get("lines_per_page")) == visible_span:
                 configured_init = int(hid_cfg["arrow_count_init"])
 
             step_arrows = configured_step if configured_step is not None else calibrated_step
@@ -2859,9 +2865,14 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         "nodes": ["init_end", "reset_home"], "status": "idle"
     })
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
-        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
-        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
+        "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "idle"
+    })
+    position_group = state.dag_state["groups"].setdefault("position_navigation", {
+        "id": "position_navigation", "title": "Line Positioning & Navigation",
+        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
+        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
     })
 
     try:
@@ -3125,9 +3136,14 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         return {"status": "error", "group": "capture_entire_markdown", "error": err_msg}
 
     capture_group = state.dag_state["groups"].setdefault("capture_entire_markdown", {
-        "id": "capture_entire_markdown", "title": "Capture Entire Markdown",
-        "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger", "document_assemble"], "status": "active"
+        "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
+        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
+        "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"], "status": "active"
+    })
+    position_group = state.dag_state["groups"].setdefault("position_navigation", {
+        "id": "position_navigation", "title": "Line Positioning & Navigation",
+        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
+        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "idle"
     })
     capture_group["status"] = "active"
     state.dag_state["current_active_group"] = "capture_entire_markdown"
@@ -3139,7 +3155,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     state.current_dag2_loop_index = loop_idx
     state.active_dag2_loop_key_events = []
 
-    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": True, "pipelined": True, "skip_env_heal": True}
+    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "pipelined": False, "skip_env_heal": True}
 
     # Enforce Edit Mode and Dark Mode ONLY on the initial cycle (loop 1) or if edit_mode isn't verified.
     # On subsequent cycles, avoid tactile touches or viewport resets so that Node 6's precise alignment is preserved.
@@ -3151,7 +3167,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     loop_t0 = time.perf_counter()
     loop_nodes = []
 
-    # Node 3: frame_acquire
+    # Node 3: frame_acquire (Screen Capture)
     n3_t0 = time.perf_counter()
     n3_start_ms = int(time.time() * 1000)
     n3_res = await run_single_dag_node("frame_acquire", opts)
@@ -3180,57 +3196,13 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Downstream compute nodes do not need repeated ADB/screencap environment healing
     opts["skip_env_heal"] = True
 
-    # Node 5: frame_ocr (fast OpenCV gutter boundary detection, ~180ms)
-    # Executed immediately after frame acquire so target_top is available for concurrent viewport navigation!
-    n5_t0 = time.perf_counter()
-    n5_start_ms = int(time.time() * 1000)
-    n5_res = await run_single_dag_node("frame_ocr", opts)
-    n5_t1 = time.perf_counter()
-    n5_end_ms = int(time.time() * 1000)
-    n5_dur_ms = max(1, int((n5_t1 - n5_t0) * 1000))
-    if n5_res.get("status") == "error":
-        loop_nodes.append({
-            "node_id": "frame_ocr",
-            "name": "Gutter Boundary Verify (Node 5)",
-            "status": "error",
-            "started_at_ms": n5_start_ms,
-            "finished_at_ms": n5_end_ms,
-            "duration_ms": n5_dur_ms,
-            "details": {}
-        })
-        capture_group["status"] = "error"
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
-        return {"status": "error", "node_id": "frame_ocr", "result": n5_res}
-
-    bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
-    top_ln = n5_res.get("top_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line") or 1
-    if bot_ln > 0:
-        opts["prev_bottom"] = bot_ln
-        opts["cur_top"] = top_ln
-        opts["target_top"] = bot_ln + 1
-
-    # Pipeline Asynchronous Overlap:
-    # Initiate viewport navigation (Node 6) concurrently in the background while
-    # local vision model inference (Node 4) processes the frame image!
+    # Node 4: local_ai_ocr (MiniCPM-V Multimodal Vision Model verbatim text extraction)
     n4_t0 = time.perf_counter()
     n4_start_ms = int(time.time() * 1000)
-    n4_task = asyncio.create_task(run_single_dag_node("local_ai_ocr", opts))
-
-    n6_t0 = time.perf_counter()
-    n6_start_ms = int(time.time() * 1000)
-    n6_task = asyncio.create_task(run_single_dag_node("arrow_down", opts))
-
-    # Await concurrent execution
-    n4_res, n6_res = await asyncio.gather(n4_task, n6_task)
+    n4_res = await run_single_dag_node("local_ai_ocr", opts)
     n4_t1 = time.perf_counter()
     n4_end_ms = int(time.time() * 1000)
     n4_dur_ms = max(1, int((n4_t1 - n4_t0) * 1000))
-
-    n6_t1 = time.perf_counter()
-    n6_end_ms = int(time.time() * 1000)
-    n6_dur_ms = max(1, int((n6_t1 - n6_t0) * 1000))
-
-    # Append loop_nodes in standard DAG 2 order (Node 4, Node 5, Node 6)
     loop_nodes.append({
         "node_id": "local_ai_ocr",
         "name": "Local AI OCR (Node 4)",
@@ -3241,11 +3213,68 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "details": {
             "model_used": n4_res.get("model_used", "MiniCPM-V"),
             "lines_count": n4_res.get("lines_count", 0),
-            "char_count": n4_res.get("char_count", 0),
-            "pipelined": True
+            "char_count": n4_res.get("char_count", 0)
         }
     })
+    if n4_res.get("status") == "error":
+        capture_group["status"] = "error"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
+        return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
+    # --- SEMAPHORE GATE BETWEEN DAG GROUP 2 (Capture/OCR) AND DAG GROUP 3 (Line Positioning) ---
+    is_semaphore_open = getattr(state, "dag_semaphore_group2_to_3", True)
+    if not is_semaphore_open:
+        state.dag_state["semaphore_status"] = "blocked"
+        await emit_dag_telemetry_event(
+            category="SYSTEM",
+            message="⏸️ Semaphore between DAG 2 and DAG 3 is BLOCKED. Capture loop paused before DAG 3 (Line Positioning).",
+            dag="position_navigation",
+            serial=active_serial
+        )
+        await state.ws_manager.broadcast({
+            "type": "dag_semaphore_blocked",
+            "message": "Capture loop paused at Semaphore between DAG 2 and DAG 3",
+            "semaphore_status": "blocked",
+            "dag": state.dag_state
+        })
+
+        if getattr(state, "capture_loop_running", False):
+            state.latest_telemetry["status_message"] = "Capture loop paused at Semaphore (DAG 2 → DAG 3)"
+            while not getattr(state, "dag_semaphore_group2_to_3", True) and getattr(state, "capture_loop_running", False):
+                await asyncio.sleep(0.25)
+
+            if not getattr(state, "capture_loop_running", False):
+                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+                return {"status": "paused", "message": "Loop stopped while awaiting Semaphore", "node_id": "semaphore"}
+
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="▶️ Semaphore OPEN. Resuming capture loop into DAG 3 (Line Positioning)...",
+                dag="position_navigation",
+                serial=active_serial
+            )
+        else:
+            # In single cycle mode, gracefully pause at the semaphore boundary
+            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+            return {
+                "status": "paused_at_semaphore",
+                "group": "capture_entire_markdown",
+                "message": "Capture single cycle paused at Semaphore before DAG 3",
+                "node3": n3_res,
+                "node4": n4_res
+            }
+
+    # --- DAG GROUP 3: LINE POSITIONING & NAVIGATION (Nodes 5, 6, 7) ---
+    position_group["status"] = "active"
+    state.dag_state["current_active_group"] = "position_navigation"
+
+    # Node 5: frame_ocr (fast OpenCV gutter boundary detection)
+    n5_t0 = time.perf_counter()
+    n5_start_ms = int(time.time() * 1000)
+    n5_res = await run_single_dag_node("frame_ocr", opts)
+    n5_t1 = time.perf_counter()
+    n5_end_ms = int(time.time() * 1000)
+    n5_dur_ms = max(1, int((n5_t1 - n5_t0) * 1000))
     loop_nodes.append({
         "node_id": "frame_ocr",
         "name": "Gutter Boundary Verify (Node 5)",
@@ -3259,6 +3288,26 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             "extracted_lines": len(n5_res.get("lines", []))
         }
     })
+    if n5_res.get("status") == "error":
+        position_group["status"] = "error"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
+        return {"status": "error", "group": "position_navigation", "node_id": "frame_ocr", "result": n5_res}
+
+    bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
+    top_ln = n5_res.get("top_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line") or 1
+    if bot_ln > 0:
+        opts["prev_bottom"] = bot_ln
+        opts["cur_top"] = top_ln
+        opts["target_top"] = bot_ln + 1
+
+    # Node 6: arrow_down (Intelligent Viewport Navigation)
+    # Executed sequentially after Node 5 so line target is settled and verified!
+    n6_t0 = time.perf_counter()
+    n6_start_ms = int(time.time() * 1000)
+    n6_res = await run_single_dag_node("arrow_down", opts)
+    n6_t1 = time.perf_counter()
+    n6_end_ms = int(time.time() * 1000)
+    n6_dur_ms = max(1, int((n6_t1 - n6_t0) * 1000))
 
     prev_b = opts.get("prev_bottom", 0)
     tgt_t = opts.get("target_top", prev_b + 1)
@@ -3278,15 +3327,9 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             "positioning_method": f"Tracked DownArrow (x{arr_cnt})",
             "dwell_ms": 0,
             "settle_ms": 100,
-            "pipelined_overlap": True,
             "key_events": list(state.active_dag2_loop_key_events)
         }
     })
-
-    if n4_res.get("status") == "error":
-        capture_group["status"] = "error"
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
-        return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
     if (
         n6_res.get("status") in ("error", "prevented")
@@ -3294,13 +3337,13 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         or n6_res.get("advanced") is False
     ):
         st = "error" if n6_res.get("status") in ("error", "success") else n6_res.get("status", "error")
-        capture_group["status"] = st
+        position_group["status"] = st
         err_msg = n6_res.get("message") or n6_res.get("error") or "Navigation failed: arrow_down did not advance viewport."
         state.latest_telemetry["status_message"] = f"Loop halted: {err_msg} DAG 7 blocked."
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "node_id": "arrow_down", "result": n6_res, "error": err_msg}
+        return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
-    # Node 7: verification_trigger
+    # Node 7: verification_trigger (Settle Assertion & Qualifier Verification)
     n7_t0 = time.perf_counter()
     n7_start_ms = int(time.time() * 1000)
     n7_res = await run_single_dag_node("verification_trigger", opts)
@@ -3326,11 +3369,16 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         or n7_res.get("prevented", False)
     ):
         st = n7_res.get("status", "prevented")
-        capture_group["status"] = st
+        position_group["status"] = st
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "node_id": "verification_trigger", "result": n7_res}
+        return {"status": st, "group": "position_navigation", "node_id": "verification_trigger", "result": n7_res}
 
-    # Node 8: document_assemble
+    position_group["status"] = "completed"
+
+    # --- DAG GROUP 2 CONTINUATION: DOCUMENT ASSEMBLE (Node 8) ---
+    capture_group["status"] = "active"
+    state.dag_state["current_active_group"] = "capture_entire_markdown"
+
     n8_t0 = time.perf_counter()
     n8_start_ms = int(time.time() * 1000)
     n8_res = await run_single_dag_node("document_assemble", opts)
@@ -3520,6 +3568,144 @@ async def get_dag_loop_status():
         "current_active_node": state.dag_state.get("current_active_node")
     }
 
+async def execute_dag_group_position_navigation(serial: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Executes DAG Group 3 ('position_navigation') in complete isolation:
+      1. Node 5 (frame_ocr): Extracts gutter boundaries (top/bottom) from latest frame image.
+      2. Node 6 (arrow_down): Viewport positioning down to target_top (prev_bottom + 1).
+      3. Node 7 (verification_trigger): Evaluates qualifiers and verifies settle alignment.
+    Enables isolated diagnosis of line positioning overshoot and timing issues.
+    """
+    active_serial = await get_active_adb_serial(serial)
+    dev_env = await resolve_and_enforce_dag_device_environment(serial=active_serial)
+    if dev_env.get("status") == "error":
+        err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"
+        position_group = state.dag_state.get("groups", {}).get("position_navigation")
+        if position_group:
+            position_group["status"] = "error"
+        state.latest_telemetry["status_message"] = err_msg
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "error": err_msg,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+        return {"status": "error", "group": "position_navigation", "error": err_msg}
+
+    position_group = state.dag_state["groups"].setdefault("position_navigation", {
+        "id": "position_navigation", "title": "Line Positioning & Navigation",
+        "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
+        "nodes": ["frame_ocr", "arrow_down", "verification_trigger"], "status": "active"
+    })
+    position_group["status"] = "active"
+    state.dag_state["current_active_group"] = "position_navigation"
+    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
+    if payload:
+        opts.update(payload)
+
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message="Running DAG 3: Line Positioning & Navigation (Nodes 5 → 6 → 7 in isolation)...",
+        dag="position_navigation",
+        serial=active_serial
+    )
+
+    # Node 5: frame_ocr
+    n5_res = await run_single_dag_node("frame_ocr", opts)
+    if n5_res.get("status") == "error":
+        position_group["status"] = "error"
+        return {"status": "error", "group": "position_navigation", "node_id": "frame_ocr", "result": n5_res}
+
+    bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
+    top_ln = n5_res.get("top_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line") or 1
+    if bot_ln > 0:
+        opts["prev_bottom"] = bot_ln
+        opts["cur_top"] = top_ln
+        opts["target_top"] = bot_ln + 1
+
+    # Node 6: arrow_down
+    n6_res = await run_single_dag_node("arrow_down", opts)
+    if (
+        n6_res.get("status") in ("error", "prevented")
+        or n6_res.get("reached") is False
+        or n6_res.get("advanced") is False
+    ):
+        st = "error" if n6_res.get("status") in ("error", "success") else n6_res.get("status", "error")
+        position_group["status"] = st
+        err_msg = n6_res.get("message") or n6_res.get("error") or "Navigation failed: arrow_down did not advance viewport."
+        state.latest_telemetry["status_message"] = f"DAG 3 halted: {err_msg}"
+        return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
+
+    # Node 7: verification_trigger
+    n7_res = await run_single_dag_node("verification_trigger", opts)
+    if (
+        n7_res.get("status") in ("error", "prevented")
+        or not n7_res.get("allowed", True)
+        or n7_res.get("prevented", False)
+    ):
+        st = n7_res.get("status", "prevented")
+        position_group["status"] = st
+        return {"status": st, "group": "position_navigation", "node_id": "verification_trigger", "result": n7_res}
+
+    position_group["status"] = "completed"
+    tgt_t = opts.get("target_top", bot_ln + 1)
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=f"DAG 3 complete ✔ Target Top Line {tgt_t} positioned and verified on external display.",
+        dag="position_navigation",
+        level="success",
+        serial=active_serial
+    )
+
+    return {
+        "status": "success",
+        "group": "position_navigation",
+        "node5": n5_res,
+        "node6": n6_res,
+        "node7": n7_res,
+        "target_top": tgt_t
+    }
+
+@router.get("/api/dag/semaphore")
+async def get_dag_semaphore():
+    enabled = getattr(state, "dag_semaphore_group2_to_3", True)
+    return {
+        "status": "success",
+        "enabled": enabled,
+        "semaphore_status": "open" if enabled else "blocked"
+    }
+
+@router.post("/api/dag/semaphore")
+async def set_dag_semaphore(payload: Optional[Dict[str, Any]] = None):
+    payload = payload or {}
+    enabled = bool(payload.get("enabled", True))
+    state.dag_semaphore_group2_to_3 = enabled
+    state.dag_state["semaphore_group2_to_3"] = enabled
+    state.dag_state["semaphore_status"] = "open" if enabled else "blocked"
+    msg = f"Semaphore between DAG 2 and DAG 3 set to {'OPEN ✔' if enabled else 'BLOCKED ⛔'}"
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=msg,
+        dag="position_navigation"
+    )
+    await state.ws_manager.broadcast({
+        "type": "dag_semaphore_changed",
+        "enabled": enabled,
+        "semaphore_status": "open" if enabled else "blocked",
+        "dag": state.dag_state
+    })
+    return {
+        "status": "success",
+        "enabled": enabled,
+        "semaphore_status": "open" if enabled else "blocked",
+        "message": msg
+    }
+
+@router.post("/api/dag/semaphore/toggle")
+async def toggle_dag_semaphore():
+    current = getattr(state, "dag_semaphore_group2_to_3", True)
+    return await set_dag_semaphore({"enabled": not current})
+
 @router.post("/api/dag/groups/{group_id}/run")
 async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
     try:
@@ -3532,6 +3718,8 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
                 return await execute_dag_group_capture_markdown(serial=serial)
             else:
                 return await start_dag_loop({"serial": serial})
+        elif group_id in {"position_navigation", "positioning", "dag_3", "group_3"}:
+            return await execute_dag_group_position_navigation(serial=serial, payload=payload)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
     except HTTPException:

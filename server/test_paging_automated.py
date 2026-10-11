@@ -50,7 +50,8 @@ async def test_full_markdown_file_pagination_through_end():
             "serial": "mock:9999",
             "cur_top": cur_top,
             "prev_bottom": prev_bottom,
-            "cursor_line": cursor_line
+            "cursor_line": cursor_line,
+            "scroll_padding_lines": 0
         })
 
         assert res["status"] == "success"
@@ -88,7 +89,8 @@ async def test_ocr_degraded_bottom_fallback_to_calibrated_capacity():
         "serial": "mock:9999",
         "cur_top": 27,
         "prev_bottom": bot_p2,
-        "cursor_line": bot_p2
+        "cursor_line": bot_p2,
+        "scroll_padding_lines": 0
     })
     assert res_p2_to_p3["arrow_count"] == 26
     assert res_p2_to_p3["target_top_line"] == 53  # Bottom 52 + 1 = 53 for Page 3 top!

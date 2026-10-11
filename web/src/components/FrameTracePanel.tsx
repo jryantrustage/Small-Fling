@@ -3,7 +3,7 @@ import { X, Copy, Check, Keyboard, Filter, ChevronRight, ChevronDown, ArrowDown,
 import type { TelemetryEvent } from '../TelemetryToaster';
 import type { FrameData } from '../types';
 
-type DagFilter = 'all' | 'initialize' | 'capture_entire_markdown' | 'system';
+type DagFilter = 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'system';
 type CatKey = 'KEY' | 'FRAME' | 'OCR' | 'PACER' | 'SYSTEM' | 'ERROR' | 'WS';
 
 const CATS: CatKey[] = ['KEY', 'FRAME', 'OCR', 'PACER', 'SYSTEM', 'ERROR', 'WS'];
@@ -11,6 +11,7 @@ const DAG_OPTIONS: Array<{ id: DagFilter; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'initialize', label: 'DAG 1' },
   { id: 'capture_entire_markdown', label: 'DAG 2' },
+  { id: 'position_navigation', label: 'DAG 3' },
   { id: 'system', label: 'System' },
 ];
 
@@ -198,8 +199,8 @@ export const FrameTracePanel: React.FC<Props> = ({ frame, eventsLog, onClose }) 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: hasDetail ? 'pointer' : 'default' }} onClick={() => hasDetail && toggleExpand(ev.id)}>
                   {hasDetail ? (isOpen ? <ChevronDown size={11} color="#8b949e" /> : <ChevronRight size={11} color="#8b949e" />) : <span style={{ width: 11 }} />}
                   <span style={{ color: '#8b949e', fontSize: '9px' }}>{ev.timestamp}</span>
-                  <span style={{ fontSize: '8.5px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px', color: ev.dag === 'initialize' ? '#58a6ff' : (ev.dag === 'capture_entire_markdown' ? '#00ff9d' : '#8b949e'), border: '1px solid #30363d' }}>
-                    {ev.dag === 'initialize' ? 'DAG 1' : ev.dag === 'capture_entire_markdown' ? 'DAG 2' : 'SYS'}
+                  <span style={{ fontSize: '8.5px', fontWeight: 800, padding: '1px 5px', borderRadius: '3px', color: ev.dag === 'initialize' ? '#58a6ff' : (ev.dag === 'capture_entire_markdown' ? '#00ff9d' : (ev.dag === 'position_navigation' ? '#ffa657' : '#8b949e')), border: '1px solid #30363d' }}>
+                    {ev.dag === 'initialize' ? 'DAG 1' : ev.dag === 'capture_entire_markdown' ? 'DAG 2' : (ev.dag === 'position_navigation' ? 'DAG 3' : 'SYS')}
                   </span>
                   <span style={{ fontSize: '8.5px', fontWeight: 800, color: catColor[cat] }}>{cat}</span>
                   <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word', color: cat === 'ERROR' ? '#ff7b72' : '#c9d1d9' }}>{ev.message}</span>

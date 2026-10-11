@@ -205,13 +205,54 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     state.update_dag_after_frame(frame_id, top_ln, bot_ln)
     return res
 
-def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Image.Image:
+def sanitize_line_text(ln: int, text: str) -> str:
+    """
+    Strips accidental OCR gutter line numbers that were inserted into line text content.
+    For example:
+      - '2' on a blank line -> ''
+      - '3> **Directory Structure' -> '> **Directory Structure'
+      - '4> Total Files...' -> '> Total Files...'
+      - '6 ## Directory Structure' -> '## Directory Structure'
+      - '10 DevAnalysis/...' -> 'DevAnalysis/...'
+      - '11 .env.example' -> '.env.example'
+      - '23 azure-devops-service.ts' -> 'azure-devops-service.ts'
+    """
+    cleaned = (text or "").rstrip()
+    stripped = cleaned.strip()
+    if not stripped:
+        return ""
+
+    # Gutter number alone on an empty line
+    if stripped.isdigit():
+        val = int(stripped)
+        if abs(val - ln) <= 4:
+            return ""
+
+    # Gutter number prepended to markdown syntax, symbols, or word characters
+    m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
+    if m:
+        val = int(m.group(1))
+        if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
+            return m.group(2).strip()
+
+    # Tree branch characters preceded by numbers e.g. "10 ├── DevAnalysis"
+    m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
+    if m2:
+        val = int(m2.group(1))
+        if abs(val - ln) <= 4:
+            return m2.group(2).strip()
+
+    return cleaned
+
+
+def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True, exclude_gutter: bool = True) -> Image.Image:
     """
     Applies empirical image filter recommendations to prevent thin character erosion
     ('|', '\\', '/', '-', ';', brackets) and eliminate toolbar/status bar distractions:
       1. Region of Interest (ROI) Cropping:
-         Excludes top toolbar/file tabs (y: < 260) and bottom taskbar/dock (y > 970) to prevent
-         hallucination of window title bar text as Line 1 or ASCII grid loops.
+         Excludes top toolbar/file tabs (y: < 260) and bottom taskbar/dock (y > 970).
+         Excludes the left gutter line numbers (x < 95) so the vision model does not transcribe
+         gutter numbers as code/text content.
       2. Gentle Contrast Stretch (+12%):
          Broadens dynamic range of faint syntax colors against dark code backgrounds without
          distorting bracket terminals.
@@ -219,15 +260,14 @@ def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True) -> Ima
     w, h = pil_img.size
     img = pil_img
 
-    # 1. ROI crop strictly to active editor text and gutter region (below formatting toolbar y: ~270, above Android dock y: ~970)
     if roi_crop and w >= 1200 and h >= 800:
         y_top = max(260, int(h * 0.260))
         y_bot = min(h - 40, int(h * 0.900))
-        x_left = 0
+        x_left = 95 if exclude_gutter else 0
         x_right = min(w, 1600)
         img = img.crop((x_left, y_top, x_right, y_bot))
 
-    # 2. Gentle contrast stretch (+12%)
+    # Gentle contrast stretch (+12%)
     contrast_enhancer = ImageEnhance.Contrast(img)
     img = contrast_enhancer.enhance(1.12)
 
@@ -240,8 +280,8 @@ def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = Non
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, 4 Lion Cove P-cores with AVX-VNNI).
     """
     with Image.open(image_path) as raw_img:
-        # Preprocess with ROI crop strictly to editor content area
-        img = preprocess_frame_for_ocr(raw_img, roi_crop=True)
+        # Preprocess with ROI crop strictly to editor content area (excluding gutter numbers)
+        img = preprocess_frame_for_ocr(raw_img, roi_crop=True, exclude_gutter=True)
         buf = io.BytesIO()
         # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
         img.convert("RGB").save(buf, format="PNG", optimize=False)
@@ -249,12 +289,13 @@ def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = Non
 
     start_ex = expected_top if (expected_top and expected_top > 0) else 1
     prompt = (
-        "Transcribe the text in this image line by line.\n"
-        "For example:\n"
-        f"{start_ex}: first line code\n"
-        f"{start_ex + 1}:\n"
-        f"{start_ex + 2}: third line code\n\n"
-        "Output only the transcribed lines with their line numbers:"
+        "You are an expert OCR transcription engine.\n"
+        "Transcribe the document text in this image line by line from top to bottom.\n"
+        f"Number each line sequentially starting from {start_ex} (e.g. {start_ex}: line content).\n"
+        f"If a line is blank or empty, output ONLY the line number and colon with no content (e.g. {start_ex + 1}: ).\n"
+        "DO NOT include any gutter line numbers in the text content.\n"
+        "Preserve all markdown syntax and characters exactly verbatim.\n"
+        "Output only the numbered lines:"
     )
     models = []
     for cand in [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]:
@@ -350,6 +391,7 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
     for ln in seen_lines:
         contents = line_map[ln]
         code = "\n".join(contents).rstrip()
+        code = sanitize_line_text(ln, code)
         is_w = "\n" in code or len(code) > 80
         plines.append({
             "line_number": ln,
@@ -375,7 +417,7 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
         for item in json_lines:
             if isinstance(item, dict) and item.get("line_number") is not None:
                 ln = int(item["line_number"])
-                code = str(item.get("text", ""))
+                code = sanitize_line_text(ln, str(item.get("text", "")))
                 plines.append({
                     "line_number": ln,
                     "gutter_number": ln,
@@ -490,6 +532,12 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
         non_blank = [p for p in plines if (p.get("text") or "").strip()]
         if non_blank:
             model_used = f"MiniCPM-V ({model_name})"
+            try:
+                from ocr_engine import worker_scan_image
+                aux = await asyncio.to_thread(worker_scan_image, str(image_path))
+                bboxes = aux.get("bounding_boxes", {})
+            except Exception:
+                pass
     except Exception as e:
         print(f"[MiniCPM-V OCR] Ollama call error: {e}")
 

@@ -22,11 +22,41 @@ router = APIRouter(tags=["Frames & Document"])
 
 def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
     ipath = state.FRAMES_DIR / (filename or f"{frame_id}.png")
-    if not ipath.exists():
-        matches = list(state.FRAMES_DIR.glob(f"*{frame_id}*.png"))
-        if matches: return matches[0]
-        raise HTTPException(status_code=404, detail="Frame image file not found")
-    return ipath
+    if ipath.exists():
+        return ipath
+
+    matches = list(state.FRAMES_DIR.glob(f"*{frame_id}*.png"))
+    if matches:
+        return matches[0]
+
+    finfo = state.captured_frames.get(frame_id)
+    if finfo:
+        if finfo.get("filename"):
+            cand = state.FRAMES_DIR / finfo["filename"]
+            if cand.exists():
+                return cand
+        pidx = finfo.get("page_index")
+        if pidx:
+            raw_matches = list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx:03d}*.png")) or list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx}*.png"))
+            if raw_matches:
+                return raw_matches[-1]
+
+    try:
+        frames = db.get_frames(state.get_current_project_id())
+        for f in frames:
+            if f.get("frame_id") == frame_id:
+                fn = f.get("filename")
+                if fn and (state.FRAMES_DIR / fn).exists():
+                    return state.FRAMES_DIR / fn
+                pidx = f.get("page_index")
+                if pidx:
+                    raw_matches = list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx:03d}*.png")) or list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx}*.png"))
+                    if raw_matches:
+                        return raw_matches[-1]
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail="Frame image file not found")
 
 def _doc_payload() -> Dict[str, Any]:
     if not state.document_lines or not state.captured_frames:

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import numpy as np
@@ -330,13 +331,22 @@ dag_state: Dict[str, Any] = {
         },
         "capture_entire_markdown": {
             "id": "capture_entire_markdown",
-            "title": "Capture Entire Markdown",
-            "description": "Acquires pages, offloads to OCR worker, and steps down through markdown document",
-            "nodes": ["frame_acquire", "local_ai_ocr", "frame_ocr", "arrow_down", "verification_trigger", "document_assemble"],
+            "title": "Screen Capture & AI OCR",
+            "description": "Acquires screen frames, extracts verbatim markdown with local vision model, and reconstructs master document",
+            "nodes": ["frame_acquire", "local_ai_ocr", "document_assemble"],
+            "status": "idle",
+            "progress": None
+        },
+        "position_navigation": {
+            "id": "position_navigation",
+            "title": "Line Positioning & Navigation",
+            "description": "Gutter OCR boundary detection, down-arrow viewport alignment, and verification triggers",
+            "nodes": ["frame_ocr", "arrow_down", "verification_trigger"],
             "status": "idle",
             "progress": None
         }
     },
+    "semaphore_group2_to_3": True,
     "nodes": {
         "init_end": {
             "id": "init_end",
@@ -440,7 +450,7 @@ dag_state: Dict[str, Any] = {
         },
         "frame_ocr": {
             "id": "frame_ocr",
-            "group": "capture_entire_markdown",
+            "group": "position_navigation",
             "title": "5. OCR & Gutter Extraction",
             "description": "Run OCR worker on acquired screen frame: extract gutter line numbers, top/bottom bounds, and document text.",
             "status": "idle",
@@ -465,7 +475,7 @@ dag_state: Dict[str, Any] = {
         },
         "arrow_down": {
             "id": "arrow_down",
-            "group": "capture_entire_markdown",
+            "group": "position_navigation",
             "title": "6. Intelligent Navigation (Down Arrow)",
             "description": "Determine line number for top gutter (last line of previous page + 1) and use keyboard down arrow to position on top.",
             "status": "idle",
@@ -488,7 +498,7 @@ dag_state: Dict[str, Any] = {
         },
         "verification_trigger": {
             "id": "verification_trigger",
-            "group": "capture_entire_markdown",
+            "group": "position_navigation",
             "title": "7. Recapture & Verification Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",
@@ -595,7 +605,7 @@ dag_state: Dict[str, Any] = {
         {"from": "init_end", "to": "reset_home"},
         {"from": "reset_home", "to": "frame_acquire"},
         {"from": "frame_acquire", "to": "local_ai_ocr"},
-        {"from": "local_ai_ocr", "to": "frame_ocr"},
+        {"from": "local_ai_ocr", "to": "frame_ocr", "has_semaphore": True},
         {"from": "frame_ocr", "to": "arrow_down"},
         {"from": "arrow_down", "to": "verification_trigger"},
         {"from": "verification_trigger", "to": "document_assemble"},
@@ -605,6 +615,7 @@ dag_state: Dict[str, Any] = {
 }
 
 capture_loop_running: bool = False
+dag_semaphore_group2_to_3: bool = True
 
 current_pipeline_mode = "cloud"
 selected_ocr_engine = "local"
@@ -617,6 +628,27 @@ def get_current_project_id() -> Optional[str]:
     p = db.get_active_project()
     return p["id"] if p else None
 
+def sanitize_line_text(ln: int, text: str) -> str:
+    cleaned = (text or "").rstrip()
+    stripped = cleaned.strip()
+    if not stripped:
+        return ""
+    if stripped.isdigit():
+        val = int(stripped)
+        if abs(val - ln) <= 4:
+            return ""
+    m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
+    if m:
+        val = int(m.group(1))
+        if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
+            return m.group(2).strip()
+    m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
+    if m2:
+        val = int(m2.group(1))
+        if abs(val - ln) <= 4:
+            return m2.group(2).strip()
+    return cleaned
+
 def get_serialized_lines() -> List[Dict[str, Any]]:
     if not document_lines:
         return []
@@ -628,11 +660,16 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
     for k in range(start_k, max_k + 1):
         if k in document_lines:
             it = document_lines[k]
-            res.append(
+            d = (
                 it.to_dict() if hasattr(it, "to_dict")
                 else (it if isinstance(it, dict)
                       else {"line_number": k, "gutter_number": k, "text": str(it), "status": "ok", "is_blank": not bool(str(it).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": datetime.now().isoformat()})
             )
+            d = dict(d)
+            clean_txt = sanitize_line_text(k, d.get("text", ""))
+            d["text"] = clean_txt
+            d["is_blank"] = not bool(clean_txt.strip())
+            res.append(d)
         else:
             res.append({
                 "line_number": k,
