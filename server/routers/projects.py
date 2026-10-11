@@ -252,22 +252,35 @@ async def create_project(req: ProjectCreateRequest):
     }
     state.dag_state["groups"]["capture_entire_markdown"] = {
         "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
-        "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
-        "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"], "status": "idle"
+        "description": "Acquires screen frames and extracts verbatim markdown with local vision model",
+        "nodes": ["frame_acquire", "local_ai_ocr"], "status": "idle"
     }
     state.dag_state["groups"]["position_navigation"] = {
         "id": "position_navigation", "title": "Line Positioning & Navigation",
         "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
         "nodes": ["frame_ocr", "arrow_down"], "status": "idle"
     }
-    state.dag_state["nodes"]["verification_trigger"]["group"] = "capture_entire_markdown"
+    state.dag_state["groups"]["verify_assemble"] = {
+        "id": "verify_assemble", "title": "Verify & Assemble",
+        "description": "Recaptures frame to verify top line position, evaluates qualifiers, and reconstructs master document",
+        "nodes": ["verification_trigger", "document_assemble"], "status": "idle"
+    }
+    state.dag_state["nodes"]["verification_trigger"]["group"] = "verify_assemble"
+    state.dag_state["nodes"]["document_assemble"]["group"] = "verify_assemble"
     state.dag_state["semaphore_group2_to_3"] = True
+    state.dag_state["semaphore_group3_to_4"] = True
+    state.dag_state["semaphore_group2_to_3_status"] = "open"
+    state.dag_state["semaphore_group3_to_4_status"] = "open"
+    state.dag_state["semaphore_status"] = "open"
+    state.dag_semaphore_group2_to_3 = True
+    state.dag_semaphore_group3_to_4 = True
     state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
     state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "target_top_line": 1, "extracted_line_count": 0})
     state.dag_state["nodes"]["arrow_down"].update({"status": "idle", "target_top_line": 1, "target_top": 1, "prev_bottom": 0, "arrow_count": 0})
     state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False, "target_top_line": 1, "target_top": 1, "expected_top": 1})
+    state.dag_state["nodes"]["document_assemble"].update({"status": "idle", "total_captured_lines": 0, "completion_percent": 0.0, "is_complete": False})
     state.orchestration_state["next_target_top"] = 1
     state.orchestration_state["cursor_line"] = 1
     state.dag_state["current_active_group"] = "initialize"

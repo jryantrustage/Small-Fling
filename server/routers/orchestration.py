@@ -3303,45 +3303,53 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
         return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
 
-    # --- SEMAPHORE GATE BETWEEN DAG GROUP 2 (Capture/OCR) AND DAG GROUP 3 (Line Positioning) ---
-    is_semaphore_open = getattr(state, "dag_semaphore_group2_to_3", True)
-    if not is_semaphore_open:
+    # --- CONNECTOR GATE BETWEEN DAG GROUP 2 (Capture/OCR) AND DAG GROUP 3 (Line Positioning) ---
+    is_connector_23_open = state.is_edge_connected("local_ai_ocr", "frame_ocr") and getattr(state, "dag_semaphore_group2_to_3", True)
+    if not is_connector_23_open:
         state.dag_state["semaphore_status"] = "blocked"
+        state.dag_state["semaphore_group2_to_3_status"] = "blocked"
         await emit_dag_telemetry_event(
             category="SYSTEM",
-            message="⏸️ Semaphore between DAG 2 and DAG 3 is BLOCKED. Capture loop paused before DAG 3 (Line Positioning).",
+            message="⏸️ Connector from Node 4 (local_ai_ocr) to Node 5 (frame_ocr) is DISCONNECTED. Flow paused before DAG 3.",
             dag="position_navigation",
             serial=active_serial
         )
         await state.ws_manager.broadcast({
             "type": "dag_semaphore_blocked",
-            "message": "Capture loop paused at Semaphore between DAG 2 and DAG 3",
+            "semaphore_id": "group2_to_3",
+            "from_node": "local_ai_ocr",
+            "to_node": "frame_ocr",
+            "message": "Capture loop paused: Connector between Node 4 and Node 5 is disconnected",
             "semaphore_status": "blocked",
+            "edges": state.dag_state.get("edges", []),
             "dag": state.dag_state
         })
 
         if getattr(state, "capture_loop_running", False):
-            state.latest_telemetry["status_message"] = "Capture loop paused at Semaphore (DAG 2 → DAG 3)"
-            while not getattr(state, "dag_semaphore_group2_to_3", True) and getattr(state, "capture_loop_running", False):
+            state.latest_telemetry["status_message"] = "Capture loop paused at Connector (Node 4 ➔ Node 5)"
+            while not (state.is_edge_connected("local_ai_ocr", "frame_ocr") and getattr(state, "dag_semaphore_group2_to_3", True)) and getattr(state, "capture_loop_running", False):
                 await asyncio.sleep(0.25)
 
             if not getattr(state, "capture_loop_running", False):
                 _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
-                return {"status": "paused", "message": "Loop stopped while awaiting Semaphore", "node_id": "semaphore"}
+                return {"status": "paused", "message": "Loop stopped while awaiting Connector", "node_id": "connector_4_5"}
 
             await emit_dag_telemetry_event(
                 category="SYSTEM",
-                message="▶️ Semaphore OPEN. Resuming capture loop into DAG 3 (Line Positioning)...",
+                message="▶️ Connector connected! Resuming capture loop into DAG 3 (Line Positioning)...",
                 dag="position_navigation",
                 serial=active_serial
             )
         else:
-            # In single cycle mode, gracefully pause at the semaphore boundary
+            # In single cycle mode, gracefully pause at the connector boundary
             _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
             return {
                 "status": "paused_at_semaphore",
+                "semaphore_id": "group2_to_3",
+                "from_node": "local_ai_ocr",
+                "to_node": "frame_ocr",
                 "group": "capture_entire_markdown",
-                "message": "Capture single cycle paused at Semaphore before DAG 3",
+                "message": "Capture single cycle paused at Connector before DAG 3",
                 "node3": n3_res,
                 "node4": n4_res
             }
@@ -3427,9 +3435,66 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
 
     position_group["status"] = "completed"
 
-    # --- DAG GROUP 2 CONTINUATION: VERIFY & ASSEMBLE (Nodes 7 & 8) ---
-    capture_group["status"] = "active"
-    state.dag_state["current_active_group"] = "capture_entire_markdown"
+    # --- CONNECTOR GATE BETWEEN DAG GROUP 3 (Line Positioning) AND DAG GROUP 4 (Verify & Assemble) ---
+    is_connector_34_open = state.is_edge_connected("arrow_down", "verification_trigger") and getattr(state, "dag_semaphore_group3_to_4", True)
+    if not is_connector_34_open:
+        state.dag_state["semaphore_group3_to_4_status"] = "blocked"
+        await emit_dag_telemetry_event(
+            category="SYSTEM",
+            message="⏸️ Connector from Node 6 (arrow_down) to Node 7 (verification_trigger) is DISCONNECTED. Flow paused before DAG 4.",
+            dag="verify_assemble",
+            serial=active_serial
+        )
+        await state.ws_manager.broadcast({
+            "type": "dag_semaphore_blocked",
+            "semaphore_id": "group3_to_4",
+            "from_node": "arrow_down",
+            "to_node": "verification_trigger",
+            "message": "Capture loop paused: Connector between Node 6 and Node 7 is disconnected",
+            "semaphore_status": "blocked",
+            "edges": state.dag_state.get("edges", []),
+            "dag": state.dag_state
+        })
+
+        if getattr(state, "capture_loop_running", False):
+            state.latest_telemetry["status_message"] = "Capture loop paused at Connector (Node 6 ➔ Node 7)"
+            while not (state.is_edge_connected("arrow_down", "verification_trigger") and getattr(state, "dag_semaphore_group3_to_4", True)) and getattr(state, "capture_loop_running", False):
+                await asyncio.sleep(0.25)
+
+            if not getattr(state, "capture_loop_running", False):
+                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+                return {"status": "paused", "message": "Loop stopped while awaiting Connector between Node 6 and Node 7", "node_id": "connector_6_7"}
+
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="▶️ Connector connected! Resuming capture loop into DAG 4 (Verify & Assemble)...",
+                dag="verify_assemble",
+                serial=active_serial
+            )
+        else:
+            # In single cycle mode, gracefully pause at the connector boundary
+            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+            return {
+                "status": "paused_at_semaphore",
+                "semaphore_id": "group3_to_4",
+                "from_node": "arrow_down",
+                "to_node": "verification_trigger",
+                "group": "position_navigation",
+                "message": "Capture single cycle paused at Connector before DAG 4",
+                "node5": n5_res,
+                "node6": n6_res
+            }
+
+    # --- DAG GROUP 4: VERIFY & ASSEMBLE (Nodes 7 & 8) ---
+    verify_group = state.dag_state.get("groups", {}).setdefault("verify_assemble", {
+        "id": "verify_assemble",
+        "title": "Verify & Assemble",
+        "description": "Recaptures frame to verify top line position, evaluates qualifiers, and reconstructs master document",
+        "nodes": ["verification_trigger", "document_assemble"],
+        "status": "active"
+    })
+    verify_group["status"] = "active"
+    state.dag_state["current_active_group"] = "verify_assemble"
 
     # Node 7: verification_trigger (Settle Assertion & Qualifier Verification)
     n7_t0 = time.perf_counter()
@@ -3457,10 +3522,11 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         or n7_res.get("prevented", False)
     ):
         st = n7_res.get("status", "prevented")
-        capture_group["status"] = st
+        verify_group["status"] = st
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "group": "capture_entire_markdown", "node_id": "verification_trigger", "result": n7_res}
+        return {"status": st, "group": "verify_assemble", "node_id": "verification_trigger", "result": n7_res}
 
+    # Node 8: document_assemble
     n8_t0 = time.perf_counter()
     n8_start_ms = int(time.time() * 1000)
     n8_res = await run_single_dag_node("document_assemble", opts)
@@ -3480,6 +3546,10 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             "is_complete": n8_res.get("is_complete", False)
         }
     })
+    if n8_res.get("status") == "error":
+        verify_group["status"] = "error"
+    else:
+        verify_group["status"] = "completed"
 
     # Record completed loop
     loop_t1 = time.perf_counter()
@@ -3583,6 +3653,10 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
             n7 = res.get("node7", {})
             if not n7.get("allowed", True):
                 state.latest_telemetry["status_message"] = f"Trigger blocked next loop: {n7.get('message')}"
+                break
+
+            if not state.is_edge_connected("document_assemble", "frame_acquire"):
+                state.latest_telemetry["status_message"] = "Loop finished cycle: Loopback connector (Node 8 ➔ Node 3) is disconnected"
                 break
 
             await asyncio.sleep(0.18)
@@ -3736,45 +3810,272 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         "target_top": tgt_t
     }
 
-@router.get("/api/dag/semaphore")
-async def get_dag_semaphore():
-    enabled = getattr(state, "dag_semaphore_group2_to_3", True)
+async def execute_dag_group_verify_assemble(serial: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Executes DAG Group 4: Verify & Assemble (Nodes 7 & 8) in isolation.
+    """
+    active_serial = await get_active_adb_serial(serial)
+    dev_env = await resolve_and_enforce_dag_device_environment(serial=active_serial)
+    if dev_env.get("status") == "error":
+        err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"
+        verify_group = state.dag_state.get("groups", {}).get("verify_assemble")
+        if verify_group:
+            verify_group["status"] = "error"
+        state.latest_telemetry["status_message"] = err_msg
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "error": err_msg,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry
+        })
+        return {"status": "error", "group": "verify_assemble", "error": err_msg}
+
+    verify_group = state.dag_state["groups"].setdefault("verify_assemble", {
+        "id": "verify_assemble", "title": "Verify & Assemble",
+        "description": "Recaptures frame to verify top line position, evaluates qualifiers, and reconstructs master document",
+        "nodes": ["verification_trigger", "document_assemble"], "status": "active"
+    })
+    verify_group["status"] = "active"
+    state.dag_state["current_active_group"] = "verify_assemble"
+    opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
+    if payload:
+        opts.update(payload)
+
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message="Running DAG 4: Verify & Assemble (Nodes 7 → 8 in isolation)...",
+        dag="verify_assemble",
+        serial=active_serial
+    )
+
+    # Node 7: verification_trigger
+    n7_res = await run_single_dag_node("verification_trigger", opts)
+    if (
+        n7_res.get("status") in ("error", "prevented")
+        or not n7_res.get("allowed", True)
+        or n7_res.get("prevented", False)
+    ):
+        st = n7_res.get("status", "prevented")
+        verify_group["status"] = st
+        err_msg = n7_res.get("message") or n7_res.get("error") or "Verification trigger check prevented execution."
+        state.latest_telemetry["status_message"] = f"DAG 4 halted: {err_msg}"
+        return {"status": st, "group": "verify_assemble", "node_id": "verification_trigger", "result": n7_res, "error": err_msg}
+
+    # Node 8: document_assemble
+    n8_res = await run_single_dag_node("document_assemble", opts)
+    if n8_res.get("status") == "error":
+        verify_group["status"] = "error"
+        err_msg = n8_res.get("message") or n8_res.get("error") or "Document assembly failed."
+        state.latest_telemetry["status_message"] = f"DAG 4 halted: {err_msg}"
+        return {"status": "error", "group": "verify_assemble", "node_id": "document_assemble", "result": n8_res, "error": err_msg}
+
+    verify_group["status"] = "completed"
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message="DAG 4 complete ✔ Qualifiers verified and document reconstructed.",
+        dag="verify_assemble",
+        level="success",
+        serial=active_serial
+    )
+
     return {
         "status": "success",
-        "enabled": enabled,
-        "semaphore_status": "open" if enabled else "blocked"
+        "group": "verify_assemble",
+        "node7": n7_res,
+        "node8": n8_res
+    }
+
+@router.get("/api/dag/semaphore")
+async def get_dag_semaphore():
+    s23 = getattr(state, "dag_semaphore_group2_to_3", True)
+    s34 = getattr(state, "dag_semaphore_group3_to_4", True)
+    return {
+        "status": "success",
+        "enabled": s23 and s34,
+        "semaphore_status": "open" if (s23 and s34) else "blocked",
+        "semaphore_group2_to_3": s23,
+        "semaphore_group3_to_4": s34,
+        "semaphore_group2_to_3_status": "open" if s23 else "blocked",
+        "semaphore_group3_to_4_status": "open" if s34 else "blocked",
+        "group2_to_3": {
+            "enabled": s23,
+            "status": "open" if s23 else "blocked"
+        },
+        "group3_to_4": {
+            "enabled": s34,
+            "status": "open" if s34 else "blocked"
+        }
     }
 
 @router.post("/api/dag/semaphore")
 async def set_dag_semaphore(payload: Optional[Dict[str, Any]] = None):
     payload = payload or {}
     enabled = bool(payload.get("enabled", True))
-    state.dag_semaphore_group2_to_3 = enabled
-    state.dag_state["semaphore_group2_to_3"] = enabled
-    state.dag_state["semaphore_status"] = "open" if enabled else "blocked"
-    msg = f"Semaphore between DAG 2 and DAG 3 set to {'OPEN ✔' if enabled else 'BLOCKED ⛔'}"
+    sem_id = payload.get("semaphore_id") or payload.get("id") or "group2_to_3"
+
+    if sem_id in ("group3_to_4", "group_3_to_4", "dag3_to_4", "3_to_4"):
+        state.set_edge_connection("arrow_down", "verification_trigger", enabled)
+        sem_name = "DAG 3 to DAG 4"
+        dag_cat = "verify_assemble"
+    elif sem_id in ("all", "both"):
+        state.set_edge_connection("local_ai_ocr", "frame_ocr", enabled)
+        state.set_edge_connection("arrow_down", "verification_trigger", enabled)
+        sem_name = "All Semaphores"
+        dag_cat = "position_navigation"
+    else:
+        state.set_edge_connection("local_ai_ocr", "frame_ocr", enabled)
+        sem_name = "DAG 2 to DAG 3"
+        dag_cat = "position_navigation"
+
+    overall_open = getattr(state, "dag_semaphore_group2_to_3", True) and getattr(state, "dag_semaphore_group3_to_4", True)
+    state.dag_state["semaphore_status"] = "open" if overall_open else "blocked"
+    msg = f"Semaphore ({sem_name}) set to {'OPEN ✔' if enabled else 'BLOCKED ⛔'}"
+
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=msg,
+        dag=dag_cat
+    )
+    await state.ws_manager.broadcast({
+        "type": "dag_semaphore_changed",
+        "semaphore_id": sem_id,
+        "enabled": enabled,
+        "semaphore_group2_to_3": getattr(state, "dag_semaphore_group2_to_3", True),
+        "semaphore_group3_to_4": getattr(state, "dag_semaphore_group3_to_4", True),
+        "semaphore_status": "open" if overall_open else "blocked",
+        "edges": state.dag_state.get("edges", []),
+        "dag": state.dag_state
+    })
+    return {
+        "status": "success",
+        "semaphore_id": sem_id,
+        "enabled": enabled,
+        "semaphore_status": "open" if enabled else "blocked",
+        "semaphore_group2_to_3": getattr(state, "dag_semaphore_group2_to_3", True),
+        "semaphore_group3_to_4": getattr(state, "dag_semaphore_group3_to_4", True),
+        "edges": state.dag_state.get("edges", []),
+        "message": msg
+    }
+
+@router.post("/api/dag/semaphore/toggle")
+async def toggle_dag_semaphore(payload: Optional[Dict[str, Any]] = None):
+    payload = payload or {}
+    sem_id = payload.get("semaphore_id") or payload.get("id") or "group2_to_3"
+    if sem_id in ("group3_to_4", "group_3_to_4", "dag3_to_4", "3_to_4"):
+        current = getattr(state, "dag_semaphore_group3_to_4", True)
+    else:
+        current = getattr(state, "dag_semaphore_group2_to_3", True)
+    return await set_dag_semaphore({"enabled": not current, "semaphore_id": sem_id})
+
+@router.post("/api/dag/semaphore/{semaphore_id}/toggle")
+async def toggle_dag_semaphore_by_id(semaphore_id: str):
+    return await toggle_dag_semaphore({"semaphore_id": semaphore_id})
+
+# ─── CONNECTOR FLOW DIRECTING ENDPOINTS ──────────────────────────────────
+@router.get("/api/dag/connectors")
+async def get_dag_connectors():
+    edges = state.dag_state.get("edges", [])
+    return {
+        "status": "success",
+        "edges": edges,
+        "count": len(edges),
+        "adjacency": {e["from"]: e["to"] for e in edges if e.get("enabled", True)}
+    }
+
+@router.post("/api/dag/connectors/toggle")
+async def toggle_dag_connector(payload: Optional[Dict[str, Any]] = None):
+    payload = payload or {}
+    edge_id = payload.get("edge_id") or payload.get("id")
+    from_node = payload.get("from_node") or payload.get("from")
+    to_node = payload.get("to_node") or payload.get("to")
+    edge = state.toggle_edge_connection(edge_id=edge_id, from_node=from_node, to_node=to_node)
+    is_open = bool(edge.get("enabled", True))
+    f = edge.get("from", from_node or "node")
+    t = edge.get("to", to_node or "node")
+    msg = f"Connector ({f} ➔ {t}) set to {'CONNECTED ⚡' if is_open else 'DISCONNECTED ✂️'}"
     await emit_dag_telemetry_event(
         category="SYSTEM",
         message=msg,
         dag="position_navigation"
     )
     await state.ws_manager.broadcast({
-        "type": "dag_semaphore_changed",
-        "enabled": enabled,
-        "semaphore_status": "open" if enabled else "blocked",
+        "type": "dag_connector_updated",
+        "edge": edge,
+        "edges": state.dag_state.get("edges", []),
+        "message": msg,
         "dag": state.dag_state
     })
-    return {
-        "status": "success",
-        "enabled": enabled,
-        "semaphore_status": "open" if enabled else "blocked",
-        "message": msg
-    }
+    return {"status": "success", "edge": edge, "edges": state.dag_state.get("edges", []), "message": msg}
 
-@router.post("/api/dag/semaphore/toggle")
-async def toggle_dag_semaphore():
-    current = getattr(state, "dag_semaphore_group2_to_3", True)
-    return await set_dag_semaphore({"enabled": not current})
+@router.post("/api/dag/connectors/connect")
+async def connect_dag_nodes(payload: Dict[str, Any]):
+    from_node = payload.get("from_node") or payload.get("from")
+    to_node = payload.get("to_node") or payload.get("to")
+    enabled = bool(payload.get("enabled", True))
+    if not from_node or not to_node:
+        raise HTTPException(status_code=400, detail="from_node and to_node are required")
+    edge = state.set_edge_connection(from_node, to_node, enabled=enabled)
+    msg = f"Flow directed: ({from_node} ➔ {to_node}) [{'CONNECTED ⚡' if enabled else 'DISCONNECTED ✂️'}]"
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=msg,
+        dag="position_navigation"
+    )
+    await state.ws_manager.broadcast({
+        "type": "dag_connector_updated",
+        "edge": edge,
+        "edges": state.dag_state.get("edges", []),
+        "message": msg,
+        "dag": state.dag_state
+    })
+    return {"status": "success", "edge": edge, "edges": state.dag_state.get("edges", []), "message": msg}
+
+@router.post("/api/dag/connectors/disconnect")
+async def disconnect_dag_connector(payload: Dict[str, Any]):
+    edge_id = payload.get("edge_id") or payload.get("id")
+    from_node = payload.get("from_node") or payload.get("from")
+    to_node = payload.get("to_node") or payload.get("to")
+    if edge_id:
+        for e in state.dag_state.get("edges", []):
+            if e.get("id") == edge_id:
+                from_node = e.get("from")
+                to_node = e.get("to")
+                break
+    if from_node and to_node:
+        edge = state.set_edge_connection(from_node, to_node, enabled=False)
+    else:
+        edge = state.toggle_edge_connection(edge_id=edge_id, from_node=from_node, to_node=to_node)
+    msg = f"Connector ({from_node} ➔ {to_node}) DISCONNECTED ✂️"
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=msg,
+        dag="position_navigation"
+    )
+    await state.ws_manager.broadcast({
+        "type": "dag_connector_updated",
+        "edge": edge,
+        "edges": state.dag_state.get("edges", []),
+        "message": msg,
+        "dag": state.dag_state
+    })
+    return {"status": "success", "edge": edge, "edges": state.dag_state.get("edges", []), "message": msg}
+
+@router.post("/api/dag/connectors/reset")
+async def reset_dag_connectors():
+    edges = state.reset_default_edges()
+    msg = "All DAG connectors reset to standard sequential flow ✔"
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message=msg,
+        dag="position_navigation"
+    )
+    await state.ws_manager.broadcast({
+        "type": "dag_connector_updated",
+        "edges": edges,
+        "message": msg,
+        "dag": state.dag_state
+    })
+    return {"status": "success", "edges": edges, "message": msg}
 
 @router.post("/api/dag/groups/{group_id}/run")
 async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
@@ -3790,6 +4091,8 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
                 return await start_dag_loop({"serial": serial})
         elif group_id in {"position_navigation", "positioning", "dag_3", "group_3"}:
             return await execute_dag_group_position_navigation(serial=serial, payload=payload)
+        elif group_id in {"verify_assemble", "verify", "assemble", "dag_4", "group_4"}:
+            return await execute_dag_group_verify_assemble(serial=serial, payload=payload)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
     except HTTPException:

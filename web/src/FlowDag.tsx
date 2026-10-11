@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Activity, Lock, Sliders,
-  ShieldAlert, Unlock, Info
+  ShieldAlert, Unlock, Info, RotateCcw
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -14,7 +14,10 @@ import {
   copyToClipboard, calculateNodeLiveStatus, formatNodeDiagnosticsMarkdown, discernNodePerformance
 } from './utils/dagDiagnostics';
 import { DagSvgAssets } from './components/dag/DagSvgAssets';
-import { MicroConnectingArrow, LoopbackArrow, LoopbackReturnTrack } from './components/dag/DagArrows';
+import {
+  MicroConnectingArrow, LoopbackArrow,
+  InteractiveDagConnector, InteractiveLoopbackConnector
+} from './components/dag/DagArrows';
 import { DagNodeCard } from './components/dag/DagNodeCard';
 import { DagNodePopover, DagBlockedDiagnosticBox } from './components/dag/DagNodePopover';
 import { DagInspectorModal } from './components/dag/DagInspectorModal';
@@ -39,8 +42,8 @@ export interface FlowDagProps {
   currentPage?: number;
   isOrchestrating?: boolean;
   onRefresh?: () => void;
-  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation';
-  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => void;
+  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble';
+  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
   projectInitProgress?: {
@@ -76,9 +79,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
-  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation'>(selectedDag);
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
-  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation') => {
+  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => {
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);
   };
@@ -197,6 +200,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const initGroup = dagStatus.dag?.groups?.initialize || {};
   const captureGroup = dagStatus.dag?.groups?.capture_entire_markdown || {};
   const positionGroup = dagStatus.dag?.groups?.position_navigation || {};
+  const verifyGroup = dagStatus.dag?.groups?.verify_assemble || {};
 
   const node1 = dagStatus.dag?.nodes?.init_end || {};
   const node2 = dagStatus.dag?.nodes?.reset_home || {};
@@ -212,42 +216,110 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const isInitGroupCompleted = Boolean(!isInitGroupRunning && (initGroup.status === 'completed' || (isNode1Calibrated && isNode2Verified) || projectInitProgress?.status === 'completed'));
   const isInitGroupError = Boolean(!isInitGroupRunning && (initGroup.status === 'error' || isNode1Error || projectInitProgress?.status === 'error'));
 
+  const isCaptureGroupRunning = Boolean(
+    runningGroupId === 'capture_entire_markdown' ||
+    captureGroup.status === 'active' ||
+    (isLoopRunning && (activeRunningId === null || ['frame_acquire', 'local_ai_ocr'].includes(activeRunningId))) ||
+    (activeRunningId !== null && ['frame_acquire', 'local_ai_ocr'].includes(activeRunningId))
+  );
+
   const isPositionGroupRunning = Boolean(
     runningGroupId === 'position_navigation' ||
     positionGroup.status === 'active' ||
     (activeRunningId !== null && ['frame_ocr', 'arrow_down'].includes(activeRunningId))
   );
 
-  const isCaptureGroupRunning = Boolean(
-    runningGroupId === 'capture_entire_markdown' ||
-    captureGroup.status === 'active' ||
-    isLoopRunning ||
-    (activeRunningId !== null && ['frame_acquire', 'local_ai_ocr', 'verification_trigger', 'document_assemble'].includes(activeRunningId))
+  const isVerifyGroupRunning = Boolean(
+    runningGroupId === 'verify_assemble' ||
+    verifyGroup.status === 'active' ||
+    (activeRunningId !== null && ['verification_trigger', 'document_assemble'].includes(activeRunningId))
   );
 
-  const isSemaphoreOpen = Boolean(dagStatus.dag?.semaphore_group2_to_3 ?? true);
-  const [isTogglingSemaphore, setIsTogglingSemaphore] = useState(false);
+  // Connectors & Direct Flow State
+  const isEdgeConnected = useCallback((fromNode: string, toNode?: string) => {
+    const edges = dagStatus.dag?.edges;
+    if (edges && edges.length > 0) {
+      const match = edges.find(e => e.from === fromNode && (!toNode || e.to === toNode));
+      if (match) return match.enabled !== false;
+    }
+    if (fromNode === 'local_ai_ocr') return Boolean(dagStatus.dag?.semaphore_group2_to_3 ?? true);
+    if (fromNode === 'arrow_down') return Boolean(dagStatus.dag?.semaphore_group3_to_4 ?? true);
+    return true;
+  }, [dagStatus.dag?.edges, dagStatus.dag?.semaphore_group2_to_3, dagStatus.dag?.semaphore_group3_to_4]);
 
-  const handleToggleSemaphore = async () => {
-    setIsTogglingSemaphore(true);
+  const getEdgeTarget = useCallback((fromNode: string, defaultTarget: string) => {
+    const edges = dagStatus.dag?.edges;
+    if (edges && edges.length > 0) {
+      const match = edges.find(e => e.from === fromNode);
+      if (match && match.to) return match.to;
+    }
+    return defaultTarget;
+  }, [dagStatus.dag?.edges]);
+
+  const isConnector1Open = isEdgeConnected('local_ai_ocr', 'frame_ocr');
+  const isConnector2Open = isEdgeConnected('arrow_down', 'verification_trigger');
+  const isLoopbackConnected = isEdgeConnected('document_assemble', 'frame_acquire');
+
+  const [isTogglingConnector, setIsTogglingConnector] = useState<string | null>(null);
+
+  const handleToggleConnector = async (fromNode: string, toNode?: string, edgeId?: string) => {
+    const key = `${fromNode}->${toNode || ''}`;
+    setIsTogglingConnector(key);
     try {
-      const res = await fetch(`${apiBase}/api/dag/semaphore/toggle`, {
+      const res = await fetch(`${apiBase}/api/dag/connectors/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ edge_id: edgeId, from_node: fromNode, to_node: toNode })
       });
       const { data } = await parseApiResponse(res);
+      const isEnabled = data.edge ? data.edge.enabled !== false : true;
       setNodeFeedback({
-        id: 'semaphore',
-        message: data.message || `Semaphore toggled to ${data.enabled ? 'OPEN' : 'BLOCKED'}`,
-        isError: !data.enabled
+        id: `connector_${fromNode}`,
+        message: data.message || `Connector (${fromNode} ➔ ${toNode || 'target'}) set to ${isEnabled ? 'CONNECTED ⚡' : 'DISCONNECTED ✂️'}`,
+        isError: !isEnabled
       });
       onRefresh?.();
     } catch (err: any) {
-      setNodeFeedback({ id: 'semaphore', message: `Semaphore error: ${err.message}`, isError: true });
+      setNodeFeedback({ id: `connector_${fromNode}`, message: `Connector error: ${err.message}`, isError: true });
     } finally {
-      setIsTogglingSemaphore(false);
+      setIsTogglingConnector(null);
     }
   };
+
+  const handleDirectFlow = async (fromNode: string, toNode: string) => {
+    try {
+      const res = await fetch(`${apiBase}/api/dag/connectors/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_node: fromNode, to_node: toNode, enabled: true })
+      });
+      const { data } = await parseApiResponse(res);
+      setNodeFeedback({
+        id: `flow_${fromNode}`,
+        message: data.message || `Flow directed: ${fromNode} ➔ ${toNode} ✔`,
+        isError: false
+      });
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({ id: `flow_${fromNode}`, message: `Failed to direct flow: ${err.message}`, isError: true });
+    }
+  };
+
+  const handleResetDefaultFlow = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/dag/connectors/reset`, { method: 'POST' });
+      const { data } = await parseApiResponse(res);
+      setNodeFeedback({
+        id: 'reset_flow',
+        message: data.message || 'All node connectors reset to standard pipeline flow ✔',
+        isError: false
+      });
+      onRefresh?.();
+    } catch (err: any) {
+      setNodeFeedback({ id: 'reset_flow', message: `Reset error: ${err.message}`, isError: true });
+    }
+  };
+
 
   // Single-purpose status resolver
   const getNodeLiveStatus = useCallback((id: string) => {
@@ -731,7 +803,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
             {/* Filter buttons */}
             <div style={{ display: 'inline-flex', background: '#161b22', padding: '2px', borderRadius: '5px', border: '1px solid #30363d', gap: '2px' }}>
-              {(['all', 'initialize', 'capture_entire_markdown', 'position_navigation'] as const).map(dag => (
+              {(['all', 'initialize', 'capture_entire_markdown', 'position_navigation', 'verify_assemble'] as const).map(dag => (
                 <button
                   key={dag}
                   type="button"
@@ -743,29 +815,82 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     border: 'none', borderRadius: '3px', cursor: 'pointer'
                   }}
                 >
-                  {dag === 'all' ? 'All' : (dag === 'initialize' ? 'DAG 1' : (dag === 'capture_entire_markdown' ? 'DAG 2' : 'DAG 3'))}
+                  {dag === 'all' ? 'All' : (dag === 'initialize' ? 'DAG 1' : (dag === 'capture_entire_markdown' ? 'DAG 2' : (dag === 'position_navigation' ? 'DAG 3' : 'DAG 4')))}
                 </button>
               ))}
             </div>
 
-            {/* Semaphore Quick Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleSemaphore}
-              disabled={isTogglingSemaphore}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px',
-                borderRadius: '5px', border: `1.5px solid ${isSemaphoreOpen ? '#3fb950' : '#f85149'}`,
-                background: isSemaphoreOpen ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
-                color: isSemaphoreOpen ? '#3fb950' : '#ff7b72',
-                fontSize: '9px', fontWeight: 800, cursor: 'pointer',
-                letterSpacing: '0.3px', height: '24px'
-              }}
-              title={isSemaphoreOpen ? 'Semaphore OPEN (Loop allowed into DAG 3). Click to BLOCK/GATE.' : 'Semaphore BLOCKED (Loop held before DAG 3). Click to OPEN.'}
-            >
-              <span>{isSemaphoreOpen ? '🟢' : '🛑'}</span>
-              <span>{isSemaphoreOpen ? 'SEMAPHORE: OPEN' : 'SEMAPHORE: GATED'}</span>
-            </button>
+            {/* Direct Flow Connectors Bar */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => handleToggleConnector('local_ai_ocr', 'frame_ocr', 'local_ai_ocr->frame_ocr')}
+                disabled={Boolean(isTogglingConnector)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
+                  borderRadius: '5px', border: `1.5px solid ${isConnector1Open ? '#3fb950' : '#f85149'}`,
+                  background: isConnector1Open ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  color: isConnector1Open ? '#3fb950' : '#ff7b72',
+                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
+                  letterSpacing: '0.3px', height: '24px'
+                }}
+                title={isConnector1Open ? 'Connector (DAG 2➔3): CONNECTED. Click to sever/pause flow.' : 'Connector (DAG 2➔3): SEVERED. Click to connect & enable flow.'}
+              >
+                <span>{isConnector1Open ? '⚡' : '✂️'}</span>
+                <span>{isConnector1Open ? 'C1 (2➔3): LINKED' : 'C1 (2➔3): SEVERED'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleToggleConnector('arrow_down', 'verification_trigger', 'arrow_down->verification_trigger')}
+                disabled={Boolean(isTogglingConnector)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
+                  borderRadius: '5px', border: `1.5px solid ${isConnector2Open ? '#3fb950' : '#f85149'}`,
+                  background: isConnector2Open ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  color: isConnector2Open ? '#3fb950' : '#ff7b72',
+                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
+                  letterSpacing: '0.3px', height: '24px'
+                }}
+                title={isConnector2Open ? 'Connector (DAG 3➔4): CONNECTED. Click to sever/pause flow.' : 'Connector (DAG 3➔4): SEVERED. Click to connect & enable flow.'}
+              >
+                <span>{isConnector2Open ? '⚡' : '✂️'}</span>
+                <span>{isConnector2Open ? 'C2 (3➔4): LINKED' : 'C2 (3➔4): SEVERED'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleToggleConnector('document_assemble', 'frame_acquire', 'document_assemble->frame_acquire')}
+                disabled={Boolean(isTogglingConnector)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
+                  borderRadius: '5px', border: `1.5px solid ${isLoopbackConnected ? '#3fb950' : '#f85149'}`,
+                  background: isLoopbackConnected ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  color: isLoopbackConnected ? '#3fb950' : '#ff7b72',
+                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
+                  letterSpacing: '0.3px', height: '24px'
+                }}
+                title={isLoopbackConnected ? 'Loopback (8➔3): CONNECTED. Click to halt after 1 cycle.' : 'Loopback (8➔3): SEVERED. Click to repeat loop.'}
+              >
+                <span>{isLoopbackConnected ? '🔄' : '⏸️'}</span>
+                <span>{isLoopbackConnected ? 'LOOP: ON' : 'LOOP: OFF'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetDefaultFlow}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '3px', padding: '3px 6px',
+                  borderRadius: '5px', border: '1px solid rgba(88, 166, 255, 0.3)',
+                  background: 'rgba(88, 166, 255, 0.12)', color: '#58a6ff',
+                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '24px'
+                }}
+                title="Reset all node connectors back to standard sequential pipeline (1➔2➔3➔4➔5➔6➔7➔8➔3)"
+              >
+                <RotateCcw size={10} />
+                <span>Reset Flow</span>
+              </button>
+            </div>
 
             {/* Continuous Capture Loop Toggle */}
             <button
@@ -963,13 +1088,24 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       </div>
 
       {/* DAG GROUPS & NODES CANVAS */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%', position: 'relative' }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        gap: '6px',
+        width: '100%',
+        position: 'relative',
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        padding: '3px 2px 6px 2px',
+        boxSizing: 'border-box'
+      }}>
         {/* GROUP 1: INITIALIZE */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'initialize') && (
           <div
             style={{
-              flex: '0 0 auto',
-              width: '280px',
+              flex: effectiveSelectedDag === 'initialize' ? 1 : '0 0 272px',
+              width: effectiveSelectedDag === 'initialize' ? 'auto' : '272px',
+              minWidth: '260px',
               background: isInitGroupRunning
                 ? 'linear-gradient(180deg, rgba(88, 166, 255, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
                 : (effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.06)' : 'rgba(15, 23, 42, 0.4)'),
@@ -984,7 +1120,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               transition: 'all 0.3s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: isInitGroupError ? '#ff7b72' : (isInitGroupRunning ? '#58a6ff' : '#00ff9d') }}>
                   DAG 1: INIT
@@ -1054,19 +1190,30 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           </div>
         )}
 
-        {/* Transition arrow from Group 1 to Group 2 */}
+        {/* INTERACTIVE CONNECTOR: DAG GROUP 1 (reset_home) TO DAG GROUP 2 (frame_acquire) */}
         {effectiveSelectedDag === 'all' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Play size={10} color="#00ff9d" fill="#00ff9d" />
-          </div>
+          <InteractiveDagConnector
+            fromNodeId="reset_home"
+            toNodeId={getEdgeTarget("reset_home", "frame_acquire")}
+            fromLabel="DAG 1"
+            toLabel="DAG 2"
+            isConnected={isEdgeConnected("reset_home", "frame_acquire")}
+            isActive={isInitGroupRunning || isCaptureGroupRunning}
+            accentColor="#58a6ff"
+            isToggling={isTogglingConnector === 'reset_home->frame_acquire'}
+            onToggle={() => handleToggleConnector("reset_home", "frame_acquire", "reset_home->frame_acquire")}
+            onChangeTarget={(targetId) => handleDirectFlow("reset_home", targetId)}
+            allNodes={NODES_METADATA}
+          />
         )}
 
         {/* GROUP 2: SCREEN CAPTURE & AI OCR (Nodes 3, 4) */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'capture_entire_markdown') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'capture_entire_markdown' ? 1 : '0 1 auto',
-              minWidth: 0,
+              flex: effectiveSelectedDag === 'capture_entire_markdown' ? 1 : '0 0 272px',
+              width: effectiveSelectedDag === 'capture_entire_markdown' ? 'auto' : '272px',
+              minWidth: '260px',
               background: isCaptureGroupRunning
                 ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
                 : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
@@ -1081,7 +1228,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               transition: 'all 0.3s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
                   DAG 2: CAPTURE & AI OCR
@@ -1122,7 +1269,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     background: 'rgba(0, 255, 157, 0.08)', color: '#00ff9d',
                     fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
                   }}
-                  title="Run 1 single capture cycle"
+                  title="Run 1 single capture cycle (Nodes 3→4)"
                 >
                   {isCaptureGroupRunning ? <RefreshCw size={8} className="spin" /> : <Play size={8} />}
                   <span>1 Cycle</span>
@@ -1130,143 +1277,74 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '3px' }}>
-              {[2, 3].map((metaIdx, arrIdx) => {
-                const nodeMeta = NODES_METADATA[metaIdx];
-                const nextMeta = arrIdx === 0 ? NODES_METADATA[3] : null;
-                return (
-                  <React.Fragment key={nodeMeta.id}>
-                    <DagNodeCard
-                      node={nodeMeta}
-                      status={getNodeLiveStatus(nodeMeta.id)}
-                      isSelected={activeSelectedNodeId === nodeMeta.id}
-                      isPinned={pinnedHoverNodeId === nodeMeta.id}
-                      isPulsingSwirl={activeRunningId === nodeMeta.id}
-                      copiedNodeId={copiedNodeId}
-                      onSelect={() => handleSelectNode(nodeMeta.id)}
-                      onDoubleClick={() => setPinnedHoverNodeId(prev => prev === nodeMeta.id ? null : nodeMeta.id)}
-                      onMouseEnter={() => setHoveredNodeId(nodeMeta.id)}
-                      onMouseLeave={() => setHoveredNodeId(prev => prev === nodeMeta.id ? null : prev)}
-                      onCopyForAi={() => handleCopyNodeDetailsForAi(nodeMeta.id)}
-                      onOpenPromptModal={() => handleOpenPromptModal(nodeMeta.id)}
-                    />
-                    {nextMeta && (
-                      <MicroConnectingArrow
-                        fromNode={nodeMeta}
-                        toNode={nextMeta}
-                        width={14}
-                        isActive={isCaptureGroupRunning || activeRunningId === nodeMeta.id || activeRunningId === nextMeta.id}
-                        isHeat={isCaptureGroupRunning}
-                      />
-                    )}
-                  </React.Fragment>
-                );
-              })}
-              {effectiveSelectedDag === 'capture_entire_markdown' && (
-                <>
-                  <MicroConnectingArrow
-                    fromNode={NODES_METADATA[3]}
-                    toNode={NODES_METADATA[6]}
-                    width={14}
-                    isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[3].id || activeRunningId === NODES_METADATA[6].id}
-                    isHeat={isCaptureGroupRunning}
-                  />
-                  <DagNodeCard
-                    node={NODES_METADATA[6]}
-                    status={getNodeLiveStatus(NODES_METADATA[6].id)}
-                    isSelected={activeSelectedNodeId === NODES_METADATA[6].id}
-                    isPinned={pinnedHoverNodeId === NODES_METADATA[6].id}
-                    isPulsingSwirl={activeRunningId === NODES_METADATA[6].id}
-                    copiedNodeId={copiedNodeId}
-                    onSelect={() => handleSelectNode(NODES_METADATA[6].id)}
-                    onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[6].id ? null : NODES_METADATA[6].id)}
-                    onMouseEnter={() => setHoveredNodeId(NODES_METADATA[6].id)}
-                    onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[6].id ? null : prev)}
-                    onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[6].id)}
-                    onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[6].id)}
-                  />
-                  <MicroConnectingArrow
-                    fromNode={NODES_METADATA[6]}
-                    toNode={NODES_METADATA[7]}
-                    width={14}
-                    isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[6].id || activeRunningId === NODES_METADATA[7].id}
-                    isHeat={isCaptureGroupRunning}
-                  />
-                  <DagNodeCard
-                    node={NODES_METADATA[7]}
-                    status={getNodeLiveStatus(NODES_METADATA[7].id)}
-                    isSelected={activeSelectedNodeId === NODES_METADATA[7].id}
-                    isPinned={pinnedHoverNodeId === NODES_METADATA[7].id}
-                    isPulsingSwirl={activeRunningId === NODES_METADATA[7].id}
-                    copiedNodeId={copiedNodeId}
-                    onSelect={() => handleSelectNode(NODES_METADATA[7].id)}
-                    onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[7].id ? null : NODES_METADATA[7].id)}
-                    onMouseEnter={() => setHoveredNodeId(NODES_METADATA[7].id)}
-                    onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[7].id ? null : prev)}
-                    onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[7].id)}
-                    onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[7].id)}
-                  />
-                  <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
-                </>
-              )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', width: '100%' }}>
+              <DagNodeCard
+                node={NODES_METADATA[2]}
+                status={getNodeLiveStatus(NODES_METADATA[2].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[2].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[2].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[2].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[2].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[2].id ? null : NODES_METADATA[2].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[2].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[2].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[2].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[2].id)}
+              />
+              <MicroConnectingArrow
+                fromNode={NODES_METADATA[2]}
+                toNode={NODES_METADATA[3]}
+                width={16}
+                isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[2].id || activeRunningId === NODES_METADATA[3].id}
+                isHeat={isCaptureGroupRunning}
+              />
+              <DagNodeCard
+                node={NODES_METADATA[3]}
+                status={getNodeLiveStatus(NODES_METADATA[3].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[3].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[3].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[3].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[3].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[3].id ? null : NODES_METADATA[3].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[3].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[3].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[3].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[3].id)}
+              />
             </div>
-
-            {effectiveSelectedDag === 'capture_entire_markdown' && (
-              <LoopbackReturnTrack isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
-            )}
           </div>
         )}
 
-        {/* INTERACTIVE SEMAPHORE GATE BETWEEN DAG GROUP 2 AND DAG GROUP 3 */}
+        {/* INTERACTIVE CONNECTOR: DAG GROUP 2 (local_ai_ocr) TO DAG GROUP 3 (frame_ocr) */}
         {effectiveSelectedDag === 'all' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', margin: '0 2px', flexShrink: 0, zIndex: 10 }}>
-            <button
-              type="button"
-              onClick={handleToggleSemaphore}
-              disabled={isTogglingSemaphore}
-              title={isSemaphoreOpen ? 'Semaphore OPEN (Loop allowed to enter DAG 3). Click to GATE / PAUSE.' : 'Semaphore BLOCKED (Loop held at DAG 2). Click to OPEN / RUN.'}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '2px',
-                padding: '4px 6px',
-                borderRadius: '6px',
-                background: isSemaphoreOpen ? 'rgba(35, 134, 54, 0.18)' : 'rgba(218, 54, 51, 0.25)',
-                border: `1.5px solid ${isSemaphoreOpen ? '#3fb950' : '#f85149'}`,
-                color: isSemaphoreOpen ? '#3fb950' : '#ff7b72',
-                cursor: 'pointer',
-                boxShadow: isSemaphoreOpen ? '0 0 8px rgba(63, 185, 80, 0.3)' : '0 0 10px rgba(248, 81, 73, 0.5)',
-                transition: 'all 0.2s ease',
-                minWidth: '56px'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                <span style={{ fontSize: '10px' }}>{isSemaphoreOpen ? '🟢' : '🛑'}</span>
-                <span style={{ fontSize: '8.5px', fontWeight: 900, letterSpacing: '0.3px' }}>
-                  {isSemaphoreOpen ? 'OPEN' : 'GATED'}
-                </span>
-              </div>
-              <span style={{ fontSize: '7px', fontWeight: 700, color: '#8b949e', textTransform: 'uppercase' }}>
-                {isSemaphoreOpen ? 'Loop Allowed' : 'Loop Paused'}
-              </span>
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: '2px' }}>
-              <Play size={8} color={isSemaphoreOpen ? '#3fb950' : '#f85149'} fill={isSemaphoreOpen ? '#3fb950' : '#f85149'} />
-            </div>
-          </div>
+          <InteractiveDagConnector
+            fromNodeId="local_ai_ocr"
+            toNodeId={getEdgeTarget("local_ai_ocr", "frame_ocr")}
+            fromLabel="DAG 2"
+            toLabel="DAG 3"
+            isConnected={isConnector1Open}
+            isActive={isCaptureGroupRunning || isPositionGroupRunning}
+            accentColor="#00ff9d"
+            isToggling={isTogglingConnector === 'local_ai_ocr->frame_ocr'}
+            onToggle={() => handleToggleConnector("local_ai_ocr", "frame_ocr", "local_ai_ocr->frame_ocr")}
+            onChangeTarget={(targetId) => handleDirectFlow("local_ai_ocr", targetId)}
+            allNodes={NODES_METADATA}
+          />
         )}
 
         {/* GROUP 3: LINE POSITIONING (Nodes 5, 6) */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'position_navigation') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'position_navigation' ? 1 : '0 1 auto',
-              minWidth: 0,
+              flex: effectiveSelectedDag === 'position_navigation' ? 1 : '0 0 272px',
+              width: effectiveSelectedDag === 'position_navigation' ? 'auto' : '272px',
+              minWidth: '260px',
               background: isPositionGroupRunning
                 ? 'linear-gradient(180deg, rgba(255, 166, 87, 0.15) 0%, rgba(13, 17, 23, 0.8) 100%)'
                 : (effectiveSelectedDag === 'position_navigation' ? 'rgba(255, 166, 87, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isPositionGroupRunning ? '#ffa657' : (!isSemaphoreOpen ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
+              border: `1.5px solid ${isPositionGroupRunning ? '#ffa657' : (!isConnector1Open ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
               borderRadius: '8px',
               padding: '4px 6px',
               display: 'flex',
@@ -1277,18 +1355,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               transition: 'all 0.3s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', gap: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: '#ffa657' }}>
                   DAG 3: LINE POSITIONING
                 </span>
                 <span style={{
                   fontSize: '8px', padding: '0 4px', borderRadius: '3px',
-                  background: isPositionGroupRunning ? 'rgba(255, 166, 87, 0.25)' : (!isSemaphoreOpen ? 'rgba(248, 81, 73, 0.2)' : 'rgba(255, 166, 87, 0.12)'),
-                  color: isPositionGroupRunning ? '#ffa657' : (!isSemaphoreOpen ? '#ff7b72' : '#ffa657'),
+                  background: isPositionGroupRunning ? 'rgba(255, 166, 87, 0.25)' : (!isConnector1Open ? 'rgba(248, 81, 73, 0.2)' : 'rgba(255, 166, 87, 0.12)'),
+                  color: isPositionGroupRunning ? '#ffa657' : (!isConnector1Open ? '#ff7b72' : '#ffa657'),
                   fontWeight: 800
                 }}>
-                  {isPositionGroupRunning ? 'POSITIONING' : (!isSemaphoreOpen ? '🛑 GATED' : 'READY')}
+                  {isPositionGroupRunning ? 'POSITIONING' : (!isConnector1Open ? '✂️ SEVERED' : 'READY')}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1311,57 +1389,74 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: effectiveSelectedDag === 'position_navigation' ? 'center' : 'space-between', gap: effectiveSelectedDag === 'position_navigation' ? '20px' : '3px' }}>
-              {[4, 5].map((metaIdx, arrIdx) => {
-                const nodeMeta = NODES_METADATA[metaIdx];
-                const nextMeta = arrIdx === 0 ? NODES_METADATA[5] : null;
-                return (
-                  <React.Fragment key={nodeMeta.id}>
-                    <DagNodeCard
-                      node={nodeMeta}
-                      status={getNodeLiveStatus(nodeMeta.id)}
-                      isSelected={activeSelectedNodeId === nodeMeta.id}
-                      isPinned={pinnedHoverNodeId === nodeMeta.id}
-                      isPulsingSwirl={activeRunningId === nodeMeta.id}
-                      copiedNodeId={copiedNodeId}
-                      onSelect={() => handleSelectNode(nodeMeta.id)}
-                      onDoubleClick={() => setPinnedHoverNodeId(prev => prev === nodeMeta.id ? null : nodeMeta.id)}
-                      onMouseEnter={() => setHoveredNodeId(nodeMeta.id)}
-                      onMouseLeave={() => setHoveredNodeId(prev => prev === nodeMeta.id ? null : prev)}
-                      onCopyForAi={() => handleCopyNodeDetailsForAi(nodeMeta.id)}
-                      onOpenPromptModal={() => handleOpenPromptModal(nodeMeta.id)}
-                    />
-                    {nextMeta && (
-                      <MicroConnectingArrow
-                        fromNode={nodeMeta}
-                        toNode={nextMeta}
-                        width={effectiveSelectedDag === 'position_navigation' ? 24 : 14}
-                        isActive={isPositionGroupRunning || activeRunningId === nodeMeta.id || activeRunningId === nextMeta.id}
-                        isHeat={isPositionGroupRunning}
-                      />
-                    )}
-                  </React.Fragment>
-                );
-              })}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', width: '100%' }}>
+              <DagNodeCard
+                node={NODES_METADATA[4]}
+                status={getNodeLiveStatus(NODES_METADATA[4].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[4].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[4].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[4].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[4].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[4].id ? null : NODES_METADATA[4].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[4].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[4].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[4].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[4].id)}
+              />
+              <MicroConnectingArrow
+                fromNode={NODES_METADATA[4]}
+                toNode={NODES_METADATA[5]}
+                width={16}
+                isActive={isPositionGroupRunning || activeRunningId === NODES_METADATA[4].id || activeRunningId === NODES_METADATA[5].id}
+                isHeat={isPositionGroupRunning}
+              />
+              <DagNodeCard
+                node={NODES_METADATA[5]}
+                status={getNodeLiveStatus(NODES_METADATA[5].id)}
+                isSelected={activeSelectedNodeId === NODES_METADATA[5].id}
+                isPinned={pinnedHoverNodeId === NODES_METADATA[5].id}
+                isPulsingSwirl={activeRunningId === NODES_METADATA[5].id}
+                copiedNodeId={copiedNodeId}
+                onSelect={() => handleSelectNode(NODES_METADATA[5].id)}
+                onDoubleClick={() => setPinnedHoverNodeId(prev => prev === NODES_METADATA[5].id ? null : NODES_METADATA[5].id)}
+                onMouseEnter={() => setHoveredNodeId(NODES_METADATA[5].id)}
+                onMouseLeave={() => setHoveredNodeId(prev => prev === NODES_METADATA[5].id ? null : prev)}
+                onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[5].id)}
+                onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[5].id)}
+              />
             </div>
           </div>
         )}
 
-        {/* Transition arrow from Group 3 to DAG 2 (Verify & Assemble) */}
+        {/* INTERACTIVE CONNECTOR: DAG GROUP 3 (arrow_down) TO DAG GROUP 4 (verification_trigger) */}
         {effectiveSelectedDag === 'all' && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Play size={10} color="#00ff9d" fill="#00ff9d" />
-          </div>
+          <InteractiveDagConnector
+            fromNodeId="arrow_down"
+            toNodeId={getEdgeTarget("arrow_down", "verification_trigger")}
+            fromLabel="DAG 3"
+            toLabel="DAG 4"
+            isConnected={isConnector2Open}
+            isActive={isPositionGroupRunning || isVerifyGroupRunning}
+            accentColor="#ffa657"
+            isToggling={isTogglingConnector === 'arrow_down->verification_trigger'}
+            onToggle={() => handleToggleConnector("arrow_down", "verification_trigger", "arrow_down->verification_trigger")}
+            onChangeTarget={(targetId) => handleDirectFlow("arrow_down", targetId)}
+            allNodes={NODES_METADATA}
+          />
         )}
 
-        {/* DAG 2 VERIFY & ASSEMBLE (Nodes 7, 8) */}
-        {effectiveSelectedDag === 'all' && (
+        {/* GROUP 4: VERIFY & ASSEMBLE (Nodes 7, 8) */}
+        {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'verify_assemble') && (
           <div
             style={{
-              background: isCaptureGroupRunning
-                ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
-                : 'rgba(15, 23, 42, 0.4)',
-              border: `1.5px solid ${isCaptureGroupRunning ? '#00ff9d' : '#30363d'}`,
+              flex: effectiveSelectedDag === 'verify_assemble' ? 1 : '0 0 282px',
+              width: effectiveSelectedDag === 'verify_assemble' ? 'auto' : '282px',
+              minWidth: '260px',
+              background: isVerifyGroupRunning
+                ? 'linear-gradient(180deg, rgba(188, 140, 255, 0.16) 0%, rgba(13, 17, 23, 0.8) 100%)'
+                : (effectiveSelectedDag === 'verify_assemble' ? 'rgba(188, 140, 255, 0.06)' : 'rgba(15, 23, 42, 0.4)'),
+              border: `1.5px solid ${isVerifyGroupRunning ? '#bc8cff' : (!isConnector2Open ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
               borderRadius: '8px',
               padding: '4px 6px',
               display: 'flex',
@@ -1372,23 +1467,41 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               transition: 'all 0.3s ease'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '9px', fontWeight: 800, color: '#00ff9d' }}>
-                  DAG 2: VERIFY & ASSEMBLE
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#bc8cff' }}>
+                  DAG 4: VERIFY & ASSEMBLE
                 </span>
                 <span style={{
                   fontSize: '8px', padding: '0 4px', borderRadius: '3px',
-                  background: isCaptureGroupRunning ? 'rgba(0, 255, 157, 0.25)' : 'rgba(0, 255, 157, 0.12)',
-                  color: '#00ff9d',
+                  background: isVerifyGroupRunning ? 'rgba(188, 140, 255, 0.25)' : (!isConnector2Open ? 'rgba(248, 81, 73, 0.2)' : 'rgba(188, 140, 255, 0.14)'),
+                  color: isVerifyGroupRunning ? '#bc8cff' : (!isConnector2Open ? '#ff7b72' : '#bc8cff'),
                   fontWeight: 800
                 }}>
-                  {isCaptureGroupRunning ? 'ACTIVE' : 'READY'}
+                  {isVerifyGroupRunning ? 'ACTIVE' : (!isConnector2Open ? '✂️ SEVERED' : 'READY')}
                 </span>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleRunGroup('verify_assemble'); }}
+                  disabled={runningGroupId !== null || runningNodeId !== null}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '3px', padding: '1px 6px',
+                    borderRadius: '3px', border: '1px solid rgba(188, 140, 255, 0.45)',
+                    background: 'rgba(188, 140, 255, 0.14)', color: '#bc8cff',
+                    fontSize: '8.5px', fontWeight: 800, cursor: 'pointer',
+                    boxShadow: '0 0 6px rgba(188, 140, 255, 0.15)'
+                  }}
+                  title="Run DAG 4 (Nodes 7→8) in isolation to verify qualifiers and assemble markdown"
+                >
+                  <Play size={8} fill="#bc8cff" />
+                  <span>Run DAG 4</span>
+                </button>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-              {/* Node 7: verification_trigger */}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', width: '100%' }}>
               <DagNodeCard
                 node={NODES_METADATA[6]}
                 status={getNodeLiveStatus(NODES_METADATA[6].id)}
@@ -1406,11 +1519,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <MicroConnectingArrow
                 fromNode={NODES_METADATA[6]}
                 toNode={NODES_METADATA[7]}
-                width={14}
-                isActive={isCaptureGroupRunning || activeRunningId === NODES_METADATA[6].id || activeRunningId === NODES_METADATA[7].id}
-                isHeat={isCaptureGroupRunning}
+                width={16}
+                isActive={isVerifyGroupRunning || activeRunningId === NODES_METADATA[6].id || activeRunningId === NODES_METADATA[7].id}
+                isHeat={isVerifyGroupRunning}
               />
-              {/* Node 8: document_assemble */}
               <DagNodeCard
                 node={NODES_METADATA[7]}
                 status={getNodeLiveStatus(NODES_METADATA[7].id)}
@@ -1425,9 +1537,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 onCopyForAi={() => handleCopyNodeDetailsForAi(NODES_METADATA[7].id)}
                 onOpenPromptModal={() => handleOpenPromptModal(NODES_METADATA[7].id)}
               />
-              <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+              <LoopbackArrow isCaptureRunning={Boolean(isCaptureGroupRunning || isVerifyGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
             </div>
-            <LoopbackReturnTrack isCaptureRunning={Boolean(isCaptureGroupRunning)} isPrevented={Boolean(triggerDecision?.prevented)} />
+            <InteractiveLoopbackConnector
+              isConnected={isLoopbackConnected}
+              isCaptureRunning={Boolean(isCaptureGroupRunning || isVerifyGroupRunning)}
+              isPrevented={Boolean(triggerDecision?.prevented)}
+              onToggle={() => handleToggleConnector("document_assemble", "frame_acquire", "document_assemble->frame_acquire")}
+            />
           </div>
         )}
       </div>

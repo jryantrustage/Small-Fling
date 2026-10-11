@@ -332,8 +332,8 @@ dag_state: Dict[str, Any] = {
         "capture_entire_markdown": {
             "id": "capture_entire_markdown",
             "title": "Screen Capture & AI OCR",
-            "description": "Acquires screen frames, extracts verbatim markdown with local vision model, verifies settle timing, and reconstructs master document",
-            "nodes": ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"],
+            "description": "Acquires screen frames and extracts verbatim markdown with local vision model",
+            "nodes": ["frame_acquire", "local_ai_ocr"],
             "status": "idle",
             "progress": None
         },
@@ -344,9 +344,21 @@ dag_state: Dict[str, Any] = {
             "nodes": ["frame_ocr", "arrow_down"],
             "status": "idle",
             "progress": None
+        },
+        "verify_assemble": {
+            "id": "verify_assemble",
+            "title": "Verify & Assemble",
+            "description": "Recaptures frame to verify top line position, evaluates qualifiers, and reconstructs master document",
+            "nodes": ["verification_trigger", "document_assemble"],
+            "status": "idle",
+            "progress": None
         }
     },
     "semaphore_group2_to_3": True,
+    "semaphore_group3_to_4": True,
+    "semaphore_status": "open",
+    "semaphore_group2_to_3_status": "open",
+    "semaphore_group3_to_4_status": "open",
     "nodes": {
         "init_end": {
             "id": "init_end",
@@ -498,7 +510,7 @@ dag_state: Dict[str, Any] = {
         },
         "verification_trigger": {
             "id": "verification_trigger",
-            "group": "capture_entire_markdown",
+            "group": "verify_assemble",
             "title": "7. Recapture & Verification Trigger",
             "description": "Verify last line + 1 has been positioned to the top, then trigger DAG process flow.",
             "status": "idle",
@@ -577,7 +589,7 @@ dag_state: Dict[str, Any] = {
         },
         "document_assemble": {
             "id": "document_assemble",
-            "group": "capture_entire_markdown",
+            "group": "verify_assemble",
             "title": "8. Markdown Document Assemble",
             "description": "Reconstructs continuous markdown document, links verified code blocks, and evaluates loopback completion against total lines.",
             "status": "idle",
@@ -602,20 +614,118 @@ dag_state: Dict[str, Any] = {
         }
     },
     "edges": [
-        {"from": "init_end", "to": "reset_home"},
-        {"from": "reset_home", "to": "frame_acquire"},
-        {"from": "frame_acquire", "to": "local_ai_ocr"},
-        {"from": "local_ai_ocr", "to": "frame_ocr", "has_semaphore": True},
-        {"from": "frame_ocr", "to": "arrow_down"},
-        {"from": "arrow_down", "to": "verification_trigger"},
-        {"from": "verification_trigger", "to": "document_assemble"},
-        {"from": "document_assemble", "to": "frame_acquire", "is_loopback": True}
+        {"id": "init_end->reset_home", "from": "init_end", "to": "reset_home", "enabled": True},
+        {"id": "reset_home->frame_acquire", "from": "reset_home", "to": "frame_acquire", "enabled": True},
+        {"id": "frame_acquire->local_ai_ocr", "from": "frame_acquire", "to": "local_ai_ocr", "enabled": True},
+        {"id": "local_ai_ocr->frame_ocr", "from": "local_ai_ocr", "to": "frame_ocr", "enabled": True, "has_semaphore": True},
+        {"id": "frame_ocr->arrow_down", "from": "frame_ocr", "to": "arrow_down", "enabled": True},
+        {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "has_semaphore": True},
+        {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True},
+        {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True}
     ],
     "current_active_node": None
 }
 
+DEFAULT_DAG_EDGES = [
+    {"id": "init_end->reset_home", "from": "init_end", "to": "reset_home", "enabled": True, "label": "Calibrate to Line 1"},
+    {"id": "reset_home->frame_acquire", "from": "reset_home", "to": "frame_acquire", "enabled": True, "label": "Start Page Capture"},
+    {"id": "frame_acquire->local_ai_ocr", "from": "frame_acquire", "to": "local_ai_ocr", "enabled": True, "label": "Send Image to MiniCPM-V"},
+    {"id": "local_ai_ocr->frame_ocr", "from": "local_ai_ocr", "to": "frame_ocr", "enabled": True, "label": "Route to Gutter Boundary OCR", "has_semaphore": True},
+    {"id": "frame_ocr->arrow_down", "from": "frame_ocr", "to": "arrow_down", "enabled": True, "label": "Target Next Page Line"},
+    {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "label": "Assert Settle & Trigger Next", "has_semaphore": True},
+    {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True, "label": "Append Verified Text"},
+    {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True, "label": "Continuous Loopback Track"}
+]
+
 capture_loop_running: bool = False
 dag_semaphore_group2_to_3: bool = True
+dag_semaphore_group3_to_4: bool = True
+
+def get_outgoing_edge(from_node: str) -> Optional[Dict[str, Any]]:
+    for edge in dag_state.get("edges", []):
+        if edge.get("from") == from_node and edge.get("enabled", True):
+            return edge
+    return None
+
+def is_edge_connected(from_node: str, to_node: Optional[str] = None) -> bool:
+    for edge in dag_state.get("edges", []):
+        if edge.get("from") == from_node:
+            if to_node is None or edge.get("to") == to_node:
+                return bool(edge.get("enabled", True))
+    return False
+
+def sync_semaphore_states_from_edges():
+    global dag_semaphore_group2_to_3, dag_semaphore_group3_to_4
+    dag_semaphore_group2_to_3 = is_edge_connected("local_ai_ocr", "frame_ocr")
+    dag_semaphore_group3_to_4 = is_edge_connected("arrow_down", "verification_trigger")
+    dag_state["semaphore_group2_to_3"] = dag_semaphore_group2_to_3
+    dag_state["semaphore_group3_to_4"] = dag_semaphore_group3_to_4
+    dag_state["semaphore_group2_to_3_status"] = "open" if dag_semaphore_group2_to_3 else "blocked"
+    dag_state["semaphore_group3_to_4_status"] = "open" if dag_semaphore_group3_to_4 else "blocked"
+    dag_state["semaphore_status"] = "open" if (dag_semaphore_group2_to_3 and dag_semaphore_group3_to_4) else "blocked"
+
+def set_edge_connection(from_node: str, to_node: str, enabled: bool = True) -> Dict[str, Any]:
+    edges = dag_state.setdefault("edges", [])
+    matched = None
+    for edge in edges:
+        if edge.get("from") == from_node:
+            edge["to"] = to_node
+            edge["enabled"] = bool(enabled)
+            edge["id"] = f"{from_node}->{to_node}"
+            matched = edge
+            break
+    if not matched:
+        matched = {
+            "id": f"{from_node}->{to_node}",
+            "from": from_node,
+            "to": to_node,
+            "enabled": bool(enabled),
+            "is_loopback": (from_node == "document_assemble" and to_node == "frame_acquire")
+        }
+        edges.append(matched)
+    sync_semaphore_states_from_edges()
+    return matched
+
+def toggle_edge_connection(edge_id: Optional[str] = None, from_node: Optional[str] = None, to_node: Optional[str] = None) -> Dict[str, Any]:
+    edges = dag_state.setdefault("edges", [])
+    # Alias support for group2_to_3 and group3_to_4
+    if edge_id == "group2_to_3" or (from_node == "local_ai_ocr" and to_node in (None, "frame_ocr")):
+        from_node, to_node = "local_ai_ocr", "frame_ocr"
+        edge_id = None
+    elif edge_id == "group3_to_4" or (from_node == "arrow_down" and to_node in (None, "verification_trigger")):
+        from_node, to_node = "arrow_down", "verification_trigger"
+        edge_id = None
+
+    matched = None
+    for edge in edges:
+        if edge_id and edge.get("id") == edge_id:
+            edge["enabled"] = not edge.get("enabled", True)
+            matched = edge
+            break
+        elif from_node and edge.get("from") == from_node:
+            if to_node is None or edge.get("to") == to_node:
+                edge["enabled"] = not edge.get("enabled", True)
+                matched = edge
+                break
+
+    if not matched and from_node and to_node:
+        matched = {
+            "id": f"{from_node}->{to_node}",
+            "from": from_node,
+            "to": to_node,
+            "enabled": False,
+            "is_loopback": (from_node == "document_assemble" and to_node == "frame_acquire")
+        }
+        edges.append(matched)
+
+    sync_semaphore_states_from_edges()
+    return matched or {"error": "Edge not found"}
+
+def reset_default_edges() -> List[Dict[str, Any]]:
+    import copy
+    dag_state["edges"] = copy.deepcopy(DEFAULT_DAG_EDGES)
+    sync_semaphore_states_from_edges()
+    return dag_state["edges"]
 
 current_pipeline_mode = "cloud"
 selected_ocr_engine = "local"

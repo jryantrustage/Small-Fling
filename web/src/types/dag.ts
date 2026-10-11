@@ -52,7 +52,7 @@ export interface PerformanceDiagnosis {
   promptDataUri: string;
 }
 
-export type DagGroup = 'initialize' | 'capture_entire_markdown' | 'position_navigation';
+export type DagGroup = 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble';
 
 export interface NodeMeta {
   id: string;
@@ -87,15 +87,28 @@ export interface NodeLiveStatus {
   nodeError?: string | null;
 }
 
+export interface DagEdge {
+  id?: string;
+  from: string;
+  to: string;
+  enabled?: boolean;
+  label?: string;
+  is_loopback?: boolean;
+  has_semaphore?: boolean;
+}
+
 export interface DagStatusData {
   dag?: {
     current_active_node?: string;
     current_active_group?: string;
     groups?: Record<string, any>;
     nodes?: Record<string, any>;
-    edges?: Array<{ from: string; to: string; is_loopback?: boolean; has_semaphore?: boolean }>;
+    edges?: DagEdge[];
     semaphore_group2_to_3?: boolean;
+    semaphore_group3_to_4?: boolean;
     semaphore_status?: 'open' | 'blocked';
+    semaphore_group2_to_3_status?: 'open' | 'blocked';
+    semaphore_group3_to_4_status?: 'open' | 'blocked';
   };
   active_node: string;
   target_total_lines: number;
@@ -181,7 +194,7 @@ export const NODES_METADATA: NodeMeta[] = [
     fullName: '7. VERIFY & TRIGGER',
     subhead: 'Settle Timing & Qualifiers',
     desc: 'Verifies top line is settled and evaluates qualifiers before advancing the capture loop.',
-    group: 'capture_entire_markdown',
+    group: 'verify_assemble',
     accentColor: '#58a6ff',
     hasConfig: true
   },
@@ -192,8 +205,8 @@ export const NODES_METADATA: NodeMeta[] = [
     fullName: '8. ASSEMBLE MARKDOWN',
     subhead: 'Reconstruct Master Document',
     desc: 'Assembles verified code blocks into continuous markdown and evaluates EOF loopback completion.',
-    group: 'capture_entire_markdown',
-    accentColor: '#00ff9d',
+    group: 'verify_assemble',
+    accentColor: '#bc8cff',
     hasConfig: true
   }
 ];

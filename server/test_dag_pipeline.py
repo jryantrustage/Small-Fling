@@ -98,22 +98,30 @@ def test_dag_group_segmentation_and_runner():
         assert "initialize" in dag_data["groups"]
         assert "capture_entire_markdown" in dag_data["groups"]
         assert "position_navigation" in dag_data["groups"]
-        for req_node in ["frame_acquire", "local_ai_ocr", "verification_trigger", "document_assemble"]:
+        assert "verify_assemble" in dag_data["groups"]
+        for req_node in ["init_end", "reset_home"]:
+            assert req_node in dag_data["groups"]["initialize"]["nodes"]
+        for req_node in ["frame_acquire", "local_ai_ocr"]:
             assert req_node in dag_data["groups"]["capture_entire_markdown"]["nodes"]
         for req_node in ["frame_ocr", "arrow_down"]:
             assert req_node in dag_data["groups"]["position_navigation"]["nodes"]
-        assert len(dag_data["nodes"]) >= 6
+        for req_node in ["verification_trigger", "document_assemble"]:
+            assert req_node in dag_data["groups"]["verify_assemble"]["nodes"]
+        assert len(dag_data["nodes"]) >= 8
         assert "frame_acquire" in dag_data["nodes"]
         assert "frame_ocr" in dag_data["nodes"]
 
-        # Test Semaphore API
+        # Test Dual Semaphore API
         sem_res = client.get("/api/dag/semaphore")
         assert sem_res.status_code == 200
         assert sem_res.json()["status"] == "success"
-        toggle_res = client.post("/api/dag/semaphore/toggle")
+        assert "semaphore_group2_to_3" in sem_res.json()
+        assert "semaphore_group3_to_4" in sem_res.json()
+        toggle_res = client.post("/api/dag/semaphore/toggle", json={"semaphore_id": "group3_to_4"})
         assert toggle_res.status_code == 200
+        assert toggle_res.json()["semaphore_id"] == "group3_to_4"
         # Restore semaphore to True
-        client.post("/api/dag/semaphore", json={"enabled": True})
+        client.post("/api/dag/semaphore", json={"enabled": True, "semaphore_id": "group3_to_4"})
 
         # 3. Test independent configuration of Node 3 and Node 4
         cfg3_res = client.post("/api/dag/nodes/frame_acquire/config", json={"settle_delay_ms": 400})
@@ -332,4 +340,59 @@ def test_viewport_26_lines_page_alignment():
             cursor = res["cursor_line"]
 
     asyncio.run(run_test())
+
+
+def test_dag_node_connectors_flow_orchestration():
+    """Verify that node connectors direct DAG orchestration flow and can be connected/disconnected."""
+    with TestClient(main.app) as client:
+        # 1. Fetch connectors
+        res = client.get("/api/dag/connectors")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "success"
+        edges = data["edges"]
+        assert len(edges) >= 8
+
+        # 2. Toggle connector between local_ai_ocr and frame_ocr
+        toggle_res = client.post("/api/dag/connectors/toggle", json={
+            "from_node": "local_ai_ocr",
+            "to_node": "frame_ocr"
+        })
+        assert toggle_res.status_code == 200
+        assert toggle_res.json()["edge"]["enabled"] is False
+
+        # Verify semaphore backward-compatibility reflects disconnected edge
+        sem_res = client.get("/api/dag/semaphore")
+        assert sem_res.json()["semaphore_group2_to_3"] is False
+
+        # 3. Direct flow: Re-route local_ai_ocr directly to verification_trigger (bypassing line positioning)
+        connect_res = client.post("/api/dag/connectors/connect", json={
+            "from_node": "local_ai_ocr",
+            "to_node": "verification_trigger",
+            "enabled": True
+        })
+        assert connect_res.status_code == 200
+        assert connect_res.json()["edge"]["from"] == "local_ai_ocr"
+        assert connect_res.json()["edge"]["to"] == "verification_trigger"
+        assert connect_res.json()["edge"]["enabled"] is True
+
+        # 4. Disconnect a connector
+        disconn_res = client.post("/api/dag/connectors/disconnect", json={
+            "from_node": "arrow_down",
+            "to_node": "verification_trigger"
+        })
+        assert disconn_res.status_code == 200
+        assert disconn_res.json()["edge"]["enabled"] is False
+
+        # 5. Reset connectors back to default
+        reset_res = client.post("/api/dag/connectors/reset")
+        assert reset_res.status_code == 200
+        reset_edges = reset_res.json()["edges"]
+        # All reset edges should be enabled
+        assert all(e["enabled"] for e in reset_edges)
+        # Verify local_ai_ocr -> frame_ocr restored
+        edge_23 = next((e for e in reset_edges if e["from"] == "local_ai_ocr"), None)
+        assert edge_23 is not None
+        assert edge_23["to"] == "frame_ocr"
+
 
