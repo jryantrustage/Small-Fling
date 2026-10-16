@@ -209,28 +209,42 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     body_gutter = img[tb_y2:h - int(h * 0.04), :gutter_w]
     
     gutter_lines = []
-    # OCR pass on gutter crop
-    res_g, _ = ocr(body_gutter)
-    if res_g:
-        for b, t, s in res_g:
+
+    def _extract_gutter_tokens(crop_img, x_offset: int, y_offset: int):
+        if crop_img.size == 0:
+            return
+        res, _ = ocr(crop_img)
+        if not res:
+            return
+        for b, t, s in res:
             pts = np.array(b)
-            bx1, by1 = int(pts[:, 0].min()), tb_y2 + int(pts[:, 1].min())
-            bw, bh = int(pts[:, 0].max() - pts[:, 0].min()), int(pts[:, 1].max() - pts[:, 1].min())
+            bx1 = x_offset + int(pts[:, 0].min())
+            by1 = y_offset + int(pts[:, 1].min())
+            bw = int(pts[:, 0].max() - pts[:, 0].min())
+            bh = int(pts[:, 1].max() - pts[:, 1].min())
             clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
             if m := re.search(r'^\s*(\d+)', clean):
                 val = int(m.group(1))
-                if 1 <= val <= 999999:
+                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 12 and gl[1] == val for gl in gutter_lines):
                     char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
                     box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
                     gutter_lines.append((by1, val, box))
 
-    # Also incorporate top_tokens below toolbar
+    # Pass A: Focused narrow gutter crop dedicated to line number digits (avoids body text grouping interference)
+    gutter_num_w = int(max(70, min(140, 95 * dpi_factor)))
+    narrow_strip = img[tb_y2:h - int(h * 0.04), :gutter_num_w]
+    _extract_gutter_tokens(narrow_strip, 0, tb_y2)
+
+    # Pass B: Wider gutter crop for wider gutters or indented columns
+    _extract_gutter_tokens(body_gutter, 0, tb_y2)
+
+    # Pass C: Also incorporate top_tokens below toolbar
     for bx1, by1, bw, bh, t, s in top_tokens:
         if by1 >= tb_y2 and bx1 < gutter_w:
             clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
             if m := re.search(r'^\s*(\d+)', clean):
                 val = int(m.group(1))
-                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 for gl in gutter_lines):
+                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 12 for gl in gutter_lines):
                     char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
                     box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
                     gutter_lines.append((by1, val, box))
@@ -243,20 +257,62 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     if gutter_lines:
         gutter_lines.sort(key=lambda x: x[0])
         top_y, top_val, top_box = gutter_lines[0]
-        # If top detected line > 1, check whether line 1 is visible directly above it using vertical gutter pitch
-        if top_val > 1 and len(gutter_lines) >= 2:
-            pitches = [gutter_lines[i+1][0] - gutter_lines[i][0] for i in range(min(4, len(gutter_lines)-1)) if gutter_lines[i+1][1] > gutter_lines[i][1]]
-            avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(18.0, 36.0 * (dpi_factor / 2.0))
-            est_l1_y = top_y - int((top_val - 1) * avg_pitch)
-            if est_l1_y >= tb_y2 - 10:
-                first_line_num = 1
-                first_line_box = [top_box[0], max(tb_y2, est_l1_y), top_box[2], top_box[3]]
-            else:
-                first_line_num = top_val
-                first_line_box = top_box
-        else:
-            first_line_num = top_val
-            first_line_box = top_box
+
+        # Calculate actual pitch per line (delta_y / delta_line_number)
+        pitches = []
+        for i in range(len(gutter_lines) - 1):
+            d_val = gutter_lines[i+1][1] - gutter_lines[i][1]
+            d_y = gutter_lines[i+1][0] - gutter_lines[i][0]
+            if d_val > 0 and d_y > 0:
+                pitch = d_y / float(d_val)
+                if 15.0 <= pitch <= 80.0:
+                    pitches.append(pitch)
+
+        avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(18.0, 26.0 * dpi_factor)
+
+        # If top detected line > 1, check whether line 1 (or intervening lines) are visible directly above it
+        first_line_num = top_val
+        first_line_box = top_box
+
+        if top_val > 1:
+            topmost_val = top_val
+            topmost_y = top_y
+            for cand_val in range(top_val - 1, 0, -1):
+                cand_y = top_y - int((top_val - cand_val) * avg_pitch)
+                if cand_y >= tb_y2 - 12:
+                    topmost_val = cand_val
+                    topmost_y = cand_y
+                else:
+                    break
+
+            if topmost_val < top_val:
+                first_line_num = topmost_val
+                est_box = [top_box[0], max(tb_y2, topmost_y), top_box[2], top_box[3]]
+                # Refine with contour detection in digit window
+                cy1 = max(tb_y2, topmost_y - int(8 * dpi_factor))
+                cy2 = min(h, topmost_y + int(24 * dpi_factor))
+                cx1 = max(0, top_box[0] - int(15 * dpi_factor))
+                cx2 = min(w, top_box[0] + top_box[2] + int(15 * dpi_factor))
+                crop_digit = img[cy1:cy2, cx1:cx2]
+                if crop_digit.size > 0:
+                    gray_digit = cv2.cvtColor(crop_digit, cv2.COLOR_BGR2GRAY)
+                    if dark_mode_active:
+                        _, thresh_d = cv2.threshold(gray_digit, 60, 255, cv2.THRESH_BINARY)
+                    else:
+                        _, thresh_d = cv2.threshold(gray_digit, 190, 255, cv2.THRESH_BINARY_INV)
+                    conts, _ = cv2.findContours(thresh_d, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    valid_conts = []
+                    for c in conts:
+                        cdx, cdy, cdw, cdh = cv2.boundingRect(c)
+                        area = cv2.contourArea(c)
+                        if 10 <= area <= 600 and 8 <= cdh <= int(35 * dpi_factor):
+                            valid_conts.append((cdx, cdy, cdw, cdh))
+                    if valid_conts:
+                        valid_conts.sort(key=lambda c: abs((cy1 + c[1]) - topmost_y))
+                        cdx, cdy, cdw, cdh = valid_conts[0]
+                        est_box = [cx1 + cdx - 2, cy1 + cdy - 2, max(cdw + 4, 14), cdh + 4]
+
+                first_line_box = est_box
 
         # Last line
         last_line_num = gutter_lines[-1][1]
