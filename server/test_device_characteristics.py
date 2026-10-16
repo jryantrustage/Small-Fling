@@ -243,3 +243,44 @@ async def test_scroll_padding_and_arrow_count_calibration_and_persistence():
         db.delete_project(pid)
 
 
+def test_alignment_detection_pixel8_and_pixel10_profiles():
+    """Verifies that edit mode pencil detection and dark mode pass on both Pixel 8 and Pixel 10 desktop profiles."""
+    from pathlib import Path
+    import cv2
+    from alignment_engine import detect_teams_markdown_alignment
+
+    img_dir = Path(__file__).parent.parent / "tests" / "test_images" / "device_profiles"
+    p8_path = img_dir / "pixel8_pro_desktop.png"
+    p10_path = img_dir / "pixel10_pro_xl_desktop.png"
+
+    if p8_path.exists():
+        img_p8 = cv2.imread(str(p8_path))
+        res_p8 = detect_teams_markdown_alignment(img_p8, dpi_factor=1.0)
+        assert res_p8["boxes"]["edit_mode"]["passed"] is True
+        assert res_p8["boxes"]["dark_mode"]["passed"] is True
+        assert res_p8["boxes"]["teams_logo"]["passed"] is True
+        assert res_p8["boxes"]["file_name"]["passed"] is True
+        assert res_p8["is_aligned"] is True
+
+    if p10_path.exists():
+        img_p10 = cv2.imread(str(p10_path))
+        res_p10 = detect_teams_markdown_alignment(img_p10, dpi_factor=1.0)
+        assert res_p10["boxes"]["edit_mode"]["passed"] is True
+        assert res_p10["boxes"]["dark_mode"]["passed"] is True
+        assert res_p10["boxes"]["teams_logo"]["passed"] is True
+        assert res_p10["boxes"]["file_name"]["passed"] is True
+        assert res_p10["is_aligned"] is True
+
+    # Also test live desktop capture from Pixel 10 Pro XL on external display if available
+    live_p10 = Path(__file__).parent / "current_pixel10_desktop.png"
+    if live_p10.exists():
+        img_live = cv2.imread(str(live_p10))
+        res_live = detect_teams_markdown_alignment(img_live, dpi_factor=1.375)
+        assert res_live["boxes"]["edit_mode"]["passed"] is True
+        assert res_live["boxes"]["dark_mode"]["passed"] is True
+        assert res_live["boxes"]["teams_logo"]["passed"] is True
+        assert res_live["boxes"]["file_name"]["passed"] is True
+        assert res_live["is_aligned"] is True
+
+
+

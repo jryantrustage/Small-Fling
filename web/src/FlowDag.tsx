@@ -1091,27 +1091,34 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       <div style={{
         display: 'flex',
         alignItems: 'stretch',
-        gap: '6px',
+        gap: '8px',
         width: '100%',
         position: 'relative',
         overflowX: 'auto',
         overflowY: 'hidden',
-        padding: '3px 2px 6px 2px',
+        padding: '6px 8px 8px 8px',
         boxSizing: 'border-box'
       }}>
         {/* GROUP 1: INITIALIZE */}
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'initialize') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'initialize' ? 1 : '0 0 272px',
-              width: effectiveSelectedDag === 'initialize' ? 'auto' : '272px',
+              flex: effectiveSelectedDag === 'initialize' ? 1 : '0 0 284px',
+              width: effectiveSelectedDag === 'initialize' ? 'auto' : '284px',
               minWidth: '260px',
               background: isInitGroupRunning
-                ? 'linear-gradient(180deg, rgba(88, 166, 255, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
-                : (effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.06)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isInitGroupError ? '#f85149' : (isInitGroupRunning ? '#58a6ff' : (isInitGroupCompleted ? '#238636' : '#30363d'))}`,
-              borderRadius: '8px',
-              padding: '4px 6px',
+                ? 'linear-gradient(180deg, rgba(88, 166, 255, 0.16) 0%, rgba(13, 17, 23, 0.85) 100%)'
+                : (effectiveSelectedDag === 'initialize' ? 'rgba(88, 166, 255, 0.08)' : 'rgba(15, 23, 42, 0.55)'),
+              border: `1.5px solid ${isInitGroupError ? '#f85149' : (isInitGroupRunning ? '#58a6ff' : (isInitGroupCompleted ? '#238636' : 'rgba(88, 166, 255, 0.5)'))}`,
+              borderRadius: '10px',
+              boxShadow: isInitGroupError
+                ? '0 0 10px rgba(248, 81, 73, 0.3)'
+                : (isInitGroupRunning
+                  ? '0 0 14px rgba(88, 166, 255, 0.4)'
+                  : (isInitGroupCompleted
+                    ? '0 0 10px rgba(35, 134, 54, 0.3)'
+                    : '0 0 9px rgba(88, 166, 255, 0.16), inset 0 0 10px rgba(88, 166, 255, 0.04)')),
+              padding: '6px 8px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
@@ -1211,15 +1218,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'capture_entire_markdown') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'capture_entire_markdown' ? 1 : '0 0 272px',
-              width: effectiveSelectedDag === 'capture_entire_markdown' ? 'auto' : '272px',
+              flex: effectiveSelectedDag === 'capture_entire_markdown' ? 1 : '0 0 284px',
+              width: effectiveSelectedDag === 'capture_entire_markdown' ? 'auto' : '284px',
               minWidth: '260px',
               background: isCaptureGroupRunning
-                ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.12) 0%, rgba(13, 17, 23, 0.8) 100%)'
-                : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isCaptureGroupRunning ? '#00ff9d' : '#30363d'}`,
-              borderRadius: '8px',
-              padding: '4px 6px',
+                ? 'linear-gradient(180deg, rgba(0, 255, 157, 0.14) 0%, rgba(13, 17, 23, 0.85) 100%)'
+                : (effectiveSelectedDag === 'capture_entire_markdown' ? 'rgba(0, 255, 157, 0.06)' : 'rgba(15, 23, 42, 0.55)'),
+              border: `1.5px solid ${isCaptureGroupRunning ? '#00ff9d' : 'rgba(0, 255, 157, 0.45)'}`,
+              borderRadius: '10px',
+              boxShadow: isCaptureGroupRunning
+                ? '0 0 14px rgba(0, 255, 157, 0.35)'
+                : '0 0 9px rgba(0, 255, 157, 0.14), inset 0 0 10px rgba(0, 255, 157, 0.03)',
+              padding: '6px 8px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
@@ -1338,15 +1348,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'position_navigation') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'position_navigation' ? 1 : '0 0 272px',
-              width: effectiveSelectedDag === 'position_navigation' ? 'auto' : '272px',
+              flex: effectiveSelectedDag === 'position_navigation' ? 1 : '0 0 284px',
+              width: effectiveSelectedDag === 'position_navigation' ? 'auto' : '284px',
               minWidth: '260px',
               background: isPositionGroupRunning
-                ? 'linear-gradient(180deg, rgba(255, 166, 87, 0.15) 0%, rgba(13, 17, 23, 0.8) 100%)'
-                : (effectiveSelectedDag === 'position_navigation' ? 'rgba(255, 166, 87, 0.05)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isPositionGroupRunning ? '#ffa657' : (!isConnector1Open ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
-              borderRadius: '8px',
-              padding: '4px 6px',
+                ? 'linear-gradient(180deg, rgba(255, 166, 87, 0.15) 0%, rgba(13, 17, 23, 0.85) 100%)'
+                : (effectiveSelectedDag === 'position_navigation' ? 'rgba(255, 166, 87, 0.06)' : 'rgba(15, 23, 42, 0.55)'),
+              border: `1.5px solid ${isPositionGroupRunning ? '#ffa657' : (!isConnector1Open ? 'rgba(248, 81, 73, 0.6)' : 'rgba(255, 166, 87, 0.45)')}`,
+              borderRadius: '10px',
+              boxShadow: isPositionGroupRunning
+                ? '0 0 14px rgba(255, 166, 87, 0.35)'
+                : '0 0 9px rgba(255, 166, 87, 0.14), inset 0 0 10px rgba(255, 166, 87, 0.03)',
+              padding: '6px 8px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
@@ -1450,15 +1463,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         {(effectiveSelectedDag === 'all' || effectiveSelectedDag === 'verify_assemble') && (
           <div
             style={{
-              flex: effectiveSelectedDag === 'verify_assemble' ? 1 : '0 0 282px',
-              width: effectiveSelectedDag === 'verify_assemble' ? 'auto' : '282px',
+              flex: effectiveSelectedDag === 'verify_assemble' ? 1 : '0 0 284px',
+              width: effectiveSelectedDag === 'verify_assemble' ? 'auto' : '284px',
               minWidth: '260px',
               background: isVerifyGroupRunning
-                ? 'linear-gradient(180deg, rgba(188, 140, 255, 0.16) 0%, rgba(13, 17, 23, 0.8) 100%)'
-                : (effectiveSelectedDag === 'verify_assemble' ? 'rgba(188, 140, 255, 0.06)' : 'rgba(15, 23, 42, 0.4)'),
-              border: `1.5px solid ${isVerifyGroupRunning ? '#bc8cff' : (!isConnector2Open ? 'rgba(248, 81, 73, 0.6)' : '#30363d')}`,
-              borderRadius: '8px',
-              padding: '4px 6px',
+                ? 'linear-gradient(180deg, rgba(188, 140, 255, 0.16) 0%, rgba(13, 17, 23, 0.85) 100%)'
+                : (effectiveSelectedDag === 'verify_assemble' ? 'rgba(188, 140, 255, 0.06)' : 'rgba(15, 23, 42, 0.55)'),
+              border: `1.5px solid ${isVerifyGroupRunning ? '#bc8cff' : (!isConnector2Open ? 'rgba(248, 81, 73, 0.6)' : 'rgba(188, 140, 255, 0.45)')}`,
+              borderRadius: '10px',
+              boxShadow: isVerifyGroupRunning
+                ? '0 0 14px rgba(188, 140, 255, 0.35)'
+                : '0 0 9px rgba(188, 140, 255, 0.14), inset 0 0 10px rgba(188, 140, 255, 0.03)',
+              padding: '6px 8px',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',

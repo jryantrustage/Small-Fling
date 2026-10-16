@@ -251,8 +251,8 @@ def analyze_dag2_performance_report(loop_history: Optional[List[Dict[str, Any]]]
         cf = getattr(state, "captured_frames", {})
         now_ms = int(time.time() * 1000)
         items = list(cf.items())[:6]
-        if not items:
-            # Synthetic default baseline
+        if len(items) < 2:
+            # Synthetic default baseline exhibiting multi-loop progression
             items = [
                 ("frame_p001", {"top_line": 1, "bottom_line": 50, "extracted_line_count": 50}),
                 ("frame_p002", {"top_line": 51, "bottom_line": 100, "extracted_line_count": 50}),

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, ChevronDown, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Play, Camera, ArrowDownCircle } from 'lucide-react';
+import { Activity, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Play, Camera, ArrowDownCircle, Minus, X, Trash2 } from 'lucide-react';
 import { StructuredLogEntry } from './components/StructuredLogEntry';
 
 export interface TelemetryEvent {
@@ -175,13 +175,17 @@ export interface TelemetryToasterProps {
   apiBase?: string;
   onRefresh?: () => void;
   onOpenPromptModal?: (nodeId: string) => void;
+  isExpanded?: boolean;
+  activeTab?: 'overview' | 'pacer' | 'tokens' | 'events';
+  onActiveTabChange?: (tab: 'overview' | 'pacer' | 'tokens' | 'events') => void;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   telemetry, tokenStats, documentSummary, wsConnected, latencyMs, pipelineMode, deviceModel,
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
-  selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal
+  selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal,
+  isExpanded: controlledExpanded, activeTab: controlledActiveTab, onActiveTabChange
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
@@ -232,10 +236,24 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     if (selectedNodeId) setIsNodeTracingActive(true);
   }, [selectedNodeId]);
 
-  const [isExpanded, setIsExpanded] = useState<boolean>(() => {
+  const [internalExpanded, setInternalExpanded] = useState<boolean>(() => {
     try { return localStorage.getItem('mc_telemetry_expanded') === 'true'; } catch { return false; }
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'pacer' | 'tokens' | 'events'>('overview');
+  const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
+
+  useEffect(() => {
+    if (controlledExpanded !== undefined) {
+      setInternalExpanded(controlledExpanded);
+    }
+  }, [controlledExpanded]);
+
+  const [internalActiveTab, setInternalActiveTab] = useState<'overview' | 'pacer' | 'tokens' | 'events'>('overview');
+  const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
+  const setActiveTab = (tab: 'overview' | 'pacer' | 'tokens' | 'events') => {
+    if (onActiveTabChange) onActiveTabChange(tab);
+    else setInternalActiveTab(tab);
+  };
+
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState<number>(() => Date.now());
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -260,7 +278,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
 
   const toggleExpanded = () => {
     const next = !isExpanded;
-    setIsExpanded(next);
+    setInternalExpanded(next);
     try { localStorage.setItem('mc_telemetry_expanded', String(next)); } catch {}
     onExpandedChange?.(next);
   };
@@ -474,6 +492,17 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               </div>
             </div>
             <div className="toaster-header-actions">
+              {activeTab === 'events' && onClearEvents && (
+                <button
+                  type="button"
+                  className="toaster-btn-icon"
+                  onClick={onClearEvents}
+                  title="Clear live events log"
+                  style={{ color: '#8b949e' }}
+                >
+                  <Trash2 size={13} />
+                </button>
+              )}
               {onOpenStudio && (
                 <button
                   type="button"
@@ -487,7 +516,8 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               )}
               <span className="toaster-latency-pill">{latencyMs > 0 ? `${latencyMs}ms RTT` : 'synced'}</span>
               <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">{copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}</button>
-              <button className="toaster-btn-icon" onClick={toggleExpanded} title="Collapse Toaster"><ChevronDown size={15} /></button>
+              <button className="toaster-btn-icon" onClick={toggleExpanded} title="Minimize / Collapse Logs"><Minus size={13} /></button>
+              <button className="toaster-btn-icon win-btn-close" onClick={toggleExpanded} title="Close Logs Drawer"><X size={13} /></button>
             </div>
           </div>
 

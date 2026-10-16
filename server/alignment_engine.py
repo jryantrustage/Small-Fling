@@ -124,44 +124,58 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 3. WHITE BOX 1: Edit Mode ("Pencil Icon" Active)
     # ---------------------------------------------------------
-    # Find editor body start from top_tokens to bound toolbar accurately regardless of DPI
-    first_body_y = None
-    for bx1, by1, bw, bh, t, s in top_tokens:
-        clean = t.strip()
-        if by1 > file_bottom_y + 10:
-            if any(k in clean.lower() for k in ['h1', '99', '</>']) and bh < 60:
-                pass # toolbar icon
-            elif len(clean) >= 3 and (bx1 < int(w * 0.35) or clean.startswith('#') or clean.startswith('>') or re.match(r'^\d+', clean)):
-                if first_body_y is None or by1 < first_body_y:
-                    first_body_y = by1
-
     tb_y1 = max(0, file_bottom_y)
-    tb_y2 = first_body_y if (first_body_y and first_body_y > tb_y1 + 40) else min(h, tb_y1 + int(max(90, 180 * dpi_factor)))
-    crop_tb = img[tb_y1:tb_y2, :]
+    # Search band for toolbar: spans from file_bottom_y to below the action toolbar row
+    tb_search_y2 = min(h, tb_y1 + int(max(90, 160 * dpi_factor)))
+
+    # In landscape/desktop (w >= h): pencil icon is clustered on the right: x >= w * 0.50
+    # In portrait: x >= w * 0.45
+    min_pencil_x = int(w * 0.50) if w >= h else int(w * 0.45)
+    crop_tb = img[tb_y1:tb_search_y2, min_pencil_x:]
 
     edit_mode_active = False
     blue_pixel_count = 0
-    edit_box = [int(w * 0.70), tb_y1, int(40 * dpi_factor), tb_y2 - tb_y1]
+    best_pencil = None
+    best_area = 0
 
-    # Search for blue pencil icon in toolbar region
+    # Search for blue pencil icon in right-hand toolbar region
     if crop_tb.size > 0:
         hsv_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
         blue_mask = cv2.inRange(hsv_tb, np.array([95, 50, 50]), np.array([135, 255, 255]))
         contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        best_pencil = None
-        best_area = 0
         for c in contours:
             area = cv2.contourArea(c)
-            if area > 15:
+            if area >= 15:
                 bx, by, bw, bh = cv2.boundingRect(c)
-                if bx > int(w * 0.35) and area > best_area:
-                    best_area = area
-                    best_pencil = (bx, by, bw, bh)
-        if best_pencil:
-            bx, by, bw, bh = best_pencil
-            edit_mode_active = True
-            blue_pixel_count = int(best_area)
-            edit_box = [bx - 6, tb_y1 + by - 6, bw + 12, bh + 12]
+                # Compact icon aspect ratio and reasonable icon height
+                if 0.45 <= (bw / max(1, bh)) <= 2.2 and bh <= int(60 * dpi_factor):
+                    if area > best_area:
+                        best_area = area
+                        best_pencil = (min_pencil_x + bx, tb_y1 + by, bw, bh)
+
+    if best_pencil:
+        px, py, pw, ph = best_pencil
+        edit_mode_active = True
+        blue_pixel_count = int(best_area)
+        edit_box = [max(0, px - 6), max(0, py - 6), pw + 12, ph + 12]
+        tb_row_y = py + ph // 2
+    else:
+        # Fallback estimation for toolbar row from tokens or geometry
+        tb_row_y = None
+        for bx1, by1, bw, bh, t, s in top_tokens:
+            if tb_y1 + 5 < by1 < tb_search_y2 and bh < int(50 * dpi_factor):
+                clean_l = t.strip().lower()
+                if any(k in clean_l for k in ['h1', '99', '</>', 'bi', 'sh', '三', '>', '=']):
+                    tb_row_y = by1 + bh // 2
+                    break
+        if tb_row_y is None:
+            tb_row_y = tb_y1 + int(45 * dpi_factor)
+
+        default_pencil_x = int(w * 0.86) if w >= h else int(w * 0.70)
+        edit_box = [max(0, default_pencil_x - int(15 * dpi_factor)), max(0, tb_row_y - int(15 * dpi_factor)), int(30 * dpi_factor), int(30 * dpi_factor)]
+
+    # Toolbar bottom is safely below the toolbar row
+    tb_y2 = min(h, tb_row_y + int(max(20, 25 * dpi_factor)))
 
     # Check for split screen mode (preview side-by-side)
     split_screen_detected = False
@@ -184,14 +198,15 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     mean_lum = float(np.mean(cv2.cvtColor(body_sample, cv2.COLOR_BGR2GRAY))) if body_sample.size > 0 else 100.0
 
     dark_mode_active = (mean_lum < 65.0)
-    dark_box = [int(w * 0.88), tb_y1, int(40 * dpi_factor), tb_y2 - tb_y1]
+    dark_x = int(w * 0.94) if w >= h else int(w * 0.88)
+    dark_box = [max(0, dark_x - int(15 * dpi_factor)), max(0, tb_row_y - int(15 * dpi_factor)), int(30 * dpi_factor), int(30 * dpi_factor)]
 
     # ---------------------------------------------------------
     # 5 & 6. GREEN & RED BOXES: First & Last Line Numbers
     # ---------------------------------------------------------
     # Dynamic gutter search: left margin below toolbar
     gutter_w = int(max(150, min(360, 220 * dpi_factor)))
-    body_gutter = img[tb_y1:h - int(h * 0.04), :gutter_w]
+    body_gutter = img[tb_y2:h - int(h * 0.04), :gutter_w]
     
     gutter_lines = []
     # OCR pass on gutter crop
@@ -199,7 +214,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     if res_g:
         for b, t, s in res_g:
             pts = np.array(b)
-            bx1, by1 = int(pts[:, 0].min()), tb_y1 + int(pts[:, 1].min())
+            bx1, by1 = int(pts[:, 0].min()), tb_y2 + int(pts[:, 1].min())
             bw, bh = int(pts[:, 0].max() - pts[:, 0].min()), int(pts[:, 1].max() - pts[:, 1].min())
             clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
             if m := re.search(r'^\s*(\d+)', clean):
@@ -211,7 +226,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
 
     # Also incorporate top_tokens below toolbar
     for bx1, by1, bw, bh, t, s in top_tokens:
-        if by1 >= tb_y1 and bx1 < gutter_w:
+        if by1 >= tb_y2 and bx1 < gutter_w:
             clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
             if m := re.search(r'^\s*(\d+)', clean):
                 val = int(m.group(1))
@@ -233,9 +248,9 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             pitches = [gutter_lines[i+1][0] - gutter_lines[i][0] for i in range(min(4, len(gutter_lines)-1)) if gutter_lines[i+1][1] > gutter_lines[i][1]]
             avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(18.0, 36.0 * (dpi_factor / 2.0))
             est_l1_y = top_y - int((top_val - 1) * avg_pitch)
-            if est_l1_y >= tb_y1 - 10:
+            if est_l1_y >= tb_y2 - 10:
                 first_line_num = 1
-                first_line_box = [top_box[0], max(tb_y1, est_l1_y), top_box[2], top_box[3]]
+                first_line_box = [top_box[0], max(tb_y2, est_l1_y), top_box[2], top_box[3]]
             else:
                 first_line_num = top_val
                 first_line_box = top_box

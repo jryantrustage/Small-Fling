@@ -224,6 +224,7 @@ function AppContent() {
     if (tab) setStudioInitialTab(tab);
     setShowStudioDrawer(true);
     setStudioMinimized(false);
+    setInspectorMaximized(false);
     try { localStorage.setItem('mc_show_studio_drawer', 'true'); } catch {}
   };
 
@@ -253,6 +254,134 @@ function AppContent() {
   });
   const [isDraggingStudio, setIsDraggingStudio] = useState(false);
   const [studioMaximized, setStudioMaximized] = useState(false);
+  const [telemetryActiveTab, setTelemetryActiveTab] = useState<'overview' | 'pacer' | 'tokens' | 'events'>('events');
+  const [showLayoutMenu, setShowLayoutMenu] = useState(false);
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
+
+  // Unified Window Navigation Handlers
+  const handleToggleDag = useCallback(() => {
+    if (!showDag) {
+      setShowDag(true);
+      setDagMinimized(false);
+    } else if (dagMinimized) {
+      setDagMinimized(false);
+    } else {
+      setShowDag(false);
+    }
+  }, [showDag, dagMinimized]);
+
+  const handleTogglePhone = useCallback(() => {
+    setInspectorMaximized(false);
+    if (inspectorMode !== 'live') {
+      setInspectorMode('live');
+      setLiveMode('desktop');
+      setStreamKey(Date.now());
+    } else {
+      setInspectorMode('single');
+    }
+  }, [inspectorMode]);
+
+  const handleToggleStudio = useCallback((tab?: 'kiosk' | 'device' | 'processes' | 'telemetry') => {
+    setInspectorMaximized(false);
+    if (!showStudioDrawer) {
+      if (tab) setStudioInitialTab(tab);
+      setShowStudioDrawer(true);
+      setStudioMinimized(false);
+      try { localStorage.setItem('mc_show_studio_drawer', 'true'); } catch {}
+    } else if (studioMinimized) {
+      if (tab) setStudioInitialTab(tab);
+      setStudioMinimized(false);
+    } else {
+      // Already open & un-minimized
+      if (tab && studioInitialTab !== tab) {
+        setStudioInitialTab(tab);
+      } else {
+        setShowStudioDrawer(false);
+        try { localStorage.setItem('mc_show_studio_drawer', 'false'); } catch {}
+      }
+    }
+  }, [showStudioDrawer, studioMinimized, studioInitialTab]);
+
+  const handleToggleLogs = useCallback(() => {
+    setIsTelemetryExpanded(prev => {
+      const next = !prev;
+      if (next) setTelemetryActiveTab('events');
+      return next;
+    });
+  }, []);
+
+  const handleToggleFrames = useCallback(() => {
+    setInspectorMaximized(false);
+    setFramesMinimized(p => !p);
+  }, []);
+
+  const handleToggleLines = useCallback(() => {
+    setInspectorMaximized(false);
+    setLinesMinimized(p => !p);
+  }, []);
+
+  const handleApplyLayoutPreset = useCallback((preset: 'balanced' | 'phone_focus' | 'studio_focus' | 'document_audit' | 'zen_canvas' | 'reset_all') => {
+    setShowLayoutMenu(false);
+    if (preset === 'balanced') {
+      setShowDag(true);
+      setDagMinimized(false);
+      setInspectorMode('live');
+      setFramesMinimized(false);
+      setLinesMinimized(false);
+      setShowStudioDrawer(false);
+      setIsTelemetryExpanded(false);
+      setInspectorMaximized(false);
+      setInspectorPercent(50);
+    } else if (preset === 'phone_focus') {
+      setShowDag(true);
+      setDagMinimized(false);
+      setInspectorMode('live');
+      setFramesMinimized(true);
+      setLinesMinimized(true);
+      setShowStudioDrawer(false);
+      setIsTelemetryExpanded(false);
+      setInspectorMaximized(false);
+    } else if (preset === 'studio_focus') {
+      setShowDag(true);
+      setDagMinimized(false);
+      setInspectorMode('live');
+      setShowStudioDrawer(true);
+      setStudioMinimized(false);
+      setStudioInitialTab('device');
+      setFramesMinimized(true);
+      setLinesMinimized(true);
+      setIsTelemetryExpanded(false);
+      setInspectorMaximized(false);
+    } else if (preset === 'document_audit') {
+      setShowDag(true);
+      setDagMinimized(true);
+      setInspectorMode('single');
+      setFramesMinimized(false);
+      setLinesMinimized(false);
+      setShowStudioDrawer(false);
+      setIsTelemetryExpanded(false);
+      setInspectorMaximized(false);
+      setInspectorPercent(48);
+    } else if (preset === 'zen_canvas') {
+      setShowDag(true);
+      setDagMinimized(true);
+      setInspectorMaximized(true);
+      setShowStudioDrawer(false);
+      setIsTelemetryExpanded(false);
+    } else if (preset === 'reset_all') {
+      setShowDag(true);
+      setDagMinimized(false);
+      setShowStudioDrawer(true);
+      setStudioMinimized(false);
+      setFramesMinimized(false);
+      setLinesMinimized(false);
+      setIsTelemetryExpanded(false);
+      setInspectorMaximized(false);
+      setInspectorPercent(50);
+      setFramesPanelWidth(240);
+      setStudioPanelWidth(460);
+    }
+  }, []);
 
   // Group Edit / Selection States
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
@@ -277,6 +406,19 @@ function AppContent() {
     }
   }, [deviceInfo]);
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (layoutMenuRef.current && !layoutMenuRef.current.contains(e.target as Node)) {
+        setShowLayoutMenu(false);
+      }
+    };
+    if (showLayoutMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showLayoutMenu]);
+
   const isDocVisibleRef = useRef(true);
   const isFetchingRef = useRef(false);
   const activeProjectRef = useRef(activeProject);
@@ -1654,70 +1796,150 @@ function AppContent() {
           </div>
 
           <div className="window-dock-bar">
+            {/* DAG Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${showDag ? 'active' : ''} ${dagMinimized ? 'minimized' : ''}`}
-              onClick={() => {
-                if (!showDag) { setShowDag(true); setDagMinimized(false); }
-                else setDagMinimized(p => !p);
-              }}
-              title="Toggle / Minimize / Restore Flow DAG window"
+              className={`window-dock-pill ${showDag && !dagMinimized ? 'active' : ''} ${showDag && dagMinimized ? 'minimized' : ''}`}
+              onClick={handleToggleDag}
+              title={`Toggle Flow DAG (Currently ${!showDag ? 'Closed' : (dagMinimized ? 'Minimized' : 'Active')})`}
             >
+              <span className={`pill-indicator ${!showDag ? 'off' : (dagMinimized ? 'min' : 'on')}`} />
               <Layers size={11} />
-              <span>DAG {showDag ? (dagMinimized ? '▲' : '●') : '○'}</span>
+              <span>DAG</span>
+              <span className="pill-badge">{!showDag ? 'OFF' : (dagMinimized ? 'MIN' : 'ON')}</span>
             </button>
+
+            {/* Phone Stream Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${showStudioDrawer ? 'active' : ''} ${studioMinimized ? 'minimized' : ''}`}
-              onClick={() => {
-                if (!showStudioDrawer) handleOpenStudio();
-                else setStudioMinimized(p => !p);
-              }}
-              title="Toggle / Minimize / Restore Device & Kiosk Studio workspace"
+              className={`window-dock-pill ${inspectorMode === 'live' ? 'active' : ''}`}
+              onClick={handleTogglePhone}
+              title={`Toggle Live Phone Display Viewport (Currently ${inspectorMode === 'live' ? 'Live Stream Active' : 'Single Frame Mode'})`}
             >
-              <Monitor size={11} />
-              <span>Studio {showStudioDrawer ? (studioMinimized ? '▲' : '●') : '○'}</span>
-            </button>
-            <button
-              type="button"
-              className={`window-dock-pill ${showStudioDrawer && studioInitialTab === 'telemetry' && !studioMinimized ? 'active' : ''}`}
-              onClick={() => handleOpenStudio('telemetry')}
-              title="Open Live Telemetry & Structured Logs in Studio"
-            >
-              <Activity size={11} />
-              <span>Telemetry</span>
-            </button>
-            <button
-              type="button"
-              className={`window-dock-pill ${showStudioDrawer && studioInitialTab === 'kiosk' && !studioMinimized ? 'active' : ''}`}
-              onClick={() => {
-                setLiveMode('desktop');
-                setStreamKey(Date.now());
-                handleOpenStudio('kiosk');
-              }}
-              title="Open Phone Live Screen Stream in Studio"
-            >
+              <span className={`pill-indicator ${inspectorMode === 'live' ? 'on' : 'off'}`} />
               <Smartphone size={11} />
-              <span>Phone Stream</span>
+              <span>Phone</span>
+              <span className="pill-badge">{inspectorMode === 'live' ? 'LIVE' : 'FRAME'}</span>
             </button>
+
+            {/* Studio Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${!framesMinimized ? 'active' : ''} ${framesMinimized ? 'minimized' : ''}`}
-              onClick={() => setFramesMinimized(p => !p)}
-              title="Toggle Captured Frames Panel"
+              className={`window-dock-pill ${showStudioDrawer && !studioMinimized ? 'active' : ''} ${showStudioDrawer && studioMinimized ? 'minimized' : ''}`}
+              onClick={() => handleToggleStudio()}
+              title={`Toggle Device & Hardware Studio (Currently ${!showStudioDrawer ? 'Closed' : (studioMinimized ? 'Minimized' : 'Active')})`}
             >
+              <span className={`pill-indicator ${!showStudioDrawer ? 'off' : (studioMinimized ? 'min' : 'on')}`} />
+              <Monitor size={11} />
+              <span>Studio</span>
+              <span className="pill-badge">{!showStudioDrawer ? 'OFF' : (studioMinimized ? 'MIN' : 'ON')}</span>
+            </button>
+
+            {/* Logs / Telemetry Pill */}
+            <button
+              type="button"
+              className={`window-dock-pill ${isTelemetryExpanded ? 'active' : ''}`}
+              onClick={handleToggleLogs}
+              title={`Toggle Live Logs & System Telemetry Drawer (Currently ${isTelemetryExpanded ? 'Open' : 'Collapsed'})`}
+            >
+              <span className={`pill-indicator ${isTelemetryExpanded ? 'on' : 'off'}`} />
+              <Activity size={11} />
+              <span>Logs</span>
+              <span className="pill-badge">{isTelemetryExpanded ? 'OPEN' : 'MIN'}</span>
+            </button>
+
+            <div className="dock-separator" />
+
+            {/* Frames Feed Pill */}
+            <button
+              type="button"
+              className={`window-dock-pill ${!framesMinimized && !inspectorMaximized ? 'active' : 'minimized'}`}
+              onClick={handleToggleFrames}
+              title={`Toggle Captured Frames Feed (${frames.length} frames)`}
+            >
+              <span className={`pill-indicator ${!framesMinimized && !inspectorMaximized ? 'on' : 'min'}`} />
               <Camera size={11} />
-              <span>Frames {!framesMinimized ? '●' : '▲'}</span>
+              <span>Frames</span>
+              <span className="pill-count">{frames.length}</span>
             </button>
+
+            {/* Lines Panel Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${!linesMinimized ? 'active' : ''} ${linesMinimized ? 'minimized' : ''}`}
-              onClick={() => setLinesMinimized(p => !p)}
-              title="Toggle Verified Lines Panel"
+              className={`window-dock-pill ${!linesMinimized && !inspectorMaximized ? 'active' : 'minimized'}`}
+              onClick={handleToggleLines}
+              title={`Toggle Verified Lines Panel (${filteredLines.length} lines)`}
             >
+              <span className={`pill-indicator ${!linesMinimized && !inspectorMaximized ? 'on' : 'min'}`} />
               <Search size={11} />
-              <span>Lines {!linesMinimized ? '●' : '▲'}</span>
+              <span>Lines</span>
+              <span className="pill-count">{filteredLines.length}</span>
             </button>
+
+            <div className="dock-separator" />
+
+            {/* Layout / Arrange Presets Menu */}
+            <div className="layout-presets-wrapper" ref={layoutMenuRef}>
+              <button
+                type="button"
+                className={`window-dock-pill layout-presets-btn ${showLayoutMenu ? 'active' : ''}`}
+                onClick={() => setShowLayoutMenu(p => !p)}
+                title="Arrange Windows & Layout Presets"
+              >
+                <Sliders size={11} />
+                <span>Layout</span>
+                <ChevronDown size={11} style={{ transform: showLayoutMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
+              </button>
+
+              {showLayoutMenu && (
+                <div className="layout-presets-dropdown">
+                  <div className="layout-dropdown-header">LAYOUT PRESETS</div>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('balanced')}>
+                    <span className="preset-icon">🖥️</span>
+                    <div className="preset-text">
+                      <strong>Balanced View (Default)</strong>
+                      <small>DAG + Phone Stream + Frames + Lines</small>
+                    </div>
+                  </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('phone_focus')}>
+                    <span className="preset-icon">📱</span>
+                    <div className="preset-text">
+                      <strong>Phone Stream Focus</strong>
+                      <small>Full Live Phone View + DAG (Sidebars parked)</small>
+                    </div>
+                  </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('studio_focus')}>
+                    <span className="preset-icon">🛠️</span>
+                    <div className="preset-text">
+                      <strong>Hardware & ADB Studio</strong>
+                      <small>Device Pairing + Studio Drawer + Live Screen</small>
+                    </div>
+                  </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('document_audit')}>
+                    <span className="preset-icon">🔍</span>
+                    <div className="preset-text">
+                      <strong>Document Frame Audit</strong>
+                      <small>Single Frame Inspector + Verified Lines + Frames</small>
+                    </div>
+                  </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('zen_canvas')}>
+                    <span className="preset-icon">✨</span>
+                    <div className="preset-text">
+                      <strong>Zen / Full Canvas</strong>
+                      <small>Maximize viewport canvas across screen</small>
+                    </div>
+                  </button>
+                  <div className="layout-dropdown-divider" />
+                  <button type="button" className="layout-dropdown-item reset" onClick={() => handleApplyLayoutPreset('reset_all')}>
+                    <span className="preset-icon">🔄</span>
+                    <div className="preset-text">
+                      <strong>Reset All Windows</strong>
+                      <small>Open all panes & restore default sizing</small>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {isCurrentDeviceConnected ? (
@@ -1865,10 +2087,10 @@ function AppContent() {
 
         {activeProject ? (
           <>
-            {framesMinimized ? (
+            {framesMinimized || inspectorMaximized ? (
               <aside
                 className="window-minimized-rail"
-                onClick={() => setFramesMinimized(false)}
+                onClick={() => { setFramesMinimized(false); setInspectorMaximized(false); }}
                 title={`Click to restore Captured Frames panel (${frames.length} frames)`}
               >
                 <Camera size={15} color="#00ff9d" />
@@ -1883,7 +2105,7 @@ function AppContent() {
                 )}
                 <Maximize2 size={12} style={{ marginTop: 'auto' }} />
               </aside>
-            ) : !inspectorMaximized ? (
+            ) : (
               <>
                 <aside className="frames-feed-panel" style={{ width: `${framesPanelWidth}px`, flexShrink: 0 }}>
                   <div className="panel-header">
@@ -2003,7 +2225,7 @@ function AppContent() {
                   <div className="panel-resizer-line" />
                 </div>
               </>
-            ) : null}
+            )}
 
             <main className="frame-inspector-panel" style={{ flex: inspectorMaximized ? '1 1 100%' : `${inspectorPercent} 1 0`, minWidth: '220px' }}>
               <div className="panel-header">
@@ -2363,22 +2585,22 @@ function AppContent() {
               </div>
             </main>
 
-            {!inspectorMaximized ? (
-              <>
-                <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
+            {!inspectorMaximized && (
+              <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
+            )}
 
-                {linesMinimized ? (
-                  <aside
-                    className="window-minimized-rail"
-                    onClick={() => setLinesMinimized(false)}
-                    title="Click to restore Verified Lines panel"
-                  >
-                    <Search size={14} color="#00ff9d" />
-                    <span className="minimized-rail-label">VERIFIED LINES ({filteredLines.length})</span>
-                    <Maximize2 size={12} style={{ marginTop: 'auto' }} />
-                  </aside>
-                ) : (
-                  <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
+            {linesMinimized || inspectorMaximized ? (
+              <aside
+                className="window-minimized-rail"
+                onClick={() => { setLinesMinimized(false); setInspectorMaximized(false); }}
+                title="Click to restore Verified Lines panel"
+              >
+                <Search size={14} color="#00ff9d" />
+                <span className="minimized-rail-label">VERIFIED LINES ({filteredLines.length})</span>
+                <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+              </aside>
+            ) : (
+              <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
                     <div className="panel-header">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
@@ -2488,8 +2710,6 @@ function AppContent() {
                     </div>
                   </section>
                 )}
-              </>
-            ) : null}
           </>
         ) : (
           <main className="frame-inspector-panel standby-workspace-hub" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'radial-gradient(ellipse at 50% 20%, rgba(22, 27, 34, 0.95) 0%, #0d1117 80%)' }}>
@@ -3739,10 +3959,12 @@ function AppContent() {
         telemetry={telemetry} tokenStats={tokenStats}
         documentSummary={{ total_lines: documentData?.total_lines || 0, min_line: documentData?.min_line || 0, max_line: documentData?.max_line || 0, total_frames: frames.length, issue_count: documentData?.issue_count || 0, verified_overlap_lines: (documentData?.lines || []).filter(l => l.status === 'verified_overlap').length }}
         wsConnected={wsConnected} backendConnected={backendConnected} latencyMs={latencyMs} pipelineMode={pipelineMode}
-        deviceModel={deviceModel} eventsLog={eventsLog} onClearEvents={() => setEventsLog([])} onExpandedChange={setIsTelemetryExpanded}
+        deviceModel={deviceModel} eventsLog={eventsLog} onClearEvents={() => setEventsLog([])}
+        isExpanded={isTelemetryExpanded} onExpandedChange={setIsTelemetryExpanded}
+        activeTab={telemetryActiveTab} onActiveTabChange={setTelemetryActiveTab}
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
         onReturnAlignmentOverlay={() => { setIsBannerDismissed(false); setIsBannerMinimized(false); localStorage.setItem('mc_banner_dismissed', 'false'); localStorage.setItem('mc_banner_minimized', 'false'); addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned'); }}
-        onOpenStudio={() => { setStudioInitialTab('telemetry'); setShowStudioDrawer(true); setStudioMinimized(false); }}
+        onOpenStudio={() => handleToggleStudio('telemetry')}
         selectedDag={selectedDag}
         onSelectDag={setSelectedDag}
         selectedNodeId={selectedNodeId}

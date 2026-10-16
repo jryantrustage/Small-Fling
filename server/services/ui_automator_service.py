@@ -85,9 +85,9 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
         "theme_dropdown": (int(1840 * scale_x), int(250 * scale_y)),
     }
 
-    # Search secondary markdown toolbar strip (y: ~18%..32%, x: >= 1350)
-    tb_y1, tb_y2 = int(h * 0.18), int(h * 0.32)
-    tb_x1, tb_x2 = int(1350 * scale_x), w
+    # Search secondary markdown toolbar strip (y: ~10%..35%, x: >= 1200)
+    tb_y1, tb_y2 = int(h * 0.10), int(h * 0.35)
+    tb_x1, tb_x2 = int(1200 * scale_x), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
@@ -174,7 +174,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
             scale_y = h_i / 1080.0
 
             # Check if pencil icon is already highlighted with blue pill and no split screen
-            crop_pencil = img[int(180 * scale_y):int(320 * scale_y), int(1200 * scale_x):int(1800 * scale_x)]
+            crop_pencil = img[int(100 * scale_y):int(350 * scale_y), int(1200 * scale_x):int(1850 * scale_x)]
             if crop_pencil.size > 0:
                 hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
                 blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
