@@ -310,3 +310,5 @@ export const Node3bExtractedTextModal: React.FC<Node3bExtractedTextModalProps> =
     </Modal>
   );
 };
+
+export { UniversalNodeConfigModal } from './UniversalNodeConfigModal';

@@ -30,6 +30,17 @@ router = APIRouter(tags=["Orchestration & Telemetry"])
 from services.ui_automator_service import enable_edit_mode, select_dark_mode, get_display_dimensions
 from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
 try:
+    from server.observation_actions import observation_action_registry
+    from server.observation_actions.base_action import ActionContext, ObservationContext
+    from server.observation_actions.discovery_observer import DynamicIssueDiscoveryObserver, DynamicObservationDiscoveryEngine
+    from server.dag_nodes import dag_node_registry, graph_executor, DagBlackboard
+except ImportError:
+    from observation_actions import observation_action_registry
+    from observation_actions.base_action import ActionContext, ObservationContext
+    from observation_actions.discovery_observer import DynamicIssueDiscoveryObserver, DynamicObservationDiscoveryEngine
+    from dag_nodes import dag_node_registry, graph_executor, DagBlackboard
+
+try:
     from server.alignment_engine import detect_teams_markdown_alignment
 except ImportError:
     from alignment_engine import detect_teams_markdown_alignment
@@ -378,6 +389,174 @@ async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
 
     await state.ws_manager.broadcast({"type": "dag_node_configured", "node_id": target_key, "config": cfg, "trigger_decision": decision, "dag": state.dag_state})
     return {"status": "success", "node_id": target_key, "config": cfg, "trigger_decision": decision}
+
+# ─── MODULAR OBSERVATION & WORKAROUND ACTION ENDPOINTS ───────────────────
+
+@router.get("/api/dag/observation-actions")
+@router.get("/api/dag/observations/actions")
+async def get_observation_actions():
+    """Returns the catalog of all decoupled observation anomaly detectors and workarounds."""
+    return {
+        "status": "success",
+        "actions": observation_action_registry.get_catalog()
+    }
+
+@router.post("/api/dag/observation-actions/scan")
+@router.post("/api/dag/observations/discover")
+@router.get("/api/dag/observations/discover")
+async def scan_observation_actions(payload: Optional[Dict[str, Any]] = None):
+    """Diagnoses current display environment and detects any active anomalies."""
+    payload = payload or {}
+    serial = payload.get("serial") or await get_active_adb_serial()
+    disp_id = payload.get("display_id") or await detect_external_display_id(serial)
+    active_node = payload.get("node_id") or state.dag_state.get("current_active_node") or "frame_acquire"
+
+    snap = await capture_external_screenshot(serial, max_cache_age_s=0.2)
+
+    diagnosis = await DynamicObservationDiscoveryEngine.diagnose_environment(
+        serial=serial,
+        display_id=disp_id,
+        active_node_id=active_node,
+        image_bytes=snap
+    )
+
+    return {
+        "status": "success",
+        "total_checked": len(observation_action_registry.list_all_actions()),
+        **diagnosis
+    }
+
+@router.post("/api/dag/observation-actions/{action_id}/remediate")
+async def remediate_observation_action(action_id: str, payload: Optional[Dict[str, Any]] = None):
+    """Executes a specific workaround action plugin on the active device."""
+    payload = payload or {}
+    serial = payload.get("serial") or await get_active_adb_serial()
+    disp_id = payload.get("display_id") or await detect_external_display_id(serial)
+
+    act = observation_action_registry.get_action(action_id)
+    if not act:
+        raise HTTPException(status_code=404, detail=f"Observation action '{action_id}' not found")
+
+    snap = await capture_external_screenshot(serial, max_cache_age_s=0.2)
+    ctx = ActionContext(
+        serial=serial,
+        display_id=disp_id,
+        image_bytes=snap,
+        node_id=payload.get("node_id", "manual"),
+        project_id=state.get_current_project_id()
+    )
+
+    res = await act.remediate(ctx)
+    return {
+        "status": "success" if res.success else "error",
+        "action_id": action_id,
+        "label": act.label,
+        "result": res.to_dict()
+    }
+
+@router.patch("/api/dag/nodes/{node_id}/actions")
+@router.post("/api/dag/nodes/{node_id}/actions")
+async def update_node_attached_actions(node_id: str, payload: Dict[str, Any]):
+    """Configures the attached observation and workaround actions bound to a DAG node."""
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
+
+    action_ids = payload.get("attached_actions", [])
+    node["attached_actions"] = list(action_ids)
+
+    backend_node = dag_node_registry.get_node(target_key)
+    if backend_node:
+        backend_node.set_attached_actions(action_ids)
+
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state,
+        "node_id": target_key
+    })
+    return {"status": "success", "node_id": target_key, "attached_actions": node["attached_actions"]}
+
+@router.patch("/api/dag/nodes/{node_id}/position")
+@router.post("/api/dag/nodes/{node_id}/position")
+async def update_node_canvas_position(node_id: str, payload: Dict[str, Any]):
+    """Updates 2D canvas coordinates (x, y) for a freely draggable DAG node."""
+    target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+    node = state.dag_state["nodes"].get(target_key)
+    if not node:
+        raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
+
+    x = float(payload.get("x", 0.0))
+    y = float(payload.get("y", 0.0))
+    node["position"] = {"x": x, "y": y}
+
+    backend_node = dag_node_registry.get_node(target_key)
+    if backend_node:
+        backend_node.set_position(x, y)
+
+    return {"status": "success", "node_id": target_key, "position": node["position"]}
+
+@router.post("/api/dag/layout/clean")
+async def snap_to_clean_layout():
+    """Snaps all DAG nodes to an aesthetically aligned topological/horizontal 2D canvas layout."""
+    clean_coords = {
+        "init_end": {"x": 60.0, "y": 140.0},
+        "reset_home": {"x": 280.0, "y": 140.0},
+        "frame_acquire": {"x": 500.0, "y": 140.0},
+        "local_ai_ocr": {"x": 720.0, "y": 140.0},
+        "frame_ocr": {"x": 940.0, "y": 140.0},
+        "arrow_down": {"x": 1160.0, "y": 140.0},
+        "verification_trigger": {"x": 1380.0, "y": 140.0},
+        "document_assemble": {"x": 1600.0, "y": 140.0},
+    }
+    for nid, pos in clean_coords.items():
+        if nid in state.dag_state.get("nodes", {}):
+            state.dag_state["nodes"][nid]["position"] = dict(pos)
+            backend_node = dag_node_registry.get_node(nid)
+            if backend_node:
+                backend_node.set_position(pos["x"], pos["y"])
+
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state
+    })
+    return {"status": "success", "layout": clean_coords}
+
+@router.post("/api/dag/edges")
+async def add_or_update_dag_edge(payload: Dict[str, Any]):
+    """Connects or updates an interactive wiring edge between two DAG nodes."""
+    from_node = payload.get("from")
+    to_node = payload.get("to")
+    if not from_node or not to_node:
+        raise HTTPException(status_code=400, detail="'from' and 'to' node IDs required")
+
+    edge_id = payload.get("id") or f"{from_node}->{to_node}"
+    condition = payload.get("condition", "ON_SUCCESS")
+    enabled = payload.get("enabled", True)
+
+    edges = state.dag_state.setdefault("edges", [])
+    existing = next((e for e in edges if e.get("id") == edge_id or (e.get("from") == from_node and e.get("to") == to_node)), None)
+    if existing:
+        existing.update({"id": edge_id, "from": from_node, "to": to_node, "condition": condition, "enabled": enabled})
+    else:
+        edges.append({"id": edge_id, "from": from_node, "to": to_node, "condition": condition, "enabled": enabled})
+
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state
+    })
+    return {"status": "success", "edge": {"id": edge_id, "from": from_node, "to": to_node, "condition": condition, "enabled": enabled}}
+
+@router.delete("/api/dag/edges/{edge_id}")
+async def delete_dag_edge(edge_id: str):
+    """Disconnects and removes a wiring edge between DAG nodes."""
+    edges = state.dag_state.get("edges", [])
+    state.dag_state["edges"] = [e for e in edges if e.get("id") != edge_id]
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state
+    })
+    return {"status": "success", "removed": edge_id}
 
 # ─── SINGLE-NODE CONCURRENCY & PREEMPTION MANAGER ─────────────────────────
 _current_running_node_task: Optional[asyncio.Task] = None
@@ -1100,7 +1279,25 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     try:
         disp_id = await detect_external_display_id(active_serial)
 
-        # Proactively heal environment triggers before executing node action (keyboard, fullscreen, edit mode, dark mode)
+        # Delegate execution directly to the modular BaseDagNode instance
+        dag_node = dag_node_registry.get_node(target_key)
+        if dag_node:
+            bb = DagBlackboard(
+                active_serial=active_serial,
+                display_id=disp_id,
+                project_id=state.get_current_project_id(),
+                config=cfg,
+                payload=payload,
+                top_line=state.dag_state["nodes"].get("frame_ocr", {}).get("top_line", 0),
+                bottom_line=state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0),
+                total_lines=state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0),
+            )
+            exec_res = await dag_node.run(bb)
+            if exec_res.status == "error":
+                raise RuntimeError(exec_res.error or exec_res.message)
+            return exec_res.to_dict()
+
+        # Proactively heal environment triggers before executing legacy node action
         if not payload.get("skip_env_heal"):
             t_pre_0 = time.perf_counter()
             heal_env = await auto_heal_pipeline_environment(active_serial, disp_id, target_key)

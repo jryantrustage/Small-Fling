@@ -2383,3 +2383,43 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   border-top: 1px solid var(--border-color);
   flex-wrap: wrap;
 }
+
+/* ─── INTERACTIVE 2D DAG CANVAS & WIREABLE NODES ───────────────────────── */
+.dag-2d-canvas-container {
+  position: relative;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes flowWireAnim {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.drawing-wire-active {
+  animation: flowWireAnim 0.5s linear infinite;
+}
+
+.wire-active-flow {
+  animation: flowWireAnim 1s linear infinite;
+}
+
+.candidate-pulse {
+  animation: pulseCandidate 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes pulseCandidate {
+  from {
+    transform: translateY(-50%) scale(1);
+    box-shadow: 0 0 6px #00ff9d;
+  }
+  to {
+    transform: translateY(-50%) scale(1.35);
+    box-shadow: 0 0 16px #00ff9d;
+  }
+}

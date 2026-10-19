@@ -95,6 +95,7 @@ export interface DagEdge {
   label?: string;
   is_loopback?: boolean;
   has_semaphore?: boolean;
+  condition?: string;
 }
 
 export interface DagStatusData {
