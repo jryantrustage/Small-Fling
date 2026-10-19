@@ -1125,16 +1125,19 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Silently ensure virtual keyboard is closed without tapping or resizing
             await dismiss_keyboard(active_serial, disp_id)
 
-            # Ensure Teams editor window on target display has focus without touching editable body
+            # Ensure Teams editor WebView on target display has focus
             target_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 7)
             disp_w, disp_h = await get_display_dimensions(active_serial, target_d)
-            await run_adb_shell(f"input -d {target_d} tap {disp_w // 2} {max(45, int(60 * disp_h / 1080.0))} >/dev/null 2>&1", active_serial)
-            await asyncio.sleep(0.1)
+            await run_adb_shell(f"input -d {target_d} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", active_serial)
+            await asyncio.sleep(0.15)
+            await dismiss_keyboard(active_serial, target_d)
+            await asyncio.sleep(0.15)
 
             # 1. Send Ctrl+End to navigate to EOF
             await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end")
             settle_s = max(0.8, float(cfg.get("settle_delay_ms", 800)) / 1000.0)
             await asyncio.sleep(settle_s)
+            await dismiss_keyboard(active_serial, target_d)
 
             # 2. Fetch current density/DPI from the phone right before running OCR to normalize gutter search bounding boxes
             dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
@@ -1166,7 +1169,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
                     if b_sample > total_lines:
                         total_lines = b_sample
-                    if t_sample > top_line:
+                    if t_sample > 0 and (top_line == 0 or t_sample < top_line):
                         top_line = t_sample
 
                     await emit_dag_telemetry_event(
@@ -1204,7 +1207,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 with open(calib, "wb") as f: f.write(snap_fixed)
                 t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                 if b_fix > total_lines: total_lines = b_fix
-                if t_fix > 0 and top_line <= 0: top_line = t_fix
+                if t_fix > 0 and (top_line <= 0 or t_fix < top_line): top_line = t_fix
 
             if cfg.get("manual_total_lines", 0) <= 0:
                 if proj := db.get_active_project():
@@ -1239,12 +1242,14 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     serial=active_serial
                 )
                 try:
-                    await dismiss_keyboard(active_serial, disp_id)
                     disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
-                    await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {max(45, int(60 * disp_h / 1080.0))} >/dev/null 2>&1", active_serial)
-                    await asyncio.sleep(0.1)
+                    await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", active_serial)
+                    await asyncio.sleep(0.15)
+                    await dismiss_keyboard(active_serial, disp_id)
+                    await asyncio.sleep(0.15)
                     await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
                     await asyncio.sleep(0.8)
+                    await dismiss_keyboard(active_serial, disp_id)
                     node.update({
                         "evaluator": "Scroll Convergence Evaluator",
                         "healing_step": "Refreshing page capture",
@@ -1261,7 +1266,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                             r_total = scan_res.get("bottom_line", 0)
                             if r_top <= 0: r_top = scan_res.get("top_line", 0)
                         if r_total > total_lines: total_lines = r_total
-                        if r_top > 0: top_line = r_top
+                        if r_top > 0:
+                            if r_top > 500 or top_line == 0 or r_top < top_line:
+                                top_line = r_top
 
                         if total_lines >= 500 or top_line > 30:
                             is_stuck_on_line_1 = False

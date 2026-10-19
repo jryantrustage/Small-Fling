@@ -135,11 +135,12 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
     nums.sort(key=lambda x: x[0])
     return [n for _, n in nums]
 
-def correct_gutter_sequence(gutter_items: List[Tuple[int, int]]) -> List[Tuple[int, int]]:
+def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: int = 270) -> List[Tuple[int, int]]:
     """
     Validates and corrects line numbers in a vertical gutter column.
     Detects and corrects outliers (such as truncated numbers like 69 instead of 697)
     using sequence consensus, median line pitch, and linear projection.
+    Also back-projects missing leading lines down to 1 when near top of document.
     """
     if not gutter_items:
         return []
@@ -185,6 +186,19 @@ def correct_gutter_sequence(gutter_items: List[Tuple[int, int]]) -> List[Tuple[i
                 cleaned.append((y_pos, num))
         else:
             cleaned.append((y_pos, num))
+
+    # 3. Back-project missing leading lines down to 1 if top of document is visible
+    if cleaned and 1 < cleaned[0][1] <= 12:
+        first_y, first_n = cleaned[0]
+        prepended = []
+        for k in range(first_n - 1, 0, -1):
+            proj_y = int(round(first_y - (first_n - k) * med_pitch))
+            if proj_y >= min_content_y:
+                prepended.append((proj_y, k))
+        if prepended:
+            prepended.reverse()
+            cleaned = prepended + cleaned
+
     return cleaned
 
 def clean_slice_numbers(nums: List[int]) -> List[int]:
@@ -365,7 +379,7 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
 
     # Filter and correct gutter numbers using consensus sequence validation
     if best_gutter:
-        best_gutter = correct_gutter_sequence(best_gutter)
+        best_gutter = correct_gutter_sequence(best_gutter, min_content_y=top_y)
 
     valid = []
     for y_pos, num in best_gutter:

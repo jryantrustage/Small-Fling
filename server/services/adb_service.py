@@ -1290,20 +1290,12 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
-        # Ensure target display and FilePreviewActivity have window focus without typing into editor
+        # Ensure IME is closed on target display so it does not intercept keycombination
         if "mock" not in str(ser).lower() and target_d and target_d > 0:
             try:
-                # If IME is currently open, dismiss it on target display before sending keycombination
                 if await is_ime_visible(ser):
                     await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
                     await asyncio.sleep(0.08)
-
-                # Tap neutral window decor titlebar to guarantee window manager focus on target_d
-                disp_w, disp_h = await get_display_dimensions(ser, target_d)
-                title_x = disp_w // 2
-                title_y = max(45, int(60 * (disp_h / 1080.0)))
-                await run_adb_shell(f"input -d {target_d} tap {title_x} {title_y} >/dev/null 2>&1", ser, timeout=1.0)
-                await asyncio.sleep(0.08)
             except Exception:
                 pass
 
