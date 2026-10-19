@@ -21,9 +21,6 @@ import { DagInspectorModal } from './components/dag/DagInspectorModal';
 import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
 import { Dag2PerformanceReportModal } from './components/dag/Dag2PerformanceReportModal';
 import {
-  Node3CaptureConfigModal,
-  Node4OcrConfigModal,
-  Node6QualifierConfigModal,
   Node3bExtractedTextModal,
   UniversalNodeConfigModal
 } from './components/dag/DagConfigModals';
@@ -121,15 +118,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isInspectorModalOpen, setIsInspectorModalOpen] = useState(false);
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [promptModalNodeId, setPromptModalNodeId] = useState<string>('init_end');
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [isNode3ConfigOpen, setIsNode3ConfigOpen] = useState(false);
-  const [isNode4ConfigOpen, setIsNode4ConfigOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [isDag2ReportModalOpen, setIsDag2ReportModalOpen] = useState(false);
-  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
-  const [configFeedback, setConfigFeedback] = useState<string | null>(null);
   const [nodeFeedback, setNodeFeedback] = useState<{
     id: string;
     message: string;
@@ -152,14 +144,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     current_top_line: currentTopLine, current_bottom_line: currentBottomLine,
     current_page: currentPage, is_keyboard_guarded: true, arrow_step_count: 48,
     verification_trigger_fired: false, ocr_worker_active: true, ocr_latency_ms: 45
-  });
-
-  const [node3Config, setNode3Config] = useState({
-    settle_delay_ms: 300, guard_keyboard: true, mode: 'desktop'
-  });
-
-  const [node4Config, setNode4Config] = useState({
-    engine: 'local:rapidocr', ocr_worker_timeout_s: 15, min_confidence: 0.8
   });
 
   const [node5Config, setNode5Config] = useState<Node5ConfigState>({
@@ -189,7 +173,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [wiringState, setWiringState] = useState<{ active: boolean; fromNodeId: string; mouseX: number; mouseY: number } | null>(null);
   const [universalConfigNodeId, setUniversalConfigNodeId] = useState<string | null>(null);
 
-  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isConfigModalOpen || isTextModalOpen || isNode3ConfigOpen || isNode4ConfigOpen || isDag2ReportModalOpen || Boolean(universalConfigNodeId);
+  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isTextModalOpen || isDag2ReportModalOpen || Boolean(universalConfigNodeId);
 
   // Real-time synchronization
   useEffect(() => {
@@ -207,8 +191,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             current_page: d.current_page !== undefined ? d.current_page : currentPage
           }));
           if (d.node_5_config?.qualifiers) setNode5Config(prev => ({ ...prev, ...d.node_5_config, qualifiers: { ...prev.qualifiers, ...d.node_5_config.qualifiers } }));
-          if (d.dag?.nodes?.frame_acquire?.config) setNode3Config(prev => ({ ...prev, ...d.dag.nodes.frame_acquire.config }));
-          if (d.dag?.nodes?.frame_ocr?.config) setNode4Config(prev => ({ ...prev, ...d.dag.nodes.frame_ocr.config }));
           if (d.trigger_decision) setTriggerDecision(d.trigger_decision);
         }
         try {
@@ -590,36 +572,37 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               handleToggleConnector(edge.from, edge.to, edgeIdStr);
             }}
           />
-          {/* Interactive midpoint tag with delete edge button */}
+          {/* Sleek Minimalist Midpoint Tag */}
           <g transform={`translate(${midX}, ${midY})`} style={{ pointerEvents: 'auto' }}>
             <rect
-              x="-36"
-              y="-10"
-              width="72"
-              height="20"
-              rx="10"
-              fill="rgba(13, 17, 23, 0.95)"
+              x="-22"
+              y="-7"
+              width="44"
+              height="14"
+              rx="4"
+              fill="#0d1117"
               stroke={edgeColor}
-              strokeWidth="1.2"
+              strokeWidth="1"
             />
             <text
-              x="-12"
+              x="-6"
               y="3"
-              fill="#c9d1d9"
-              fontSize="7.5"
-              fontWeight="800"
+              fill={edgeColor}
+              fontSize="7"
+              fontWeight="700"
+              fontFamily="monospace"
               textAnchor="middle"
               style={{ pointerEvents: 'none', userSelect: 'none' }}
             >
-              {isLoopback ? 'LOOP' : ((edge as any).condition === 'ON_ERROR' ? 'ERR' : 'NEXT')}
+              {isSevered ? 'CUT' : (isLoopback ? 'LOOP' : ((edge as any).condition === 'ON_ERROR' ? 'ERR' : 'NEXT'))}
             </text>
             <circle
-              cx="20"
+              cx="13"
               cy="0"
-              r="6.5"
-              fill="rgba(248, 81, 73, 0.22)"
+              r="4.5"
+              fill="rgba(248, 81, 73, 0.15)"
               stroke="#f85149"
-              strokeWidth="1"
+              strokeWidth="0.8"
               style={{ cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
@@ -627,10 +610,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               }}
             />
             <text
-              x="20"
-              y="2.8"
+              x="13"
+              y="2.2"
               fill="#ff7b72"
-              fontSize="8"
+              fontSize="6.5"
               fontWeight="900"
               textAnchor="middle"
               style={{ cursor: 'pointer', pointerEvents: 'none' }}
@@ -918,34 +901,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
-  // Save config handlers
-  const handleSaveNode3 = async () => {
-    setIsSavingConfig(true);
-    try {
-      await fetch(`${apiBase}/api/dag/nodes/frame_acquire/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node3Config) });
-      setIsNode3ConfigOpen(false);
-    } finally { setIsSavingConfig(false); }
-  };
-
-  const handleSaveNode4 = async () => {
-    setIsSavingConfig(true);
-    try {
-      await fetch(`${apiBase}/api/dag/nodes/frame_ocr/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node4Config) });
-      setIsNode4ConfigOpen(false);
-    } finally { setIsSavingConfig(false); }
-  };
-
-  const handleSaveNode5 = async () => {
-    setIsSavingConfig(true);
-    try {
-      await fetch(`${apiBase}/api/dag/nodes/verification_trigger/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(node5Config) });
-      setIsConfigModalOpen(false);
-      setConfigFeedback('Configuration updated successfully');
-      setTimeout(() => setConfigFeedback(null), 3000);
-    } catch (err: any) {
-      setConfigFeedback(`Failed to save config: ${err?.message || err}`);
-    } finally { setIsSavingConfig(false); }
-  };
 
   if (isMinimized) {
     return (
@@ -1144,23 +1099,22 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </div>
 
             {/* Direct Flow Connectors Bar */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
               <button
                 type="button"
                 onClick={() => handleToggleConnector('local_ai_ocr', 'frame_ocr', 'local_ai_ocr->frame_ocr')}
                 disabled={Boolean(isTogglingConnector)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
-                  borderRadius: '5px', border: `1.5px solid ${isConnector1Open ? '#3fb950' : '#f85149'}`,
-                  background: isConnector1Open ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                  borderRadius: '4px', border: `1px solid ${isConnector1Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                  background: isConnector1Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
                   color: isConnector1Open ? '#3fb950' : '#ff7b72',
-                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
-                  letterSpacing: '0.3px', height: '24px'
+                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
                 }}
-                title={isConnector1Open ? 'Connector (DAG 2➔3): CONNECTED. Click to sever/pause flow.' : 'Connector (DAG 2➔3): SEVERED. Click to connect & enable flow.'}
+                title={isConnector1Open ? 'Connector (DAG 2➔3): Connected. Click to toggle.' : 'Connector (DAG 2➔3): Severed. Click to toggle.'}
               >
-                <span>{isConnector1Open ? '⚡' : '✂️'}</span>
-                <span>{isConnector1Open ? 'C1 (2➔3): LINKED' : 'C1 (2➔3): SEVERED'}</span>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector1Open ? '#3fb950' : '#f85149' }} />
+                <span>C1 (2➔3)</span>
               </button>
 
               <button
@@ -1168,17 +1122,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 onClick={() => handleToggleConnector('arrow_down', 'verification_trigger', 'arrow_down->verification_trigger')}
                 disabled={Boolean(isTogglingConnector)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
-                  borderRadius: '5px', border: `1.5px solid ${isConnector2Open ? '#3fb950' : '#f85149'}`,
-                  background: isConnector2Open ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                  borderRadius: '4px', border: `1px solid ${isConnector2Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                  background: isConnector2Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
                   color: isConnector2Open ? '#3fb950' : '#ff7b72',
-                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
-                  letterSpacing: '0.3px', height: '24px'
+                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
                 }}
-                title={isConnector2Open ? 'Connector (DAG 3➔4): CONNECTED. Click to sever/pause flow.' : 'Connector (DAG 3➔4): SEVERED. Click to connect & enable flow.'}
+                title={isConnector2Open ? 'Connector (DAG 3➔4): Connected. Click to toggle.' : 'Connector (DAG 3➔4): Severed. Click to toggle.'}
               >
-                <span>{isConnector2Open ? '⚡' : '✂️'}</span>
-                <span>{isConnector2Open ? 'C2 (3➔4): LINKED' : 'C2 (3➔4): SEVERED'}</span>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector2Open ? '#3fb950' : '#f85149' }} />
+                <span>C2 (3➔4)</span>
               </button>
 
               <button
@@ -1186,32 +1139,31 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 onClick={() => handleToggleConnector('document_assemble', 'frame_acquire', 'document_assemble->frame_acquire')}
                 disabled={Boolean(isTogglingConnector)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 7px',
-                  borderRadius: '5px', border: `1.5px solid ${isLoopbackConnected ? '#3fb950' : '#f85149'}`,
-                  background: isLoopbackConnected ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.22)',
+                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                  borderRadius: '4px', border: `1px solid ${isLoopbackConnected ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                  background: isLoopbackConnected ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
                   color: isLoopbackConnected ? '#3fb950' : '#ff7b72',
-                  fontSize: '9px', fontWeight: 800, cursor: 'pointer',
-                  letterSpacing: '0.3px', height: '24px'
+                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
                 }}
-                title={isLoopbackConnected ? 'Loopback (8➔3): CONNECTED. Click to halt after 1 cycle.' : 'Loopback (8➔3): SEVERED. Click to repeat loop.'}
+                title={isLoopbackConnected ? 'Loopback (8➔3): Connected. Click to toggle.' : 'Loopback (8➔3): Severed. Click to toggle.'}
               >
-                <span>{isLoopbackConnected ? '🔄' : '⏸️'}</span>
-                <span>{isLoopbackConnected ? 'LOOP: ON' : 'LOOP: OFF'}</span>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isLoopbackConnected ? '#3fb950' : '#f85149' }} />
+                <span>Loop (8➔3)</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleResetDefaultFlow}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: '3px', padding: '3px 6px',
-                  borderRadius: '5px', border: '1px solid rgba(88, 166, 255, 0.3)',
-                  background: 'rgba(88, 166, 255, 0.12)', color: '#58a6ff',
-                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '24px'
+                  display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                  borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(255, 255, 255, 0.03)', color: '#8b949e',
+                  fontSize: '8.5px', fontWeight: 600, cursor: 'pointer', height: '22px'
                 }}
-                title="Reset all node connectors back to standard sequential pipeline (1➔2➔3➔4➔5➔6➔7➔8➔3)"
+                title="Reset all node connectors back to standard sequential pipeline"
               >
-                <RotateCcw size={10} />
-                <span>Reset Flow</span>
+                <RotateCcw size={9} />
+                <span>Reset</span>
               </button>
             </div>
 
@@ -1221,17 +1173,17 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               onClick={handleToggleLoop}
               disabled={isInitGroupRunning}
               style={{
-                display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 10px',
-                borderRadius: '5px', border: `1.5px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
-                background: isLoopRunning ? 'rgba(248, 81, 73, 0.25)' : 'rgba(0, 255, 157, 0.18)',
+                display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 9px',
+                borderRadius: '4px', border: `1px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
+                background: isLoopRunning ? 'rgba(248, 81, 73, 0.15)' : 'rgba(0, 255, 157, 0.12)',
                 color: isLoopRunning ? '#ff7b72' : '#00ff9d',
-                fontSize: '9.5px', fontWeight: 900, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer',
-                letterSpacing: '0.4px', height: '24px'
+                fontSize: '9px', fontWeight: 700, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer',
+                letterSpacing: '0.2px', height: '22px'
               }}
               title={isLoopRunning ? 'Stop continuous capture loop' : 'Start continuous loop (Nodes 3→8 Repeating until 100% captured)'}
             >
-              {isLoopRunning ? <Square size={10} fill="#ff7b72" /> : <Play size={10} fill="#00ff9d" />}
-              <span>{isLoopRunning ? 'STOP LOOP' : 'RUN CAPTURE LOOP'}</span>
+              {isLoopRunning ? <Square size={9} fill="#ff7b72" /> : <Play size={9} fill="#00ff9d" />}
+              <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
             </button>
 
             {/* Window Controls */}
@@ -1425,66 +1377,66 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         }}>
           {/* Left: Subgraph Quick Runners */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '8.5px', fontWeight: 800, color: '#8b949e', letterSpacing: '0.5px' }}>RUN SUBGRAPH:</span>
+            <span style={{ fontSize: '8.5px', fontWeight: 700, color: '#6e7681', letterSpacing: '0.3px' }}>SUBGRAPHS:</span>
             <button
               type="button"
               onClick={() => handleRunGroup('initialize')}
               disabled={runningGroupId !== null || runningNodeId !== null}
               style={{
-                display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
-                borderRadius: '4px', border: '1px solid rgba(88, 166, 255, 0.4)',
-                background: 'rgba(88, 166, 255, 0.12)', color: '#58a6ff',
-                fontSize: '9px', fontWeight: 700, cursor: 'pointer'
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px', border: '1px solid rgba(88, 166, 255, 0.3)',
+                background: 'rgba(88, 166, 255, 0.08)', color: '#58a6ff',
+                fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
               }}
-              title="Run DAG 1 (Nodes 1→2) to determine EOF and reset to Line 1"
+              title="Run Init (Nodes 1→2) to determine EOF and reset to Line 1"
             >
-              <Play size={8} fill="#58a6ff" />
-              <span>DAG 1: Init</span>
+              <Play size={7.5} fill="#58a6ff" />
+              <span>Init</span>
             </button>
             <button
               type="button"
               onClick={() => handleRunGroup('capture_entire_markdown')}
               disabled={runningGroupId !== null || runningNodeId !== null}
               style={{
-                display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
-                borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.4)',
-                background: 'rgba(0, 255, 157, 0.12)', color: '#00ff9d',
-                fontSize: '9px', fontWeight: 700, cursor: 'pointer'
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.3)',
+                background: 'rgba(0, 255, 157, 0.08)', color: '#00ff9d',
+                fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
               }}
-              title="Run DAG 2 (Nodes 3→4) to capture screen and transcribe markdown"
+              title="Run Capture (Nodes 3→4) to capture screen and transcribe markdown"
             >
-              <Play size={8} fill="#00ff9d" />
-              <span>DAG 2: Capture</span>
+              <Play size={7.5} fill="#00ff9d" />
+              <span>Capture</span>
             </button>
             <button
               type="button"
               onClick={() => handleRunGroup('position_navigation')}
               disabled={runningGroupId !== null || runningNodeId !== null}
               style={{
-                display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
-                borderRadius: '4px', border: '1px solid rgba(255, 166, 87, 0.4)',
-                background: 'rgba(255, 166, 87, 0.12)', color: '#ffa657',
-                fontSize: '9px', fontWeight: 700, cursor: 'pointer'
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px', border: '1px solid rgba(255, 166, 87, 0.3)',
+                background: 'rgba(255, 166, 87, 0.08)', color: '#ffa657',
+                fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
               }}
-              title="Run DAG 3 (Nodes 5→6) to OCR gutter and page down"
+              title="Run Navigate (Nodes 5→6) to OCR gutter and page down"
             >
-              <Play size={8} fill="#ffa657" />
-              <span>DAG 3: Navigate</span>
+              <Play size={7.5} fill="#ffa657" />
+              <span>Navigate</span>
             </button>
             <button
               type="button"
               onClick={() => handleRunGroup('verify_assemble')}
               disabled={runningGroupId !== null || runningNodeId !== null}
               style={{
-                display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
-                borderRadius: '4px', border: '1px solid rgba(188, 140, 255, 0.4)',
-                background: 'rgba(188, 140, 255, 0.12)', color: '#bc8cff',
-                fontSize: '9px', fontWeight: 700, cursor: 'pointer'
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px', border: '1px solid rgba(188, 140, 255, 0.3)',
+                background: 'rgba(188, 140, 255, 0.08)', color: '#bc8cff',
+                fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
               }}
-              title="Run DAG 4 (Nodes 7→8) to verify continuity and assemble document"
+              title="Run Assemble (Nodes 7→8) to verify continuity and assemble document"
             >
-              <Play size={8} fill="#bc8cff" />
-              <span>DAG 4: Assemble</span>
+              <Play size={7.5} fill="#bc8cff" />
+              <span>Assemble</span>
             </button>
           </div>
 
@@ -1725,7 +1677,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           onReevaluate={handleEvaluateNode5}
           onRunNode={handleRunNode}
           onAbortNode={handleAbortNode}
-          onOpenConfig={() => setIsConfigModalOpen(true)}
+          onOpenConfig={() => setUniversalConfigNodeId('verification_trigger')}
         />
       )}
 
@@ -1753,41 +1705,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           onRefresh={onRefresh}
         />
       )}
-
-      {/* MODAL 1: Node 3 Screen Capture Config */}
-      <Node3CaptureConfigModal
-        isOpen={isNode3ConfigOpen}
-        onClose={() => setIsNode3ConfigOpen(false)}
-        config={node3Config}
-        onChangeConfig={setNode3Config}
-        onSave={handleSaveNode3}
-        isSaving={isSavingConfig}
-      />
-
-      {/* MODAL 2: Node 4 OCR Extraction Config */}
-      <Node4OcrConfigModal
-        isOpen={isNode4ConfigOpen}
-        onClose={() => setIsNode4ConfigOpen(false)}
-        config={node4Config}
-        onChangeConfig={setNode4Config}
-        onSave={handleSaveNode4}
-        isSaving={isSavingConfig}
-      />
-
-      {/* MODAL 3: Node 6 Trigger Verification & Qualifiers Config */}
-      <Node6QualifierConfigModal
-        isOpen={isConfigModalOpen}
-        onClose={() => setIsConfigModalOpen(false)}
-        config={node5Config}
-        onChangeConfig={setNode5Config}
-        triggerDecision={triggerDecision}
-        onToggleQualifier={(qId) => setNode5Config(prev => prev.qualifiers[qId] ? ({ ...prev, qualifiers: { ...prev.qualifiers, [qId]: { ...prev.qualifiers[qId], enabled: !prev.qualifiers[qId].enabled } } }) : prev)}
-        onEvaluate={handleEvaluateNode5}
-        isEvaluating={isEvaluating}
-        onSave={handleSaveNode5}
-        isSaving={isSavingConfig}
-        feedback={configFeedback}
-      />
 
       {/* MODAL 4: Node 3b Full Extracted Text Modal */}
       <Node3bExtractedTextModal

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from observation_actions.base_action import ActionContext, WorkaroundResult
 from observation_actions import observation_action_registry
-from observation_actions.discovery_engine import DynamicObservationDiscoveryEngine
+from observation_actions.discovery_observer import DynamicObservationDiscoveryEngine
 
 
 @dataclass

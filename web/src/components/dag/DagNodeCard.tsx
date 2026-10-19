@@ -77,27 +77,41 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
       style={{
         width: '185px',
         height: '62px',
-        background: isSelected ? 'rgba(22, 27, 34, 0.98)' : 'rgba(13, 17, 23, 0.92)',
-        backdropFilter: 'blur(8px)',
-        borderRadius: '7px',
-        border: `1.5px solid ${isWiringTargetCandidate ? '#00ff9d' : (isPinned ? '#58a6ff' : (isSelected ? node.accentColor : (status.isDone ? '#238636' : (status.isError ? '#f85149' : '#30363d'))))}`,
+        background: isSelected ? '#161b22' : 'rgba(13, 17, 23, 0.88)',
+        backdropFilter: 'blur(12px)',
+        borderRadius: '8px',
+        border: `1px solid ${
+          isWiringTargetCandidate
+            ? '#00ff9d'
+            : isPinned
+            ? '#388bfd'
+            : isSelected
+            ? node.accentColor
+            : status.isRunning
+            ? '#ff6b25'
+            : status.isError
+            ? '#f85149'
+            : 'rgba(255, 255, 255, 0.08)'
+        }`,
         boxShadow: isPinned
-          ? `0 0 16px rgba(88, 166, 255, 0.6), 0 4px 12px rgba(0,0,0,0.7)`
-          : (isSelected
-            ? `0 0 14px ${node.accentColor}55, 0 4px 12px rgba(0,0,0,0.6)`
-            : (status.isRunning ? '0 0 12px rgba(255, 107, 37, 0.5)' : '0 2px 8px rgba(0,0,0,0.4)')),
-        padding: '4px 8px',
+          ? `0 0 16px rgba(56, 139, 253, 0.4), 0 4px 12px rgba(0,0,0,0.6)`
+          : isSelected
+          ? `0 0 14px ${node.accentColor}33, 0 4px 12px rgba(0,0,0,0.5)`
+          : status.isRunning
+          ? '0 0 12px rgba(255, 107, 37, 0.35)'
+          : '0 2px 8px rgba(0, 0, 0, 0.35)',
+        padding: '5px 8px',
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
         cursor: 'grab',
         position: 'relative',
-        transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+        transition: 'border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease',
         boxSizing: 'border-box',
         userSelect: 'none',
         ...style
       }}
-      title={`Node ${node.step}: ${node.fullName}\n• Evaluator: ${status.evaluator || 'Standard Gutter'}\n${status.healingStep ? `• Healing Action: ${status.healingStep}\n` : ''}${status.telemetryInsight ? `• Insight: ${status.telemetryInsight}\n` : ''}• Drag card to reposition on 2D canvas\n• Drag wire from right port to connect\n• Click Gear (CFG) for observation actions & parameters`}
+      title={`Node ${node.step}: ${node.fullName}\n• Evaluator: ${status.evaluator || 'Standard Gutter'}\n${status.healingStep ? `• Healing Action: ${status.healingStep}\n` : ''}${status.telemetryInsight ? `• Insight: ${status.telemetryInsight}\n` : ''}• Drag card to reposition\n• Connect wire via right port\n• Gear icon for configs & actions`}
     >
       {/* Interactive Input Port Socket (Left edge) */}
       <div
@@ -110,18 +124,18 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
           e.stopPropagation();
           if (onCompleteWiring) onCompleteWiring(node.id);
         }}
-        title={`Input Port Socket: Drop wire here to direct execution flow into Node ${node.step}`}
+        title={`Input Socket: Connect wire into Node ${node.step}`}
         style={{
           position: 'absolute',
-          left: '-7px',
+          left: '-5px',
           top: '50%',
           transform: 'translateY(-50%)',
-          width: '13px',
-          height: '13px',
+          width: '10px',
+          height: '10px',
           borderRadius: '50%',
-          background: isWiringTargetCandidate ? '#00ff9d' : '#161b22',
-          border: `2px solid ${isWiringTargetCandidate ? '#00ff9d' : node.accentColor}`,
-          boxShadow: isWiringTargetCandidate ? '0 0 10px #00ff9d' : '0 0 4px rgba(0,0,0,0.8)',
+          background: isWiringTargetCandidate ? '#00ff9d' : '#0d1117',
+          border: `1.5px solid ${isWiringTargetCandidate ? '#00ff9d' : (isSelected ? node.accentColor : '#30363d')}`,
+          boxShadow: isWiringTargetCandidate ? '0 0 8px #00ff9d' : 'none',
           cursor: 'pointer',
           zIndex: 10,
           transition: 'all 0.15s ease'
@@ -135,82 +149,142 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
           e.stopPropagation();
           if (onStartWiring) onStartWiring(e, node.id);
         }}
-        title={`Output Port Socket: Drag interactive Bezier wire to another node's Input Socket`}
+        title={`Output Socket: Drag wire to another node`}
         style={{
           position: 'absolute',
-          right: '-7px',
+          right: '-5px',
           top: '50%',
           transform: 'translateY(-50%)',
-          width: '13px',
-          height: '13px',
+          width: '10px',
+          height: '10px',
           borderRadius: '50%',
-          background: isWiringSource ? '#58a6ff' : '#161b22',
-          border: `2px solid ${isWiringSource ? '#58a6ff' : node.accentColor}`,
-          boxShadow: isWiringSource ? '0 0 10px #58a6ff' : '0 0 4px rgba(0,0,0,0.8)',
+          background: isWiringSource ? '#388bfd' : '#0d1117',
+          border: `1.5px solid ${isWiringSource ? '#388bfd' : (isSelected ? node.accentColor : '#30363d')}`,
+          boxShadow: isWiringSource ? '0 0 8px #388bfd' : 'none',
           cursor: 'crosshair',
           zIndex: 10,
           transition: 'all 0.15s ease'
         }}
       />
 
-      {/* Top: Step badge + Short name + Action count + Status indicator */}
+      {/* Top Header: Step badge + Node short name + Actions count + Status dot */}
       <div
         className="dag-node-header"
         onPointerDown={onPointerDownHeader}
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '3px', cursor: 'grab' }}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '4px',
+          cursor: 'grab'
+        }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden' }}>
-          <span style={{
-            fontSize: '8px', fontWeight: 800, padding: '0px 3px', borderRadius: '3px',
-            background: `${node.accentColor}25`, color: node.accentColor, border: `1px solid ${node.accentColor}55`
-          }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, overflow: 'hidden' }}>
+          <span
+            style={{
+              fontSize: '8px',
+              fontWeight: 700,
+              padding: '1px 4px',
+              borderRadius: '3px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              color: node.accentColor,
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              fontFamily: 'monospace',
+              lineHeight: 1
+            }}
+          >
             {node.step}
           </span>
-          <span style={{ fontSize: '9.5px', fontWeight: 800, color: '#f0f6fc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              color: '#f0f6fc',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              letterSpacing: '-0.01em'
+            }}
+          >
             {node.shortName}
           </span>
           {attachedActionsCount > 0 && (
             <span
               style={{
-                fontSize: '7px',
-                fontWeight: 800,
-                padding: '0px 3px',
-                borderRadius: '3px',
-                background: 'rgba(255, 166, 87, 0.22)',
-                color: '#ffa657',
-                border: '1px solid rgba(255, 166, 87, 0.4)',
+                fontSize: '8px',
+                fontWeight: 700,
+                color: '#e3b341',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '1px'
+                gap: '1px',
+                lineHeight: 1
               }}
-              title={`${attachedActionsCount} Observation/Workaround Actions Attached`}
+              title={`${attachedActionsCount} Observation & Workaround Actions Attached`}
             >
               ⚡{attachedActionsCount}
             </span>
           )}
         </div>
+
         {status.isRunning ? (
-          <RefreshCw size={9} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} />
+          <RefreshCw size={10} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} style={{ flexShrink: 0 }} />
         ) : (
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: status.color, boxShadow: `0 0 5px ${status.color}`, flexShrink: 0 }} />
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: status.color,
+              boxShadow: status.isRunning ? `0 0 6px ${status.color}` : 'none',
+              flexShrink: 0
+            }}
+          />
         )}
       </div>
 
-      {/* Middle: Metric badge with healing indicator */}
-      <div style={{ fontSize: '8.5px', fontWeight: 700, color: status.color, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: '3px' }}>
-        {status.healingStep && (status.isRunning || status.isError) && <RefreshCw size={7.5} className="spin" style={{ flexShrink: 0 }} />}
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{status.metricLabel || status.statusLabel}</span>
+      {/* Middle: Subtle status/metric summary */}
+      <div
+        style={{
+          fontSize: '9px',
+          fontWeight: 500,
+          color: status.isError ? '#f85149' : (status.isRunning ? '#ffa657' : '#8b949e'),
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '3px',
+          padding: '0 1px'
+        }}
+      >
+        {status.healingStep && (status.isRunning || status.isError) && (
+          <RefreshCw size={8} className="spin" style={{ flexShrink: 0 }} />
+        )}
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {status.metricLabel || status.statusLabel}
+        </span>
       </div>
 
-      {/* Bottom: Timing & Action Buttons (Config, AI, Prompt) */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '7.5px', color: isPulsingSwirl ? '#ffa657' : '#8b949e', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '2px' }}>
-        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '55%' }}>
+      {/* Bottom: Timing & Minimalist Icon Action Buttons */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '8.5px',
+          color: '#6e7681',
+          borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+          paddingTop: '3px'
+        }}
+      >
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '60%', fontFamily: 'monospace' }}>
           {isPulsingSwirl
             ? (status.startedAt ? `${status.startedAt} (active)` : 'Active...')
             : (status.durationMs ? `${(status.durationMs / 1000).toFixed(1)}s` : (status.startedAt || 'Idle'))}
         </span>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-          {/* Config (Gear) Button */}
+          {/* Config (Gear) Icon Button */}
           {onOpenConfig && (
             <button
               type="button"
@@ -221,24 +295,68 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '2px',
-                padding: '0px 3px',
+                justifyContent: 'center',
+                width: '15px',
+                height: '15px',
                 borderRadius: '3px',
-                border: '1px solid rgba(88, 166, 255, 0.4)',
-                background: 'rgba(88, 166, 255, 0.15)',
-                color: '#58a6ff',
-                fontSize: '7px',
-                fontWeight: 800,
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(255, 255, 255, 0.03)',
+                color: '#8b949e',
                 cursor: 'pointer',
-                lineHeight: '11px',
-                height: '13px'
+                padding: 0,
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#58a6ff';
+                e.currentTarget.style.borderColor = 'rgba(88, 166, 255, 0.4)';
+                e.currentTarget.style.background = 'rgba(88, 166, 255, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#8b949e';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
               }}
               title="Configure Node & Observation Actions"
             >
-              <Settings size={7} />
-              <span>CFG</span>
+              <Settings size={9} />
             </button>
           )}
+
+          {/* AI Prompt Sparkles Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenPromptModal();
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '15px',
+              height: '15px',
+              borderRadius: '3px',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(255, 255, 255, 0.03)',
+              color: '#8b949e',
+              cursor: 'pointer',
+              padding: 0,
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#ffa657';
+              e.currentTarget.style.borderColor = 'rgba(255, 166, 87, 0.4)';
+              e.currentTarget.style.background = 'rgba(255, 166, 87, 0.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = '#8b949e';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+            }}
+            title="View Markdown Resolution Prompt for AI"
+          >
+            <Sparkles size={9} />
+          </button>
 
           {/* AI Copy Button */}
           <button
@@ -250,53 +368,35 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '2px',
-              padding: '0px 3px',
+              justifyContent: 'center',
+              width: '15px',
+              height: '15px',
               borderRadius: '3px',
-              border: isCopied ? '1px solid #00ff9d' : '1px solid rgba(88, 166, 255, 0.4)',
-              background: isCopied ? 'rgba(0, 255, 157, 0.2)' : 'rgba(88, 166, 255, 0.15)',
-              color: isCopied ? '#00ff9d' : '#58a6ff',
-              fontSize: '7px',
-              fontWeight: 800,
+              border: isCopied ? '1px solid #00ff9d' : '1px solid rgba(255, 255, 255, 0.08)',
+              background: isCopied ? 'rgba(0, 255, 157, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+              color: isCopied ? '#00ff9d' : '#8b949e',
               cursor: 'pointer',
-              lineHeight: '11px',
-              height: '13px'
+              padding: 0,
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              if (!isCopied) {
+                e.currentTarget.style.color = '#f0f6fc';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isCopied) {
+                e.currentTarget.style.color = '#8b949e';
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
+              }
             }}
             title="Copy details for AI in Markdown format"
           >
-            {isCopied ? <Check size={7} /> : <Copy size={7} />}
-            <span>{isCopied ? 'COPIED' : 'AI'}</span>
+            {isCopied ? <Check size={9} /> : <Copy size={9} />}
           </button>
-
-          {/* AI Prompt Button */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenPromptModal();
-            }}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '2px',
-              padding: '0px 3px',
-              borderRadius: '3px',
-              border: '1px solid rgba(255, 166, 87, 0.4)',
-              background: 'rgba(255, 166, 87, 0.15)',
-              color: '#ffa657',
-              fontSize: '7px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              lineHeight: '11px',
-              height: '13px'
-            }}
-            title="View Markdown Resolution Prompt for AI"
-          >
-            <Sparkles size={7} />
-            <span>PROMPT</span>
-          </button>
-          {isSelected && <span style={{ color: node.accentColor, fontSize: '7px', fontWeight: 800 }}>SEL</span>}
-          {isPinned && <span style={{ color: '#58a6ff', fontSize: '7px', fontWeight: 800 }}>OPEN</span>}
         </div>
       </div>
     </div>

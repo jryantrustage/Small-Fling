@@ -77,10 +77,8 @@ class NodeRegistry:
         ignored_files = {
             "__init__.py",
             "base.py",
-            "base_node.py",
             "registry.py",
             "executor.py",
-            "graph_executor.py"
         }
 
         # First discover canonical *_node.py files, then others
