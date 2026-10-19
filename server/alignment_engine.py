@@ -204,13 +204,14 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 5 & 6. GREEN & RED BOXES: First & Last Line Numbers
     # ---------------------------------------------------------
-    # Dynamic gutter search: left margin below toolbar
-    gutter_w = int(max(150, min(360, 220 * dpi_factor)))
-    body_gutter = img[tb_y2:h - int(h * 0.04), :gutter_w]
+    scale_w = w / 1920.0
+    scale_h = h / 1080.0
     
+    # Gutter column width is strictly bounded to the left margin column (avoids code/tree text)
+    gutter_num_w = int(max(45, min(95, 75 * scale_w * dpi_factor)))
     gutter_lines = []
 
-    def _extract_gutter_tokens(crop_img, x_offset: int, y_offset: int):
+    def _extract_gutter_tokens(crop_img, x_offset: int, y_offset: int, max_allowed_x: int = 9999):
         if crop_img.size == 0:
             return
         res, _ = ocr(crop_img)
@@ -222,32 +223,59 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             by1 = y_offset + int(pts[:, 1].min())
             bw = int(pts[:, 0].max() - pts[:, 0].min())
             bh = int(pts[:, 1].max() - pts[:, 1].min())
-            clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
+            
+            # Spatial filter: token must start inside the gutter column
+            if bx1 > max_allowed_x:
+                continue
+
+            raw_t = t.strip()
+            # Linguistic filter: gutter line numbers NEVER contain multiple letters (e.g. 'layout.ts', 'logger')
+            letters = re.findall(r'[a-zA-Z]', raw_t)
+            if len(letters) >= 2 or (len(letters) == 1 and (len(raw_t) > 4 or letters[0] not in 'lIOSB')):
+                continue
+
+            clean = raw_t.replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1').replace('|', '1')
             if m := re.search(r'^\s*(\d+)', clean):
                 val = int(m.group(1))
-                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 12 and gl[1] == val for gl in gutter_lines):
+                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 and gl[1] == val for gl in gutter_lines):
                     char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
                     box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
                     gutter_lines.append((by1, val, box))
 
-    # Pass A: Focused narrow gutter crop dedicated to line number digits (avoids body text grouping interference)
-    gutter_num_w = int(max(70, min(140, 95 * dpi_factor)))
+    # Pass A: Focused narrow gutter crop dedicated to line number digits
     narrow_strip = img[tb_y2:h - int(h * 0.04), :gutter_num_w]
-    _extract_gutter_tokens(narrow_strip, 0, tb_y2)
+    _extract_gutter_tokens(narrow_strip, 0, tb_y2, max_allowed_x=gutter_num_w)
 
-    # Pass B: Wider gutter crop for wider gutters or indented columns
-    _extract_gutter_tokens(body_gutter, 0, tb_y2)
+    # 1.5x scaled narrow strip for small/faint digits on high-density or scaled down captures
+    strip_scaled = cv2.resize(narrow_strip, (0, 0), fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    if strip_scaled.size > 0:
+        res_scaled, _ = ocr(strip_scaled)
+        if res_scaled:
+            for b, t, s in res_scaled:
+                pts = np.array(b) / 1.5
+                bx1 = int(pts[:, 0].min())
+                by1 = tb_y2 + int(pts[:, 1].min())
+                bw = int(pts[:, 0].max() - pts[:, 0].min())
+                bh = int(pts[:, 1].max() - pts[:, 1].min())
+                if bx1 > gutter_num_w:
+                    continue
+                raw_t = t.strip()
+                letters = re.findall(r'[a-zA-Z]', raw_t)
+                if len(letters) >= 2 or (len(letters) == 1 and (len(raw_t) > 4 or letters[0] not in 'lIOSB')):
+                    continue
+                clean = raw_t.replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1').replace('|', '1')
+                if m := re.search(r'^\s*(\d+)', clean):
+                    val = int(m.group(1))
+                    if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 for gl in gutter_lines):
+                        char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
+                        box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
+                        gutter_lines.append((by1, val, box))
 
-    # Pass C: Also incorporate top_tokens below toolbar
-    for bx1, by1, bw, bh, t, s in top_tokens:
-        if by1 >= tb_y2 and bx1 < gutter_w:
-            clean = t.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('I', '1').replace('l', '1')
-            if m := re.search(r'^\s*(\d+)', clean):
-                val = int(m.group(1))
-                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 12 for gl in gutter_lines):
-                    char_w = max(14, int(bw * (len(m.group(1)) / max(1, len(clean)))) + 4)
-                    box = [max(0, bx1 - 3), max(0, by1 - 3), min(bw, char_w), bh + 6]
-                    gutter_lines.append((by1, val, box))
+    # Pass B: Fallback wider search ONLY if no lines detected in margin (e.g. sidebar open)
+    if not gutter_lines:
+        gutter_w = int(max(150, min(360, 220 * dpi_factor)))
+        body_gutter = img[tb_y2:h - int(h * 0.04), :gutter_w]
+        _extract_gutter_tokens(body_gutter, 0, tb_y2, max_allowed_x=gutter_w)
 
     first_line_num = 0
     first_line_box = [int(w * 0.02), tb_y2, int(35 * dpi_factor), int(25 * dpi_factor)]
@@ -256,6 +284,15 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
 
     if gutter_lines:
         gutter_lines.sort(key=lambda x: x[0])
+
+        # Filter horizontal outliers (keep column within +/- 30px of median gutter X)
+        col_xs = [gl[2][0] for gl in gutter_lines]
+        med_x = float(np.median(col_xs))
+        gutter_lines = [gl for gl in gutter_lines if abs(gl[2][0] - med_x) <= max(25.0, 35.0 * dpi_factor)]
+        gutter_col_x = int(np.median([gl[2][0] for gl in gutter_lines])) if gutter_lines else int(w * 0.02)
+        gutter_bw = int(np.median([gl[2][2] for gl in gutter_lines])) if gutter_lines else int(20 * dpi_factor)
+        gutter_bh = int(np.median([gl[2][3] for gl in gutter_lines])) if gutter_lines else int(20 * dpi_factor)
+
         top_y, top_val, top_box = gutter_lines[0]
 
         # Calculate actual pitch per line (delta_y / delta_line_number)
@@ -265,10 +302,10 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             d_y = gutter_lines[i+1][0] - gutter_lines[i][0]
             if d_val > 0 and d_y > 0:
                 pitch = d_y / float(d_val)
-                if 15.0 <= pitch <= 80.0:
+                if 8.0 <= pitch <= 80.0:
                     pitches.append(pitch)
 
-        avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(18.0, 26.0 * dpi_factor)
+        avg_pitch = (sum(pitches) / len(pitches)) if pitches else max(12.0, 26.0 * scale_h)
 
         # If top detected line > 1, check whether line 1 (or intervening lines) are visible directly above it
         first_line_num = top_val
@@ -287,12 +324,13 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
 
             if topmost_val < top_val:
                 first_line_num = topmost_val
-                est_box = [top_box[0], max(tb_y2, topmost_y), top_box[2], top_box[3]]
-                # Refine with contour detection in digit window
+                # Base box strictly aligned to gutter column (never shift right into code/header text)
+                est_box = [gutter_col_x, max(tb_y2, topmost_y), gutter_bw, gutter_bh]
+                # Refine with contour detection strictly inside the gutter column width
                 cy1 = max(tb_y2, topmost_y - int(8 * dpi_factor))
                 cy2 = min(h, topmost_y + int(24 * dpi_factor))
-                cx1 = max(0, top_box[0] - int(15 * dpi_factor))
-                cx2 = min(w, top_box[0] + top_box[2] + int(15 * dpi_factor))
+                cx1 = max(0, gutter_col_x - int(8 * dpi_factor))
+                cx2 = min(w, gutter_col_x + gutter_bw + int(4 * dpi_factor))
                 crop_digit = img[cy1:cy2, cx1:cx2]
                 if crop_digit.size > 0:
                     gray_digit = cv2.cvtColor(crop_digit, cv2.COLOR_BGR2GRAY)
@@ -305,18 +343,27 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                     for c in conts:
                         cdx, cdy, cdw, cdh = cv2.boundingRect(c)
                         area = cv2.contourArea(c)
+                        abs_cx = cx1 + cdx
+                        # Must be strictly within the gutter column (avoids '#', '.', etc. in text body)
                         if 10 <= area <= 600 and 8 <= cdh <= int(35 * dpi_factor):
-                            valid_conts.append((cdx, cdy, cdw, cdh))
+                            if abs(abs_cx - gutter_col_x) <= max(6.0, 8.0 * dpi_factor):
+                                valid_conts.append((cdx, cdy, cdw, cdh, abs_cx))
                     if valid_conts:
-                        valid_conts.sort(key=lambda c: abs((cy1 + c[1]) - topmost_y))
-                        cdx, cdy, cdw, cdh = valid_conts[0]
+                        # Prioritize contour closest to the gutter column center
+                        valid_conts.sort(key=lambda c: abs(c[4] - gutter_col_x))
+                        cdx, cdy, cdw, cdh, _ = valid_conts[0]
                         est_box = [cx1 + cdx - 2, cy1 + cdy - 2, max(cdw + 4, 14), cdh + 4]
 
                 first_line_box = est_box
 
-        # Last line
-        last_line_num = gutter_lines[-1][1]
-        last_line_box = gutter_lines[-1][2]
+        # Last line resolution: MUST be >= first_line_num and in the gutter column
+        valid_descendants = [gl for gl in gutter_lines if gl[1] >= first_line_num and gl[0] >= first_line_box[1]]
+        if valid_descendants:
+            last_line_num = valid_descendants[-1][1]
+            last_line_box = valid_descendants[-1][2]
+        else:
+            last_line_num = gutter_lines[-1][1]
+            last_line_box = gutter_lines[-1][2]
 
         # If only 1 line was found in gutter_lines (e.g. at 400 DPI where only line 1 has leading digits),
         # estimate last line from vertical rows or text content in editor body:

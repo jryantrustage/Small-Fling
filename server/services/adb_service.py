@@ -701,7 +701,7 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: Op
         # 3. Check if Teams or Intune Company Portal is prompting for authentication on internal or external display
         ext_id = await detect_external_display_id(ser)
         auth_chk = await run_adb_shell(
-            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity'",
+            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity|BiometricActivity|biometric_prompt'",
             ser,
             timeout=1.2
         )
@@ -709,7 +709,7 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: Op
         if any(k.lower() in auth_out.lower() for k in [
             "companyportal", "confirmcredential", "pinactivity", "authenticationactivity",
             "lockpatternactivity", "mamstartupactivity", "mammsalauthactivity",
-            "brokerauthorizationactivity", "accountchooseractivity"
+            "brokerauthorizationactivity", "accountchooseractivity", "biometricactivity", "biometric_prompt"
         ]):
             # Enter PIN on both external display and internal phone display
             if ext_id and ext_id > 0:
@@ -799,22 +799,17 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
     try:
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open:
-            # Enforce hardware keyboard policy and dismiss active IME window.
-            # In Android desktop mode, the soft keyboard window lives on display 0.
-            # Sending KEYCODE_ESCAPE (111) or KEYCODE_BACK (4) to display 0 closes IME.
-            # We NEVER dispatch KEYCODE_BACK (4) to the external display (display_id > 0)
-            # because that causes FilePreviewActivity to handle onBackPressed() and close the file!
+            did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+            valid_d = sanitize_input_display_id(did)
+            if valid_d and valid_d > 0:
+                await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
+            # Enforce hardware keyboard policy and dismiss active IME window on display 0 if open
             cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 4 >/dev/null 2>&1"
             await run_adb_shell(cmd, ser, timeout=2.0)
             await asyncio.sleep(0.12)
             is_open = await is_ime_visible(ser, force_check=True)
-            if is_open:
-                # If still open, send KEYCODE_ESCAPE (111) to external display (safe, doesn't close activity)
-                did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
-                if did and did > 0:
-                    await run_adb_shell(f"input -d {did} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
-                else:
-                    await run_adb_shell("input keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
+            if is_open and valid_d and valid_d > 0:
+                await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
                 await asyncio.sleep(0.12)
                 is_open = await is_ime_visible(ser, force_check=True)
         else:
@@ -1295,20 +1290,25 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
-        # Ensure FilePreviewActivity is in front on target display without tactile screen taps
-        try:
-            top_chk = await run_adb_shell("dumpsys activity activities | grep -E 'topResumedActivity'", ser, timeout=1.0)
-            if "FilePreviewActivity" not in top_chk.get("stdout", ""):
-                t_res = await run_adb_shell("dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'", ser, timeout=1.0)
-                tid = t_res.get("stdout", "").strip()
-                if tid and tid.isdigit():
-                    await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.0)
-        except Exception:
-            pass
+        # Ensure target display and FilePreviewActivity have window focus without typing into editor
+        if "mock" not in str(ser).lower() and target_d and target_d > 0:
+            try:
+                # If IME is currently open, dismiss it on target display before sending keycombination
+                if await is_ime_visible(ser):
+                    await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
+                    await asyncio.sleep(0.08)
+
+                # Tap neutral window decor titlebar to guarantee window manager focus on target_d
+                disp_w, disp_h = await get_display_dimensions(ser, target_d)
+                title_x = disp_w // 2
+                title_y = max(45, int(60 * (disp_h / 1080.0)))
+                await run_adb_shell(f"input -d {target_d} tap {title_x} {title_y} >/dev/null 2>&1", ser, timeout=1.0)
+                await asyncio.sleep(0.08)
+            except Exception:
+                pass
 
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
-            "input -d 0 keyevent 111 >/dev/null 2>&1",
         ]
         if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")

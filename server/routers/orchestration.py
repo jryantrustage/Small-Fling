@@ -1125,10 +1125,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Silently ensure virtual keyboard is closed without tapping or resizing
             await dismiss_keyboard(active_serial, disp_id)
 
-            # Ensure Teams editor body has caret focus so Ctrl+End reaches document
-            target_d = disp_id if (disp_id and disp_id > 0) else 3
-            await run_adb_shell(f"input -d {target_d} tap 500 450", active_serial)
-            await asyncio.sleep(0.15)
+            # Ensure Teams editor window on target display has focus without touching editable body
+            target_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 7)
+            disp_w, disp_h = await get_display_dimensions(active_serial, target_d)
+            await run_adb_shell(f"input -d {target_d} tap {disp_w // 2} {max(45, int(60 * disp_h / 1080.0))} >/dev/null 2>&1", active_serial)
+            await asyncio.sleep(0.1)
 
             # 1. Send Ctrl+End to navigate to EOF
             await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end")
@@ -1219,7 +1220,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 is_stuck_on_line_1 = False
             elif 0 < top_line <= 15:
                 is_stuck_on_line_1 = True
-            elif total_lines < 500:
+            elif total_lines < 500 and top_line <= 30:
                 is_stuck_on_line_1 = True
 
             # If initial attempt left page near Line 1 or partial scroll, refocus & re-dispatch EOF jump
@@ -1239,6 +1240,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 )
                 try:
                     await dismiss_keyboard(active_serial, disp_id)
+                    disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
+                    await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {max(45, int(60 * disp_h / 1080.0))} >/dev/null 2>&1", active_serial)
+                    await asyncio.sleep(0.1)
                     await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
                     await asyncio.sleep(0.8)
                     node.update({
@@ -1259,7 +1263,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                         if r_total > total_lines: total_lines = r_total
                         if r_top > 0: top_line = r_top
 
-                        if total_lines >= 500:
+                        if total_lines >= 500 or top_line > 30:
                             is_stuck_on_line_1 = False
                             snap = snap_retry
                 except Exception as re_err:
