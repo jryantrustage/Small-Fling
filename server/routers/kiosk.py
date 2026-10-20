@@ -23,8 +23,17 @@ class KioskAutoRefreshRequest(BaseModel):
     serial: Optional[str] = None
 
 class DesktopModeToggleRequest(BaseModel):
-    enabled: bool
+    enabled: Optional[bool] = None
+    enable: Optional[bool] = None
     serial: Optional[str] = None
+
+    @property
+    def is_enabled(self) -> bool:
+        if self.enabled is not None:
+            return self.enabled
+        if self.enable is not None:
+            return self.enable
+        return True
 
 class KeyboardProhibitRequest(BaseModel):
     prohibit: bool
@@ -41,21 +50,22 @@ async def get_kiosk_status_endpoint(serial: Optional[str] = None):
     return status
 
 @router.get("/desktop-mode")
+@router.get("/desktop-mode/verify")
 async def get_desktop_mode_endpoint(serial: Optional[str] = None):
-    from services import state
-    return {
-        "status": "ok",
-        "desktop_mode_enabled": getattr(state, "desktop_mode_enabled", True),
-        "desktop_keyboard_prohibited": getattr(state, "desktop_keyboard_prohibited", True)
-    }
+    return await kiosk_service.verify_desktop_mode_status(serial)
 
 @router.post("/desktop-mode")
 @router.post("/desktop-mode/toggle")
 async def toggle_desktop_mode_endpoint(req: DesktopModeToggleRequest):
-    res = await kiosk_service.toggle_desktop_mode(enable=req.enabled, serial=req.serial)
+    res = await kiosk_service.toggle_desktop_mode(enable=req.is_enabled, serial=req.serial)
     if res.get("status") == "error":
         raise HTTPException(status_code=400, detail=res.get("message", "Failed to toggle desktop mode"))
     return res
+
+@router.post("/desktop-mode/verify")
+async def post_desktop_mode_verify_endpoint(req: Optional[DesktopModeToggleRequest] = None):
+    serial = req.serial if req else None
+    return await kiosk_service.verify_desktop_mode_status(serial)
 
 @router.get("/keyboard-prohibit")
 async def get_keyboard_prohibit_endpoint(serial: Optional[str] = None):

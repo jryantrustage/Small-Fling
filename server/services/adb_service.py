@@ -442,7 +442,7 @@ async def detect_surfaceflinger_displays(serial: Optional[str] = None, force_ref
     now = time.time()
     cached = _display_map_cache.get(ser)
     cached_ts = _display_map_cache_ts.get(ser, 0.0)
-    if not force_refresh and cached and (now - cached_ts < 300.0):
+    if not force_refresh and cached and (now - cached_ts < (300.0 if "desktop" in cached else 3.0)):
         return cached
 
     displays = {}
@@ -725,14 +725,34 @@ async def detect_auth_screen_type(
             "requires_mam_pin": False
         }
 
+    # If Teams Markdown editor or files listing is active, it is strictly NOT an auth screen
+    if "filepreviewactivity" in combined_acts_lower or "personalfilesactivity" in combined_acts_lower:
+        return {
+            "auth_type": "none",
+            "details": "Teams Markdown editor or files listing is active",
+            "is_pin_safe": False,
+            "requires_keyguard_unlock": False,
+            "requires_mam_pin": False
+        }
+
     # 3. Check Input Method / Focused Editor characteristics (inputType & hintText)
     try:
         ime_chk = await run_adb_shell("dumpsys input_method", ser, timeout=1.2)
         ime_out = ime_chk.get("stdout", "")
+        # If the served view is the Teams preview host view, it is the editor
+        if "preview_host_view" in ime_out or ("com.microsoft.teams" in ime_out and "FilePreviewActivity" in ime_out):
+            return {
+                "auth_type": "none",
+                "details": "Teams Markdown editor is the active IME target",
+                "is_pin_safe": False,
+                "requires_keyguard_unlock": False,
+                "requires_mam_pin": False
+            }
+
         # Inspect focused inputType
         # Android inputType: Class 1=TEXT, 2=NUMBER.
-        # Variations: 0x20/32=email, 0x80/128=password, 0xa0/160=web_text.
-        # Numeric password: 0x12 (18) or 0x80002.
+        # Password variations: 0x80 (password), 0x90 (visible password), 0xe0 (web password).
+        # Email variations: 0x20 (email), 0xd0 (web email).
         for line in ime_out.splitlines():
             line_str = line.strip()
             if "mEditorInfo" in line_str or "inputType=" in line_str:
@@ -741,11 +761,11 @@ async def detect_auth_screen_type(
                     val = int(m_type.group(1), 16)
                     cls = val & 0x0F
                     variation = val & 0x0FF0
-                    # Check for text variations (email, password, webview edit text)
-                    if cls == 1 or variation in (0x20, 0x80, 0xa0):
+                    # Check for explicit email or password variations only (never plain text or web edit text 0xa0)
+                    if cls == 1 and variation in (0x20, 0x80, 0x90, 0xd0, 0xe0):
                         return {
                             "auth_type": "username_password",
-                            "details": f"Focused input field is text/email/password (inputType=0x{val:x})",
+                            "details": f"Focused input field is email/password (inputType=0x{val:x})",
                             "is_pin_safe": False,
                             "requires_keyguard_unlock": False,
                             "requires_mam_pin": False
@@ -1020,17 +1040,32 @@ def parse_activities_by_display(dumpsys_output: str) -> Dict[int, Dict[str, Any]
     curr_task_id = None
 
     for line in lines:
-        disp_m = re.search(r'Display #(\d+)', line)
+        sline = line.strip()
+        disp_m = re.match(r'^(?:\s*)Display #(\d+)', sline)
         if disp_m:
             curr_disp = int(disp_m.group(1))
-            displays[curr_disp] = {
-                "file_preview_tasks": [],
-                "teams_tasks": [],
-                "resumed_activities": [],
-                "tasks": set()
-            }
+            if curr_disp not in displays:
+                displays[curr_disp] = {
+                    "file_preview_tasks": [],
+                    "teams_tasks": [],
+                    "resumed_activities": [],
+                    "tasks": set()
+                }
             curr_task_id = None
             continue
+
+        if curr_disp is not None:
+            # Terminate display scope when leaving the per-display tree
+            if (
+                sline.startswith("ActivityTaskSupervisor")
+                or sline.startswith("Resumed activities in task")
+                or sline.startswith("ResumedActivity:")
+                or sline.startswith("Recent tasks:")
+                or (not line.startswith(" ") and not line.startswith("\t") and not sline.startswith("Display #"))
+            ):
+                curr_disp = None
+                continue
+
         if curr_disp is None:
             continue
 
@@ -1124,8 +1159,8 @@ async def enforce_markdown_only_on_desktop(
 
     # 3. Check if FilePreviewActivity is resident specifically on Phone Display (Display 0)
     # Only remove Markdown viewer (FilePreviewActivity), NEVER knock user out of Teams login or main app
-    phone_md_tasks = disp0_info.get("file_preview_tasks", [])
     ext_md_tasks = set(ext_info.get("file_preview_tasks", []))
+    phone_md_tasks = [t for t in disp0_info.get("file_preview_tasks", []) if t not in ext_md_tasks]
 
     if phone_md_tasks:
         # Send HOME keyevent to phone display (Display 0) only if Markdown preview is stuck on phone
@@ -1135,13 +1170,12 @@ async def enforce_markdown_only_on_desktop(
 
         # Remove any FilePreviewActivity tasks tied specifically to Display 0
         for tid in phone_md_tasks:
-            if tid not in ext_md_tasks:
-                await run_adb_shell(f"cmd activity stack remove {tid}", ser, timeout=2.0)
-                actions.append(f"Removed phone Markdown task #{tid} from Display 0")
+            await run_adb_shell(f"cmd activity stack remove {tid}", ser, timeout=2.0)
+            actions.append(f"Removed phone Markdown task #{tid} from Display 0")
         await asyncio.sleep(0.2)
 
     # 4. Check status on External Desktop Display
-    is_ext_md_resumed = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", []))
+    is_ext_md_resumed = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", [])) or len(ext_md_tasks) > 0
 
     if not is_ext_md_resumed:
         # Launch / Bring com.microsoft.teams to the foreground on the external desktop display
@@ -1155,6 +1189,10 @@ async def enforce_markdown_only_on_desktop(
 
         # Neutral tap on top left title bar area away from center caption handle
         await run_adb_shell(f"input -d {ext_id} tap 240 40 >/dev/null 2>&1", ser, timeout=1.5)
+    elif ext_md_tasks:
+        # Ensure resident Markdown editor task has focus without reloading
+        top_tid = next(iter(ext_md_tasks))
+        await run_adb_shell(f"cmd activity task to-front {top_tid} >/dev/null 2>&1", ser, timeout=1.5)
 
     # 5. Silently assure virtual keyboard is closed on desktop display without touching phone
     await dismiss_keyboard(ser, ext_id)
@@ -1290,17 +1328,19 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             cmd = (
                 "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
                 "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
-                "settings put secure show_ime_with_hard_keyboard 0; "
-                f"input -d {valid_d} keyevent 111 >/dev/null 2>&1"
+                "settings put secure show_ime_with_hard_keyboard 0"
             )
             await run_adb_shell(cmd, ser, timeout=1.5)
+            is_open = await is_ime_visible(ser, force_check=True)
+            if is_open:
+                await run_adb_shell(f"input -d {valid_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.5)
             _ime_visible_cache["val"] = False
             _ime_visible_cache["ts"] = time.time()
             return True
 
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open and valid_d and valid_d > 0:
-            await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
+            await run_adb_shell(f"input -d {valid_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.5)
             await asyncio.sleep(0.12)
             is_open = await is_ime_visible(ser, force_check=True)
 
@@ -1467,7 +1507,7 @@ async def is_editor_full_screen(
             w_span = r - l
             h_span = b - t
 
-            if mode == "freeform":
+            if mode == "freeform" and (w_span < disp_w - 60 or h_span < disp_h - 150):
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
@@ -1478,7 +1518,7 @@ async def is_editor_full_screen(
                     "reason": f"Activity task #{tid} is running in freeform window mode ({w_span}x{h_span})"
                 }
 
-            if w_span < disp_w - 60 or h_span < disp_h - 100:
+            if w_span < disp_w - 60 or h_span < disp_h - 150:
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
@@ -1567,8 +1607,16 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
         await dismiss_keyboard(ser, display_id)
         is_open = await is_ime_visible(ser, force_check=True)
 
-    # Check fullscreen status post-fix
+    # Check fullscreen status post-fix and maximize freeform floating window if needed
     fs_status = await is_editor_full_screen(ser, display_id)
+    if not fs_status.get("is_fullscreen", True):
+        b = fs_status.get("bounds", [0, 0, disp_w, disp_h])
+        if (b[2] - b[0]) < disp_w - 60 and b[2] > 150 and b[1] >= 0:
+            max_x = b[2] - 120
+            max_y = b[1] + 30
+            await run_adb_shell(f"input -d {display_id} tap {max_x} {max_y} >/dev/null 2>&1", ser)
+            await asyncio.sleep(0.3)
+            fs_status = await is_editor_full_screen(ser, display_id)
 
     try:
         from services import state

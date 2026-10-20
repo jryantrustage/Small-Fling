@@ -130,6 +130,7 @@ export const GotoLineModal: React.FC<Props> = ({
           streamUrl={`${apiBase}/api/device/stream?mode=${mode}&t=${streamKey}`}
           fallbackUrl={`${apiBase}/api/device/screen?mode=${mode}&t=${streamKey}`}
           liveMode={mode}
+          onSwitchLiveMode={setMode}
           alignmentData={alignmentData}
           showBoundingBoxes={showBoundingBoxes}
           deviceInfo={deviceInfo}

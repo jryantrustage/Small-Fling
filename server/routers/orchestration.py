@@ -1322,12 +1322,15 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Ensure Teams editor window on target display has focus without tapping editable text
             target_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 7)
             try:
-                from services.adb_service import enforce_markdown_only_on_desktop
+                from services.adb_service import enforce_markdown_only_on_desktop, auto_fix_viewport
                 await enforce_markdown_only_on_desktop(active_serial, target_d)
+                await auto_fix_viewport(active_serial, target_d)
             except Exception:
                 pass
             disp_w, disp_h = await get_display_dimensions(active_serial, target_d)
-            await run_adb_shell(f"input -d {target_d} tap 240 40 >/dev/null 2>&1", active_serial)
+            focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+            focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+            await run_adb_shell(f"input -d {target_d} tap {focus_x} {focus_y} >/dev/null 2>&1", active_serial)
             await asyncio.sleep(0.08)
             await dismiss_keyboard(active_serial, target_d)
             await asyncio.sleep(0.08)
@@ -1442,7 +1445,9 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 )
                 try:
                     disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
-                    await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", active_serial)
+                    focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+                    focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+                    await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", active_serial)
                     await asyncio.sleep(0.08)
                     await dismiss_keyboard(active_serial, disp_id)
                     await asyncio.sleep(0.08)

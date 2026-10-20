@@ -46,8 +46,11 @@ class OpenMarkdownFromOneDriveAction(ObservationActionPlugin):
         target_info = parsed.get(disp_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
         phone_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
 
-        is_file_preview_on_desktop = any("FilePreviewActivity" in r for r in target_info.get("resumed_activities", [])) or len(target_info.get("file_preview_tasks", [])) > 0
-        is_file_preview_on_phone = len(phone_info.get("file_preview_tasks", [])) > 0
+        ext_md_tasks = set(target_info.get("file_preview_tasks", []))
+        phone_md_tasks = [t for t in phone_info.get("file_preview_tasks", []) if t not in ext_md_tasks]
+
+        is_file_preview_on_desktop = any("FilePreviewActivity" in r for r in target_info.get("resumed_activities", [])) or len(ext_md_tasks) > 0
+        is_file_preview_on_phone = len(phone_md_tasks) > 0
         is_teams_on_desktop = any("com.microsoft.teams" in r for r in target_info.get("resumed_activities", [])) or len(target_info.get("teams_tasks", [])) > 0
 
         # An issue exists if Markdown is NOT open on the desktop display, OR if it IS open on the phone!

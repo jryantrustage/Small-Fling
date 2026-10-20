@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Maximize2, Minimize2, RefreshCw, ZoomIn, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Maximize2, Minimize2, RefreshCw, ZoomIn, Copy, Check, Monitor, Smartphone } from 'lucide-react';
 import { BoundingBoxesOverlay } from './BoundingBoxesOverlay';
 import type { AlignmentData, DeviceInfoData } from '../types';
 
@@ -7,6 +7,7 @@ export interface LiveResponsiveViewportProps {
   streamUrl: string;
   fallbackUrl?: string;
   liveMode?: 'desktop' | 'phone';
+  onSwitchLiveMode?: (mode: 'desktop' | 'phone') => void;
   alignmentData?: AlignmentData | null;
   showBoundingBoxes?: boolean;
   deviceInfo?: DeviceInfoData | null;
@@ -25,6 +26,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   streamUrl,
   fallbackUrl,
   liveMode = 'desktop',
+  onSwitchLiveMode,
   alignmentData,
   showBoundingBoxes = true,
   deviceInfo,
@@ -47,6 +49,45 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
+
+  // Synchronize internal live mode with controlled prop or allow local toggle
+  const [internalLiveMode, setInternalLiveMode] = useState<'desktop' | 'phone'>(liveMode);
+
+  useEffect(() => {
+    setInternalLiveMode(liveMode);
+  }, [liveMode]);
+
+  const effectiveLiveMode = onSwitchLiveMode ? liveMode : internalLiveMode;
+
+  const handleSwitchMode = (targetMode: 'desktop' | 'phone') => {
+    if (onSwitchLiveMode) {
+      onSwitchLiveMode(targetMode);
+    } else {
+      setInternalLiveMode(targetMode);
+    }
+    if (onRefreshStream) {
+      onRefreshStream();
+    }
+  };
+
+  // Compute active stream and fallback URLs dynamically based on effective live mode
+  const activeStreamUrl = useMemo(() => {
+    if (!streamUrl) return '';
+    if (streamUrl.includes('mode=')) {
+      return streamUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`);
+    }
+    const sep = streamUrl.includes('?') ? '&' : '?';
+    return `${streamUrl}${sep}mode=${effectiveLiveMode}`;
+  }, [streamUrl, effectiveLiveMode]);
+
+  const activeFallbackUrl = useMemo(() => {
+    if (!fallbackUrl) return '';
+    if (fallbackUrl.includes('mode=')) {
+      return fallbackUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`);
+    }
+    const sep = fallbackUrl.includes('?') ? '&' : '?';
+    return `${fallbackUrl}${sep}mode=${effectiveLiveMode}`;
+  }, [fallbackUrl, effectiveLiveMode]);
 
   // ResizeObserver on the container to measure available viewport space responsively
   useEffect(() => {
@@ -77,10 +118,10 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
 
   // Ensure DOM element resets to new stream URL when device/mode/streamKey updates
   useEffect(() => {
-    if (imgRef.current && streamUrl) {
-      imgRef.current.src = streamUrl;
+    if (imgRef.current && activeStreamUrl) {
+      imgRef.current.src = activeStreamUrl;
     }
-  }, [streamUrl]);
+  }, [activeStreamUrl]);
 
   // Image load handler to capture true stream aspect ratio and resolution
   const handleImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -94,9 +135,9 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   const metaW = typeof metaResolution === 'object' ? metaResolution.width : (metaResolution ? parseInt(metaResolution.split('x')[0], 10) : 0);
   const metaH = typeof metaResolution === 'object' ? metaResolution.height : (metaResolution ? parseInt(metaResolution.split('x')[1], 10) : 0);
 
-  const baseW = naturalSize.width || alignmentData?.resolution?.width || metaW || (liveMode === 'phone' ? 1080 : 1920);
-  const baseH = naturalSize.height || alignmentData?.resolution?.height || metaH || (liveMode === 'phone' ? 2400 : 1080);
-  const aspectRatio = baseW > 0 && baseH > 0 ? baseW / baseH : (liveMode === 'phone' ? 9 / 20 : 16 / 9);
+  const baseW = naturalSize.width || alignmentData?.resolution?.width || metaW || (effectiveLiveMode === 'phone' ? 1080 : 1920);
+  const baseH = naturalSize.height || alignmentData?.resolution?.height || metaH || (effectiveLiveMode === 'phone' ? 2400 : 1080);
+  const aspectRatio = baseW > 0 && baseH > 0 ? baseW / baseH : (effectiveLiveMode === 'phone' ? 9 / 20 : 16 / 9);
   const isPortrait = baseH > baseW;
   const orientationLabel = isPortrait ? 'PORTRAIT' : 'LANDSCAPE';
   const resolutionDisplay = `${baseW}×${baseH}`;
@@ -140,7 +181,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
     setCopying(true);
     try {
       // Fetch uncompressed PNG frame from device screenshot endpoint
-      const response = await fetch(`/api/device/screen?mode=${liveMode}&format=png`);
+      const response = await fetch(`/api/device/screen?mode=${effectiveLiveMode}&format=png`);
       if (!response.ok) {
         throw new Error(`Failed to capture image: HTTP ${response.status}`);
       }
@@ -158,7 +199,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `screen_${liveMode}_${Date.now()}.png`;
+        a.download = `screen_${effectiveLiveMode}_${Date.now()}.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -192,7 +233,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
     } finally {
       setCopying(false);
     }
-  }, [copying, liveMode]);
+  }, [copying, effectiveLiveMode]);
 
   return (
     <div
@@ -241,12 +282,12 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
         <img
           ref={imgRef}
           className="live-viewport-stream-img"
-          src={streamUrl}
-          alt={`Live ${liveMode} display`}
+          src={activeStreamUrl || streamUrl}
+          alt={`Live ${effectiveLiveMode} display`}
           onLoad={handleImageLoad}
           onError={(e) => {
-            if (fallbackUrl) {
-              (e.target as HTMLImageElement).src = fallbackUrl;
+            if (activeFallbackUrl || fallbackUrl) {
+              (e.target as HTMLImageElement).src = (activeFallbackUrl || fallbackUrl)!;
             }
           }}
           style={{
@@ -259,7 +300,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
         />
 
         {/* Bounding Boxes SVG Overlay */}
-        {showBoundingBoxes && liveMode === 'desktop' && alignmentData && (
+        {showBoundingBoxes && effectiveLiveMode === 'desktop' && alignmentData && (
           <BoundingBoxesOverlay
             data={alignmentData}
             aspectRatio={aspectRatio}
@@ -301,7 +342,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
             }}
           />
           <span style={{ fontWeight: 800, letterSpacing: '0.4px' }}>
-            LIVE • {liveMode.toUpperCase()}
+            LIVE • {effectiveLiveMode.toUpperCase()}
           </span>
           <span style={{ color: '#8b949e', fontSize: '9px' }}>({orientationLabel})</span>
         </div>
@@ -348,6 +389,69 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
               zIndex: 20,
             }}
           >
+            {/* Display Mode Toggle Pill: Desktop vs Phone */}
+            <div
+              className="live-mode-toggle-group"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                background: 'rgba(15, 23, 42, 0.88)',
+                borderRadius: '4px',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                padding: '1px',
+                backdropFilter: 'blur(6px)',
+              }}
+            >
+              <button
+                type="button"
+                className={`btn btn-xs ${effectiveLiveMode === 'desktop' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => handleSwitchMode('desktop')}
+                title="Switch to External Desktop Mode Display (16:9 1080p landscape)"
+                style={{
+                  height: '22px',
+                  padding: '2px 7px',
+                  fontSize: '10px',
+                  fontWeight: effectiveLiveMode === 'desktop' ? 700 : 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  borderRadius: '3px',
+                  background: effectiveLiveMode === 'desktop' ? '#2563eb' : 'transparent',
+                  color: effectiveLiveMode === 'desktop' ? '#ffffff' : '#94a3b8',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: effectiveLiveMode === 'desktop' ? '0 1px 4px rgba(37, 99, 235, 0.4)' : 'none',
+                }}
+              >
+                <Monitor size={11} />
+                <span>DESKTOP</span>
+              </button>
+              <button
+                type="button"
+                className={`btn btn-xs ${effectiveLiveMode === 'phone' ? 'btn-primary' : 'btn-ghost'}`}
+                onClick={() => handleSwitchMode('phone')}
+                title="Switch to Phone Display (9:20 portrait mirror)"
+                style={{
+                  height: '22px',
+                  padding: '2px 7px',
+                  fontSize: '10px',
+                  fontWeight: effectiveLiveMode === 'phone' ? 700 : 500,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  borderRadius: '3px',
+                  background: effectiveLiveMode === 'phone' ? '#2563eb' : 'transparent',
+                  color: effectiveLiveMode === 'phone' ? '#ffffff' : '#94a3b8',
+                  border: 'none',
+                  cursor: 'pointer',
+                  boxShadow: effectiveLiveMode === 'phone' ? '0 1px 4px rgba(37, 99, 235, 0.4)' : 'none',
+                }}
+              >
+                <Smartphone size={11} />
+                <span>PHONE</span>
+              </button>
+            </div>
+
             {/* View Mode Toggle: Fit to bounds vs Full Fill */}
             <button
               type="button"

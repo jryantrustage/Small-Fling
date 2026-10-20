@@ -192,6 +192,7 @@ export const LiveMonitorDrawer: React.FC<Props> = ({
           streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
           fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
           liveMode={liveMode}
+          onSwitchLiveMode={onSwitchLiveMode}
           alignmentData={alignmentData}
           showBoundingBoxes={showBoundingBoxes}
           deviceInfo={deviceInfo}

@@ -44,15 +44,18 @@ class InitEndNode(BaseDagNode):
         except Exception:
             pass
 
-        # 1. Enforce Markdown exclusively on desktop display & focus without tapping editable text
+        # 1. Enforce Markdown exclusively on desktop display & maximize viewport
         try:
-            from services.adb_service import enforce_markdown_only_on_desktop
+            from services.adb_service import enforce_markdown_only_on_desktop, auto_fix_viewport
             await enforce_markdown_only_on_desktop(serial, disp_id)
+            await auto_fix_viewport(serial, disp_id)
         except Exception:
             pass
         disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        # Tap neutral title text area on left (x=240, y=40) away from center window caption handle
-        await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
+        focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+        focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+        # Tap editor canvas to focus without keeping soft keyboard open
+        await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
         await asyncio.sleep(0.08)
         await dismiss_keyboard(serial, disp_id)
         await asyncio.sleep(0.08)
@@ -124,7 +127,7 @@ class InitEndNode(BaseDagNode):
 
         # Retry jump if stuck
         if is_stuck:
-            await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
+            await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
             await asyncio.sleep(0.08)
             await dismiss_keyboard(serial, disp_id)
             await asyncio.sleep(0.08)

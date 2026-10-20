@@ -389,3 +389,36 @@ export interface TelemetryEvent {
   markdownPrompt?: string;
   statusCode?: number | string;
 }
+
+export interface DesktopVerificationInfo {
+  status: string;
+  desktop_mode_enabled: boolean;
+  desktop_keyboard_prohibited?: boolean;
+  os_desktop_mode_ready?: boolean;
+  hardware_connected?: boolean;
+  usb_connected?: boolean;
+  hot_plug_detect?: boolean;
+  dp_lanes?: number;
+  external_display_id?: number | null;
+  resolution?: string | null;
+  mouse_display_id?: number;
+  verification_status?: 'CONNECTED' | 'ARMED_AWAITING_CABLE' | 'DISABLED_PHONE_MODE';
+  diagnostic_advice?: string;
+  message?: string;
+  settings_breakdown?: {
+    secure_desktop_mode?: boolean;
+    enable_freeform_support?: boolean;
+    force_desktop_mode_on_external?: boolean;
+    force_resizable_activities?: boolean;
+    force_allow_on_external?: boolean;
+    enable_non_resizable_multi_window?: boolean;
+    override_desktop_experience?: boolean;
+    override_desktop_mode?: boolean;
+  };
+  developer_option_status?: {
+    is_eligible?: boolean;
+    switch_checked?: boolean;
+    switch_enabled?: boolean;
+    explanation?: string;
+  };
+}

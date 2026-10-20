@@ -2675,3 +2675,94 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
     box-shadow: 0 0 16px #00ff9d;
   }
 }
+
+/* Desktop Mode & DP Alt Mode Hardware Status Visual Enhancements */
+@keyframes radar-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.75);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgba(63, 185, 80, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(63, 185, 80, 0);
+  }
+}
+
+@keyframes armed-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 8px 2px rgba(227, 179, 65, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.7);
+  }
+}
+
+.pill-indicator.radar-connected {
+  background: #3fb950 !important;
+  animation: radar-ring 2s infinite ease-in-out;
+}
+
+.pill-indicator.armed-pulse {
+  background: #58a6ff !important;
+  animation: armed-glow 2s infinite ease-in-out;
+}
+
+.desktop-pill.connected {
+  border-color: rgba(63, 185, 80, 0.55) !important;
+  background: rgba(63, 185, 80, 0.14) !important;
+  color: #3fb950 !important;
+  box-shadow: 0 0 12px rgba(63, 185, 80, 0.22);
+}
+
+.desktop-pill.armed {
+  border-color: rgba(88, 166, 255, 0.55) !important;
+  background: linear-gradient(135deg, rgba(56, 139, 253, 0.16), rgba(210, 153, 34, 0.12)) !important;
+  color: #58a6ff !important;
+  box-shadow: 0 0 10px rgba(88, 166, 255, 0.2);
+}
+
+.desktop-pill.phone-mode {
+  border-color: rgba(163, 113, 247, 0.45) !important;
+  background: rgba(163, 113, 247, 0.12) !important;
+  color: #d2a8ff !important;
+}
+
+.desktop-sub-badge {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 2px;
+  display: inline-block;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+.desktop-sub-badge.connected {
+  background: rgba(63, 185, 80, 0.22);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.45);
+}
+
+.desktop-sub-badge.ready-plug {
+  background: rgba(227, 179, 65, 0.18);
+  color: #e3b341;
+  border: 1px solid rgba(227, 179, 65, 0.45);
+}
+
+.desktop-sub-badge.phone {
+  background: rgba(163, 113, 247, 0.2);
+  color: #d2a8ff;
+  border: 1px solid rgba(163, 113, 247, 0.4);
+}
+
+.desktop-diag-trigger:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 4px;
+}
+

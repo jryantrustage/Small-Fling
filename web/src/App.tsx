@@ -11,7 +11,7 @@ import { FlowDag } from './FlowDag';
 import { useConfirm, Modal } from './ConfirmModal';
 import type {
   ProjectData, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
-  DeviceProfile, DeviceHardwareSpecs
+  DeviceProfile, DeviceHardwareSpecs, DesktopVerificationInfo
 } from './types';
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
@@ -197,7 +197,21 @@ function AppContent() {
   const [frameBoundingBoxes, setFrameBoundingBoxes] = useState<Record<string, FrameBoundingBoxes>>({});
   const [wsConnected, setWsConnected] = useState(false);
   const [backendConnected, setBackendConnected] = useState(true);
-  const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>('desktop');
+  const [liveMode, setLiveMode] = useState<'desktop' | 'phone'>(() => {
+    try {
+      return (localStorage.getItem('mc_live_mode') as 'desktop' | 'phone') || 'desktop';
+    } catch {
+      return 'desktop';
+    }
+  });
+
+  const handleSwitchLiveMode = (mode: 'desktop' | 'phone') => {
+    setLiveMode(mode);
+    try {
+      localStorage.setItem('mc_live_mode', mode);
+    } catch {}
+    setStreamKey(Date.now());
+  };
   const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
   const [splicedScale, setSplicedScale] = useState<number>(100);
   const [splicedFitMode, setSplicedFitMode] = useState<'width' | 'fit'>('width');
@@ -246,6 +260,23 @@ function AppContent() {
   const [desktopModeEnabled, setDesktopModeEnabled] = useState<boolean>(true);
   const [isTogglingDesktopMode, setIsTogglingDesktopMode] = useState<boolean>(false);
   const [isTogglingKeyboardProhibit, setIsTogglingKeyboardProhibit] = useState<boolean>(false);
+  const [desktopVerification, setDesktopVerification] = useState<DesktopVerificationInfo | null>(null);
+  const [showDesktopDiag, setShowDesktopDiag] = useState<boolean>(false);
+  const desktopDiagRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (desktopDiagRef.current && !desktopDiagRef.current.contains(event.target as Node)) {
+        setShowDesktopDiag(false);
+      }
+    }
+    if (showDesktopDiag) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDesktopDiag]);
 
   // Window & Panel Management States
   const [dagMinimized, setDagMinimized] = useState(false);
@@ -585,27 +616,50 @@ function AppContent() {
     }
   };
 
+  const handleVerifyDesktopMode = async () => {
+    try {
+      const res = await api('/api/device/kiosk/desktop-mode/verify');
+      if (res.ok) {
+        const data = await res.json();
+        setDesktopVerification(data);
+        if (typeof data.desktop_mode_enabled === 'boolean') {
+          setDesktopModeEnabled(data.desktop_mode_enabled);
+        }
+        addTelemetryEvent('SYSTEM', `Desktop Verification: ${data.message || 'Hardware checked'}`);
+      }
+    } catch (e: any) {
+      addTelemetryEvent('ERROR', `Desktop verification error: ${e.message}`);
+    }
+  };
+
   const handleToggleDesktopMode = async (enable: boolean) => {
     setIsTogglingDesktopMode(true);
     try {
       const res = await api('/api/device/kiosk/desktop-mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enable, serial: deviceInfo?.active_serial })
+        body: JSON.stringify({ enable, enabled: enable, serial: deviceInfo?.active_serial })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const data = await res.json();
         const effectiveVal = typeof data.desktop_mode_enabled === 'boolean' ? data.desktop_mode_enabled : enable;
         setDesktopModeEnabled(effectiveVal);
+        setDesktopVerification(data);
         if (effectiveVal) {
-          setLiveMode('desktop');
-          addTelemetryEvent('SYSTEM', 'Desktop Mode ENABLED: Mouse routed to external monitor (Display 11)');
+          if (data.hardware_connected) {
+            setLiveMode('desktop');
+            addTelemetryEvent('SYSTEM', `Desktop Mode ENABLED & CONNECTED: Display #${data.external_display_id || 11} (${data.resolution || 'DP Alt Mode'}). Mouse routed to monitor.`);
+          } else {
+            addTelemetryEvent('SYSTEM', 'Desktop Mode ARMED on Pixel 8: Developer options verified. Ready to plug in USB-C DP Alt Mode cable!');
+          }
         } else {
           setLiveMode('phone');
-          addTelemetryEvent('SYSTEM', 'Phone Screen Mode ENABLED: Mouse routed to phone (Display 0), kiosk unlocked, keyboard enabled for authentication');
+          addTelemetryEvent('SYSTEM', 'Phone Screen Mode ENABLED: Mouse routed to phone (Display 0), kiosk unlocked, keyboard enabled for authentication.');
         }
         setStreamKey(Date.now());
         await fetchData();
+      } else {
+        addTelemetryEvent('ERROR', `Failed to toggle desktop mode: ${data.detail || res.statusText || 'Server error'}`);
       }
     } catch (err: any) {
       addTelemetryEvent('ERROR', `Failed to toggle desktop mode: ${err.message}`);
@@ -766,6 +820,7 @@ function AppContent() {
           const d = await deskRes.json();
           if (typeof d.desktop_mode_enabled === 'boolean') setDesktopModeEnabled(d.desktop_mode_enabled);
           if (typeof d.desktop_keyboard_prohibited === 'boolean') setDesktopKeyboardProhibited(d.desktop_keyboard_prohibited);
+          setDesktopVerification(d);
         } catch {}
       }
     } catch { setBackendConnected(false); }
@@ -1363,9 +1418,12 @@ function AppContent() {
           } else if (msg.type === 'desktop_mode_changed') {
             if (typeof msg.desktop_mode_enabled === 'boolean') {
               setDesktopModeEnabled(msg.desktop_mode_enabled);
-              if (msg.desktop_mode_enabled) setLiveMode('desktop');
-              else setLiveMode('phone');
+              // Only fallback to phone if external desktop hardware is strictly disconnected
+              if (msg.hardware_connected === false) {
+                setLiveMode('phone');
+              }
             }
+            setDesktopVerification(msg);
           } else if (msg.type === 'orchestration_event' && msg.telemetry) {
             setTelemetry(msg.telemetry);
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
@@ -1982,25 +2040,250 @@ function AppContent() {
               <span>{desktopKeyboardProhibited ? 'KB BLOCKED' : 'ALLOW KB'}</span>
             </button>
 
-            {/* Hardware Desktop Mode / Phone Screen (Mouse) Switcher Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${desktopModeEnabled ? 'active' : ''}`}
-              style={{
-                borderColor: desktopModeEnabled ? 'rgba(56, 139, 253, 0.6)' : 'rgba(163, 113, 247, 0.6)',
-                background: desktopModeEnabled ? 'rgba(56, 139, 253, 0.14)' : 'rgba(163, 113, 247, 0.14)',
-                color: desktopModeEnabled ? '#58a6ff' : '#d2a8ff'
-              }}
-              onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
-              disabled={isTogglingDesktopMode}
-              title={desktopModeEnabled
-                ? 'Desktop Mode ON (Mouse routed to external monitor). Click to switch mouse to phone screen (Display 0), unlock kiosk, and enable keyboard for auth.'
-                : 'Phone Screen Mode ON (Mouse routed to phone Display 0, kiosk unlocked, keyboard enabled for auth). Click to return to Desktop Mode.'}
-            >
-              <span className={`pill-indicator ${desktopModeEnabled ? 'on' : 'min'}`} style={{ background: desktopModeEnabled ? '#58a6ff' : '#a371f7' }} />
-              {desktopModeEnabled ? <Monitor size={11} /> : <Smartphone size={11} />}
-              <span>{desktopModeEnabled ? 'DESKTOP' : 'PHONE (MOUSE)'}</span>
-            </button>
+            {/* Hardware Desktop Mode / Phone Screen (Mouse) Switcher Pill & Verification Popover */}
+            <div className="desktop-mode-wrapper" ref={desktopDiagRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <button
+                type="button"
+                className={`window-dock-pill desktop-pill ${
+                  desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'connected' : 'armed')
+                    : 'phone-mode'
+                }`}
+                onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
+                disabled={isTogglingDesktopMode}
+                title={desktopModeEnabled
+                  ? (desktopVerification?.hardware_connected
+                      ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to switch mouse to phone screen.`
+                      : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to disable.')
+                  : 'Phone Screen Mode Active. Mouse routed to phone screen (Display 0). Click to enable Desktop Mode.'}
+              >
+                <span className={`pill-indicator ${
+                  desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'on radar-connected' : 'min armed-pulse')
+                    : 'off'
+                }`} />
+                {desktopModeEnabled ? <Monitor size={11} /> : <Smartphone size={11} />}
+                <span>
+                  {desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'DESKTOP ON' : 'DESKTOP ARMED')
+                    : 'PHONE MODE'}
+                </span>
+                <span className={`desktop-sub-badge ${
+                  desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'connected' : 'ready-plug')
+                    : 'phone'
+                }`}>
+                  {desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? `DISP #${desktopVerification.external_display_id || 11}` : 'READY TO PLUG IN')
+                    : 'PHONE MOUSE'}
+                </span>
+              </button>
+
+              {/* Quick Info & Verification Trigger */}
+              <button
+                type="button"
+                className={`desktop-diag-trigger ${showDesktopDiag ? 'active' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDesktopDiag(prev => !prev);
+                  if (!showDesktopDiag) {
+                    handleVerifyDesktopMode();
+                  }
+                }}
+                title="View Hardware & DP Alt Mode Diagnostics"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: desktopModeEnabled ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff') : '#a371f7',
+                  padding: '2px 4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  marginLeft: '-2px'
+                }}
+              >
+                <Info size={11} />
+              </button>
+
+              {/* Hardware & DP Alt Mode Verification Popover */}
+              {showDesktopDiag && (
+                <div className="desktop-hardware-popover animate-fadeIn" style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  width: '350px',
+                  background: 'rgba(13, 17, 23, 0.98)',
+                  backdropFilter: 'blur(16px)',
+                  border: '1px solid rgba(88, 166, 255, 0.35)',
+                  borderRadius: '8px',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2)',
+                  zIndex: 2500,
+                  padding: '12px',
+                  fontSize: '11px',
+                  color: '#c9d1d9'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
+                      <Monitor size={13} color="#58a6ff" />
+                      <span>DESKTOP HARDWARE STATUS</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleVerifyDesktopMode()}
+                      title="Re-verify Device Status"
+                      style={{
+                        background: 'rgba(56, 139, 253, 0.15)',
+                        border: '1px solid rgba(56, 139, 253, 0.35)',
+                        color: '#58a6ff',
+                        borderRadius: '4px',
+                        padding: '2px 6px',
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px'
+                      }}
+                    >
+                      <RefreshCw size={9} />
+                      <span>Re-verify</span>
+                    </button>
+                  </div>
+
+                  {/* Verification Item Rows */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>OS Developer & Window Flags:</span>
+                      <span style={{
+                        color: desktopVerification?.os_desktop_mode_ready ? '#3fb950' : '#f85149',
+                        fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px'
+                      }}>
+                        {desktopVerification?.os_desktop_mode_ready ? <Check size={11} /> : <AlertTriangle size={11} />}
+                        {desktopVerification?.os_desktop_mode_ready ? 'ARMED (8/8 Active)' : 'DISARMED'}
+                      </span>
+                    </div>
+
+                    {/* 8-Flag Grid Breakdown */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', padding: '6px 8px', background: 'rgba(0,0,0,0.25)', borderRadius: '4px', fontSize: '9px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.secure_desktop_mode ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.secure_desktop_mode ?? desktopModeEnabled) ? '✔' : '○'} secure desktop_mode
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.enable_freeform_support ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.enable_freeform_support ?? desktopModeEnabled) ? '✔' : '○'} freeform_support
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.force_desktop_mode_on_external ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.force_desktop_mode_on_external ?? desktopModeEnabled) ? '✔' : '○'} force_desktop_mode
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.override_desktop_experience ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.override_desktop_experience ?? desktopModeEnabled) ? '✔' : '○'} desktop_experience
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.force_resizable_activities ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.force_resizable_activities ?? desktopModeEnabled) ? '✔' : '○'} resizable_activities
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.enable_non_resizable_multi_window ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
+                        {(desktopVerification?.settings_breakdown?.enable_non_resizable_multi_window ?? desktopModeEnabled) ? '✔' : '○'} multi_window
+                      </div>
+                    </div>
+
+                    {/* Developer Options Dimmed Explanation Note */}
+                    <div style={{ background: 'rgba(56, 139, 253, 0.08)', border: '1px solid rgba(56, 139, 253, 0.22)', padding: '6px 8px', borderRadius: '4px', fontSize: '9.5px', color: '#8b949e', lineHeight: '1.4' }}>
+                      <strong style={{ color: '#58a6ff' }}>Developer Options Note:</strong> In Android 15, "Enable desktop experience features" is locked to <span style={{ color: '#3fb950', fontWeight: 700 }}>ON (checked=true)</span> for eligible Pixel devices. Because user toggling is disabled by system policy, the switch appears dimmed in Developer Options, but is active.
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>USB-C Hub Port:</span>
+                      <span style={{
+                        color: desktopVerification?.usb_connected ? '#3fb950' : '#8b949e',
+                        fontWeight: 700
+                      }}>
+                        {desktopVerification?.usb_connected ? 'CONNECTED (Host)' : 'DISCONNECTED'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>DisplayPort Signal (HPD):</span>
+                      <span style={{
+                        color: desktopVerification?.hot_plug_detect ? '#3fb950' : (desktopVerification?.usb_connected ? '#e3b341' : '#8b949e'),
+                        fontWeight: 700
+                      }}>
+                        {desktopVerification?.hot_plug_detect ? 'ACTIVE' : (desktopVerification?.usb_connected ? 'AWAITING MONITOR HPD' : 'STANDBY')}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>External Monitor:</span>
+                      <span style={{
+                        color: desktopVerification?.hardware_connected ? '#3fb950' : '#8b949e',
+                        fontWeight: 700
+                      }}>
+                        {desktopVerification?.hardware_connected
+                          ? `Display #${desktopVerification.external_display_id} (${desktopVerification.resolution || 'Active'})`
+                          : 'Awaiting Cable Plug-in'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>Mouse Pointer Route:</span>
+                      <span style={{
+                        color: desktopModeEnabled ? '#58a6ff' : '#a371f7',
+                        fontWeight: 700
+                      }}>
+                        {desktopModeEnabled ? `Display #${desktopVerification?.mouse_display_id || 11} (Monitor)` : 'Display 0 (Phone Screen)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Diagnostic Advice Box */}
+                  <div style={{
+                    marginTop: '10px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: desktopVerification?.hardware_connected
+                      ? 'rgba(63, 185, 80, 0.1)'
+                      : (desktopModeEnabled ? 'rgba(210, 153, 34, 0.12)' : 'rgba(163, 113, 247, 0.1)'),
+                    border: `1px solid ${
+                      desktopVerification?.hardware_connected
+                        ? 'rgba(63, 185, 80, 0.3)'
+                        : (desktopModeEnabled ? 'rgba(210, 153, 34, 0.35)' : 'rgba(163, 113, 247, 0.3)')
+                    }`,
+                    fontSize: '10px',
+                    lineHeight: '1.45',
+                    color: desktopVerification?.hardware_connected ? '#7ee787' : (desktopModeEnabled ? '#f0b72f' : '#d2a8ff')
+                  }}>
+                    <div style={{ fontWeight: 800, marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Info size={11} />
+                      <span>{desktopVerification?.hardware_connected ? 'READY & ACTIVE' : (desktopModeEnabled ? 'VERIFIED: READY TO PLUG IN' : 'PHONE SCREEN MODE')}</span>
+                    </div>
+                    <div>
+                      {desktopVerification?.diagnostic_advice || (desktopModeEnabled
+                        ? 'Desktop mode is armed and ready on Pixel 8. Connect your USB-C DP Alt Mode cable or hub to project to the monitor.'
+                        : 'Desktop mode is disabled. Mouse is routed to phone screen for authentication.')}
+                    </div>
+                  </div>
+
+                  {/* Quick Action Toggle Button */}
+                  <div style={{ marginTop: '10px', display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
+                      style={{
+                        flex: 1,
+                        padding: '6px 8px',
+                        borderRadius: '5px',
+                        background: desktopModeEnabled ? 'rgba(248, 81, 73, 0.15)' : 'rgba(56, 139, 253, 0.2)',
+                        border: desktopModeEnabled ? '1px solid rgba(248, 81, 73, 0.4)' : '1px solid rgba(56, 139, 253, 0.5)',
+                        color: desktopModeEnabled ? '#ff7b72' : '#58a6ff',
+                        fontWeight: 700,
+                        fontSize: '10.5px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {desktopModeEnabled ? 'Switch to Phone Screen' : 'Arm & Enable Desktop Mode'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="dock-separator" />
 
@@ -2150,6 +2433,7 @@ function AppContent() {
             onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
             desktopModeEnabled={desktopModeEnabled}
             onToggleDesktopMode={handleToggleDesktopMode}
+            desktopVerification={desktopVerification}
           />
         </div>
       )}
@@ -2486,8 +2770,68 @@ function AppContent() {
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Monitor size={14} color="#00ff9d" />
-                        <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>LIVE DESKTOP · MARKDOWN VIEW</span>
+                        {liveMode === 'desktop' ? <Monitor size={14} color="#00ff9d" /> : <Smartphone size={14} color="#58a6ff" />}
+                        <span style={{ fontSize: '11px', color: liveMode === 'desktop' ? '#00ff9d' : '#58a6ff', fontFamily: 'monospace', fontWeight: 700 }}>
+                          LIVE {liveMode.toUpperCase()} · {liveMode === 'desktop' ? 'MARKDOWN VIEW' : 'MIRROR VIEW'}
+                        </span>
+
+                        {/* Stream Display Mode Switcher Pill */}
+                        <div
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            background: '#0d1117',
+                            border: '1px solid #30363d',
+                            borderRadius: '4px',
+                            padding: '1px',
+                            marginLeft: '4px',
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${liveMode === 'desktop' ? 'btn-primary' : 'btn-ghost'}`}
+                            onClick={() => handleSwitchLiveMode('desktop')}
+                            title="Switch to External Desktop Mode Display (16:9 1080p landscape)"
+                            style={{
+                              padding: '2px 8px',
+                              height: '22px',
+                              fontSize: '10px',
+                              fontWeight: liveMode === 'desktop' ? 700 : 500,
+                              background: liveMode === 'desktop' ? '#2563eb' : 'transparent',
+                              color: liveMode === 'desktop' ? '#fff' : '#8b949e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Monitor size={11} />
+                            DESKTOP
+                          </button>
+                          <button
+                            type="button"
+                            className={`btn btn-xs ${liveMode === 'phone' ? 'btn-primary' : 'btn-ghost'}`}
+                            onClick={() => handleSwitchLiveMode('phone')}
+                            title="Switch to Phone Display (9:20 portrait mirror)"
+                            style={{
+                              padding: '2px 8px',
+                              height: '22px',
+                              fontSize: '10px',
+                              fontWeight: liveMode === 'phone' ? 700 : 500,
+                              background: liveMode === 'phone' ? '#2563eb' : 'transparent',
+                              color: liveMode === 'phone' ? '#fff' : '#8b949e',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Smartphone size={11} />
+                            PHONE
+                          </button>
+                        </div>
                       </div>
 
                       {/* Yellow Arrow 1 Target: Actuator Progress */}
@@ -2554,6 +2898,7 @@ function AppContent() {
                         streamUrl={`${API_BASE}/api/device/stream?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
                         fallbackUrl={`${API_BASE}/api/device/screen?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
                         liveMode={liveMode}
+                        onSwitchLiveMode={handleSwitchLiveMode}
                         alignmentData={alignmentData}
                         showBoundingBoxes={showBoundingBoxes}
                         deviceInfo={deviceInfo}
@@ -3153,6 +3498,8 @@ function AppContent() {
                   onToggleDesktopMode={handleToggleDesktopMode}
                   desktopKeyboardProhibited={desktopKeyboardProhibited}
                   onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
+                  desktopVerification={desktopVerification}
+                  onVerifyDesktopMode={handleVerifyDesktopMode}
                 />
               </section>
             </>

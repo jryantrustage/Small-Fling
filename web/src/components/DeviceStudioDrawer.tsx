@@ -78,6 +78,8 @@ export interface DeviceStudioDrawerProps {
   onToggleDesktopMode?: (enable: boolean) => void;
   desktopKeyboardProhibited?: boolean;
   onToggleProhibitKeyboard?: (prohibit?: boolean) => void;
+  desktopVerification?: any;
+  onVerifyDesktopMode?: () => void;
 }
 
 export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
@@ -129,6 +131,8 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   onToggleDesktopMode,
   desktopKeyboardProhibited = true,
   onToggleProhibitKeyboard,
+  desktopVerification,
+  onVerifyDesktopMode,
 }) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>(initialTab);
@@ -536,33 +540,27 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
             <div className="studio-mode-pill-group">
               <button
                 type="button"
-                className={`studio-mode-btn ${liveMode === 'desktop' && desktopModeEnabled ? 'active' : ''}`}
+                className={`studio-mode-btn ${liveMode === 'desktop' ? 'active' : ''}`}
                 onClick={() => {
                   onSwitchLiveMode('desktop');
                   onRefreshStream();
-                  if (onToggleDesktopMode && !desktopModeEnabled) {
-                    onToggleDesktopMode(true);
-                  }
                 }}
-                title="Desktop Mode: Viewport + Mouse on external monitor (Display 11)"
+                title="Desktop Mode: Viewport on external monitor (1080p landscape)"
               >
                 <Monitor size={11} />
                 <span>DESKTOP</span>
               </button>
               <button
                 type="button"
-                className={`studio-mode-btn ${(liveMode === 'phone' || !desktopModeEnabled) ? 'active' : ''}`}
+                className={`studio-mode-btn ${liveMode === 'phone' ? 'active' : ''}`}
                 onClick={() => {
                   onSwitchLiveMode('phone');
                   onRefreshStream();
-                  if (onToggleDesktopMode && desktopModeEnabled) {
-                    onToggleDesktopMode(false);
-                  }
                 }}
-                title="Phone Screen Mode: Route mouse to phone screen (Display 0), unlock kiosk, enable keyboard for auth"
+                title="Phone Screen Mode: Viewport on phone screen (portrait mirror)"
               >
                 <Smartphone size={11} />
-                <span>PHONE (MOUSE)</span>
+                <span>PHONE</span>
               </button>
             </div>
 
@@ -683,6 +681,7 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                   streamUrl={`${apiBase}/api/device/stream?mode=${liveMode}&t=${streamKey}`}
                   fallbackUrl={`${apiBase}/api/device/screen?mode=${liveMode}&t=${streamKey}`}
                   liveMode={liveMode}
+                  onSwitchLiveMode={onSwitchLiveMode}
                   alignmentData={alignmentData}
                   showBoundingBoxes={showBoundingBoxes}
                   deviceInfo={deviceInfo}
@@ -1422,28 +1421,118 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                   )}
 
                   {/* Display Hardware & Mouse Routing */}
-                  <div className="dropdown-section-title" style={{ marginTop: '14px' }}>DISPLAY HARDWARE & MOUSE ROUTING</div>
+                  {/* Display Hardware & Mouse Routing */}
+                  <div className="dropdown-section-title" style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>DISPLAY HARDWARE & DP ALT MODE</span>
+                    {onVerifyDesktopMode && (
+                      <button
+                        type="button"
+                        onClick={onVerifyDesktopMode}
+                        style={{
+                          background: 'rgba(56, 139, 253, 0.15)',
+                          border: '1px solid rgba(56, 139, 253, 0.35)',
+                          color: '#58a6ff',
+                          borderRadius: '4px',
+                          padding: '1px 5px',
+                          fontSize: '8.5px',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Re-verify
+                      </button>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       type="button"
                       className={`capability-card ${desktopModeEnabled ? 'ready' : 'na'}`}
-                      style={{ flex: 1, cursor: 'pointer', border: desktopModeEnabled ? '1px solid #388bfd' : '1px solid rgba(255,255,255,0.1)' }}
+                      style={{
+                        flex: 1,
+                        cursor: 'pointer',
+                        border: desktopModeEnabled
+                          ? (desktopVerification?.hardware_connected ? '1px solid #3fb950' : '1px solid #388bfd')
+                          : '1px solid rgba(255,255,255,0.1)',
+                        background: desktopModeEnabled
+                          ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.12)' : 'rgba(56, 139, 253, 0.12)')
+                          : 'transparent'
+                      }}
                       onClick={() => onToggleDesktopMode?.(true)}
-                      title="Desktop Mode: Mouse routed to external monitor (Display 11). Click to activate."
+                      title="Desktop Mode: Mouse routed to external monitor. Click to activate."
                     >
-                      <Monitor size={14} />
-                      <span>Desktop Mode: {desktopModeEnabled ? 'ACTIVE (MOUSE)' : 'STANDBY'}</span>
+                      <Monitor size={14} color={desktopModeEnabled ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff') : undefined} />
+                      <span>
+                        Desktop:{' '}
+                        {desktopVerification?.hardware_connected
+                          ? `ACTIVE (DISP #${desktopVerification.external_display_id || 11})`
+                          : desktopModeEnabled
+                          ? 'ARMED (READY TO PLUG IN)'
+                          : 'STANDBY'}
+                      </span>
                     </button>
                     <button
                       type="button"
                       className={`capability-card phone ${!desktopModeEnabled ? 'ready' : 'na'}`}
-                      style={{ flex: 1, cursor: 'pointer', border: !desktopModeEnabled ? '1px solid #a371f7' : '1px solid rgba(255,255,255,0.1)' }}
+                      style={{
+                        flex: 1,
+                        cursor: 'pointer',
+                        border: !desktopModeEnabled ? '1px solid #a371f7' : '1px solid rgba(255,255,255,0.1)',
+                        background: !desktopModeEnabled ? 'rgba(163, 113, 247, 0.12)' : 'transparent'
+                      }}
                       onClick={() => onToggleDesktopMode?.(false)}
                       title="Phone Screen Mode: Mouse routed to phone (Display 0), kiosk unlocked, keyboard enabled for auth. Click to activate."
                     >
-                      <Smartphone size={14} />
+                      <Smartphone size={14} color={!desktopModeEnabled ? '#d2a8ff' : undefined} />
                       <span>Phone Mode: {!desktopModeEnabled ? 'ACTIVE (MOUSE)' : 'STANDBY'}</span>
                     </button>
+                  </div>
+
+                  {/* DP Alt Mode Hardware Status Diagnostics Bar */}
+                  <div style={{
+                    marginTop: '8px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    fontSize: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>Pixel 8 OS Developer Flags:</span>
+                      <span style={{ color: desktopVerification?.os_desktop_mode_ready ? '#3fb950' : '#8b949e', fontWeight: 700 }}>
+                        {desktopVerification?.os_desktop_mode_ready ? 'ARMED (4/4 Ready)' : 'Standby'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>USB-C Hub:</span>
+                      <span style={{ color: desktopVerification?.usb_connected ? '#3fb950' : '#8b949e', fontWeight: 700 }}>
+                        {desktopVerification?.usb_connected ? 'Connected (Host)' : 'Disconnected'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#8b949e' }}>Monitor DP Signal (HPD):</span>
+                      <span style={{
+                        color: desktopVerification?.hot_plug_detect ? '#3fb950' : (desktopVerification?.usb_connected ? '#e3b341' : '#8b949e'),
+                        fontWeight: 700
+                      }}>
+                        {desktopVerification?.hot_plug_detect
+                          ? `Active (${desktopVerification.resolution || 'DP Alt Mode'})`
+                          : (desktopVerification?.usb_connected ? 'Waiting for Monitor' : 'Standby')}
+                      </span>
+                    </div>
+
+                    {desktopModeEnabled && !desktopVerification?.hardware_connected && (
+                      <div style={{
+                        marginTop: '6px',
+                        padding: '6px 8px',
+                        borderRadius: '4px',
+                        background: 'rgba(210, 153, 34, 0.12)',
+                        border: '1px solid rgba(210, 153, 34, 0.3)',
+                        color: '#f0b72f',
+                        lineHeight: '1.4'
+                      }}>
+                        💡 {desktopVerification?.diagnostic_advice || 'Plug in USB-C DP Alt Mode cable. Verify monitor power, input source, and hub PD charger.'}
+                      </div>
+                    )}
                   </div>
 
                   {/* Input Method & Soft Keyboard Suppression */}

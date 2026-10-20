@@ -89,6 +89,7 @@ export interface FlowDagProps {
   onToggleProhibitKeyboard?: (prohibit?: boolean) => void;
   desktopModeEnabled?: boolean;
   onToggleDesktopMode?: (enable: boolean) => void;
+  desktopVerification?: any;
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
@@ -98,7 +99,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
   onClose, isMinimized = false, onToggleMinimize,
   desktopKeyboardProhibited = true, onToggleProhibitKeyboard,
-  desktopModeEnabled = true, onToggleDesktopMode
+  desktopModeEnabled = true, onToggleDesktopMode,
+  desktopVerification
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
@@ -1222,17 +1224,31 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
                   borderRadius: '4px',
-                  border: `1px solid ${desktopModeEnabled ? 'rgba(56, 139, 253, 0.6)' : 'rgba(163, 113, 247, 0.6)'}`,
-                  background: desktopModeEnabled ? 'rgba(56, 139, 253, 0.18)' : 'rgba(163, 113, 247, 0.18)',
-                  color: desktopModeEnabled ? '#58a6ff' : '#d2a8ff',
+                  border: `1px solid ${
+                    desktopModeEnabled
+                      ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.6)' : 'rgba(56, 139, 253, 0.6)')
+                      : 'rgba(163, 113, 247, 0.6)'
+                  }`,
+                  background: desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.18)' : 'rgba(56, 139, 253, 0.18)')
+                    : 'rgba(163, 113, 247, 0.18)',
+                  color: desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff')
+                    : '#d2a8ff',
                   fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
                 }}
                 title={desktopModeEnabled
-                  ? 'Desktop Mode ON (External monitor display 11, mouse active). Click to route mouse to phone screen (display 0), remove kiosk mode, & enable keyboard for auth.'
+                  ? (desktopVerification?.hardware_connected
+                      ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to route mouse to phone screen.`
+                      : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to route mouse to phone.')
                   : 'Phone Screen Mode ON (Mouse routed to phone display 0, kiosk unlocked, keyboard enabled). Click to return to Desktop Mode.'}
               >
                 {desktopModeEnabled ? <Monitor size={10} /> : <Smartphone size={10} />}
-                <span>{desktopModeEnabled ? 'DESKTOP MODE' : 'PHONE SCREEN (MOUSE)'}</span>
+                <span>
+                  {desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'DESKTOP ON (CONNECTED)' : 'DESKTOP (READY TO PLUG IN)')
+                    : 'PHONE SCREEN (MOUSE)'}
+                </span>
               </button>
             )}
 
@@ -1528,18 +1544,32 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                   gap: '4px',
                   padding: '2px 8px',
                   borderRadius: '4px',
-                  border: desktopModeEnabled ? '1px solid rgba(88, 166, 255, 0.4)' : '1px solid rgba(255, 166, 87, 0.4)',
-                  background: desktopModeEnabled ? 'rgba(88, 166, 255, 0.12)' : 'rgba(255, 166, 87, 0.12)',
-                  color: desktopModeEnabled ? '#58a6ff' : '#ffa657',
+                  border: desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? '1px solid rgba(63, 185, 80, 0.6)' : '1px solid rgba(88, 166, 255, 0.4)')
+                    : '1px solid rgba(255, 166, 87, 0.4)',
+                  background: desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.18)' : 'rgba(88, 166, 255, 0.12)')
+                    : 'rgba(255, 166, 87, 0.12)',
+                  color: desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff')
+                    : '#ffa657',
                   fontSize: '8.5px',
                   fontWeight: 700,
                   cursor: 'pointer',
                   transition: 'all 0.15s ease'
                 }}
-                title={desktopModeEnabled ? "Desktop Mode Active (Mouse on Monitor). Click to switch to Phone Screen (moves mouse to phone, removes kiosk lockdown, enables phone keyboard for auth)" : "Phone Screen Active (Mouse on Phone Screen, Kiosk Removed, Keyboard Ready for Auth). Click to return to Desktop Mode"}
+                title={desktopModeEnabled
+                  ? (desktopVerification?.hardware_connected
+                      ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to switch to Phone Screen.`
+                      : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to switch to Phone Screen.')
+                  : "Phone Screen Active (Mouse on Phone Screen, Kiosk Removed, Keyboard Ready for Auth). Click to return to Desktop Mode"}
               >
                 {desktopModeEnabled ? <Monitor size={9} /> : <Smartphone size={9} />}
-                <span>{desktopModeEnabled ? 'DESKTOP MODE' : 'PHONE SCREEN (MOUSE)'}</span>
+                <span>
+                  {desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected ? 'DESKTOP ON (CONNECTED)' : 'DESKTOP (READY TO PLUG IN)')
+                    : 'PHONE SCREEN (MOUSE)'}
+                </span>
               </button>
             )}
           </div>
