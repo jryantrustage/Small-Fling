@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Settings, RefreshCw, Sliders,
   ArrowUp, ArrowDown, Play, Wrench, AlertTriangle, CheckCircle2,
-  Zap, Sparkles
+  Zap, Sparkles, ShieldCheck, Plus, X, Moon, Edit3, Keyboard,
+  FolderGit2
 } from 'lucide-react';
 import { Modal } from '../../ConfirmModal';
 
@@ -27,46 +28,130 @@ export interface UniversalNodeConfigModalProps {
   onSave: (config: Record<string, any>, attachedActions: string[]) => Promise<void>;
 }
 
+// Canonical backend action IDs and aliases
+const ACTION_ID_ALIASES: Record<string, string> = {
+  'view_mode_detected_switch_to_edit': 'view_mode_to_edit_mode',
+  'light_mode_detected_switch_to_dark': 'light_mode_to_dark_mode',
+  'keyboard_detected_close_keyboard': 'keyboard_detected_close',
+  'line_number_top_not_detected_detect_top': 'top_line_missing_detect',
+  'line_number_bottom_not_detected_detect_bottom': 'bottom_line_missing_detect',
+  'view_mode_to_edit': 'view_mode_to_edit_mode',
+  'light_mode_to_dark': 'light_mode_to_dark_mode',
+  'close_keyboard': 'keyboard_detected_close',
+};
+
+function normalizeActionId(id: string): string {
+  return ACTION_ID_ALIASES[id] || id;
+}
+
+const STANDARD_RECOMMENDED_ACTIONS = [
+  'keyboard_detected_close',
+  'view_mode_to_edit_mode',
+  'light_mode_to_dark_mode',
+  'top_line_missing_detect',
+  'bottom_line_missing_detect'
+];
+
+interface ActionUiMeta {
+  title: string;
+  category: string;
+  badgeColor: string;
+  explanation: string;
+  icon: 'keyboard' | 'edit' | 'moon' | 'top' | 'bottom' | 'onedrive';
+  recommended: boolean;
+}
+
+const ACTION_UI_META: Record<string, ActionUiMeta> = {
+  keyboard_detected_close: {
+    title: 'Virtual Keyboard Guard',
+    category: 'Screen & Viewport',
+    badgeColor: '#388bfd',
+    explanation: 'Detects active soft keyboard via dumpsys input_method and dismisses it so line numbers and viewport are never obscured.',
+    icon: 'keyboard',
+    recommended: true,
+  },
+  view_mode_to_edit_mode: {
+    title: 'Edit Mode Enforcer',
+    category: 'Screen & Viewport',
+    badgeColor: '#58a6ff',
+    explanation: 'Detects read-only viewer mode or split panes and taps the pencil icon in MarkdownToolbar to enforce single-pane edit mode.',
+    icon: 'edit',
+    recommended: true,
+  },
+  light_mode_to_dark_mode: {
+    title: 'Dark Theme Enforcer',
+    category: 'Screen & Viewport',
+    badgeColor: '#a371f7',
+    explanation: 'Detects light canvas luminance (>= 55.0) and switches editor theme to dark mode for optimal OCR contrast and line extraction.',
+    icon: 'moon',
+    recommended: true,
+  },
+  top_line_missing_detect: {
+    title: 'Top Line Gutter Detector',
+    category: 'Gutter OCR & Heuristics',
+    badgeColor: '#3fb950',
+    explanation: 'Inspects top line gutter ROI; recovers missing top numbers via median pitch extrapolation and fallback OCR.',
+    icon: 'top',
+    recommended: true,
+  },
+  bottom_line_missing_detect: {
+    title: 'Bottom Line Gutter Validator',
+    category: 'Gutter OCR & Heuristics',
+    badgeColor: '#3fb950',
+    explanation: 'Validates bottom line visibility in the current viewport and applies calibrated line capacity and sub-line scroll adjustments.',
+    icon: 'bottom',
+    recommended: true,
+  },
+  markdown_not_open_navigate_onedrive: {
+    title: 'OneDrive Document Recovery (Compounding)',
+    category: 'Autonomous Navigation',
+    badgeColor: '#ffa657',
+    explanation: '5-step autonomous recovery: launches Teams on external display, navigates OneDrive folders, and opens the target Markdown file.',
+    icon: 'onedrive',
+    recommended: false,
+  }
+};
+
 const DEFAULT_OBSERVATION_PLUGINS: ObservationActionItem[] = [
   {
-    action_id: 'view_mode_detected_switch_to_edit',
-    label: 'view mode detected, switching to edit mode',
-    description: 'Detects if Markdown viewer is in read-only view mode and taps Edit Mode button.',
-    hook_phase: 'pre',
-    is_compounding: false,
-    priority: 1
-  },
-  {
-    action_id: 'light_mode_detected_switch_to_dark',
-    label: 'light mode detected, switching to dark mode',
-    description: 'Detects if editor is rendered in light theme and switches to dark mode for optimal OCR contrast.',
-    hook_phase: 'pre',
-    is_compounding: false,
-    priority: 2
-  },
-  {
-    action_id: 'keyboard_detected_close_keyboard',
+    action_id: 'keyboard_detected_close',
     label: 'keyboard detected, closing keyboard',
     description: 'Detects if soft virtual keyboard is visible or obscuring viewport and dismisses it.',
     hook_phase: 'pre',
     is_compounding: false,
-    priority: 3
+    priority: 10
   },
   {
-    action_id: 'line_number_top_not_detected_detect_top',
+    action_id: 'view_mode_to_edit_mode',
+    label: 'view mode detected, switching to edit mode',
+    description: 'Detects if Markdown viewer is in read-only view mode and taps Edit Mode pencil button.',
+    hook_phase: 'pre',
+    is_compounding: false,
+    priority: 20
+  },
+  {
+    action_id: 'light_mode_to_dark_mode',
+    label: 'light mode detected, switching to dark mode',
+    description: 'Detects if editor is rendered in light theme and switches to dark mode for optimal OCR contrast.',
+    hook_phase: 'pre',
+    is_compounding: false,
+    priority: 25
+  },
+  {
+    action_id: 'top_line_missing_detect',
     label: 'line number at top not detected, detecting line number at top',
     description: 'Inspects top line gutter region and applies fallback OCR or nudge heuristics to detect the top line.',
-    hook_phase: 'post',
+    hook_phase: 'error',
     is_compounding: false,
-    priority: 4
+    priority: 30
   },
   {
-    action_id: 'line_number_bottom_not_detected_detect_bottom',
+    action_id: 'bottom_line_missing_detect',
     label: 'line number at bottom not detected',
     description: 'Validates visibility of bottom line in current viewport and performs sub-line scroll adjustments.',
-    hook_phase: 'post',
+    hook_phase: 'error',
     is_compounding: false,
-    priority: 5
+    priority: 35
   },
   {
     action_id: 'markdown_not_open_navigate_onedrive',
@@ -74,9 +159,12 @@ const DEFAULT_OBSERVATION_PLUGINS: ObservationActionItem[] = [
     description: 'Compounding 5-step recovery: launches Teams on external display, navigates OneDrive folders, and opens target Markdown file.',
     hook_phase: 'pre',
     is_compounding: true,
-    priority: 6
+    priority: 5
   }
 ];
+
+// In-memory catalog cache across modal opens
+let cachedCatalog: ObservationActionItem[] | null = null;
 
 export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> = ({
   isOpen,
@@ -89,10 +177,10 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
   initialAttachedActions = [],
   onSave,
 }) => {
-  const [activeTab, setActiveTab] = useState<'params' | 'actions'>('params');
+  const [activeTab, setActiveTab] = useState<'actions' | 'params'>('actions');
   const [localConfig, setLocalConfig] = useState<Record<string, any>>(nodeConfig || {});
-  const [attachedActions, setAttachedActions] = useState<string[]>(initialAttachedActions || []);
-  const [allActions, setAllActions] = useState<ObservationActionItem[]>(DEFAULT_OBSERVATION_PLUGINS);
+  const [attachedActions, setAttachedActions] = useState<string[]>([]);
+  const [allActions, setAllActions] = useState<ObservationActionItem[]>(cachedCatalog || DEFAULT_OBSERVATION_PLUGINS);
   const [isLoadingActions, setIsLoadingActions] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResults, setScanResults] = useState<{
@@ -104,7 +192,22 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
   const [remediationMsg, setRemediationMsg] = useState<{ id: string; success: boolean; msg: string } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchCatalog = useCallback(async () => {
+  // References to prevent background WebSocket / timer polling from resetting user inputs
+  const prevIsOpenRef = useRef(false);
+  const prevNodeIdRef = useRef<string | null>(null);
+  const nodeConfigRef = useRef(nodeConfig);
+  const initialActionsRef = useRef(initialAttachedActions);
+
+  useEffect(() => {
+    nodeConfigRef.current = nodeConfig;
+    initialActionsRef.current = initialAttachedActions;
+  });
+
+  const fetchCatalog = useCallback(async (force = false) => {
+    if (cachedCatalog && !force) {
+      setAllActions(cachedCatalog);
+      return;
+    }
     setIsLoadingActions(true);
     try {
       // 1. Fetch from canonical /api/dag/observations/actions
@@ -112,6 +215,7 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
       if (res.ok) {
         const data = await res.json();
         if (data.actions && data.actions.length > 0) {
+          cachedCatalog = data.actions;
           setAllActions(data.actions);
           return;
         }
@@ -121,33 +225,43 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
       if (res2.ok) {
         const data2 = await res2.json();
         if (data2.actions && data2.actions.length > 0) {
+          cachedCatalog = data2.actions;
           setAllActions(data2.actions);
           return;
         }
       }
     } catch (err) {
       console.warn('[UniversalConfig] Using default observation actions catalog:', err);
+      if (!cachedCatalog) {
+        setAllActions(DEFAULT_OBSERVATION_PLUGINS);
+      }
     } finally {
       setIsLoadingActions(false);
     }
   }, [apiBase]);
 
-  // Sync state on open
+  // Sync state ONCE when modal transitions to open, or when nodeId changes.
   useEffect(() => {
-    if (isOpen) {
-      setLocalConfig({ ...nodeConfig });
-      setAttachedActions([...initialAttachedActions]);
+    const isJustOpening = isOpen && !prevIsOpenRef.current;
+    const isNodeChanged = isOpen && prevNodeIdRef.current !== nodeId;
+
+    if (isJustOpening || isNodeChanged) {
+      setLocalConfig({ ...(nodeConfigRef.current || {}) });
+      const normalized = (initialActionsRef.current || []).map(normalizeActionId);
+      setAttachedActions(normalized);
       setScanResults(null);
       setRemediationMsg(null);
-      fetchCatalog();
+      fetchCatalog(false);
     }
-  }, [isOpen, nodeId, nodeConfig, initialAttachedActions, fetchCatalog]);
+
+    prevIsOpenRef.current = isOpen;
+    prevNodeIdRef.current = nodeId;
+  }, [isOpen, nodeId, fetchCatalog]);
 
   const handleRunScan = async () => {
     setIsScanning(true);
     setRemediationMsg(null);
     try {
-      // Call POST /api/dag/observations/discover
       let res = await fetch(`${apiBase}/api/dag/observations/discover`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -158,7 +272,6 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
       });
 
       if (!res.ok) {
-        // Fallback to /api/dag/observation-actions/scan
         res = await fetch(`${apiBase}/api/dag/observation-actions/scan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -171,17 +284,30 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
 
       if (res.ok) {
         const data = await res.json();
-        const detected = data.detected_issues || [];
-        const clean = data.clean_actions || [];
-        const recommended = data.recommended_actions || detected.map((d: any) => d.action_id);
+        const detected = (data.detected_issues || data.detected || []).map((d: any) => ({
+          action_id: normalizeActionId(d.action_id || d.id),
+          label: d.label || d.config_label || d.action_id,
+          reason: d.reason || d.message || d.diagnostic
+        }));
+        const clean = (data.clean_invariants || data.clean || []).map((c: any) => ({
+          action_id: normalizeActionId(c.action_id || c.id),
+          label: c.label || c.config_label || c.action_id
+        }));
+        const recommended = (data.recommended_actions || []).map(normalizeActionId);
+
         setScanResults({
           detected,
           clean,
           recommended_actions: recommended
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[UniversalConfig] Scan error:', err);
+      setRemediationMsg({
+        id: 'scan_error',
+        success: false,
+        msg: `Failed to complete live screen scan: ${err.message}`
+      });
     } finally {
       setIsScanning(false);
     }
@@ -192,7 +318,8 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
     if (recommendedIds.length === 0) return;
     setAttachedActions(prev => {
       const combined = [...prev];
-      for (const id of recommendedIds) {
+      for (const rawId of recommendedIds) {
+        const id = normalizeActionId(rawId);
         if (!combined.includes(id)) {
           combined.push(id);
         }
@@ -207,10 +334,11 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
   };
 
   const handleTestRemediate = async (actionId: string) => {
-    setRemediatingId(actionId);
+    const canonicalId = normalizeActionId(actionId);
+    setRemediatingId(canonicalId);
     setRemediationMsg(null);
     try {
-      const res = await fetch(`${apiBase}/api/dag/observation-actions/${actionId}/remediate`, {
+      const res = await fetch(`${apiBase}/api/dag/observation-actions/${canonicalId}/remediate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -221,22 +349,21 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
       const data = await res.json();
       if (res.ok && data.status === 'success') {
         setRemediationMsg({
-          id: actionId,
+          id: canonicalId,
           success: true,
           msg: data.result?.message || 'Workaround remediation succeeded!'
         });
-        // Auto-re-run scan to update status
         setTimeout(() => handleRunScan(), 800);
       } else {
         setRemediationMsg({
-          id: actionId,
+          id: canonicalId,
           success: false,
           msg: data.result?.message || data.detail || 'Remediation failed'
         });
       }
     } catch (err: any) {
       setRemediationMsg({
-        id: actionId,
+        id: canonicalId,
         success: false,
         msg: err.message || 'Network error executing workaround'
       });
@@ -245,13 +372,42 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
     }
   };
 
-  const toggleAction = (actionId: string) => {
-    setAttachedActions(prev => {
-      if (prev.includes(actionId)) {
-        return prev.filter(id => id !== actionId);
-      } else {
-        return [...prev, actionId];
-      }
+  const attachAction = (actionId: string) => {
+    const canonicalId = normalizeActionId(actionId);
+    setAttachedActions(prev => prev.includes(canonicalId) ? prev : [...prev, canonicalId]);
+  };
+
+  const detachAction = (actionId: string) => {
+    const canonicalId = normalizeActionId(actionId);
+    setAttachedActions(prev => prev.filter(id => id !== canonicalId));
+  };
+
+
+  const handleEnableStandard = () => {
+    setAttachedActions([...STANDARD_RECOMMENDED_ACTIONS]);
+    setRemediationMsg({
+      id: 'enable_standard',
+      success: true,
+      msg: 'Attached 5 standard self-healing workarounds (Keyboard, Edit Mode, Dark Theme, Top Line, Bottom Line)!'
+    });
+  };
+
+  const handleAttachAll = () => {
+    const allIds = allActions.map(a => normalizeActionId(a.action_id));
+    setAttachedActions(allIds);
+    setRemediationMsg({
+      id: 'attach_all',
+      success: true,
+      msg: `Attached all ${allIds.length} workaround plugins to this node!`
+    });
+  };
+
+  const handleClearAll = () => {
+    setAttachedActions([]);
+    setRemediationMsg({
+      id: 'clear_all',
+      success: false,
+      msg: 'Detached all workaround plugins from this node.'
     });
   };
 
@@ -279,6 +435,48 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
 
   if (!isOpen) return null;
 
+  // Active attached vs available catalog
+  const attachedItems: ObservationActionItem[] = attachedActions.map(id => {
+    const found = allActions.find(a => normalizeActionId(a.action_id) === id);
+    if (found) return found;
+    const defaultFound = DEFAULT_OBSERVATION_PLUGINS.find(a => a.action_id === id);
+    if (defaultFound) return defaultFound;
+    return {
+      action_id: id,
+      label: id.replace(/_/g, ' '),
+      description: 'Custom attached observation & workaround plugin',
+      hook_phase: 'pre',
+      is_compounding: false,
+      priority: 99
+    };
+  });
+
+  const unattachedItems: ObservationActionItem[] = allActions.filter(
+    a => !attachedActions.includes(normalizeActionId(a.action_id))
+  );
+
+  const renderActionIcon = (actionId: string) => {
+    const canonicalId = normalizeActionId(actionId);
+    const meta = ACTION_UI_META[canonicalId];
+    if (!meta) return <Wrench size={13} color="#58a6ff" />;
+    switch (meta.icon) {
+      case 'keyboard':
+        return <Keyboard size={13} color="#388bfd" />;
+      case 'edit':
+        return <Edit3 size={13} color="#58a6ff" />;
+      case 'moon':
+        return <Moon size={13} color="#a371f7" />;
+      case 'top':
+        return <ArrowUp size={13} color="#3fb950" />;
+      case 'bottom':
+        return <ArrowDown size={13} color="#3fb950" />;
+      case 'onedrive':
+        return <FolderGit2 size={13} color="#ffa657" />;
+      default:
+        return <Wrench size={13} color="#58a6ff" />;
+    }
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -289,21 +487,52 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
           <span>Configure Node: {nodeTitle || nodeId}</span>
         </div>
       }
-      subtitle={`Configure execution parameters and attached observation/workaround action plugins for ${nodeId}`}
+      subtitle={`Configure autonomous observation/workaround action plugins and execution parameters for ${nodeId}`}
       confirmText={isSaving ? 'Saving...' : 'Save Configuration & Actions'}
       cancelText="Cancel"
       onConfirm={handleSave}
       disabled={isSaving}
-      maxWidth="680px"
+      maxWidth="720px"
     >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', color: '#e6edf3' }}>
-        {/* Tabs Bar */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', color: '#e6edf3' }}>
+        {/* Tab Navigation */}
         <div style={{
           display: 'flex',
           borderBottom: '1px solid #30363d',
           gap: '8px',
           paddingBottom: '2px'
         }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('actions')}
+            style={{
+              background: activeTab === 'actions' ? '#21262d' : 'transparent',
+              color: activeTab === 'actions' ? '#ffa657' : '#8b949e',
+              border: 'none',
+              borderBottom: activeTab === 'actions' ? '2px solid #ffa657' : '2px solid transparent',
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Zap size={14} color="#ffa657" />
+            <span>Observation & Workarounds</span>
+            <span style={{
+              background: attachedActions.length > 0 ? 'rgba(255, 166, 87, 0.2)' : 'rgba(110, 118, 129, 0.2)',
+              color: attachedActions.length > 0 ? '#ffa657' : '#8b949e',
+              borderRadius: '10px',
+              padding: '1px 7px',
+              fontSize: '10px',
+              fontWeight: 800
+            }}>
+              {attachedActions.length} Active
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveTab('params')}
@@ -324,40 +553,636 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
             <Sliders size={14} />
             <span>Node Parameters</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('actions')}
-            style={{
-              background: activeTab === 'actions' ? '#21262d' : 'transparent',
-              color: activeTab === 'actions' ? '#58a6ff' : '#8b949e',
-              border: 'none',
-              borderBottom: activeTab === 'actions' ? '2px solid #58a6ff' : '2px solid transparent',
-              padding: '6px 12px',
-              fontSize: '12px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            <Zap size={14} color="#ffa657" />
-            <span>Observation & Workarounds</span>
-            <span style={{
-              background: 'rgba(255, 166, 87, 0.2)',
-              color: '#ffa657',
-              borderRadius: '10px',
-              padding: '1px 6px',
-              fontSize: '10px'
-            }}>
-              {attachedActions.length}
-            </span>
-          </button>
         </div>
 
-        {/* TAB 1: NODE PARAMETERS */}
+        {/* TAB 1: OBSERVATION & WORKAROUND ACTIONS */}
+        {activeTab === 'actions' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '480px', overflowY: 'auto', paddingRight: '4px' }}>
+            {/* Informative Guidance Banner */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(56, 139, 253, 0.08) 0%, rgba(13, 17, 23, 0.6) 100%)',
+              border: '1px solid rgba(56, 139, 253, 0.25)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                  <ShieldCheck size={16} color="#58a6ff" />
+                  <span style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
+                    Autonomous Self-Healing Workarounds
+                  </span>
+                </div>
+                <div style={{
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  color: attachedActions.length > 0 ? '#3fb950' : '#8b949e',
+                  background: attachedActions.length > 0 ? 'rgba(63, 185, 80, 0.15)' : 'rgba(110, 118, 129, 0.15)',
+                  padding: '2px 8px',
+                  borderRadius: '12px',
+                  border: `1px solid ${attachedActions.length > 0 ? 'rgba(63, 185, 80, 0.4)' : '#30363d'}`
+                }}>
+                  {attachedActions.length} of {allActions.length} Workarounds Active
+                </div>
+              </div>
+              <div style={{ fontSize: '10.5px', color: '#8b949e', lineHeight: 1.4 }}>
+                Attached workarounds run automatically before or after this node. If a disruption occurs (virtual keyboard pops up, editor slips into view mode, light theme activates, or line numbers are obscured), the workaround instantly heals the environment so the DAG loop never halts.
+              </div>
+
+              {/* Quick Actions Bar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '4px', paddingTop: '6px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <button
+                  type="button"
+                  onClick={handleEnableStandard}
+                  style={{
+                    background: 'rgba(63, 185, 80, 0.2)',
+                    color: '#3fb950',
+                    border: '1px solid rgba(63, 185, 80, 0.5)',
+                    borderRadius: '5px',
+                    padding: '4px 10px',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="Enable the 5 standard self-healing guards (Keyboard, Edit Mode, Dark Theme, Top Line, Bottom Line)"
+                >
+                  <Zap size={11} />
+                  <span>Enable Standard (5)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAttachAll}
+                  style={{
+                    background: '#21262d',
+                    color: '#c9d1d9',
+                    border: '1px solid #30363d',
+                    borderRadius: '5px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Attach all registered workaround plugins"
+                >
+                  Attach All ({allActions.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  style={{
+                    background: '#21262d',
+                    color: '#8b949e',
+                    border: '1px solid #30363d',
+                    borderRadius: '5px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                  title="Detach all workarounds from this node"
+                >
+                  Clear All
+                </button>
+
+                <div style={{ marginLeft: 'auto' }}>
+                  <button
+                    type="button"
+                    onClick={handleRunScan}
+                    disabled={isScanning}
+                    style={{
+                      background: isScanning ? '#21262d' : 'rgba(88, 166, 255, 0.15)',
+                      color: isScanning ? '#8b949e' : '#58a6ff',
+                      border: '1px solid rgba(88, 166, 255, 0.4)',
+                      borderRadius: '5px',
+                      padding: '4px 10px',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      cursor: isScanning ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px'
+                    }}
+                    title="Diagnose active device display for anomalies"
+                  >
+                    <Sparkles size={11} className={isScanning ? 'spin' : ''} />
+                    <span>{isScanning ? 'Scanning Display...' : 'Diagnose Screen (Live Scan)'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Scan Results Banner */}
+            {scanResults && (
+              <div style={{
+                background: scanResults.detected.length > 0 ? 'rgba(248, 81, 73, 0.1)' : 'rgba(35, 134, 54, 0.15)',
+                border: `1px solid ${scanResults.detected.length > 0 ? '#f85149' : '#238636'}`,
+                borderRadius: '8px',
+                padding: '10px 12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', fontWeight: 800, color: scanResults.detected.length > 0 ? '#f85149' : '#3fb950' }}>
+                    {scanResults.detected.length > 0 ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+                    <span>
+                      {scanResults.detected.length > 0
+                        ? `Live Scan Found ${scanResults.detected.length} Environmental Anomaly(ies):`
+                        : 'Display Invariants Clean: No keyboard, dark mode active, edit mode confirmed, gutter OCR clean.'}
+                    </span>
+                  </div>
+                  {scanResults.detected.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleAutoAttachRecommended}
+                      style={{
+                        background: 'rgba(0, 255, 157, 0.2)',
+                        color: '#00ff9d',
+                        border: '1px solid #00ff9d',
+                        borderRadius: '5px',
+                        padding: '3px 8px',
+                        fontSize: '9.5px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                      title="Attach all detected and recommended workarounds to this DAG node"
+                    >
+                      <Zap size={10} />
+                      <span>Auto-Attach Workarounds</span>
+                    </button>
+                  )}
+                </div>
+
+                {scanResults.detected.map(issue => (
+                  <div
+                    key={issue.action_id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(22, 27, 34, 0.9)',
+                      padding: '6px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      border: '1px solid rgba(248, 81, 73, 0.3)'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#f0f6fc' }}>{issue.label}</div>
+                      {issue.reason && <div style={{ fontSize: '10px', color: '#8b949e' }}>{issue.reason}</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleTestRemediate(issue.action_id)}
+                        disabled={remediatingId === issue.action_id}
+                        style={{
+                          background: '#238636',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '3px 8px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        {remediatingId === issue.action_id ? <RefreshCw size={10} className="spin" /> : <Wrench size={10} />}
+                        <span>Remediate Now</span>
+                      </button>
+                      {!attachedActions.includes(issue.action_id) && (
+                        <button
+                          type="button"
+                          onClick={() => attachAction(issue.action_id)}
+                          style={{
+                            background: 'rgba(88, 166, 255, 0.2)',
+                            color: '#58a6ff',
+                            border: '1px solid rgba(88, 166, 255, 0.4)',
+                            borderRadius: '4px',
+                            padding: '3px 8px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          + Attach
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Remediation message alert */}
+            {remediationMsg && (
+              <div style={{
+                background: remediationMsg.success ? 'rgba(35, 134, 54, 0.15)' : 'rgba(248, 81, 73, 0.15)',
+                border: `1px solid ${remediationMsg.success ? '#238636' : '#f85149'}`,
+                borderRadius: '6px',
+                padding: '7px 12px',
+                fontSize: '11px',
+                color: remediationMsg.success ? '#3fb950' : '#f85149',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <span>{remediationMsg.msg}</span>
+                <button
+                  type="button"
+                  onClick={() => setRemediationMsg(null)}
+                  style={{ background: 'transparent', border: 'none', color: '#8b949e', cursor: 'pointer', padding: 0 }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+
+            {/* SECTION 1: ACTIVE ATTACHED WORKAROUNDS */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Active Attached Workarounds ({attachedItems.length})
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#8b949e' }}>
+                    (Runs in sequence before/after this node)
+                  </span>
+                </div>
+                {isLoadingActions && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#58a6ff', fontSize: '10px' }}>
+                    <RefreshCw size={10} className="spin" />
+                    <span>Syncing catalog...</span>
+                  </div>
+                )}
+              </div>
+
+              {attachedItems.length === 0 ? (
+                <div style={{
+                  padding: '14px',
+                  background: '#161b22',
+                  border: '1px dashed #30363d',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  fontSize: '11px',
+                  color: '#8b949e'
+                }}>
+                  No workarounds currently attached to this node. Click <strong>"Enable Standard (5)"</strong> above to guard against keyboards, theme resets, and unreadable lines.
+                </div>
+              ) : (
+                attachedItems.map((action, index) => {
+                  const canonicalId = normalizeActionId(action.action_id);
+                  const meta = ACTION_UI_META[canonicalId];
+                  const isOneDrive = canonicalId === 'markdown_not_open_navigate_onedrive';
+
+                  return (
+                    <div
+                      key={action.action_id}
+                      style={{
+                        background: 'rgba(88, 166, 255, 0.05)',
+                        border: '1.5px solid rgba(88, 166, 255, 0.45)',
+                        borderRadius: '8px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
+                        {/* Left: Priority badge + Icon + Titles */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flex: 1, minWidth: 0 }}>
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: 800,
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: '#21262d',
+                            color: '#58a6ff',
+                            border: '1px solid #30363d',
+                            fontFamily: 'monospace'
+                          }}>
+                            #{index + 1}
+                          </span>
+
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '5px', background: '#21262d' }}>
+                            {renderActionIcon(canonicalId)}
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc' }}>
+                                {meta?.title || action.label}
+                              </span>
+                              <span style={{
+                                fontSize: '8.5px',
+                                fontWeight: 800,
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                background: action.hook_phase === 'error' ? 'rgba(163, 113, 247, 0.2)' : 'rgba(56, 139, 253, 0.15)',
+                                color: action.hook_phase === 'error' ? '#a371f7' : '#58a6ff',
+                                textTransform: 'uppercase'
+                              }}>
+                                {action.hook_phase === 'error' ? 'ON-ERROR' : 'PRE-EXECUTION'}
+                              </span>
+                              {action.is_compounding && (
+                                <span style={{
+                                  fontSize: '8.5px',
+                                  fontWeight: 800,
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  background: 'rgba(255, 166, 87, 0.2)',
+                                  color: '#ffa657'
+                                }}>
+                                  COMPOUNDING
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: '10.5px', color: '#8b949e', lineHeight: 1.3 }}>
+                              {meta?.explanation || action.description}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Right: Order controls, Test button, and Detach */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <button
+                              type="button"
+                              onClick={() => moveAction(index, 'up')}
+                              disabled={index === 0}
+                              style={{
+                                background: '#21262d', border: '1px solid #30363d', borderRadius: '3px',
+                                color: index === 0 ? '#484f58' : '#c9d1d9', padding: '1px 4px',
+                                cursor: index === 0 ? 'not-allowed' : 'pointer'
+                              }}
+                              title="Run this workaround earlier"
+                            >
+                              <ArrowUp size={10} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveAction(index, 'down')}
+                              disabled={index === attachedItems.length - 1}
+                              style={{
+                                background: '#21262d', border: '1px solid #30363d', borderRadius: '3px',
+                                color: index === attachedItems.length - 1 ? '#484f58' : '#c9d1d9', padding: '1px 4px',
+                                cursor: index === attachedItems.length - 1 ? 'not-allowed' : 'pointer'
+                              }}
+                              title="Run this workaround later"
+                            >
+                              <ArrowDown size={10} />
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTestRemediate(action.action_id)}
+                            disabled={remediatingId === canonicalId}
+                            style={{
+                              background: '#21262d',
+                              border: '1px solid #30363d',
+                              borderRadius: '5px',
+                              padding: '5px 8px',
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: '#c9d1d9',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px'
+                            }}
+                            title="Test-fire this workaround directly on the active device"
+                          >
+                            {remediatingId === canonicalId ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
+                            <span>Test</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => detachAction(action.action_id)}
+                            style={{
+                              background: 'rgba(248, 81, 73, 0.1)',
+                              border: '1px solid rgba(248, 81, 73, 0.3)',
+                              borderRadius: '5px',
+                              padding: '5px 8px',
+                              fontSize: '10px',
+                              fontWeight: 700,
+                              color: '#ff7b72',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Detach workaround from this node"
+                          >
+                            <X size={11} />
+                            <span>Detach</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* If OneDrive compounding action: show folder and filename */}
+                      {isOneDrive && (
+                        <div
+                          style={{
+                            marginTop: '2px',
+                            padding: '8px 10px',
+                            background: 'rgba(13, 17, 23, 0.85)',
+                            border: '1px solid #30363d',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px'
+                          }}
+                        >
+                          <div style={{ fontSize: '10px', fontWeight: 800, color: '#ffa657' }}>
+                            OneDrive Navigation Parameters:
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <label style={{ fontSize: '9px', fontWeight: 700, color: '#8b949e' }}>Target OneDrive Folder</label>
+                              <input
+                                type="text"
+                                value={localConfig.target_folder_path ?? localConfig.folder_path ?? ''}
+                                placeholder="e.g. Internal_Open_Source"
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setLocalConfig(prev => ({ ...prev, target_folder_path: val, folder_path: val }));
+                                }}
+                                style={{
+                                  background: '#161b22',
+                                  border: '1px solid #30363d',
+                                  borderRadius: '4px',
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  color: '#f0f6fc'
+                                }}
+                              />
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <label style={{ fontSize: '9px', fontWeight: 700, color: '#8b949e' }}>Target Markdown Filename</label>
+                              <input
+                                type="text"
+                                value={localConfig.target_filename ?? localConfig.filename ?? ''}
+                                placeholder="e.g. Matrix_main_26-09-17-8-19am.md"
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setLocalConfig(prev => ({ ...prev, target_filename: val, filename: val }));
+                                }}
+                                style={{
+                                  background: '#161b22',
+                                  border: '1px solid #30363d',
+                                  borderRadius: '4px',
+                                  padding: '4px 8px',
+                                  fontSize: '11px',
+                                  color: '#f0f6fc'
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* SECTION 2: AVAILABLE WORKAROUNDS (CATALOG) */}
+            {unattachedItems.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Available Workaround Plugins ({unattachedItems.length})
+                </div>
+
+                {unattachedItems.map((action) => {
+                  const canonicalId = normalizeActionId(action.action_id);
+                  const meta = ACTION_UI_META[canonicalId];
+
+                  return (
+                    <div
+                      key={action.action_id}
+                      style={{
+                        background: '#161b22',
+                        border: '1px solid #30363d',
+                        borderRadius: '8px',
+                        padding: '9px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        transition: 'border-color 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '5px', background: '#21262d' }}>
+                          {renderActionIcon(canonicalId)}
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#c9d1d9' }}>
+                              {meta?.title || action.label}
+                            </span>
+                            {meta?.recommended && (
+                              <span style={{
+                                fontSize: '8px',
+                                fontWeight: 800,
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                background: 'rgba(63, 185, 80, 0.15)',
+                                color: '#3fb950',
+                                textTransform: 'uppercase'
+                              }}>
+                                RECOMMENDED
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: '8.5px',
+                              fontWeight: 700,
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              background: '#21262d',
+                              color: '#8b949e'
+                            }}>
+                              {action.hook_phase}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '10px', color: '#8b949e', lineHeight: 1.3 }}>
+                            {meta?.explanation || action.description}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={() => handleTestRemediate(action.action_id)}
+                          disabled={remediatingId === canonicalId}
+                          style={{
+                            background: '#21262d',
+                            border: '1px solid #30363d',
+                            borderRadius: '4px',
+                            padding: '4px 7px',
+                            fontSize: '9.5px',
+                            fontWeight: 700,
+                            color: '#8b949e',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}
+                          title="Test-fire this workaround on the active device before attaching"
+                        >
+                          {remediatingId === canonicalId ? <RefreshCw size={9} className="spin" /> : <Play size={9} />}
+                          <span>Test</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => attachAction(action.action_id)}
+                          style={{
+                            background: 'rgba(88, 166, 255, 0.15)',
+                            color: '#58a6ff',
+                            border: '1px solid rgba(88, 166, 255, 0.4)',
+                            borderRadius: '5px',
+                            padding: '4px 9px',
+                            fontSize: '10px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <Plus size={11} />
+                          <span>Attach to Node</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: NODE PARAMETERS */}
         {activeTab === 'params' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '420px', overflowY: 'auto', paddingRight: '4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '440px', overflowY: 'auto', paddingRight: '4px' }}>
             {/* Generic / Settle delay */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e' }}>SETTLE DELAY (MS)</label>
@@ -370,7 +1195,7 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
                   padding: '7px 10px', color: '#f0f6fc', fontSize: '12px'
                 }}
               />
-              <span style={{ fontSize: '10px', color: '#8b949e' }}>Dwell time allowed for hardware and UI rendering to settle.</span>
+              <span style={{ fontSize: '10px', color: '#8b949e' }}>Dwell time allowed for hardware and UI rendering to settle before next execution.</span>
             </div>
 
             {/* Node 1 specifics */}
@@ -386,6 +1211,7 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
                     padding: '7px 10px', color: '#f0f6fc', fontSize: '12px'
                   }}
                 />
+                <span style={{ fontSize: '10px', color: '#8b949e' }}>Override total line calibration if OCR auto-calibration is skipped.</span>
               </div>
             )}
 
@@ -508,380 +1334,30 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
                       padding: '7px 10px', color: '#f0f6fc', fontSize: '12px'
                     }}
                   />
+                  <span style={{ fontSize: '10px', color: '#8b949e' }}>Maximum corrective scroll steps attempted if gutter line is obscured.</span>
                 </div>
               </>
             )}
-          </div>
-        )}
 
-        {/* TAB 2: OBSERVATION & WORKAROUND ACTIONS */}
-        {activeTab === 'actions' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '440px', overflowY: 'auto', paddingRight: '4px' }}>
-            {/* Live Scan Header */}
-            <div style={{
-              background: '#161b22',
-              border: '1px solid #30363d',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px'
-            }}>
-              <div>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#f0f6fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Sparkles size={14} color="#ffa657" />
-                  <span>Dynamic Environmental Anomaly Discovery</span>
+            {/* Node 7 specifics */}
+            {nodeId === 'verification_trigger' && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Prevent Trigger on Qualifier Issue</div>
+                  <div style={{ fontSize: '10px', color: '#8b949e' }}>Blocks next cycle transition if any blocking qualifier (e.g. keyboard open or view mode) fails.</div>
                 </div>
-                <div style={{ fontSize: '10px', color: '#8b949e' }}>
-                  Inspects live device screen, toolbar, and IME state to diagnose unexpected issues.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleRunScan}
-                disabled={isScanning}
-                style={{
-                  background: isScanning ? '#21262d' : 'rgba(88, 166, 255, 0.15)',
-                  color: isScanning ? '#8b949e' : '#58a6ff',
-                  border: '1px solid rgba(88, 166, 255, 0.4)',
-                  borderRadius: '6px',
-                  padding: '6px 12px',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  cursor: isScanning ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <RefreshCw size={12} className={isScanning ? 'spin' : ''} />
-                <span>{isScanning ? 'Scanning Display...' : 'Dynamic Observation Scan'}</span>
-              </button>
-            </div>
-
-            {/* Scan Results Banner */}
-            {scanResults && (
-              <div style={{
-                background: scanResults.detected.length > 0 ? 'rgba(248, 81, 73, 0.1)' : 'rgba(35, 134, 54, 0.15)',
-                border: `1px solid ${scanResults.detected.length > 0 ? '#f85149' : '#238636'}`,
-                borderRadius: '8px',
-                padding: '10px 12px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: scanResults.detected.length > 0 ? '#f85149' : '#3fb950' }}>
-                    {scanResults.detected.length > 0 ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
-                    <span>
-                      {scanResults.detected.length > 0
-                        ? `Detected ${scanResults.detected.length} Environmental Anomaly(ies):`
-                        : 'All Environment Invariants Clean (No Anomaly Detected)'}
-                    </span>
-                  </div>
-                  {scanResults.detected.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleAutoAttachRecommended}
-                      style={{
-                        background: 'rgba(0, 255, 157, 0.2)',
-                        color: '#00ff9d',
-                        border: '1px solid #00ff9d',
-                        borderRadius: '5px',
-                        padding: '4px 10px',
-                        fontSize: '10px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '5px'
-                      }}
-                      title="Attach all detected and recommended workarounds to this DAG node"
-                    >
-                      <Zap size={11} />
-                      <span>Auto-Attach Recommended Workarounds</span>
-                    </button>
-                  )}
-                </div>
-                {scanResults.detected.map(issue => (
-                  <div
-                    key={issue.action_id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      background: 'rgba(22, 27, 34, 0.8)',
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      fontSize: '11px',
-                      border: '1px solid rgba(248, 81, 73, 0.3)'
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 700, color: '#f0f6fc' }}>{issue.label}</div>
-                      {issue.reason && <div style={{ fontSize: '10px', color: '#8b949e' }}>{issue.reason}</div>}
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleTestRemediate(issue.action_id)}
-                        disabled={remediatingId === issue.action_id}
-                        style={{
-                          background: '#238636',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '4px',
-                          padding: '3px 8px',
-                          fontSize: '10px',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}
-                      >
-                        {remediatingId === issue.action_id ? <RefreshCw size={10} className="spin" /> : <Wrench size={10} />}
-                        <span>Remediate Now</span>
-                      </button>
-                      {!attachedActions.includes(issue.action_id) && (
-                        <button
-                          type="button"
-                          onClick={() => toggleAction(issue.action_id)}
-                          style={{
-                            background: 'rgba(88, 166, 255, 0.2)',
-                            color: '#58a6ff',
-                            border: '1px solid rgba(88, 166, 255, 0.4)',
-                            borderRadius: '4px',
-                            padding: '3px 8px',
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            cursor: 'pointer'
-                          }}
-                        >
-                          + Attach
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => setLocalConfig(prev => ({ ...prev, prevent_trigger_on_issue: !prev.prevent_trigger_on_issue }))}
+                  style={{
+                    background: localConfig.prevent_trigger_on_issue !== false ? '#238636' : '#21262d',
+                    color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                  }}
+                >
+                  {localConfig.prevent_trigger_on_issue !== false ? 'ENABLED' : 'DISABLED'}
+                </button>
               </div>
             )}
-
-            {/* Remediation message alert */}
-            {remediationMsg && (
-              <div style={{
-                background: remediationMsg.success ? 'rgba(35, 134, 54, 0.15)' : 'rgba(248, 81, 73, 0.15)',
-                border: `1px solid ${remediationMsg.success ? '#238636' : '#f85149'}`,
-                borderRadius: '6px',
-                padding: '8px 12px',
-                fontSize: '11px',
-                color: remediationMsg.success ? '#3fb950' : '#f85149'
-              }}>
-                {remediationMsg.msg}
-              </div>
-            )}
-
-            {/* Registered Observation-Action Catalog */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 800, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Registered Observation-Action Catalog ({allActions.length})
-              </div>
-
-              {isLoadingActions && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', padding: '12px 0' }}>
-                  <RefreshCw size={12} className="spin" />
-                  <span>Loading action plugins...</span>
-                </div>
-              )}
-
-              {allActions.map((action) => {
-                const isAttached = attachedActions.includes(action.action_id);
-                const attachedIdx = attachedActions.indexOf(action.action_id);
-                const isOneDriveAction = action.action_id === 'markdown_not_open_navigate_onedrive' || action.label.toLowerCase().includes('one drive');
-
-                return (
-                  <div
-                    key={action.action_id}
-                    style={{
-                      background: isAttached ? 'rgba(88, 166, 255, 0.08)' : '#161b22',
-                      border: `1.5px solid ${isAttached ? '#58a6ff' : '#30363d'}`,
-                      borderRadius: '8px',
-                      padding: '10px 12px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', flex: 1 }}>
-                        <input
-                          type="checkbox"
-                          checked={isAttached}
-                          onChange={() => toggleAction(action.action_id)}
-                          style={{ marginTop: '2px', cursor: 'pointer', accentColor: '#58a6ff' }}
-                          id={`check-${action.action_id}`}
-                        />
-                        <label htmlFor={`check-${action.action_id}`} style={{ cursor: 'pointer', flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '12px', fontWeight: 800, color: isAttached ? '#f0f6fc' : '#c9d1d9' }}>
-                              "{action.label}"
-                            </span>
-                            <span style={{
-                              fontSize: '9px',
-                              fontWeight: 800,
-                              padding: '1px 5px',
-                              borderRadius: '4px',
-                              background: '#21262d',
-                              color: '#8b949e',
-                              textTransform: 'uppercase'
-                            }}>
-                              {action.hook_phase}
-                            </span>
-                            {action.is_compounding && (
-                              <span style={{
-                                fontSize: '9px',
-                                fontWeight: 800,
-                                padding: '1px 5px',
-                                borderRadius: '4px',
-                                background: 'rgba(255, 166, 87, 0.2)',
-                                color: '#ffa657'
-                              }}>
-                                COMPOUNDING
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: '10.5px', color: '#8b949e', marginTop: '2px' }}>
-                            {action.description}
-                          </div>
-                        </label>
-                      </div>
-
-                      {/* Order Controls & Test Button */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {isAttached && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <button
-                              type="button"
-                              onClick={() => moveAction(attachedIdx, 'up')}
-                              disabled={attachedIdx === 0}
-                              style={{
-                                background: '#21262d', border: '1px solid #30363d', borderRadius: '3px',
-                                color: attachedIdx === 0 ? '#484f58' : '#c9d1d9', padding: '1px 3px',
-                                cursor: attachedIdx === 0 ? 'not-allowed' : 'pointer'
-                              }}
-                              title="Execute earlier"
-                            >
-                              <ArrowUp size={10} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => moveAction(attachedIdx, 'down')}
-                              disabled={attachedIdx === attachedActions.length - 1}
-                              style={{
-                                background: '#21262d', border: '1px solid #30363d', borderRadius: '3px',
-                                color: attachedIdx === attachedActions.length - 1 ? '#484f58' : '#c9d1d9', padding: '1px 3px',
-                                cursor: attachedIdx === attachedActions.length - 1 ? 'not-allowed' : 'pointer'
-                              }}
-                              title="Execute later"
-                            >
-                              <ArrowDown size={10} />
-                            </button>
-                          </div>
-                        )}
-
-                        <button
-                          type="button"
-                          onClick={() => handleTestRemediate(action.action_id)}
-                          disabled={remediatingId === action.action_id}
-                          style={{
-                            background: '#21262d',
-                            border: '1px solid #30363d',
-                            borderRadius: '4px',
-                            padding: '4px 8px',
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            color: '#c9d1d9',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '4px'
-                          }}
-                          title="Test-fire this workaround directly on the active device"
-                        >
-                          {remediatingId === action.action_id ? <RefreshCw size={10} className="spin" /> : <Play size={10} />}
-                          <span>Test</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Target OneDrive Folder & Markdown Filename parameters */}
-                    {isOneDriveAction && (
-                      <div
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          marginTop: '4px',
-                          padding: '8px 10px',
-                          background: 'rgba(13, 17, 23, 0.85)',
-                          border: '1px solid #30363d',
-                          borderRadius: '6px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px'
-                        }}
-                      >
-                        <div style={{ fontSize: '10px', fontWeight: 800, color: '#ffa657', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span>OneDrive Target Parameters:</span>
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                            <label style={{ fontSize: '9px', fontWeight: 700, color: '#8b949e' }}>Target OneDrive Folder Path</label>
-                            <input
-                              type="text"
-                              value={localConfig.target_folder_path ?? localConfig.folder_path ?? ''}
-                              placeholder="e.g. Internal_Open_Source"
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setLocalConfig(prev => ({ ...prev, target_folder_path: val, folder_path: val }));
-                              }}
-                              style={{
-                                background: '#161b22',
-                                border: '1px solid #30363d',
-                                borderRadius: '4px',
-                                padding: '4px 8px',
-                                fontSize: '11px',
-                                color: '#f0f6fc'
-                              }}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                            <label style={{ fontSize: '9px', fontWeight: 700, color: '#8b949e' }}>Target Markdown Filename</label>
-                            <input
-                              type="text"
-                              value={localConfig.target_filename ?? localConfig.filename ?? ''}
-                              placeholder="e.g. Matrix_main_26-09-17-8-19am.md"
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setLocalConfig(prev => ({ ...prev, target_filename: val, filename: val }));
-                              }}
-                              style={{
-                                background: '#161b22',
-                                border: '1px solid #30363d',
-                                borderRadius: '4px',
-                                padding: '4px 8px',
-                                fontSize: '11px',
-                                color: '#f0f6fc'
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
           </div>
         )}
       </div>

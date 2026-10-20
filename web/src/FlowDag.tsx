@@ -1887,25 +1887,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               });
               await parseApiResponse(resActions);
 
-              // 2. Persist node parameters if applicable
-              if (universalConfigNodeId === 'frame_acquire') {
-                await fetch(`${apiBase}/api/dag/nodes/frame_acquire/config`, {
+              // 2. Persist node parameters universally for any node
+              if (config && Object.keys(config).length > 0) {
+                const resConfig = await fetch(`${apiBase}/api/dag/nodes/${universalConfigNodeId}/config`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify(config)
                 });
-              } else if (universalConfigNodeId === 'frame_ocr') {
-                await fetch(`${apiBase}/api/dag/nodes/frame_ocr/config`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(config)
-                });
-              } else if (universalConfigNodeId === 'verification_trigger') {
-                await fetch(`${apiBase}/api/dag/nodes/verification_trigger/config`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(config)
-                });
+                await parseApiResponse(resConfig);
               }
 
               setNodeFeedback({

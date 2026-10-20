@@ -46,8 +46,20 @@ class ObservationActionRegistry:
     def unregister(self, action_id: str) -> None:
         self._actions.pop(action_id, None)
 
+    ACTION_ALIASES = {
+        "view_mode_detected_switch_to_edit": "view_mode_to_edit_mode",
+        "light_mode_detected_switch_to_dark": "light_mode_to_dark_mode",
+        "keyboard_detected_close_keyboard": "keyboard_detected_close",
+        "line_number_top_not_detected_detect_top": "top_line_missing_detect",
+        "line_number_bottom_not_detected_detect_bottom": "bottom_line_missing_detect",
+        "view_mode_to_edit": "view_mode_to_edit_mode",
+        "light_mode_to_dark": "light_mode_to_dark_mode",
+        "close_keyboard": "keyboard_detected_close",
+    }
+
     def get_action(self, action_id: str) -> Optional[ObservationActionPlugin]:
-        return self._actions.get(action_id)
+        canonical_id = self.ACTION_ALIASES.get(action_id, action_id)
+        return self._actions.get(canonical_id)
 
     def list_all_actions(self) -> List[ObservationActionPlugin]:
         # Return sorted by priority
