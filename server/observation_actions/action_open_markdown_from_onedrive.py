@@ -29,37 +29,47 @@ class OpenMarkdownFromOneDriveAction(ObservationActionPlugin):
     priority = 5
 
     async def detect_by_observation(self, ctx: ObservationContext) -> Tuple[bool, str, Dict[str, Any]]:
-        from services.adb_service import get_active_adb_serial, detect_external_display_id, run_adb_shell
+        from services.adb_service import (
+            get_active_adb_serial, detect_external_display_id, run_adb_shell,
+            parse_activities_by_display
+        )
 
         serial = ctx.serial or await get_active_adb_serial()
         disp_id = ctx.display_id or await detect_external_display_id(serial)
 
-        # Check top resumed activity and focused app
-        act_res = await run_adb_shell(
-            "dumpsys activity activities | grep -E 'topResumedActivity|mFocusedApp'",
-            serial,
-            timeout=1.5
-        )
+        # Query activity stack across all displays
+        act_res = await run_adb_shell("dumpsys activity activities", serial, timeout=3.5)
         stdout = act_res.get("stdout", "")
         ctx.focused_activity = stdout.strip()
 
-        is_file_preview = "FilePreviewActivity" in stdout
-        is_teams = "com.microsoft.teams" in stdout
+        parsed = parse_activities_by_display(stdout)
+        target_info = parsed.get(disp_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
+        phone_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
 
-        not_open = not is_file_preview
-        if not is_teams:
-            reason = "Teams application is not in the foreground"
-        elif not_open:
+        is_file_preview_on_desktop = any("FilePreviewActivity" in r for r in target_info.get("resumed_activities", [])) or len(target_info.get("file_preview_tasks", [])) > 0
+        is_file_preview_on_phone = len(phone_info.get("file_preview_tasks", [])) > 0
+        is_teams_on_desktop = any("com.microsoft.teams" in r for r in target_info.get("resumed_activities", [])) or len(target_info.get("teams_tasks", [])) > 0
+
+        # An issue exists if Markdown is NOT open on the desktop display, OR if it IS open on the phone!
+        issue_detected = (not is_file_preview_on_desktop) or is_file_preview_on_phone
+
+        if is_file_preview_on_phone:
+            reason = "Markdown editor is open on the phone screen (Display 0), blocking desktop mode rendering"
+        elif not is_teams_on_desktop:
+            reason = "Teams application is not in the foreground on desktop display"
+        elif not is_file_preview_on_desktop:
             reason = "FilePreviewActivity is not active on external display (Teams home, OneDrive tab, or folder list)"
         else:
-            reason = "Markdown editor FilePreviewActivity is active"
+            reason = "Markdown editor FilePreviewActivity is active exclusively on desktop display"
 
         return (
-            not_open,
+            issue_detected,
             reason,
             {
-                "is_teams": is_teams,
-                "is_file_preview": is_file_preview,
+                "is_teams": is_teams_on_desktop,
+                "is_file_preview": is_file_preview_on_desktop,
+                "is_open_on_phone": is_file_preview_on_phone,
+                "display_id": disp_id,
                 "focused_activity": stdout.strip()
             }
         )
@@ -67,7 +77,7 @@ class OpenMarkdownFromOneDriveAction(ObservationActionPlugin):
     async def execute_workaround(self, ctx: ObservationContext) -> Dict[str, Any]:
         from services.adb_service import (
             get_active_adb_serial, detect_external_display_id, run_adb_shell,
-            capture_external_screenshot, dismiss_keyboard
+            capture_external_screenshot, dismiss_keyboard, enforce_markdown_only_on_desktop
         )
         from services.ui_automator_service import get_display_dimensions
         from ocr_engine import get_rapid_ocr
@@ -95,12 +105,13 @@ class OpenMarkdownFromOneDriveAction(ObservationActionPlugin):
         actions_taken = []
 
         # -------------------------------------------------------------
-        # Step 1: Focus / Bring Teams to external display
+        # Step 1: Enforce Markdown ONLY on desktop screen & clear phone screen
         # -------------------------------------------------------------
-        launch_cmd = f"monkey -p com.microsoft.teams -c android.intent.category.LAUNCHER 1 --display {disp_id} >/dev/null 2>&1"
-        await run_adb_shell(launch_cmd, serial, timeout=3.0)
-        actions_taken.append(f"Brought com.microsoft.teams to foreground on display {disp_id}")
-        await asyncio.sleep(0.5)
+        enf_res = await enforce_markdown_only_on_desktop(serial, disp_id)
+        if enf_res.get("phone_cleared"):
+            actions_taken.append("Cleared Markdown editor conflict from phone screen (Display 0)")
+        actions_taken.extend(enf_res.get("actions", []))
+        await asyncio.sleep(0.4)
 
         # -------------------------------------------------------------
         # Step 2: Select OneDrive / Files tab if not already open

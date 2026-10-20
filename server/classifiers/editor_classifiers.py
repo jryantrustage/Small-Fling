@@ -948,57 +948,20 @@ class PinCodeRequestedClassifier(BaseClassifier):
         if not serial:
             return FixResult(classifier_id=self.id, success=False, message="No active device connected via ADB")
 
+        from services.adb_service import auto_handle_pin_authentication
         raw_disp = context.display_id if context.display_id is not None else await detect_external_display_id(serial)
         disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else 0
 
-        actions = []
-
-        # 1. Dismiss Keyguard if active
-        try:
-            kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", serial, timeout=1.2)
-            if "isKeyguardShowing=true" in kg_chk.get("stdout", ""):
-                await run_adb_shell(
-                    f"input -d 0 keyevent 224; input -d 0 keyevent 82; input -d 0 swipe 540 1800 540 600 200; sleep 0.1; input -d 0 text {pin}; input -d 0 keyevent 66; wm dismiss-keyguard",
-                    serial,
-                    timeout=3.0
-                )
-                actions.append(f"Unlocked device keyguard with PIN {pin}")
-        except Exception:
-            pass
-
-        # 2. Enter PIN on External Desktop Display (e.g. Teams MAM Startup PIN dialog)
-        try:
-            if disp_id > 0:
-                # Tap PIN input field, backspace existing characters, enter PIN, tap OK button and send Enter
-                await run_adb_shell(
-                    f"input -d {disp_id} tap 960 660; "
-                    f"input -d {disp_id} keyevent 67 67 67 67 67 67 67 67; "
-                    f"input -d {disp_id} text {pin}; "
-                    f"sleep 0.2; "
-                    f"input -d {disp_id} tap 960 734; "
-                    f"input -d {disp_id} keyevent 66",
-                    serial,
-                    timeout=3.0
-                )
-                actions.append(f"Submitted PIN {pin} to Intune MAM prompt on display #{disp_id}")
-        except Exception:
-            pass
-
-        # 3. Enter PIN on Primary Display (in case prompt is on display 0)
-        try:
-            await run_adb_shell(f"input -d 0 text {pin}; input -d 0 keyevent 66", serial, timeout=1.5)
-            actions.append(f"Dispatched PIN {pin} and Enter on primary display")
-        except Exception:
-            pass
-
+        pin_res = await auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=True)
+        actions = pin_res.get("actions", [])
         await asyncio.sleep(0.4)
 
         return FixResult(
             classifier_id=self.id,
             success=True,
             message=f"Supplied PIN {pin} to authentication prompt and unlocked editor",
-            actions_taken=actions,
-            metadata={"pin_length": len(pin)}
+            actions_taken=actions or [f"Submitted PIN {pin} to authentication prompt"],
+            metadata={"pin_length": len(pin), "pin_res": pin_res}
         )
 
 

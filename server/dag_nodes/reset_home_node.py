@@ -37,12 +37,25 @@ class ResetHomeNode(BaseDagNode):
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
         calib = state.FRAMES_DIR / "dag_node2_home.png"
 
+        # Auto-dismiss any lingering ANR dialogs before attempting Line 1 return
+        try:
+            from services.adb_service import dismiss_anr_dialogs
+            await dismiss_anr_dialogs(serial, disp_id)
+        except Exception:
+            pass
+
+        # 1. Enforce Markdown exclusively on desktop display & focus without tapping editable text
+        try:
+            from services.adb_service import enforce_markdown_only_on_desktop
+            await enforce_markdown_only_on_desktop(serial, disp_id)
+        except Exception:
+            pass
         disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        # 1. Tap editor body to ensure focus, dismiss keyboard
-        await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.15)
+        # Tap neutral title text area on left (x=240, y=40) away from center window caption handle
+        await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
+        await asyncio.sleep(0.08)
         await dismiss_keyboard(serial, disp_id)
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.08)
 
         is_verified = False
         detected_first = 0

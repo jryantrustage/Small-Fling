@@ -229,6 +229,42 @@ async def close_keyboard_endpoint(serial: Optional[str] = None):
     closed = await adb.ensure_adb_keyboard_closed(serial)
     return {"status": "ok", "keyboard_closed": closed}
 
+@router.get("/api/device/desktop-mode")
+async def get_device_desktop_mode_endpoint(serial: Optional[str] = None):
+    from services import state
+    return {
+        "status": "ok",
+        "desktop_mode_enabled": getattr(state, "desktop_mode_enabled", True),
+        "desktop_keyboard_prohibited": getattr(state, "desktop_keyboard_prohibited", True)
+    }
+
+@router.post("/api/device/desktop-mode")
+@router.post("/api/device/desktop-mode/toggle")
+async def toggle_device_desktop_mode_endpoint(req: Optional[Dict[str, Any]] = None):
+    req = req or {}
+    from services import kiosk_service
+    enable = req.get("enabled", True)
+    ser = req.get("serial")
+    return await kiosk_service.toggle_desktop_mode(enable=enable, serial=ser)
+
+@router.get("/api/device/keyboard/prohibit")
+@router.get("/api/device/keyboard-prohibit")
+async def get_device_keyboard_prohibit_endpoint(serial: Optional[str] = None):
+    from services import state
+    return {
+        "status": "ok",
+        "prohibited": getattr(state, "desktop_keyboard_prohibited", True)
+    }
+
+@router.post("/api/device/keyboard/prohibit")
+@router.post("/api/device/keyboard-prohibit")
+async def set_device_keyboard_prohibit_endpoint(req: Optional[Dict[str, Any]] = None):
+    req = req or {}
+    from services import kiosk_service
+    prohibit = req.get("prohibit", True)
+    ser = req.get("serial")
+    return await kiosk_service.set_desktop_keyboard_prohibition(prohibit=prohibit, serial=ser)
+
 @router.post("/api/device/autofix-viewport")
 @router.post("/api/device/alignment/fix-viewport")
 async def autofix_viewport_endpoint(req: Optional[Dict[str, Any]] = None):
@@ -390,3 +426,45 @@ async def get_hardware_profile_endpoint():
         "status": "ok",
         "profile": get_hardware_acceleration_profile()
     }
+
+@router.post("/api/device/dismiss-anr")
+async def dismiss_anr_endpoint(req: Request):
+    """Proactively dismisses any ANR or frozen app/launcher dialog and restores editor focus."""
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    disp_id = data.get("display_id")
+    res = await adb.dismiss_anr_dialogs(serial=serial, display_id=disp_id)
+    return {"status": "ok", "details": res}
+
+@router.post("/api/device/enforce-desktop-markdown")
+async def enforce_desktop_markdown_endpoint(req: Request):
+    """
+    Assures that the Markdown editor only opens and runs on the desktop mode screen,
+    clearing any instance from the phone screen to avoid paused/white screen conflicts.
+    """
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    disp_id = data.get("display_id")
+    res = await adb.enforce_markdown_only_on_desktop(serial=serial, ext_display_id=disp_id)
+    return {"status": "ok", "details": res}
+
+@router.post("/api/device/auto-pin")
+async def auto_pin_endpoint(req: Request):
+    """
+    Automatically enters the device/Intune PIN whenever authentication is suddenly displayed.
+    """
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    disp_id = data.get("display_id")
+    pin = data.get("pin")
+    force = bool(data.get("force", True))
+    res = await adb.auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=force)
+    return {"status": "ok", "details": res}
+
+

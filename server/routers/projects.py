@@ -298,6 +298,13 @@ async def create_project(req: ProjectCreateRequest):
         "telemetry": state.latest_telemetry
     })
 
+    # Immediately ensure any pending ANR dialogs (e.g. Pixel Launcher isn't responding) are cleared
+    try:
+        from services.adb_service import dismiss_anr_dialogs
+        await dismiss_anr_dialogs(serial=dev_serial, display_id=disp_id)
+    except Exception:
+        pass
+
     # Automatically run the initialize DAG group asynchronously
     asyncio.create_task(execute_dag_group_initialize(project_id=new_proj["id"]))
 

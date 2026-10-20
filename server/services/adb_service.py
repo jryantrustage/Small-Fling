@@ -658,6 +658,127 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             return jpg
     return _get_or_create_standby_frame(mode)
 
+async def auto_handle_pin_authentication(
+    serial: Optional[str] = None,
+    ext_display_id: Optional[int] = None,
+    pin: Optional[str] = None,
+    force: bool = False
+) -> Dict[str, Any]:
+    """
+    Assures PIN code authentication is automatically handled whenever an authentication prompt
+    is suddenly displayed (e.g. Teams MAM PIN, Intune Company Portal, Keyguard, Lockscreen, MSAL).
+    Enters PIN on the primary phone display (Display 0) and the desktop display (e.g. Display 11)
+    to prevent user lockouts, especially since the physical phone screen is cracked and unresponsive to touch.
+    """
+    import config
+    active_pin = pin or getattr(config, "DEVICE_PIN", "1213") or "1213"
+    auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", True)
+
+    if not auto_pin_enabled and not force:
+        return {
+            "status": "blocked_by_safety",
+            "auth_detected": False,
+            "pin_submitted": False,
+            "keyguard_unlocked": False,
+            "actions": ["Automated PIN entry is disabled in Settings (Safe Lock)"]
+        }
+
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "status": "mock",
+            "auth_detected": False,
+            "pin_submitted": False,
+            "keyguard_unlocked": False,
+            "actions": []
+        }
+
+    ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
+    actions = []
+    auth_detected = False
+    keyguard_unlocked = False
+
+    try:
+        # 1. Check if device Keyguard / Lockscreen is showing
+        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
+        kg_out = kg_chk.get("stdout", "")
+        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out or force:
+            auth_detected = True
+            await run_adb_shell(
+                f"input -d 0 keyevent 224; "
+                f"input -d 0 keyevent 82; "
+                f"input -d 0 swipe 540 1800 540 600 200; "
+                f"sleep 0.1; "
+                f"input -d 0 text {active_pin}; "
+                f"input -d 0 keyevent 66; "
+                f"wm dismiss-keyguard",
+                ser,
+                timeout=3.0
+            )
+            keyguard_unlocked = True
+            actions.append(f"Unlocked device keyguard on phone screen with PIN {active_pin}")
+
+        # 2. Check for Intune / Teams MAM / MSAL / Broker PIN prompts
+        auth_chk = await run_adb_shell(
+            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity|BiometricActivity|biometric_prompt'",
+            ser,
+            timeout=1.2
+        )
+        auth_out = auth_chk.get("stdout", "")
+        mam_active = any(k.lower() in auth_out.lower() for k in [
+            "companyportal", "confirmcredential", "pinactivity", "authenticationactivity",
+            "lockpatternactivity", "mamstartupactivity", "mammsalauthactivity",
+            "brokerauthorizationactivity", "accountchooseractivity", "biometricactivity", "biometric_prompt"
+        ])
+
+        if mam_active or force:
+            auth_detected = True
+            # Enter PIN on external desktop display if available
+            if ext_id and ext_id > 0:
+                await run_adb_shell(
+                    f"input -d {ext_id} tap 960 660; "
+                    f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
+                    f"input -d {ext_id} text {active_pin}; "
+                    f"sleep 0.2; "
+                    f"input -d {ext_id} tap 960 734; "
+                    f"input -d {ext_id} keyevent 66",
+                    ser,
+                    timeout=3.0
+                )
+                actions.append(f"Submitted PIN {active_pin} to Intune MAM prompt on desktop display #{ext_id}")
+
+            # Also enter PIN on phone display in case prompt is rendered on Display 0
+            await run_adb_shell(f"input -d 0 text {active_pin}; input -d 0 keyevent 66", ser, timeout=1.5)
+            actions.append(f"Submitted PIN {active_pin} on phone display #0")
+
+        if auth_detected and actions:
+            try:
+                from services.state import ws_manager
+                await ws_manager.broadcast({
+                    "type": "pin_authentication_handled",
+                    "pin_length": len(active_pin),
+                    "actions": actions
+                })
+            except Exception:
+                pass
+
+        return {
+            "status": "ok",
+            "auth_detected": auth_detected,
+            "pin_submitted": bool(actions),
+            "keyguard_unlocked": keyguard_unlocked,
+            "actions": actions
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "auth_detected": auth_detected,
+            "pin_submitted": False,
+            "keyguard_unlocked": keyguard_unlocked,
+            "error": str(e),
+            "actions": actions
+        }
+
 async def configure_display_awake_policies(serial: Optional[str] = None, pin: Optional[str] = None) -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
@@ -680,55 +801,158 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: Op
             timeout=2.0
         )
 
-        # 2. Check if keyguard is showing or locked
-        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
-        kg_out = kg_chk.get("stdout", "")
-        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
-            # Wake up display 0, send menu/unlock key, swipe up to ensure PIN keypad is active, enter PIN, and enter
-            await run_adb_shell(
-                f"input -d 0 keyevent 224; "
-                f"input -d 0 keyevent 82; "
-                f"input -d 0 swipe 540 1800 540 600 200; "
-                f"sleep 0.1; "
-                f"input -d 0 text {active_pin}; "
-                f"input -d 0 keyevent 66; "
-                f"wm dismiss-keyguard",
-                ser,
-                timeout=3.0
-            )
-            result["keyguard_unlocked"] = True
-
-        # 3. Check if Teams or Intune Company Portal is prompting for authentication on internal or external display
-        ext_id = await detect_external_display_id(ser)
-        auth_chk = await run_adb_shell(
-            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity|BiometricActivity|biometric_prompt'",
-            ser,
-            timeout=1.2
-        )
-        auth_out = auth_chk.get("stdout", "")
-        if any(k.lower() in auth_out.lower() for k in [
-            "companyportal", "confirmcredential", "pinactivity", "authenticationactivity",
-            "lockpatternactivity", "mamstartupactivity", "mammsalauthactivity",
-            "brokerauthorizationactivity", "accountchooseractivity", "biometricactivity", "biometric_prompt"
-        ]):
-            # Enter PIN on both external display and internal phone display
-            if ext_id and ext_id > 0:
-                await run_adb_shell(
-                    f"input -d {ext_id} tap 960 660; "
-                    f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
-                    f"input -d {ext_id} text {active_pin}; "
-                    f"sleep 0.2; "
-                    f"input -d {ext_id} tap 960 734; "
-                    f"input -d {ext_id} keyevent 66",
-                    ser,
-                    timeout=3.0
-                )
-            await run_adb_shell(f"input -d 0 text {active_pin}; input -d 0 keyevent 66", ser, timeout=1.5)
-            result["auth_handled"] = True
+        # 2. Check and handle keyguard / PIN prompts on all active displays
+        pin_res = await auto_handle_pin_authentication(ser, pin=active_pin)
+        result["keyguard_unlocked"] = pin_res.get("keyguard_unlocked", False)
+        result["auth_handled"] = pin_res.get("auth_detected", False) and pin_res.get("pin_submitted", False)
+        result["pin_actions"] = pin_res.get("actions", [])
     except Exception as e:
         print(f"[configure_display_awake_policies] Note: {e}")
         result["error"] = str(e)
     return result
+
+def parse_activities_by_display(dumpsys_output: str) -> Dict[int, Dict[str, Any]]:
+    """
+    Parses 'dumpsys activity activities' and organizes tasks, resumed activities,
+    and package presence by display ID.
+    """
+    displays: Dict[int, Dict[str, Any]] = {}
+    lines = dumpsys_output.splitlines()
+    curr_disp = None
+    curr_task_id = None
+
+    for line in lines:
+        disp_m = re.search(r'Display #(\d+)', line)
+        if disp_m:
+            curr_disp = int(disp_m.group(1))
+            displays[curr_disp] = {
+                "file_preview_tasks": [],
+                "teams_tasks": [],
+                "resumed_activities": [],
+                "tasks": set()
+            }
+            curr_task_id = None
+            continue
+        if curr_disp is None:
+            continue
+
+        task_m = re.search(r'\bTask\{[0-9a-fA-F]+\s+#(\d+)', line)
+        if task_m:
+            curr_task_id = int(task_m.group(1))
+            displays[curr_disp]["tasks"].add(curr_task_id)
+            if "com.microsoft.teams" in line:
+                if curr_task_id not in displays[curr_disp]["teams_tasks"]:
+                    displays[curr_disp]["teams_tasks"].append(curr_task_id)
+
+        act_m = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+([^\s\}]+)(?:\s+t(\d+))?', line)
+        if act_m:
+            comp = act_m.group(1)
+            tid = int(act_m.group(2)) if act_m.group(2) else curr_task_id
+            if "FilePreviewActivity" in comp:
+                if tid and tid not in displays[curr_disp]["file_preview_tasks"]:
+                    displays[curr_disp]["file_preview_tasks"].append(tid)
+            if "com.microsoft.teams" in comp:
+                if tid and tid not in displays[curr_disp]["teams_tasks"]:
+                    displays[curr_disp]["teams_tasks"].append(tid)
+
+        top_m = re.search(r'topResumedActivity=ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+([^\s\}]+)', line)
+        if top_m:
+            displays[curr_disp]["resumed_activities"].append(top_m.group(1))
+
+    return displays
+
+async def enforce_markdown_only_on_desktop(
+    serial: Optional[str] = None,
+    ext_display_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Assures that the Markdown editor (FilePreviewActivity) ONLY opens and runs on the desktop mode screen
+    (external display e.g. Display 11 / Display 8), closing or removing it from the phone screen (Display 0)
+    to prevent the blank/paused white screen conflict. Also auto-handles any PIN prompt.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "status": "mock",
+            "phone_cleared": False,
+            "desktop_markdown_active": True,
+            "actions": []
+        }
+
+    ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
+    if not ext_id or ext_id <= 0:
+        return {
+            "status": "no_external_display",
+            "phone_cleared": False,
+            "desktop_markdown_active": False,
+            "actions": ["No external desktop display detected"]
+        }
+
+    actions = []
+    phone_cleared = False
+
+    # 1. Auto-handle PIN code authentication if suddenly displayed
+    pin_res = await auto_handle_pin_authentication(ser, ext_id)
+    if pin_res.get("auth_detected"):
+        actions.extend(pin_res.get("actions", []))
+
+    # 2. Query activity stack across all displays
+    act_res = await run_adb_shell("dumpsys activity activities", ser, timeout=3.5)
+    out = act_res.get("stdout", "") if act_res.get("status") == "ok" else ""
+    parsed = parse_activities_by_display(out)
+
+    disp0_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
+    ext_info = parsed.get(ext_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
+
+    # 3. Check if FilePreviewActivity or Teams is resident on Phone Display (Display 0)
+    phone_md_tasks = disp0_info.get("file_preview_tasks", [])
+    ext_md_tasks = set(ext_info.get("file_preview_tasks", []))
+    is_phone_resumed_teams = any("com.microsoft.teams" in r for r in disp0_info.get("resumed_activities", []))
+
+    if phone_md_tasks or is_phone_resumed_teams:
+        # Send HOME keyevent to phone display (Display 0) to ensure phone launcher is visible
+        await run_adb_shell("input -d 0 keyevent 3", ser, timeout=1.5)
+        actions.append("Dispatched HOME keyevent to phone display #0")
+        phone_cleared = True
+
+        # Remove any FilePreviewActivity tasks tied specifically to Display 0
+        for tid in phone_md_tasks:
+            if tid not in ext_md_tasks:
+                await run_adb_shell(f"cmd activity stack remove {tid}", ser, timeout=2.0)
+                actions.append(f"Removed phone Markdown task #{tid} from Display 0")
+        await asyncio.sleep(0.2)
+
+    # 4. Check status on External Desktop Display
+    is_ext_md_resumed = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", []))
+
+    if not is_ext_md_resumed:
+        # Launch / Bring com.microsoft.teams to the foreground on the external desktop display
+        await run_adb_shell(
+            f"monkey -p com.microsoft.teams -c android.intent.category.LAUNCHER 1 --display {ext_id} >/dev/null 2>&1",
+            ser,
+            timeout=3.0
+        )
+        actions.append(f"Launched / focused Teams on desktop display #{ext_id}")
+        await asyncio.sleep(0.3)
+
+        # Neutral tap on top left title bar area away from center caption handle
+        await run_adb_shell(f"input -d {ext_id} tap 240 40 >/dev/null 2>&1", ser, timeout=1.5)
+
+    # 5. Silently assure virtual keyboard is closed on desktop display
+    await dismiss_keyboard(ser, ext_id)
+
+    # 6. Check once more for any lingering PIN authentication prompt after display switch
+    pin_res2 = await auto_handle_pin_authentication(ser, ext_id)
+    if pin_res2.get("auth_detected"):
+        actions.extend(pin_res2.get("actions", []))
+
+    return {
+        "status": "ok",
+        "phone_cleared": phone_cleared,
+        "desktop_markdown_active": True,
+        "external_display_id": ext_id,
+        "actions": actions
+    }
 
 async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
@@ -744,11 +968,15 @@ async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
 async def awake_keepalive_loop():
     while True:
         try:
-            await asyncio.sleep(20.0)
+            await asyncio.sleep(15.0)
             ser = await get_active_adb_serial()
             if ser:
                 await configure_display_awake_policies(ser)
+                await auto_handle_pin_authentication(ser)
+                await enforce_markdown_only_on_desktop(ser)
                 await pulse_display_awake_heartbeat(ser)
+                # Keep external desktop responsive by clearing any frozen system/launcher dialogs
+                await dismiss_anr_dialogs(ser)
         except Exception:
             await asyncio.sleep(10.0)
 
@@ -797,10 +1025,21 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
     ser = await get_active_adb_serial(serial)
     if not ser: return True
     try:
+        from services import state
+        is_prohibited = getattr(state, "desktop_keyboard_prohibited", False)
+        did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+        valid_d = sanitize_input_display_id(did)
+
+        if is_prohibited:
+            cmd = "ime disable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; settings put secure show_ime_with_hard_keyboard 0"
+            if valid_d and valid_d > 0:
+                cmd += f"; input -d {valid_d} keyevent 111 >/dev/null 2>&1"
+            await run_adb_shell(cmd, ser, timeout=1.5)
+            _ime_visible_cache["val"] = False
+            _ime_visible_cache["ts"] = time.time()
+
         is_open = await is_ime_visible(ser, force_check=True)
         if is_open:
-            did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
-            valid_d = sanitize_input_display_id(did)
             if valid_d and valid_d > 0:
                 await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
             # Enforce hardware keyboard policy and dismiss active IME window on display 0 if open
@@ -835,6 +1074,89 @@ async def get_display_dimensions(serial: Optional[str] = None, display_id: Optio
     except Exception:
         pass
     return 1920, 1080
+
+async def dismiss_anr_dialogs(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Detects and dismisses Application Not Responding (ANR) or frozen app dialogs (e.g. 'Pixel Launcher isn't responding').
+    If Pixel Launcher is unresponsive on the desktop display, force-stops and restarts it cleanly to immediately
+    unfreeze input dispatch and return responsiveness to the Markdown editor.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {"anr_detected": False, "actions": []}
+
+    actions: List[str] = []
+    try:
+        # Check window manager for ANR dialogs across all displays
+        chk = await run_adb_shell("dumpsys window windows | grep -iE 'Application Not Responding|isn\'t responding|Application Error|aerr'", ser, timeout=2.0)
+        out = chk.get("stdout", "")
+
+        proc_chk = await run_adb_shell("dumpsys activity processes | grep -iE 'not responding|anr'", ser, timeout=2.0)
+        proc_out = proc_chk.get("stdout", "")
+
+        has_anr = any(k in out for k in ["Application Not Responding", "isn't responding", "Application Error", "aerr"]) or ("not responding" in proc_out.lower())
+
+        if not has_anr:
+            return {"anr_detected": False, "actions": []}
+
+        # 1. Check if Pixel Launcher is the unresponsive component
+        is_launcher_anr = ("nexuslauncher" in out.lower()) or ("pixel launcher" in out.lower()) or ("nexuslauncher" in proc_out.lower())
+
+        if is_launcher_anr:
+            # Force stop Pixel Launcher. Android immediately restarts it cleanly in ~100ms.
+            # This instantly dismisses the modal ANR dialog and unblocks touch/keyboard input dispatch!
+            await run_adb_shell("am force-stop com.google.android.apps.nexuslauncher", ser, timeout=2.0)
+            actions.append("Force-stopped unresponsive Pixel Launcher (auto-restarted cleanly by OS)")
+            await asyncio.sleep(0.3)
+
+        # 2. Broadcast system dialog dismissal
+        await run_adb_shell("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS", ser, timeout=1.5)
+        actions.append("Broadcasted CLOSE_SYSTEM_DIALOGS")
+
+        # 3. Dismiss on target display via coordinate taps and keyevents if dialog window persists
+        did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+        disp_w, disp_h = await get_display_dimensions(ser, did)
+        valid_d = sanitize_input_display_id(did)
+        d_pfx = f"-d {valid_d} " if valid_d else ""
+
+        # Android 14/15 landscape ANR dialog button coordinates:
+        # Center X = disp_w // 2 (960 on 1080p)
+        # "Close app" button is at ~41.5% height (448 on 1080p)
+        # "Wait" button is at ~50.5% height (545 on 1080p)
+        cx = disp_w // 2
+        cy_close = int(disp_h * 0.415)
+        cy_wait = int(disp_h * 0.505)
+
+        # Tap 'Wait' / 'Close app'
+        if is_launcher_anr:
+            await run_adb_shell(f"input {d_pfx}tap {cx} {cy_close} >/dev/null 2>&1", ser, timeout=1.5)
+            actions.append(f"Tapped 'Close app' button at ({cx}, {cy_close}) on display #{did}")
+        else:
+            await run_adb_shell(f"input {d_pfx}tap {cx} {cy_wait} >/dev/null 2>&1", ser, timeout=1.5)
+            actions.append(f"Tapped 'Wait' button at ({cx}, {cy_wait}) on display #{did}")
+
+        # Send Escape / Back keyevent to dismiss any lingering dialog overlay
+        await run_adb_shell(f"input {d_pfx}keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
+        await asyncio.sleep(0.15)
+
+        # 4. Bring Markdown Viewer window back to front
+        try:
+            from services import kiosk_service
+            tasks = await kiosk_service.find_teams_task_targets(ser)
+            md_task = tasks.get("markdown_viewer_task_id")
+            if md_task:
+                await run_adb_shell(f"cmd activity task to-front {md_task}", ser, timeout=2.0)
+                actions.append(f"Restored Markdown editor window (Task #{md_task}) to front")
+        except Exception:
+            pass
+
+        return {
+            "anr_detected": True,
+            "launcher_anr": is_launcher_anr,
+            "actions": actions
+        }
+    except Exception as e:
+        return {"anr_detected": False, "error": str(e), "actions": actions}
 
 async def is_editor_full_screen(
     serial: Optional[str] = None,
@@ -981,9 +1303,11 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
 
     # Do NOT execute cmd activity task resize on FilePreviewActivity; doing so corrupts the Chromium WebView
     # and forces Teams to reload, blanking out the editor and turning the canvas white.
+    # Assure Markdown only opens and runs on desktop display and clear any phone screen conflicts
+    await enforce_markdown_only_on_desktop(ser, display_id)
+
     cmd = (
         f"am broadcast -a com.matrixcapture.app.action.AUTO_REFRESH_DISPLAY --ei display_id {display_id} >/dev/null 2>&1; "
-        f"top_tid=$(dumpsys activity activities | grep -E 'FilePreviewActivity.*t[0-9]+' | head -n 1 | grep -oE 't[0-9]+' | tr -d 't'); "
         f"settings put secure show_ime_with_hard_keyboard 0"
     )
     res = await run_adb_shell(cmd, ser, timeout=4.0)
@@ -1365,6 +1689,9 @@ async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Option
     if current_dpi != target_dpi:
         await run_adb_shell(f"wm density {target_dpi} -d {did}", ser, timeout=2.0)
         current_dpi = target_dpi
+        # Allow WindowManager and Pixel Launcher time to recreate display surfaces cleanly
+        await asyncio.sleep(0.6)
+        await dismiss_anr_dialogs(ser, did)
 
     factor = max(0.4, min(3.5, round(current_dpi / 160.0, 3)))
     try:
@@ -1478,6 +1805,9 @@ async def enforce_device_characteristics(
     if current_dpi != target_dpi:
         await run_adb_shell(f"wm density {target_dpi} -d {did}", ser, timeout=2.5)
         current_dpi = target_dpi
+        # Allow WindowManager and Pixel Launcher time to recreate display surfaces cleanly
+        await asyncio.sleep(0.6)
+        await dismiss_anr_dialogs(ser, did)
 
     factor = max(0.4, min(3.5, round(current_dpi / 160.0, 3)))
 

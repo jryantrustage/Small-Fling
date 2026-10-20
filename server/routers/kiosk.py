@@ -22,6 +22,14 @@ class KioskAutoRefreshRequest(BaseModel):
     display_id: Optional[int] = None
     serial: Optional[str] = None
 
+class DesktopModeToggleRequest(BaseModel):
+    enabled: bool
+    serial: Optional[str] = None
+
+class KeyboardProhibitRequest(BaseModel):
+    prohibit: bool
+    serial: Optional[str] = None
+
 @router.get("/displays")
 async def get_displays_endpoint(serial: Optional[str] = None):
     displays = await kiosk_service.get_connected_displays(serial)
@@ -31,6 +39,38 @@ async def get_displays_endpoint(serial: Optional[str] = None):
 async def get_kiosk_status_endpoint(serial: Optional[str] = None):
     status = await kiosk_service.query_kiosk_status(serial)
     return status
+
+@router.get("/desktop-mode")
+async def get_desktop_mode_endpoint(serial: Optional[str] = None):
+    from services import state
+    return {
+        "status": "ok",
+        "desktop_mode_enabled": getattr(state, "desktop_mode_enabled", True),
+        "desktop_keyboard_prohibited": getattr(state, "desktop_keyboard_prohibited", True)
+    }
+
+@router.post("/desktop-mode")
+@router.post("/desktop-mode/toggle")
+async def toggle_desktop_mode_endpoint(req: DesktopModeToggleRequest):
+    res = await kiosk_service.toggle_desktop_mode(enable=req.enabled, serial=req.serial)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Failed to toggle desktop mode"))
+    return res
+
+@router.get("/keyboard-prohibit")
+async def get_keyboard_prohibit_endpoint(serial: Optional[str] = None):
+    from services import state
+    return {
+        "status": "ok",
+        "prohibited": getattr(state, "desktop_keyboard_prohibited", True)
+    }
+
+@router.post("/keyboard-prohibit")
+async def set_keyboard_prohibit_endpoint(req: KeyboardProhibitRequest):
+    res = await kiosk_service.set_desktop_keyboard_prohibition(prohibit=req.prohibit, serial=req.serial)
+    if res.get("status") == "error":
+        raise HTTPException(status_code=400, detail=res.get("message", "Failed to update keyboard prohibition"))
+    return res
 
 @router.post("/lock")
 async def lock_external_display_endpoint(req: KioskLockRequest):

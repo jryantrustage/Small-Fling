@@ -37,12 +37,25 @@ class InitEndNode(BaseDagNode):
         cfg = blackboard.config or self.default_config
         calib = state.FRAMES_DIR / "dag_node1_end.png"
 
-        # 1. Focus editor WebView directly on external display
+        # Auto-dismiss any lingering ANR dialogs before attempting editor calibration
+        try:
+            from services.adb_service import dismiss_anr_dialogs
+            await dismiss_anr_dialogs(serial, disp_id)
+        except Exception:
+            pass
+
+        # 1. Enforce Markdown exclusively on desktop display & focus without tapping editable text
+        try:
+            from services.adb_service import enforce_markdown_only_on_desktop
+            await enforce_markdown_only_on_desktop(serial, disp_id)
+        except Exception:
+            pass
         disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.15)
+        # Tap neutral title text area on left (x=240, y=40) away from center window caption handle
+        await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
+        await asyncio.sleep(0.08)
         await dismiss_keyboard(serial, disp_id)
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.08)
 
         # 2. Dispatch Ctrl+End to navigate to EOF
         await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end")
@@ -111,10 +124,10 @@ class InitEndNode(BaseDagNode):
 
         # Retry jump if stuck
         if is_stuck:
-            await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", serial)
-            await asyncio.sleep(0.15)
+            await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
+            await asyncio.sleep(0.08)
             await dismiss_keyboard(serial, disp_id)
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.08)
             await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end_retry")
             await asyncio.sleep(1.0)
             await dismiss_keyboard(serial, disp_id)

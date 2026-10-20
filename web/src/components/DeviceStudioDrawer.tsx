@@ -74,6 +74,10 @@ export interface DeviceStudioDrawerProps {
   onToggleMinimize?: () => void;
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
+  desktopModeEnabled?: boolean;
+  onToggleDesktopMode?: (enable: boolean) => void;
+  desktopKeyboardProhibited?: boolean;
+  onToggleProhibitKeyboard?: (prohibit?: boolean) => void;
 }
 
 export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
@@ -121,6 +125,10 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   onToggleMinimize,
   isMaximized: controlledMaximized,
   onToggleMaximize,
+  desktopModeEnabled = true,
+  onToggleDesktopMode,
+  desktopKeyboardProhibited = true,
+  onToggleProhibitKeyboard,
 }) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>(initialTab);
@@ -524,23 +532,37 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
               <span className="status-dot-mini" />
             </button>
 
-            {/* Quick Live Mode Switcher */}
+            {/* Quick Live Mode & Hardware Display Switcher */}
             <div className="studio-mode-pill-group">
               <button
                 type="button"
-                className={`studio-mode-btn ${liveMode === 'desktop' ? 'active' : ''}`}
-                onClick={() => { onSwitchLiveMode('desktop'); onRefreshStream(); }}
+                className={`studio-mode-btn ${liveMode === 'desktop' && desktopModeEnabled ? 'active' : ''}`}
+                onClick={() => {
+                  onSwitchLiveMode('desktop');
+                  onRefreshStream();
+                  if (onToggleDesktopMode && !desktopModeEnabled) {
+                    onToggleDesktopMode(true);
+                  }
+                }}
+                title="Desktop Mode: Viewport + Mouse on external monitor (Display 11)"
               >
                 <Monitor size={11} />
                 <span>DESKTOP</span>
               </button>
               <button
                 type="button"
-                className={`studio-mode-btn ${liveMode === 'phone' ? 'active' : ''}`}
-                onClick={() => { onSwitchLiveMode('phone'); onRefreshStream(); }}
+                className={`studio-mode-btn ${(liveMode === 'phone' || !desktopModeEnabled) ? 'active' : ''}`}
+                onClick={() => {
+                  onSwitchLiveMode('phone');
+                  onRefreshStream();
+                  if (onToggleDesktopMode && desktopModeEnabled) {
+                    onToggleDesktopMode(false);
+                  }
+                }}
+                title="Phone Screen Mode: Route mouse to phone screen (Display 0), unlock kiosk, enable keyboard for auth"
               >
                 <Smartphone size={11} />
-                <span>PHONE</span>
+                <span>PHONE (MOUSE)</span>
               </button>
             </div>
 
@@ -1399,39 +1421,79 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                     </div>
                   )}
 
-                  {/* Display Hardware Capabilities */}
-                  <div className="dropdown-section-title" style={{ marginTop: '14px' }}>DISPLAY HARDWARE CAPABILITIES</div>
+                  {/* Display Hardware & Mouse Routing */}
+                  <div className="dropdown-section-title" style={{ marginTop: '14px' }}>DISPLAY HARDWARE & MOUSE ROUTING</div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <div className={`capability-card ${deviceInfo?.displays?.desktop ? 'ready' : 'na'}`} style={{ flex: 1 }}>
-                      <Monitor size={14} />
-                      <span>Desktop Mode: {deviceInfo?.displays?.desktop ? 'READY' : 'N/A'}</span>
-                    </div>
-                    <div className={`capability-card phone ${deviceInfo?.displays?.phone ? 'ready' : 'na'}`} style={{ flex: 1 }}>
-                      <Smartphone size={14} />
-                      <span>Phone Mode: {deviceInfo?.displays?.phone ? 'READY' : 'N/A'}</span>
-                    </div>
-                  </div>
-
-                  {/* Input Method & Virtual Keyboard Suppression */}
-                  <div className="dropdown-section-title" style={{ marginTop: '14px' }}>INPUT METHOD & IME</div>
-                  <div className="ime-control-card">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Keyboard size={15} color="#00ff9d" />
-                      <div>
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>HID Active (IME Suppressed)</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Prevents software keyboard popup over desktop viewport</div>
-                      </div>
-                    </div>
                     <button
                       type="button"
-                      className="btn btn-sm btn-outline"
-                      style={{ padding: '4px 10px', height: '26px', fontSize: '11px' }}
-                      onClick={onCloseKeyboard}
-                      disabled={isClosingKeyboard}
-                      title="Force dismiss on-screen virtual keyboard"
+                      className={`capability-card ${desktopModeEnabled ? 'ready' : 'na'}`}
+                      style={{ flex: 1, cursor: 'pointer', border: desktopModeEnabled ? '1px solid #388bfd' : '1px solid rgba(255,255,255,0.1)' }}
+                      onClick={() => onToggleDesktopMode?.(true)}
+                      title="Desktop Mode: Mouse routed to external monitor (Display 11). Click to activate."
                     >
-                      {isClosingKeyboard ? <Loader2 size={11} className="spin" /> : 'Close IME'}
+                      <Monitor size={14} />
+                      <span>Desktop Mode: {desktopModeEnabled ? 'ACTIVE (MOUSE)' : 'STANDBY'}</span>
                     </button>
+                    <button
+                      type="button"
+                      className={`capability-card phone ${!desktopModeEnabled ? 'ready' : 'na'}`}
+                      style={{ flex: 1, cursor: 'pointer', border: !desktopModeEnabled ? '1px solid #a371f7' : '1px solid rgba(255,255,255,0.1)' }}
+                      onClick={() => onToggleDesktopMode?.(false)}
+                      title="Phone Screen Mode: Mouse routed to phone (Display 0), kiosk unlocked, keyboard enabled for auth. Click to activate."
+                    >
+                      <Smartphone size={14} />
+                      <span>Phone Mode: {!desktopModeEnabled ? 'ACTIVE (MOUSE)' : 'STANDBY'}</span>
+                    </button>
+                  </div>
+
+                  {/* Input Method & Soft Keyboard Suppression */}
+                  <div className="dropdown-section-title" style={{ marginTop: '14px' }}>INPUT METHOD & IME</div>
+                  <div className="ime-control-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Keyboard size={15} color={desktopKeyboardProhibited ? '#00ff9d' : '#e3b341'} />
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>
+                            {desktopKeyboardProhibited ? 'Soft Keyboard PROHIBITED (Disabled)' : 'Soft Keyboard ALLOWED'}
+                          </div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                            {desktopKeyboardProhibited
+                              ? 'Soft keyboard disabled at OS level so clicking or running nodes will NEVER pop open the keyboard.'
+                              : 'Virtual keyboard is currently allowed to appear when text fields gain focus.'}
+                          </div>
+                        </div>
+                      </div>
+                      {onToggleProhibitKeyboard && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          style={{
+                            padding: '4px 10px', height: '26px', fontSize: '11px', fontWeight: 700,
+                            borderColor: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)',
+                            color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341',
+                            background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.15)' : 'rgba(210, 153, 34, 0.15)'
+                          }}
+                          onClick={() => onToggleProhibitKeyboard(!desktopKeyboardProhibited)}
+                          title={desktopKeyboardProhibited ? 'Click to allow soft keyboard' : 'Click to completely prohibit soft keyboard on desktop screen'}
+                        >
+                          {desktopKeyboardProhibited ? 'PROHIBITED ✔' : 'PROHIBIT KEYBOARD'}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Force dismiss virtual keyboard:</span>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline"
+                        style={{ padding: '2px 8px', height: '22px', fontSize: '10px' }}
+                        onClick={onCloseKeyboard}
+                        disabled={isClosingKeyboard}
+                        title="Force dismiss on-screen virtual keyboard"
+                      >
+                        {isClosingKeyboard ? <Loader2 size={11} className="spin" /> : 'Close IME'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

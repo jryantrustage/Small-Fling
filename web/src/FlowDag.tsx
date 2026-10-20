@@ -3,7 +3,7 @@ import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
   RotateCcw, LayoutGrid, ZoomIn, ZoomOut,
-  ShieldAlert, Unlock, Info
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -85,6 +85,10 @@ export interface FlowDagProps {
   onClose?: () => void;
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
+  desktopKeyboardProhibited?: boolean;
+  onToggleProhibitKeyboard?: (prohibit?: boolean) => void;
+  desktopModeEnabled?: boolean;
+  onToggleDesktopMode?: (enable: boolean) => void;
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
@@ -92,7 +96,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   targetTotalLines = 0, currentPage = 1, isOrchestrating: _isOrchestrating = false, onRefresh,
   selectedDag = 'all', onSelectDag, selectedNodeId, onSelectNodeId,
   projectInitProgress, onDismissInitProgress, onRetryInit, eventsLog = [],
-  onClose, isMinimized = false, onToggleMinimize
+  onClose, isMinimized = false, onToggleMinimize,
+  desktopKeyboardProhibited = true, onToggleProhibitKeyboard,
+  desktopModeEnabled = true, onToggleDesktopMode
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
@@ -1186,6 +1192,50 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
             </button>
 
+            {/* Prohibit Desktop Keyboard Toggle Button */}
+            {onToggleProhibitKeyboard && (
+              <button
+                type="button"
+                onClick={() => onToggleProhibitKeyboard(!desktopKeyboardProhibited)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: `1px solid ${desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)'}`,
+                  background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.18)' : 'rgba(210, 153, 34, 0.18)',
+                  color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341',
+                  fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
+                }}
+                title={desktopKeyboardProhibited
+                  ? 'Desktop Soft Keyboard is PROHIBITED (Disabled at OS level so clicking nodes will NEVER pop open the keyboard). Click to allow.'
+                  : 'Desktop Soft Keyboard is ALLOWED. Click to completely prohibit soft keyboard on desktop screen.'}
+              >
+                <Keyboard size={10} />
+                <span>{desktopKeyboardProhibited ? 'KEYBOARD: BLOCKED' : 'BLOCK KEYBOARD'}</span>
+              </button>
+            )}
+
+            {/* Desktop Mode / Phone Screen (Mouse) Toggle Button */}
+            {onToggleDesktopMode && (
+              <button
+                type="button"
+                onClick={() => onToggleDesktopMode(!desktopModeEnabled)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: `1px solid ${desktopModeEnabled ? 'rgba(56, 139, 253, 0.6)' : 'rgba(163, 113, 247, 0.6)'}`,
+                  background: desktopModeEnabled ? 'rgba(56, 139, 253, 0.18)' : 'rgba(163, 113, 247, 0.18)',
+                  color: desktopModeEnabled ? '#58a6ff' : '#d2a8ff',
+                  fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
+                }}
+                title={desktopModeEnabled
+                  ? 'Desktop Mode ON (External monitor display 11, mouse active). Click to route mouse to phone screen (display 0), remove kiosk mode, & enable keyboard for auth.'
+                  : 'Phone Screen Mode ON (Mouse routed to phone display 0, kiosk unlocked, keyboard enabled). Click to return to Desktop Mode.'}
+              >
+                {desktopModeEnabled ? <Monitor size={10} /> : <Smartphone size={10} />}
+                <span>{desktopModeEnabled ? 'DESKTOP MODE' : 'PHONE SCREEN (MOUSE)'}</span>
+              </button>
+            )}
+
             {/* Window Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
               <button
@@ -1438,6 +1488,60 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <Play size={7.5} fill="#bc8cff" />
               <span>Assemble</span>
             </button>
+
+            <div style={{ width: '1px', height: '14px', background: '#30363d', margin: '0 3px' }} />
+
+            {/* Prohibit Desktop Keyboard Single Button */}
+            {onToggleProhibitKeyboard && (
+              <button
+                type="button"
+                onClick={() => onToggleProhibitKeyboard()}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: desktopKeyboardProhibited ? '1px solid rgba(0, 255, 157, 0.45)' : '1px solid rgba(255, 166, 87, 0.4)',
+                  background: desktopKeyboardProhibited ? 'rgba(0, 255, 157, 0.12)' : 'rgba(255, 166, 87, 0.08)',
+                  color: desktopKeyboardProhibited ? '#00ff9d' : '#ffa657',
+                  fontSize: '8.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title={desktopKeyboardProhibited ? "Desktop Keyboard Prohibited: Soft keyboard will never appear on desktop mode screen when running nodes (Click to allow keyboard)" : "Desktop Keyboard Allowed (Click to completely prohibit keyboard on desktop screen)"}
+              >
+                <Shield size={9} color={desktopKeyboardProhibited ? '#00ff9d' : '#ffa657'} />
+                <span>{desktopKeyboardProhibited ? 'KEYBOARD: PROHIBITED' : 'KEYBOARD: ALLOWED'}</span>
+              </button>
+            )}
+
+            {/* Toggle Desktop Mode / Phone Screen Mode */}
+            {onToggleDesktopMode && (
+              <button
+                type="button"
+                onClick={() => onToggleDesktopMode(!desktopModeEnabled)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: desktopModeEnabled ? '1px solid rgba(88, 166, 255, 0.4)' : '1px solid rgba(255, 166, 87, 0.4)',
+                  background: desktopModeEnabled ? 'rgba(88, 166, 255, 0.12)' : 'rgba(255, 166, 87, 0.12)',
+                  color: desktopModeEnabled ? '#58a6ff' : '#ffa657',
+                  fontSize: '8.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title={desktopModeEnabled ? "Desktop Mode Active (Mouse on Monitor). Click to switch to Phone Screen (moves mouse to phone, removes kiosk lockdown, enables phone keyboard for auth)" : "Phone Screen Active (Mouse on Phone Screen, Kiosk Removed, Keyboard Ready for Auth). Click to return to Desktop Mode"}
+              >
+                {desktopModeEnabled ? <Monitor size={9} /> : <Smartphone size={9} />}
+                <span>{desktopModeEnabled ? 'DESKTOP MODE' : 'PHONE SCREEN (MOUSE)'}</span>
+              </button>
+            )}
           </div>
 
           {/* Right: Layout Snap, Zoom & Pan Controls */}

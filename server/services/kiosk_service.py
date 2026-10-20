@@ -27,6 +27,9 @@ kiosk_state: Dict[str, Any] = {
         "disable_status_bar": True,
         "prevent_sleep": True
     },
+    "desktop_mode_enabled": True,
+    "desktop_keyboard_prohibited": True,
+    "mouse_display_id": -1,
     "last_updated": None
 }
 
@@ -111,10 +114,11 @@ async def get_connected_displays(serial: Optional[str] = None) -> List[Dict[str,
 
     return displays
 
-async def find_teams_task_targets(serial: Optional[str] = None) -> Dict[str, Any]:
+async def find_teams_task_targets(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Distinguishes between the Markdown Viewer (FilePreviewActivity) and the Teams App (PersonalFilesActivity/MainActivity).
-    Returns task IDs, active flags, and component names.
+    Distinguishes between the Markdown Viewer (FilePreviewActivity) and the Teams App (PersonalFilesActivity/MainActivity)
+    specifically for the target desktop display vs the phone display (Display 0).
+    Returns task IDs, active flags, component names, and whether Markdown is lingering on the phone.
     """
     ser = await adb.get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
@@ -123,27 +127,52 @@ async def find_teams_task_targets(serial: Optional[str] = None) -> Dict[str, Any
             "teams_app_task_id": 307,
             "is_markdown_viewer_active": True,
             "is_teams_app_active": True,
-            "top_activity": "com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity"
+            "top_activity": "com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity",
+            "is_open_on_phone": False,
+            "phone_markdown_tasks": []
         }
 
     res = await adb.run_adb_shell("dumpsys activity activities", ser, timeout=3.5)
     out = res.get("stdout", "") if res.get("status") == "ok" else ""
+    parsed = adb.parse_activities_by_display(out)
 
-    md_m = re.search(r'FilePreviewActivity\s+t(\d+)', out)
-    md_task_id = int(md_m.group(1)) if md_m else None
+    target_d = display_id if (display_id is not None and display_id > 0) else await adb.detect_external_display_id(ser)
+    target_info = parsed.get(target_d, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
+    phone_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
 
-    teams_m = re.search(r'(PersonalFilesActivity|MainActivity)\s+t(\d+)', out)
-    teams_task_id = int(teams_m.group(2)) if teams_m else None
+    md_tasks = target_info.get("file_preview_tasks", [])
+    teams_tasks = target_info.get("teams_tasks", [])
+
+    md_task_id = md_tasks[0] if md_tasks else None
+    teams_task_id = teams_tasks[0] if teams_tasks else None
+
+    # Fallback to general regex if no display-specific task was parsed
+    if not md_task_id:
+        md_m = re.search(r'FilePreviewActivity\s+t(\d+)', out)
+        if md_m:
+            fallback_tid = int(md_m.group(1))
+            if fallback_tid not in phone_info.get("file_preview_tasks", []):
+                md_task_id = fallback_tid
+
+    if not teams_task_id:
+        teams_m = re.search(r'(PersonalFilesActivity|MainActivity)\s+t(\d+)', out)
+        if teams_m:
+            teams_task_id = int(teams_m.group(2))
 
     top_m = re.search(r'(?:topResumedActivity|mFocusedApp).*ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+([^\s\}]+)', out)
     top_act = top_m.group(1) if top_m else None
+
+    is_open_on_phone = len(phone_info.get("file_preview_tasks", [])) > 0
 
     return {
         "markdown_viewer_task_id": md_task_id,
         "teams_app_task_id": teams_task_id,
         "is_markdown_viewer_active": bool(md_task_id is not None),
         "is_teams_app_active": bool(teams_task_id is not None),
-        "top_activity": top_act
+        "top_activity": top_act,
+        "display_id": target_d,
+        "is_open_on_phone": is_open_on_phone,
+        "phone_markdown_tasks": phone_info.get("file_preview_tasks", [])
     }
 
 async def query_kiosk_status(serial: Optional[str] = None) -> Dict[str, Any]:
@@ -312,8 +341,10 @@ async def lock_external_display(
             resolved_target_type = "generic"
 
     if task_id_to_lock:
-        # Bring target task to front first
-        await adb.run_adb_shell(f"cmd activity task to-front {task_id_to_lock}", ser)
+        # Bring target task/app to front on external display
+        pkg_to_launch = package_id or "com.microsoft.teams"
+        await adb.run_adb_shell(f"monkey -p {pkg_to_launch} -c android.intent.category.LAUNCHER 1 --display {display_id} >/dev/null 2>&1", ser)
+        await adb.run_adb_shell(f"input -d {display_id} tap 240 40 >/dev/null 2>&1", ser)
         await asyncio.sleep(0.15)
         # Lock task in kiosk mode
         await adb.run_adb_shell(f"am task lock {task_id_to_lock}", ser)
@@ -421,4 +452,147 @@ async def auto_refresh_external_display(display_id: Optional[int] = None, serial
         "message": f"Successfully auto-refreshed external display #{display_id} (keyboard closed ✔)",
         "kiosk_state": updated
     }
+
+async def set_desktop_keyboard_prohibition(prohibit: bool, serial: Optional[str] = None) -> Dict[str, Any]:
+    global kiosk_state
+    ser = await adb.get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active device connected"}
+
+    from services import state
+    state.desktop_keyboard_prohibited = prohibit
+    kiosk_state["desktop_keyboard_prohibited"] = prohibit
+
+    disp_id = kiosk_state.get("target_display_id", -1)
+    if disp_id <= 0:
+        disp_id = await adb.detect_external_display_id(ser)
+
+    if prohibit:
+        # Completely prohibit soft keyboard from ever appearing on desktop mode screen
+        cmd = (
+            "ime disable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+            "settings put secure show_ime_with_hard_keyboard 0"
+        )
+        if disp_id > 0:
+            cmd += f"; input -d {disp_id} keyevent 111 >/dev/null 2>&1"
+        await adb.run_adb_shell(cmd, ser)
+        msg = "Desktop keyboard completely prohibited. Soft keyboard will never appear on desktop mode screen."
+    else:
+        # Restore normal keyboard behavior
+        cmd = (
+            "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+            "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+            "settings put secure show_ime_with_hard_keyboard 1"
+        )
+        await adb.run_adb_shell(cmd, ser)
+        msg = "Desktop keyboard prohibition disabled. Soft keyboard allowed."
+
+    state.latest_telemetry["desktop_keyboard_prohibited"] = prohibit
+    await ws_manager.broadcast({
+        "type": "keyboard_prohibit_changed",
+        "prohibited": prohibit,
+        "message": msg
+    })
+
+    return {
+        "status": "ok",
+        "prohibited": prohibit,
+        "message": msg
+    }
+
+async def toggle_desktop_mode(enable: bool, serial: Optional[str] = None) -> Dict[str, Any]:
+    global kiosk_state
+    ser = await adb.get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active device connected"}
+
+    from services import state
+
+    # Detect external display ID (e.g. 11 or from kiosk_state)
+    disp_id = kiosk_state.get("target_display_id", -1)
+    if disp_id <= 0:
+        disp_id = await adb.detect_external_display_id(ser)
+    if disp_id <= 0:
+        displays = await get_connected_displays(ser)
+        for d in displays:
+            if d.get("isExternal") and d.get("displayId", 0) > 0:
+                disp_id = d["displayId"]
+                break
+
+    if not enable:
+        # 1. Disable external desktop display so Android routes mouse pointer to Display 0 (Phone screen)
+        if disp_id > 0:
+            await adb.run_adb_shell(f"cmd display disable-display {disp_id}", ser)
+
+        # 2. Remove Kiosk Mode / App Pinning / Lock Task so user is not locked into markdown app
+        await release_lock(serial=ser)
+
+        # 3. Assure phone screen keyboard appears normally for authentication
+        await adb.run_adb_shell(
+            "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+            "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+            "settings put secure show_ime_with_hard_keyboard 1",
+            ser
+        )
+        # Wake up phone display 0
+        await adb.run_adb_shell("input -d 0 keyevent 224", ser)
+
+        state.desktop_mode_enabled = False
+        state.latest_telemetry["desktop_mode_enabled"] = False
+        kiosk_state["desktop_mode_enabled"] = False
+        kiosk_state["mouse_display_id"] = 0
+
+        # Broadcast state changes
+        await ws_manager.broadcast({
+            "type": "desktop_mode_changed",
+            "desktop_mode_enabled": False,
+            "mouse_display_id": 0,
+            "kiosk_removed": True,
+            "keyboard_auth_ready": True
+        })
+
+        return {
+            "status": "ok",
+            "desktop_mode_enabled": False,
+            "mouse_display_id": 0,
+            "message": "Desktop mode disabled. Mouse pointer switched to phone screen, kiosk mode removed, and keyboard enabled for authentication."
+        }
+    else:
+        # Re-enabling desktop mode
+        if disp_id > 0:
+            await adb.run_adb_shell(f"cmd display enable-display {disp_id}", ser)
+            await asyncio.sleep(0.15)
+            # Route mouse cursor back to external desktop display away from center window caption handle
+            await adb.run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", ser)
+
+        # Assure Markdown only opens on external desktop screen and clear phone display
+        if disp_id > 0:
+            await adb.enforce_markdown_only_on_desktop(ser, disp_id)
+            await adb.auto_fix_viewport(ser, disp_id)
+            await adb.dismiss_anr_dialogs(ser, disp_id)
+
+        # If desktop keyboard prohibition is active, re-enforce prohibition on desktop
+        if getattr(state, "desktop_keyboard_prohibited", True):
+            await set_desktop_keyboard_prohibition(True, ser)
+
+        state.desktop_mode_enabled = True
+        state.latest_telemetry["desktop_mode_enabled"] = True
+        kiosk_state["desktop_mode_enabled"] = True
+        kiosk_state["mouse_display_id"] = disp_id
+
+        await ws_manager.broadcast({
+            "type": "desktop_mode_changed",
+            "desktop_mode_enabled": True,
+            "mouse_display_id": disp_id,
+            "kiosk_removed": False,
+            "keyboard_auth_ready": not getattr(state, "desktop_keyboard_prohibited", True)
+        })
+
+        return {
+            "status": "ok",
+            "desktop_mode_enabled": True,
+            "mouse_display_id": disp_id,
+            "message": f"Desktop mode enabled on display #{disp_id}. Mouse routed to external monitor."
+        }
+
 

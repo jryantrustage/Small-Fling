@@ -100,15 +100,15 @@ export const StructuredLogEntry: React.FC<StructuredLogEntryProps> = ({
         className={`event-log-entry cat-${(ev.category || 'system').toLowerCase()} ${isErrorCat ? 'entry-error' : ''}`}
         style={{
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           gap: '6px',
-          padding: '3px 8px',
+          padding: '4px 8px',
           borderRadius: '4px',
           background: isErrorCat ? 'rgba(248, 81, 73, 0.12)' : (isSuccess ? 'rgba(0, 255, 157, 0.08)' : 'transparent'),
           borderLeft: isErrorCat ? '2px solid #f85149' : (isSuccess ? '2px solid #00ff9d' : '2px solid transparent')
         }}
       >
-        <span className="event-time" style={{ color: '#8b949e', fontSize: '9px' }}>{ev.timestamp}</span>
+        <span className="event-time" style={{ color: '#8b949e', fontSize: '9px', paddingTop: '1px' }}>{ev.timestamp}</span>
 
         {/* Device Context Badge */}
         {detectedDevice && (

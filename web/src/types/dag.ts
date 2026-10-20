@@ -117,6 +117,8 @@ export interface DagStatusData {
   current_bottom_line: number;
   current_page: number;
   is_keyboard_guarded: boolean;
+  desktop_keyboard_prohibited?: boolean;
+  desktop_mode_enabled?: boolean;
   arrow_step_count: number;
   verification_trigger_fired: boolean;
   ocr_worker_active: boolean;

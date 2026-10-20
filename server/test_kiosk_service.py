@@ -74,3 +74,47 @@ def test_kiosk_lock_markdown_viewer_distinction():
     assert "markdown_viewer_task_id" in status
     assert "teams_app_task_id" in status
 
+def test_desktop_mode_toggle_endpoint():
+    # Test GET desktop mode status
+    get_res = client.get("/api/device/kiosk/desktop-mode")
+    assert get_res.status_code == 200
+    get_data = get_res.json()
+    assert "desktop_mode_enabled" in get_data
+    assert "desktop_keyboard_prohibited" in get_data
+
+    # Test toggling desktop mode off (Phone screen mode: mouse to phone, kiosk released, keyboard auth ready)
+    off_res = client.post("/api/device/kiosk/desktop-mode", json={"enabled": False})
+    assert off_res.status_code == 200
+    off_data = off_res.json()
+    assert off_data.get("status") == "ok"
+    assert off_data.get("desktop_mode_enabled") is False
+    assert off_data.get("mouse_display_id") == 0
+
+    # Test toggling desktop mode back on (Desktop mode: mouse to monitor)
+    on_res = client.post("/api/device/kiosk/desktop-mode", json={"enabled": True})
+    assert on_res.status_code == 200
+    on_data = on_res.json()
+    assert on_data.get("status") == "ok"
+    assert on_data.get("desktop_mode_enabled") is True
+
+def test_keyboard_prohibit_endpoint():
+    # Test GET keyboard prohibit status
+    get_res = client.get("/api/device/kiosk/keyboard-prohibit")
+    assert get_res.status_code == 200
+    assert "prohibited" in get_res.json()
+
+    # Test enabling keyboard prohibition
+    set_prohibit = client.post("/api/device/kiosk/keyboard-prohibit", json={"prohibit": True})
+    assert set_prohibit.status_code == 200
+    assert set_prohibit.json().get("prohibited") is True
+
+    # Test disabling keyboard prohibition
+    set_allow = client.post("/api/device/kiosk/keyboard-prohibit", json={"prohibit": False})
+    assert set_allow.status_code == 200
+    assert set_allow.json().get("prohibited") is False
+
+    # Re-enable prohibition as default
+    set_prohibit2 = client.post("/api/device/kiosk/keyboard-prohibit", json={"prohibit": True})
+    assert set_prohibit2.status_code == 200
+    assert set_prohibit2.json().get("prohibited") is True
+

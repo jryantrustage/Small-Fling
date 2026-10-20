@@ -192,11 +192,16 @@ token_stats: Dict[str, Any] = {
     "mobile_tokens": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
 }
 
+desktop_keyboard_prohibited: bool = True
+desktop_mode_enabled: bool = True
+
 latest_telemetry: Dict[str, Any] = {
     "device_id": "idle", "is_pacing": False, "current_page": 0, "current_top_line": 0, "current_bottom_line": 0,
     "target_total_lines": config.TARGET_TOTAL_LINES, "dwell_countdown_ms": 0, "phase": "IDLE", "status_message": "Matrix Capture Studio ready",
     "last_heartbeat": None,
     "keyboard_visible": False,
+    "desktop_keyboard_prohibited": True,
+    "desktop_mode_enabled": True,
     "pacer_calibration": {"auto_tune_factor": config.PACER_AUTO_TUNE_FACTOR, "line_pitch_px": config.PACER_LINE_PITCH_PX, "bottom_to_top_error": 0, "wrapped_lines_detected": 0},
     "capture_telemetry": {
         "status": "idle",

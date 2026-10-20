@@ -649,37 +649,34 @@ async def auto_heal_pipeline_environment(
     except Exception as awake_e:
         print(f"[auto_heal] Awake policy note: {awake_e}")
 
-    # 0b. ANR / Unresponsive App Dialog check & dismissal via "Wait"
+    # 0b. ANR / Unresponsive App Dialog check & dismissal
     try:
-        dlg_chk = await run_adb_shell("dumpsys window windows | grep -iE 'Application Not Responding|isn\'t responding|aerr'", serial, timeout=1.8)
-        dlg_out = dlg_chk.get("stdout", "")
-        if "Application Not Responding" in dlg_out or "isn't responding" in dlg_out or "aerr" in dlg_out:
+        from services.adb_service import dismiss_anr_dialogs
+        anr_res = await dismiss_anr_dialogs(serial, disp_id)
+        if anr_res.get("anr_detected"):
             issues_observed.append("Application Not Responding (ANR) dialog detected")
+            healing_desc = "Force-stopped unresponsive Pixel Launcher & restored editor" if anr_res.get("launcher_anr") else "Dismissed ANR dialog & restored editor"
             node.update({
                 "evaluator": "ANR Recovery Evaluator",
-                "healing_step": "Selecting 'Wait' to keep Teams running",
-                "telemetry_insight": "ANR dialog detected • Tapping 'Wait' to keep Teams alive..."
+                "healing_step": healing_desc,
+                "telemetry_insight": f"ANR dialog detected • {healing_desc}..."
             })
             await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": node_id})
-            
-            # Determine display where ANR dialog is showing
-            anr_disp = disp_id
-            m_disp = re.search(r'displayId=(\d+)', dlg_out)
-            if m_disp:
-                try: anr_disp = int(m_disp.group(1))
-                except Exception: pass
-            
-            valid_anr_d = sanitize_input_display_id(anr_disp)
-            d_pfx = f"-d {valid_anr_d} " if valid_anr_d else ""
-            
-            # Tap 'Wait' button (android:id/aerr_wait, center around 787, 698 on 1080p display)
-            await run_adb_shell(f"input {d_pfx}tap 787 698 >/dev/null 2>&1", serial, timeout=1.5)
-            await asyncio.sleep(0.15)
-            await run_adb_shell(f"input {d_pfx}tap 960 700 >/dev/null 2>&1", serial, timeout=1.5)
-            await asyncio.sleep(0.2)
-            actions_taken.append("Dismissed Application Not Responding dialog by selecting 'Wait'")
+            actions_taken.extend(anr_res.get("actions", ["Dismissed Application Not Responding dialog"]))
     except Exception as anr_e:
         print(f"[auto_heal] ANR check note: {anr_e}")
+
+    # 0c. Enforce Markdown ONLY on external desktop display & clear phone display
+    try:
+        from services.adb_service import enforce_markdown_only_on_desktop
+        enf_res = await enforce_markdown_only_on_desktop(serial, disp_id)
+        if enf_res.get("phone_cleared"):
+            issues_observed.append("Markdown editor was open on phone screen")
+            actions_taken.append("Cleared Markdown editor from phone screen (Display 0)")
+        if enf_res.get("actions"):
+            actions_taken.extend(enf_res.get("actions"))
+    except Exception as enf_e:
+        print(f"[auto_heal] Enforce desktop markdown note: {enf_e}")
 
     # 1. Keyboard trigger check & fix
     try:
@@ -1322,13 +1319,18 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # Silently ensure virtual keyboard is closed without tapping or resizing
             await dismiss_keyboard(active_serial, disp_id)
 
-            # Ensure Teams editor WebView on target display has focus
+            # Ensure Teams editor window on target display has focus without tapping editable text
             target_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 7)
+            try:
+                from services.adb_service import enforce_markdown_only_on_desktop
+                await enforce_markdown_only_on_desktop(active_serial, target_d)
+            except Exception:
+                pass
             disp_w, disp_h = await get_display_dimensions(active_serial, target_d)
-            await run_adb_shell(f"input -d {target_d} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", active_serial)
-            await asyncio.sleep(0.15)
+            await run_adb_shell(f"input -d {target_d} tap 240 40 >/dev/null 2>&1", active_serial)
+            await asyncio.sleep(0.08)
             await dismiss_keyboard(active_serial, target_d)
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.08)
 
             # 1. Send Ctrl+End to navigate to EOF
             await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end")
@@ -1440,10 +1442,10 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 )
                 try:
                     disp_w, disp_h = await get_display_dimensions(active_serial, disp_id)
-                    await run_adb_shell(f"input -d {disp_id} tap {disp_w // 2} {int(disp_h * 0.45)} >/dev/null 2>&1", active_serial)
-                    await asyncio.sleep(0.15)
+                    await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", active_serial)
+                    await asyncio.sleep(0.08)
                     await dismiss_keyboard(active_serial, disp_id)
-                    await asyncio.sleep(0.15)
+                    await asyncio.sleep(0.08)
                     await send_hid_keycombination(113, 123, serial=active_serial, caller_node="init_end_retry")
                     await asyncio.sleep(0.8)
                     await dismiss_keyboard(active_serial, disp_id)
@@ -3167,6 +3169,12 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
 
     try:
         active_serial = await get_active_adb_serial(serial)
+        # Ensure any pending ANR dialogs (e.g. Pixel Launcher isn't responding) are immediately cleared
+        try:
+            from services.adb_service import dismiss_anr_dialogs
+            await dismiss_anr_dialogs(active_serial)
+        except Exception:
+            pass
         dev_env = await resolve_and_enforce_dag_device_environment(project_id=project_id, serial=active_serial)
         if dev_env.get("status") == "error":
             err_msg = dev_env.get("message") or dev_env.get("error") or "Device validation failed"

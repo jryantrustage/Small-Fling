@@ -362,6 +362,9 @@ export interface KioskTelemetry {
   displays: ConnectedDisplay[];
   active_display_count: number;
   external_resolution?: string;
+  desktop_mode_enabled?: boolean;
+  desktop_keyboard_prohibited?: boolean;
+  mouse_display_id?: number;
   peripheral_restrictions: {
     suppress_hotkeys: boolean;
     disable_status_bar: boolean;

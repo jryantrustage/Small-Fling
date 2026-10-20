@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Activity, ChevronUp, Radio, Coins, Terminal, Copy, Check, AlertTriangle, Play, Camera, ArrowDownCircle, Minus, X, Trash2 } from 'lucide-react';
+import {
+  Activity, ChevronUp, Radio, Coins, Terminal, Copy, Check,
+  AlertTriangle, Play, Camera, ArrowDownCircle, Minus, X,
+  Maximize2, Minimize2
+} from 'lucide-react';
 import { StructuredLogEntry } from './components/StructuredLogEntry';
 
 export interface TelemetryEvent {
@@ -176,6 +180,8 @@ export interface TelemetryToasterProps {
   onRefresh?: () => void;
   onOpenPromptModal?: (nodeId: string) => void;
   isExpanded?: boolean;
+  isMaximized?: boolean;
+  onMaximizedChange?: (maximized: boolean) => void;
   activeTab?: 'overview' | 'pacer' | 'tokens' | 'events';
   onActiveTabChange?: (tab: 'overview' | 'pacer' | 'tokens' | 'events') => void;
 }
@@ -185,7 +191,8 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   eventsLog, onClearEvents, onExpandedChange, isAlignmentDismissed = false, isAligned = true,
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
   selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal,
-  isExpanded: controlledExpanded, activeTab: controlledActiveTab, onActiveTabChange
+  isExpanded: controlledExpanded, isMaximized: controlledMaximized, onMaximizedChange,
+  activeTab: controlledActiveTab, onActiveTabChange
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
@@ -246,6 +253,24 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
       setInternalExpanded(controlledExpanded);
     }
   }, [controlledExpanded]);
+
+  const [internalMaximized, setInternalMaximized] = useState<boolean>(() => {
+    try { return localStorage.getItem('mc_telemetry_maximized') === 'true'; } catch { return false; }
+  });
+  const isMaximized = controlledMaximized !== undefined ? controlledMaximized : internalMaximized;
+
+  useEffect(() => {
+    if (controlledMaximized !== undefined) {
+      setInternalMaximized(controlledMaximized);
+    }
+  }, [controlledMaximized]);
+
+  const toggleMaximized = () => {
+    const next = !isMaximized;
+    setInternalMaximized(next);
+    try { localStorage.setItem('mc_telemetry_maximized', String(next)); } catch {}
+    onMaximizedChange?.(next);
+  };
 
   const [internalActiveTab, setInternalActiveTab] = useState<'overview' | 'pacer' | 'tokens' | 'events'>('overview');
   const activeTab = controlledActiveTab !== undefined ? controlledActiveTab : internalActiveTab;
@@ -326,7 +351,10 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   const phaseStyle = phaseColors[(telemetry.phase || 'STANDBY').toUpperCase()] || { bg: 'rgba(139, 148, 158, 0.15)', text: '#8b949e', border: 'rgba(139, 148, 158, 0.3)' };
 
   return (
-    <div className={`telemetry-toaster-wrapper ${isExpanded ? 'expanded' : 'collapsed'}`} data-testid="telemetry-toaster">
+    <div
+      className={`telemetry-toaster-wrapper ${isExpanded ? 'expanded' : 'collapsed'} ${isMaximized ? 'maximized' : ''}`}
+      data-testid="telemetry-toaster"
+    >
       {!isExpanded ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'auto' }}>
           {isAlignmentDismissed && !isAligned && onReturnAlignmentOverlay && (
@@ -334,175 +362,79 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
               <AlertTriangle size={13} color="#fca5a5" /><span>NOT ALIGNED (Show Overlay ↗)</span>
             </button>
           )}
-          <button
-            className="telemetry-toaster-pill"
+          <div
+            className="telemetry-toaster-minimized-bar"
             onClick={toggleExpanded}
-            title="Open Telemetry Monitor Sidebar"
-            aria-label="Toggle Telemetry Monitor Sidebar"
+            title="Click to open Telemetry Monitor"
+            role="button"
+            tabIndex={0}
           >
             <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
-            <span className="pill-title">TELEMETRY</span><span className="pill-divider">|</span>
+            <span className="pill-title">TELEMETRY</span>
+            <span className="pill-divider">|</span>
+            <span className="pill-stat" style={{ color: phaseStyle.text, fontWeight: 700 }}>{telemetry.phase || 'STANDBY'}</span>
+
             {selectedNodeId && isNodeTracingActive ? (
               <>
+                <span className="pill-divider">|</span>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: '#58a6ff', background: 'rgba(88, 166, 255, 0.2)', border: '1px solid rgba(88, 166, 255, 0.4)', padding: '1px 6px', borderRadius: '4px' }}>
                   🎯 Tracing: Node {NODE_LABELS[selectedNodeId]?.step || selectedNodeId}
                 </span>
-                <span className="pill-divider">|</span>
               </>
             ) : currentDag !== 'all' ? (
               <>
+                <span className="pill-divider">|</span>
                 <span style={{ fontSize: '9px', fontWeight: 800, color: currentDag === 'initialize' ? '#58a6ff' : '#00ff9d', background: currentDag === 'initialize' ? 'rgba(88, 166, 255, 0.15)' : 'rgba(0, 255, 157, 0.15)', padding: '1px 5px', borderRadius: '4px' }}>
                   {currentDag === 'initialize' ? 'DAG 1' : 'DAG 2'}
                 </span>
-                <span className="pill-divider">|</span>
               </>
             ) : null}
-            <span className="pill-stat" style={{ color: phaseStyle.text }}>{telemetry.phase || 'IDLE'}</span><span className="pill-divider">|</span>
-            <span className="pill-stat">⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}</span><span className="pill-divider">|</span>
+
+            <span className="pill-divider">|</span>
+            <span className="pill-stat">⚡ {latencyMs > 0 ? `${latencyMs}ms` : '<10ms'}</span>
+            <span className="pill-divider">|</span>
             <span className="pill-stat">🪙 {totalTokens.toLocaleString()}</span>
-            <ChevronUp size={14} className="pill-expand-icon" />
-          </button>
+
+            <div className="minimized-bar-actions" style={{ display: 'flex', alignItems: 'center', gap: '3px', marginLeft: '4px' }}>
+              <button
+                type="button"
+                className="minimized-action-btn"
+                onClick={(e) => { e.stopPropagation(); toggleExpanded(); }}
+                title="Restore window"
+              >
+                <ChevronUp size={13} />
+              </button>
+              <button
+                type="button"
+                className="minimized-action-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInternalExpanded(true);
+                  onExpandedChange?.(true);
+                  setInternalMaximized(true);
+                  try { localStorage.setItem('mc_telemetry_maximized', 'true'); } catch {}
+                  onMaximizedChange?.(true);
+                }}
+                title="Maximize directly to Full Window Dashboard"
+              >
+                <Maximize2 size={11} />
+              </button>
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="telemetry-toaster-card">
+        <div className={`telemetry-toaster-card ${isMaximized ? 'maximized' : 'standard'}`}>
+          {/* Header Row: Title, Phase, Status & Window Controls */}
           <div className="toaster-header">
             <div className="toaster-header-title-area">
               <div className="pill-pulse-wrapper"><span className={`pill-pulse-dot ${wsConnected ? 'live' : 'offline'}`} /></div>
-              <span className="toaster-title">TELEMETRY MONITOR</span>
-              <span className="toaster-phase-badge" style={{ background: phaseStyle.bg, color: phaseStyle.text, borderColor: phaseStyle.border }}>{telemetry.phase || 'STANDBY'}</span>
-
-              {/* DAG Filter Pills */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', background: 'rgba(0, 0, 0, 0.4)', padding: '2px 4px', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)', marginLeft: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => handleSelectDag('all')}
-                  style={{
-                    background: (!isNodeTracingActive && currentDag === 'all') ? '#21262d' : 'transparent',
-                    border: (!isNodeTracingActive && currentDag === 'all') ? '1px solid #30363d' : 'none',
-                    color: (!isNodeTracingActive && currentDag === 'all') ? '#e6edf3' : '#8b949e',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  title="Show all telemetry activity"
-                >
-                  ALL
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectDag('initialize')}
-                  style={{
-                    background: (!isNodeTracingActive && currentDag === 'initialize') ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
-                    border: (!isNodeTracingActive && currentDag === 'initialize') ? '1px solid #58a6ff66' : 'none',
-                    color: (!isNodeTracingActive && currentDag === 'initialize') ? '#58a6ff' : '#8b949e',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  title="Filter to DAG Group 1 (Initialize) activity"
-                >
-                  DAG 1: INIT
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectDag('capture_entire_markdown')}
-                  style={{
-                    background: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? 'rgba(0, 255, 157, 0.25)' : 'transparent',
-                    border: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? '1px solid #00ff9d66' : 'none',
-                    color: (!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? '#00ff9d' : '#8b949e',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  title="Filter to DAG Group 2 (Capture & OCR) activity"
-                >
-                  DAG 2: CAPTURE
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectDag('position_navigation')}
-                  style={{
-                    background: (!isNodeTracingActive && currentDag === 'position_navigation') ? 'rgba(255, 166, 87, 0.25)' : 'transparent',
-                    border: (!isNodeTracingActive && currentDag === 'position_navigation') ? '1px solid #ffa65766' : 'none',
-                    color: (!isNodeTracingActive && currentDag === 'position_navigation') ? '#ffa657' : '#8b949e',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  title="Filter to DAG Group 3 (Line Positioning & Navigation) activity"
-                >
-                  DAG 3: NAV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSelectDag('verify_assemble')}
-                  style={{
-                    background: (!isNodeTracingActive && currentDag === 'verify_assemble') ? 'rgba(188, 140, 255, 0.25)' : 'transparent',
-                    border: (!isNodeTracingActive && currentDag === 'verify_assemble') ? '1px solid #bc8cff66' : 'none',
-                    color: (!isNodeTracingActive && currentDag === 'verify_assemble') ? '#bc8cff' : '#8b949e',
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '9.5px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                  title="Filter to DAG Group 4 (Verify & Assemble) activity"
-                >
-                  DAG 4: ASSEMBLE
-                </button>
-                {selectedNodeId && (
-                  <button
-                    type="button"
-                    onClick={() => setIsNodeTracingActive(p => !p)}
-                    style={{
-                      background: isNodeTracingActive ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
-                      border: `1px solid ${isNodeTracingActive ? '#58a6ff' : 'rgba(88, 166, 255, 0.4)'}`,
-                      color: isNodeTracingActive ? '#58a6ff' : '#8b949e',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      fontSize: '9.5px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                    title={`Process tracing for Node ${NODE_LABELS[selectedNodeId]?.step || selectedNodeId}`}
-                  >
-                    <span>🎯 NODE {NODE_LABELS[selectedNodeId]?.step || ''}: {NODE_LABELS[selectedNodeId]?.name || selectedNodeId}</span>
-                    {isNodeTracingActive && (
-                      <span
-                        onClick={(e) => { e.stopPropagation(); onSelectNodeId?.(null); setIsNodeTracingActive(false); }}
-                        style={{ marginLeft: '2px', opacity: 0.8, cursor: 'pointer', fontWeight: 800 }}
-                        title="Clear node tracing filter"
-                      >
-                        ×
-                      </span>
-                    )}
-                  </button>
-                )}
-              </div>
+              <span className="toaster-title">{isMaximized ? 'TELEMETRY MONITOR · DASHBOARD' : 'TELEMETRY MONITOR'}</span>
+              <span className="toaster-phase-badge" style={{ background: phaseStyle.bg, color: phaseStyle.text, borderColor: phaseStyle.border }}>
+                {telemetry.phase || 'STANDBY'}
+              </span>
             </div>
+
             <div className="toaster-header-actions">
-              {activeTab === 'events' && onClearEvents && (
-                <button
-                  type="button"
-                  className="toaster-btn-icon"
-                  onClick={onClearEvents}
-                  title="Clear live events log"
-                  style={{ color: '#8b949e' }}
-                >
-                  <Trash2 size={13} />
-                </button>
-              )}
               {onOpenStudio && (
                 <button
                   type="button"
@@ -515,10 +447,138 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                 </button>
               )}
               <span className="toaster-latency-pill">{latencyMs > 0 ? `${latencyMs}ms RTT` : 'synced'}</span>
-              <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">{copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}</button>
-              <button className="toaster-btn-icon" onClick={toggleExpanded} title="Minimize / Collapse Logs"><Minus size={13} /></button>
-              <button className="toaster-btn-icon win-btn-close" onClick={toggleExpanded} title="Close Logs Drawer"><X size={13} /></button>
+              <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">
+                {copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}
+              </button>
+              <button
+                type="button"
+                className="toaster-win-btn"
+                onClick={toggleExpanded}
+                title="Minimize to bottom bar"
+              >
+                <Minus size={12} />
+              </button>
+              <button
+                type="button"
+                className="toaster-win-btn"
+                onClick={toggleMaximized}
+                title={isMaximized ? "Restore window size" : "Maximize to full-fledged window"}
+              >
+                {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              </button>
+              <button
+                type="button"
+                className="toaster-win-btn close"
+                onClick={toggleExpanded}
+                title="Close Telemetry Monitor"
+              >
+                <X size={13} />
+              </button>
             </div>
+          </div>
+
+          {/* Dedicated Filter & Trace Sub-Header Bar (No clipping or overflow) */}
+          <div className="toaster-filter-bar">
+            <div className="toaster-filter-bar-pills">
+              <button
+                type="button"
+                className={`toaster-filter-pill ${(!isNodeTracingActive && currentDag === 'all') ? 'active' : ''}`}
+                onClick={() => handleSelectDag('all')}
+                title="Show all telemetry activity"
+              >
+                ALL
+              </button>
+              <button
+                type="button"
+                className={`toaster-filter-pill ${(!isNodeTracingActive && currentDag === 'initialize') ? 'active-dag1' : ''}`}
+                onClick={() => handleSelectDag('initialize')}
+                title="Filter to DAG Group 1 (Initialize) activity"
+              >
+                DAG 1: INIT
+              </button>
+              <button
+                type="button"
+                className={`toaster-filter-pill ${(!isNodeTracingActive && currentDag === 'capture_entire_markdown') ? 'active-dag2' : ''}`}
+                onClick={() => handleSelectDag('capture_entire_markdown')}
+                title="Filter to DAG Group 2 (Capture & OCR) activity"
+              >
+                DAG 2: CAPTURE
+              </button>
+              <button
+                type="button"
+                className={`toaster-filter-pill ${(!isNodeTracingActive && currentDag === 'position_navigation') ? 'active-dag3' : ''}`}
+                onClick={() => handleSelectDag('position_navigation')}
+                title="Filter to DAG Group 3 (Line Positioning & Navigation) activity"
+              >
+                DAG 3: NAV
+              </button>
+              <button
+                type="button"
+                className={`toaster-filter-pill ${(!isNodeTracingActive && currentDag === 'verify_assemble') ? 'active-dag4' : ''}`}
+                onClick={() => handleSelectDag('verify_assemble')}
+                title="Filter to DAG Group 4 (Verify & Assemble) activity"
+              >
+                DAG 4: ASSEMBLE
+              </button>
+
+              {selectedNodeId && (
+                <button
+                  type="button"
+                  onClick={() => setIsNodeTracingActive(p => !p)}
+                  style={{
+                    background: isNodeTracingActive ? 'rgba(88, 166, 255, 0.25)' : 'transparent',
+                    border: `1px solid ${isNodeTracingActive ? '#58a6ff' : 'rgba(88, 166, 255, 0.4)'}`,
+                    color: isNodeTracingActive ? '#58a6ff' : '#8b949e',
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    fontSize: '9px',
+                    fontFamily: 'var(--font-mono)',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    maxWidth: '240px',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                  title={`Process tracing for Node ${NODE_LABELS[selectedNodeId]?.step || selectedNodeId}: ${NODE_LABELS[selectedNodeId]?.name || selectedNodeId}. Click to toggle filter.`}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    🎯 NODE {NODE_LABELS[selectedNodeId]?.step || ''}: {NODE_LABELS[selectedNodeId]?.name || selectedNodeId}
+                  </span>
+                  {isNodeTracingActive && (
+                    <span
+                      onClick={(e) => { e.stopPropagation(); onSelectNodeId?.(null); setIsNodeTracingActive(false); }}
+                      style={{ marginLeft: '2px', opacity: 0.8, cursor: 'pointer', fontWeight: 800 }}
+                      title="Clear node tracing filter"
+                    >
+                      ×
+                    </span>
+                  )}
+                </button>
+              )}
+            </div>
+
+            {/* Right side of filter bar: events count + clear button if on log tab */}
+            {activeTab === 'events' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                <span style={{ fontSize: '9px', color: '#8b949e', whiteSpace: 'nowrap' }}>
+                  {filteredEventsLog.length} {currentDag !== 'all' ? 'filtered' : 'events'}
+                </span>
+                {onClearEvents && (
+                  <button
+                    type="button"
+                    className="events-clear-btn"
+                    onClick={onClearEvents}
+                    title="Clear live events log"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="toaster-tabs">

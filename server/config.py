@@ -47,8 +47,8 @@ CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in
 
 TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
-# Safety default: AUTO_ENTER_PIN defaults to False so users retain full control and avoid corporate lockout
-AUTO_ENTER_PIN: bool = bool(_persisted_auto_pin if "auto_enter_pin" in _persisted_cfg else os.environ.get("AUTO_ENTER_PIN", "false").lower() in ("true", "1", "yes"))
+# Automated PIN Entry: defaults to true when DEVICE_PIN is configured to handle sudden authentication
+AUTO_ENTER_PIN: bool = bool(_persisted_auto_pin if "auto_enter_pin" in _persisted_cfg else os.environ.get("AUTO_ENTER_PIN", "true").lower() in ("true", "1", "yes"))
 DEVICE_PIN: str = os.environ.get("DEVICE_PIN", "").strip() or _persisted_device_pin or "1213"
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))

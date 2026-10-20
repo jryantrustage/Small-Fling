@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
   ZoomIn, ZoomOut, Check, ListTree, FileText,
-  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle
+  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -242,6 +242,10 @@ function AppContent() {
   const [isSwitchingPipeline, setIsSwitchingPipeline] = useState(false);
   const [deletingFrameId, setDeletingFrameId] = useState<string | null>(null);
   const [isClosingKeyboard, setIsClosingKeyboard] = useState(false);
+  const [desktopKeyboardProhibited, setDesktopKeyboardProhibited] = useState<boolean>(true);
+  const [desktopModeEnabled, setDesktopModeEnabled] = useState<boolean>(true);
+  const [isTogglingDesktopMode, setIsTogglingDesktopMode] = useState<boolean>(false);
+  const [isTogglingKeyboardProhibit, setIsTogglingKeyboardProhibit] = useState<boolean>(false);
 
   // Window & Panel Management States
   const [dagMinimized, setDagMinimized] = useState(false);
@@ -554,6 +558,62 @@ function AppContent() {
     } finally { setIsClosingKeyboard(false); }
   };
 
+  const handleToggleProhibitKeyboard = async (prohibit?: boolean) => {
+    const nextVal = prohibit !== undefined ? prohibit : !desktopKeyboardProhibited;
+    setIsTogglingKeyboardProhibit(true);
+    try {
+      const res = await api('/api/device/kiosk/keyboard-prohibit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prohibit: nextVal, serial: deviceInfo?.active_serial })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const effectiveVal = typeof data.desktop_keyboard_prohibited === 'boolean' ? data.desktop_keyboard_prohibited : nextVal;
+        setDesktopKeyboardProhibited(effectiveVal);
+        addTelemetryEvent(
+          'SYSTEM',
+          effectiveVal
+            ? 'Desktop soft keyboard PROHIBITED at OS level (will never appear when clicking nodes)'
+            : 'Desktop soft keyboard ALLOWED'
+        );
+      }
+    } catch (err: any) {
+      addTelemetryEvent('ERROR', `Failed to toggle keyboard prohibition: ${err.message}`);
+    } finally {
+      setIsTogglingKeyboardProhibit(false);
+    }
+  };
+
+  const handleToggleDesktopMode = async (enable: boolean) => {
+    setIsTogglingDesktopMode(true);
+    try {
+      const res = await api('/api/device/kiosk/desktop-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable, serial: deviceInfo?.active_serial })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const effectiveVal = typeof data.desktop_mode_enabled === 'boolean' ? data.desktop_mode_enabled : enable;
+        setDesktopModeEnabled(effectiveVal);
+        if (effectiveVal) {
+          setLiveMode('desktop');
+          addTelemetryEvent('SYSTEM', 'Desktop Mode ENABLED: Mouse routed to external monitor (Display 11)');
+        } else {
+          setLiveMode('phone');
+          addTelemetryEvent('SYSTEM', 'Phone Screen Mode ENABLED: Mouse routed to phone (Display 0), kiosk unlocked, keyboard enabled for authentication');
+        }
+        setStreamKey(Date.now());
+        await fetchData();
+      }
+    } catch (err: any) {
+      addTelemetryEvent('ERROR', `Failed to toggle desktop mode: ${err.message}`);
+    } finally {
+      setIsTogglingDesktopMode(false);
+    }
+  };
+
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
     setDeviceModel(dev);
     try {
@@ -647,9 +707,10 @@ function AppContent() {
     isFetchingRef.current = true;
     const t0 = performance.now();
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes, alignRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes, alignRes, deskRes] = await Promise.all([
         api('/api/projects'), api('/api/document'), api('/api/frames'), api('/api/recapture-queue'),
-        api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry'), api('/api/device/info'), api('/api/device/alignment')
+        api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry'), api('/api/device/info'), api('/api/device/alignment'),
+        api('/api/device/kiosk/desktop-mode')
       ]);
       setLatencyMs(Math.round(performance.now() - t0));
       const isConnected = projRes.ok || docRes.ok || framesRes.ok || cfgRes.ok || telRes.ok;
@@ -700,6 +761,13 @@ function AppContent() {
       if (telRes.ok) { try { setTelemetry(await telRes.json()); } catch {} }
       if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
       if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
+      if (deskRes.ok) {
+        try {
+          const d = await deskRes.json();
+          if (typeof d.desktop_mode_enabled === 'boolean') setDesktopModeEnabled(d.desktop_mode_enabled);
+          if (typeof d.desktop_keyboard_prohibited === 'boolean') setDesktopKeyboardProhibited(d.desktop_keyboard_prohibited);
+        } catch {}
+      }
     } catch { setBackendConnected(false); }
     finally { isFetchingRef.current = false; }
   }, []);
@@ -1282,6 +1350,22 @@ function AppContent() {
             setStreamKey(Date.now());
           } else if (msg.type === 'telemetry_updated' && msg.data) {
             setTelemetry(p => ({ ...p, ...msg.data }));
+            if (typeof msg.data.desktop_keyboard_prohibited === 'boolean') {
+              setDesktopKeyboardProhibited(msg.data.desktop_keyboard_prohibited);
+            }
+            if (typeof msg.data.desktop_mode_enabled === 'boolean') {
+              setDesktopModeEnabled(msg.data.desktop_mode_enabled);
+            }
+          } else if (msg.type === 'keyboard_prohibit_changed') {
+            if (typeof msg.desktop_keyboard_prohibited === 'boolean') {
+              setDesktopKeyboardProhibited(msg.desktop_keyboard_prohibited);
+            }
+          } else if (msg.type === 'desktop_mode_changed') {
+            if (typeof msg.desktop_mode_enabled === 'boolean') {
+              setDesktopModeEnabled(msg.desktop_mode_enabled);
+              if (msg.desktop_mode_enabled) setLiveMode('desktop');
+              else setLiveMode('phone');
+            }
           } else if (msg.type === 'orchestration_event' && msg.telemetry) {
             setTelemetry(msg.telemetry);
           } else if (msg.type === 'frame_processed' && msg.data?.frame_id) {
@@ -1878,6 +1962,48 @@ function AppContent() {
 
             <div className="dock-separator" />
 
+            {/* Desktop Soft Keyboard Prohibition Pill */}
+            <button
+              type="button"
+              className={`window-dock-pill ${desktopKeyboardProhibited ? 'active' : ''}`}
+              style={{
+                borderColor: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)',
+                background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.14)' : 'rgba(210, 153, 34, 0.14)',
+                color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341'
+              }}
+              onClick={() => handleToggleProhibitKeyboard(!desktopKeyboardProhibited)}
+              disabled={isTogglingKeyboardProhibit}
+              title={desktopKeyboardProhibited
+                ? 'Desktop Soft Keyboard is PROHIBITED at OS level (keyboard will NEVER pop up when clicking nodes). Click to allow.'
+                : 'Desktop Soft Keyboard is ALLOWED. Click to completely prohibit soft keyboard on desktop screen.'}
+            >
+              <span className={`pill-indicator ${desktopKeyboardProhibited ? 'on' : 'off'}`} style={{ background: desktopKeyboardProhibited ? '#3fb950' : '#d29922' }} />
+              <Keyboard size={11} />
+              <span>{desktopKeyboardProhibited ? 'KB BLOCKED' : 'ALLOW KB'}</span>
+            </button>
+
+            {/* Hardware Desktop Mode / Phone Screen (Mouse) Switcher Pill */}
+            <button
+              type="button"
+              className={`window-dock-pill ${desktopModeEnabled ? 'active' : ''}`}
+              style={{
+                borderColor: desktopModeEnabled ? 'rgba(56, 139, 253, 0.6)' : 'rgba(163, 113, 247, 0.6)',
+                background: desktopModeEnabled ? 'rgba(56, 139, 253, 0.14)' : 'rgba(163, 113, 247, 0.14)',
+                color: desktopModeEnabled ? '#58a6ff' : '#d2a8ff'
+              }}
+              onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
+              disabled={isTogglingDesktopMode}
+              title={desktopModeEnabled
+                ? 'Desktop Mode ON (Mouse routed to external monitor). Click to switch mouse to phone screen (Display 0), unlock kiosk, and enable keyboard for auth.'
+                : 'Phone Screen Mode ON (Mouse routed to phone Display 0, kiosk unlocked, keyboard enabled for auth). Click to return to Desktop Mode.'}
+            >
+              <span className={`pill-indicator ${desktopModeEnabled ? 'on' : 'min'}`} style={{ background: desktopModeEnabled ? '#58a6ff' : '#a371f7' }} />
+              {desktopModeEnabled ? <Monitor size={11} /> : <Smartphone size={11} />}
+              <span>{desktopModeEnabled ? 'DESKTOP' : 'PHONE (MOUSE)'}</span>
+            </button>
+
+            <div className="dock-separator" />
+
             {/* Layout / Arrange Presets Menu */}
             <div className="layout-presets-wrapper" ref={layoutMenuRef}>
               <button
@@ -2020,6 +2146,10 @@ function AppContent() {
             onClose={() => setShowDag(false)}
             isMinimized={dagMinimized}
             onToggleMinimize={() => setDagMinimized(p => !p)}
+            desktopKeyboardProhibited={desktopKeyboardProhibited}
+            onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
+            desktopModeEnabled={desktopModeEnabled}
+            onToggleDesktopMode={handleToggleDesktopMode}
           />
         </div>
       )}
@@ -3019,6 +3149,10 @@ function AppContent() {
                   onShowToast={(type, msg) => addTelemetryEvent(type.toUpperCase() as any, msg)}
                   projectInitProgress={projectInitProgress}
                   onDismissInitProgress={() => setProjectInitProgress(null)}
+                  desktopModeEnabled={desktopModeEnabled}
+                  onToggleDesktopMode={handleToggleDesktopMode}
+                  desktopKeyboardProhibited={desktopKeyboardProhibited}
+                  onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
                 />
               </section>
             </>
