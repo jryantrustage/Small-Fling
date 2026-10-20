@@ -294,6 +294,16 @@ class EditModeClassifier(BaseClassifier):
         h_t = 1080
         if img is not None:
             h_t, w_t = img.shape[:2]
+            scale_x = w_t / 1920.0
+            scale_y = h_t / 1080.0
+            # Inspect secondary toolbar for active blue pill on pencil edit icon
+            crop_pencil = img[int(100 * scale_y):int(350 * scale_y), int(1200 * scale_x):int(1850 * scale_x)]
+            if crop_pencil.size > 0:
+                hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
+                blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
+                if int(np.count_nonzero(blue_mask)) >= 20:
+                    edit_mode_active = True
+
             # Check center strip for vertical split-screen boundary (solid continuous divider line)
             center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
             if center_strip.size > 0:
@@ -301,7 +311,7 @@ class EditModeClassifier(BaseClassifier):
                 sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
                 sobel_abs = cv2.convertScaleAbs(sobel_x)
                 col_means = np.mean(sobel_abs, axis=0)
-                if np.max(col_means) > 85.0:
+                if np.max(col_means) > 28.0:
                     split_screen_detected = True
                     edit_mode_active = False
 

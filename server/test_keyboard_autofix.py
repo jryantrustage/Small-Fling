@@ -16,7 +16,7 @@ async def test_keyboard_open_classifier_registered():
 
 @pytest.mark.asyncio
 async def test_dismiss_keyboard_when_ime_open():
-    """Verify dismiss_keyboard uses keyevent 4 to dismiss IME when open."""
+    """Verify dismiss_keyboard uses keyevent 111 to dismiss IME when open and NEVER keyevent 4."""
     called_cmds = []
 
     async def mock_run_adb(cmd, *args, **kwargs):
@@ -29,13 +29,14 @@ async def test_dismiss_keyboard_when_ime_open():
 
         res = await dismiss_keyboard("test-serial", 13)
         assert res is True
-        assert any("keyevent 4" in c for c in called_cmds)
+        assert any("keyevent 111" in c for c in called_cmds)
+        assert not any("keyevent 4" in c for c in called_cmds)
         assert any("show_ime_with_hard_keyboard 0" in c for c in called_cmds)
 
 
 @pytest.mark.asyncio
 async def test_dismiss_keyboard_when_ime_already_closed():
-    """Verify dismiss_keyboard does not dispatch keyevent 4 when IME is already closed."""
+    """Verify dismiss_keyboard does not dispatch keyevent 111 or 4 when IME is already closed."""
     called_cmds = []
 
     async def mock_run_adb(cmd, *args, **kwargs):
@@ -48,7 +49,8 @@ async def test_dismiss_keyboard_when_ime_already_closed():
 
         res = await dismiss_keyboard("test-serial", 13)
         assert res is True
-        # Must not inject keyevent 4 if keyboard was never open
+        # Must not inject keyevent 111 or 4 if keyboard was never open
+        assert not any("keyevent 111" in c for c in called_cmds)
         assert not any("keyevent 4" in c for c in called_cmds)
 
 

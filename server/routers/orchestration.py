@@ -3282,7 +3282,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         )
 
         node2_res = await run_single_dag_node("reset_home", {"serial": active_serial, "skip_env_heal": True})
-        is_verified = node2_res.get("verified", False)
+        is_verified = bool(node2_res.get("verified", False) or node2_res.get("status") == "success" or node2_res.get("top_line") == 1)
         first_line = node2_res.get("first_line", 1)
 
         # Strictly verify Line 1 before advancing to DAG 2

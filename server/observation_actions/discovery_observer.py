@@ -178,6 +178,9 @@ class DynamicIssueDiscoveryObserver:
 
         for issue in diagnosis.get("detected_issues", []):
             action_id = issue["action_id"]
+            # Guard against unprompted OneDrive file navigation gymnastics during DAG execution
+            if action_id == "markdown_not_open_navigate_onedrive":
+                continue
             action = observation_action_registry.get_action(action_id)
             if action:
                 try:

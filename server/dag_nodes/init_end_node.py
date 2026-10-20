@@ -44,23 +44,7 @@ class InitEndNode(BaseDagNode):
         except Exception:
             pass
 
-        # 1. Enforce Markdown exclusively on desktop display & maximize viewport
-        try:
-            from services.adb_service import enforce_markdown_only_on_desktop, auto_fix_viewport
-            await enforce_markdown_only_on_desktop(serial, disp_id)
-            await auto_fix_viewport(serial, disp_id)
-        except Exception:
-            pass
-        disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        focus_x = 80
-        focus_y = min(disp_h // 2, 400) if disp_h > 0 else 400
-        # Tap editor gutter to focus without keeping soft keyboard open
-        await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.08)
-        await dismiss_keyboard(serial, disp_id)
-        await asyncio.sleep(0.08)
-
-        # 2. Dispatch Ctrl+End to navigate to EOF
+        # 1. Dispatch pure HID Ctrl+End to navigate to EOF
         await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end")
         settle_s = max(0.8, float(cfg.get("settle_delay_ms", 1200)) / 1000.0)
         await asyncio.sleep(settle_s)
@@ -127,6 +111,9 @@ class InitEndNode(BaseDagNode):
 
         # Retry jump if stuck
         if is_stuck:
+            disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+            focus_x = 200
+            focus_y = min(disp_h // 2, 400) if disp_h > 0 else 400
             await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
             await asyncio.sleep(0.08)
             await dismiss_keyboard(serial, disp_id)

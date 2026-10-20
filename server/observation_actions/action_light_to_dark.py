@@ -90,8 +90,8 @@ class LightToDarkAction(ObservationActionPlugin):
             await asyncio.sleep(0.3)
 
             # Tap Dark Mode option in dropdown
-            dark_opt_x = int(1800 * (disp_w / 1920.0))
-            dark_opt_y = int(320 * (disp_h / 1080.0))
+            dark_opt_x = int(1700 * (disp_w / 1920.0))
+            dark_opt_y = int(310 * (disp_h / 1080.0))
             await run_adb_shell(f"input -d {disp_id} tap {dark_opt_x} {dark_opt_y} >/dev/null 2>&1", serial)
             actions_taken.append(f"Selected Dark Mode option at ({dark_opt_x}, {dark_opt_y})")
 

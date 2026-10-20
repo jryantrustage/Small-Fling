@@ -1315,21 +1315,23 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
         await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser, timeout=1.5)
 
         # Check if IME is actually visible on screen!
-        # If NOT visible, NEVER dispatch keyevent 4 or back keys (which would close FilePreviewActivity!)
+        # If NOT visible, do not dispatch keyevents to prevent unnecessary interruption
         if not await is_ime_visible(ser, force_check=True):
             _ime_visible_cache["val"] = False
             _ime_visible_cache["ts"] = time.time()
             return True
 
-        # IME is visible: dispatch back key to external display to dismiss keyboard cleanly
+        # IME is visible: send keyevent 111 (KEYCODE_ESCAPE) to target display.
+        # If IME remains open (e.g. Gboard on Android 15 Desktop Mode), safely dispatch keyevent 4
+        # directly to target display, which the IME window consumes to collapse itself.
+        # NEVER tap taskbar navigation buttons (e.g. 1630, 1055) which closes FilePreviewActivity!
         did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
         target_d = did if (did is not None and did > 0) else 0
-        await run_adb_shell(f"input -d {target_d} keyevent 4", ser, timeout=1.0)
-        await asyncio.sleep(0.08)
-
-        # If stubborn, tap the taskbar soft-keyboard collapse chevron at (1630, 1055)
+        await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
+        await asyncio.sleep(0.05)
         if await is_ime_visible(ser, force_check=True):
-            await run_adb_shell(f"input -d {target_d} tap 1630 1055 >/dev/null 2>&1", ser, timeout=1.0)
+            await run_adb_shell(f"input -d {target_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.0)
+            await asyncio.sleep(0.08)
 
         _ime_visible_cache["val"] = False
         _ime_visible_cache["ts"] = time.time()

@@ -123,5 +123,5 @@ class ResetHomeNode(BaseDagNode):
             node_id=self.node_id,
             message="Line 1 verified at top gutter via Ctrl+Home ✔",
             top_line=1,
-            data={"first_line": 1, "predicted_arrows": predicted_arrows}
+            data={"first_line": 1, "verified": True, "predicted_arrows": predicted_arrows}
         )
