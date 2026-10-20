@@ -658,6 +658,179 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
             return jpg
     return _get_or_create_standby_frame(mode)
 
+async def detect_auth_screen_type(
+    serial: Optional[str] = None,
+    ext_display_id: Optional[int] = None,
+    screen_img: Optional[np.ndarray] = None
+) -> Dict[str, Any]:
+    """
+    Differentiates between:
+      1. 'pin': A numeric PIN entry screen (Keyguard, Device PIN, Intune MAM PIN pad).
+         Safe for automated numeric PIN entry.
+      2. 'username_password': A Username, Email, Password, or OAuth sign-in screen
+         (e.g., BrokerAuthorizationActivity, AccountChooserActivity, SignInActivity, Webview).
+         STRICTLY PROHIBITS PIN ENTRY so PIN digits (e.g. 1213) are never typed into username fields!
+      3. 'none': Normal application screen (clean, no auth prompt).
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "auth_type": "none",
+            "details": "Mock or disconnected device",
+            "is_pin_safe": False,
+            "requires_keyguard_unlock": False,
+            "requires_mam_pin": False
+        }
+
+    # 1. Device Keyguard / Lockscreen check
+    try:
+        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
+        kg_out = kg_chk.get("stdout", "")
+        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
+            return {
+                "auth_type": "pin",
+                "details": "Device lockscreen / keyguard active",
+                "is_pin_safe": True,
+                "requires_keyguard_unlock": True,
+                "requires_mam_pin": False
+            }
+    except Exception:
+        pass
+
+    # 2. Window Manager and Activity Stack inspection
+    combined_acts = ""
+    try:
+        win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", ser, timeout=1.2)
+        combined_acts += win_chk.get("stdout", "") + "\n"
+        act_chk = await run_adb_shell("dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity'", ser, timeout=1.2)
+        combined_acts += act_chk.get("stdout", "")
+    except Exception:
+        pass
+
+    combined_acts_lower = combined_acts.lower()
+
+    # Prioritize detecting Username / Password / OAuth Webview prompts
+    username_pw_indicators = [
+        "brokerauthorizationactivity", "accountchooseractivity", "signinactivity",
+        "oauthactivity", "webauthactivity", "authorizeactivity", "browsersigninactivity",
+        "identityactivity", "com.microsoft.identity.client", "com.azure.authenticator"
+    ]
+    detected_user_pw = [ind for ind in username_pw_indicators if ind in combined_acts_lower]
+    if detected_user_pw:
+        return {
+            "auth_type": "username_password",
+            "details": f"Username / Account Chooser / OAuth activity active ({', '.join(detected_user_pw)})",
+            "is_pin_safe": False,
+            "requires_keyguard_unlock": False,
+            "requires_mam_pin": False
+        }
+
+    # 3. Check Input Method / Focused Editor characteristics (inputType & hintText)
+    try:
+        ime_chk = await run_adb_shell("dumpsys input_method", ser, timeout=1.2)
+        ime_out = ime_chk.get("stdout", "")
+        # Inspect focused inputType
+        # Android inputType: Class 1=TEXT, 2=NUMBER.
+        # Variations: 0x20/32=email, 0x80/128=password, 0xa0/160=web_text.
+        # Numeric password: 0x12 (18) or 0x80002.
+        for line in ime_out.splitlines():
+            line_str = line.strip()
+            if "mEditorInfo" in line_str or "inputType=" in line_str:
+                m_type = re.search(r'inputType=0x([0-9a-fA-F]+)', line_str)
+                if m_type:
+                    val = int(m_type.group(1), 16)
+                    cls = val & 0x0F
+                    variation = val & 0x0FF0
+                    # Check for text variations (email, password, webview edit text)
+                    if cls == 1 or variation in (0x20, 0x80, 0xa0):
+                        return {
+                            "auth_type": "username_password",
+                            "details": f"Focused input field is text/email/password (inputType=0x{val:x})",
+                            "is_pin_safe": False,
+                            "requires_keyguard_unlock": False,
+                            "requires_mam_pin": False
+                        }
+                    # Check for numeric password (PIN)
+                    if cls == 2 and (val == 0x12 or (variation & 0x10) != 0):
+                        return {
+                            "auth_type": "pin",
+                            "details": f"Focused input field is numeric PIN (inputType=0x{val:x})",
+                            "is_pin_safe": True,
+                            "requires_keyguard_unlock": False,
+                            "requires_mam_pin": True
+                        }
+            # Check for hintText or fieldName indicating email / username
+            if any(hint in line_str.lower() for hint in ["hinttext=email", "hinttext=username", "hinttext=phone", "signinname"]):
+                return {
+                    "auth_type": "username_password",
+                    "details": f"Focused field hint indicates username/email ({line_str[:50]})",
+                    "is_pin_safe": False,
+                    "requires_keyguard_unlock": False,
+                    "requires_mam_pin": False
+                }
+    except Exception:
+        pass
+
+    # 4. Visual OCR Check (if image available)
+    if screen_img is not None:
+        try:
+            from ocr_engine import get_rapid_ocr
+            r = get_rapid_ocr()
+            res, _ = r(screen_img)
+            lines_text = [str(x[1]).strip().lower() for x in (res or [])]
+            full_screen_text = " ".join(lines_text)
+
+            user_pw_phrases = [
+                "sign in", "sign-in", "email, phone, or skype", "email or phone",
+                "pick an account", "use another account", "enter password",
+                "enter your password", "keep me signed in", "work or school account"
+            ]
+            if any(p in full_screen_text for p in user_pw_phrases):
+                return {
+                    "auth_type": "username_password",
+                    "details": "Username/Password or Microsoft Sign-In text detected via OCR",
+                    "is_pin_safe": False,
+                    "requires_keyguard_unlock": False,
+                    "requires_mam_pin": False
+                }
+
+            pin_phrases = [
+                "enter your pin", "enter pin", "confirm your pin", "organization pin", "device pin"
+            ]
+            if any(p in full_screen_text for p in pin_phrases):
+                return {
+                    "auth_type": "pin",
+                    "details": "PIN entry prompt detected via OCR",
+                    "is_pin_safe": True,
+                    "requires_keyguard_unlock": False,
+                    "requires_mam_pin": True
+                }
+        except Exception:
+            pass
+
+    # 5. Dedicated PIN activity names (without username/account chooser)
+    pin_indicators = [
+        "pinactivity", "mampinactivity", "confirmpinactivity", "confirmcredential",
+        "confirmdevicecredentialactivity", "keyguardbouncer"
+    ]
+    detected_pin = [ind for ind in pin_indicators if ind in combined_acts_lower]
+    if detected_pin:
+        return {
+            "auth_type": "pin",
+            "details": f"Intune MAM PIN prompt active ({', '.join(detected_pin)})",
+            "is_pin_safe": True,
+            "requires_keyguard_unlock": False,
+            "requires_mam_pin": True
+        }
+
+    return {
+        "auth_type": "none",
+        "details": "No authentication prompt active",
+        "is_pin_safe": False,
+        "requires_keyguard_unlock": False,
+        "requires_mam_pin": False
+    }
+
 async def auto_handle_pin_authentication(
     serial: Optional[str] = None,
     ext_display_id: Optional[int] = None,
@@ -665,10 +838,10 @@ async def auto_handle_pin_authentication(
     force: bool = False
 ) -> Dict[str, Any]:
     """
-    Assures PIN code authentication is automatically handled whenever an authentication prompt
-    is suddenly displayed (e.g. Teams MAM PIN, Intune Company Portal, Keyguard, Lockscreen, MSAL).
-    Enters PIN on the primary phone display (Display 0) and the desktop display (e.g. Display 11)
-    to prevent user lockouts, especially since the physical phone screen is cracked and unresponsive to touch.
+    Assures PIN code authentication is automatically handled ONLY when a valid numeric PIN prompt
+    (e.g. Teams MAM PIN, Keyguard, Lockscreen) is displayed.
+    STRICTLY differentiates between PIN prompts and Username/Password/OAuth prompts to ensure
+    the numeric PIN is NEVER typed into a username or email field!
     """
     import config
     active_pin = pin or getattr(config, "DEVICE_PIN", "1213") or "1213"
@@ -678,6 +851,7 @@ async def auto_handle_pin_authentication(
         return {
             "status": "blocked_by_safety",
             "auth_detected": False,
+            "auth_type": "none",
             "pin_submitted": False,
             "keyguard_unlocked": False,
             "actions": ["Automated PIN entry is disabled in Settings (Safe Lock)"]
@@ -688,6 +862,7 @@ async def auto_handle_pin_authentication(
         return {
             "status": "mock",
             "auth_detected": False,
+            "auth_type": "none",
             "pin_submitted": False,
             "keyguard_unlocked": False,
             "actions": []
@@ -695,15 +870,51 @@ async def auto_handle_pin_authentication(
 
     ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
     actions = []
-    auth_detected = False
-    keyguard_unlocked = False
 
+    # 1. Differentiate Authentication Screen Type
+    auth_eval = await detect_auth_screen_type(ser, ext_id)
+    auth_type = auth_eval.get("auth_type", "none")
+
+    # 2. If Username / Password / Account Chooser is detected: STRICTLY PROHIBIT PIN ENTRY!
+    if auth_type == "username_password":
+        msg = f"Username / Password prompt detected ({auth_eval.get('details')}). Suppressed automated PIN entry to prevent entering PIN into username field."
+        actions.append(msg)
+        try:
+            from services.state import ws_manager
+            await ws_manager.broadcast({
+                "type": "auth_credential_required",
+                "auth_type": "username_password",
+                "message": msg,
+                "details": auth_eval
+            })
+        except Exception:
+            pass
+        return {
+            "status": "blocked_username_password",
+            "auth_detected": True,
+            "auth_type": "username_password",
+            "pin_submitted": False,
+            "keyguard_unlocked": False,
+            "message": msg,
+            "actions": actions
+        }
+
+    # 3. If no auth prompt is active and not forced, return clean
+    if auth_type == "none" and not force:
+        return {
+            "status": "clean",
+            "auth_detected": False,
+            "auth_type": "none",
+            "pin_submitted": False,
+            "keyguard_unlocked": False,
+            "actions": []
+        }
+
+    # 4. At this point, we have a validated numeric PIN prompt or force=True
+    keyguard_unlocked = False
     try:
-        # 1. Check if device Keyguard / Lockscreen is showing
-        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
-        kg_out = kg_chk.get("stdout", "")
-        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out or force:
-            auth_detected = True
+        # A. Keyguard / Lockscreen unlock
+        if auth_eval.get("requires_keyguard_unlock") or force:
             await run_adb_shell(
                 f"input -d 0 keyevent 224; "
                 f"input -d 0 keyevent 82; "
@@ -718,22 +929,8 @@ async def auto_handle_pin_authentication(
             keyguard_unlocked = True
             actions.append(f"Unlocked device keyguard on phone screen with PIN {active_pin}")
 
-        # 2. Check for Intune / Teams MAM / MSAL / Broker PIN prompts
-        auth_chk = await run_adb_shell(
-            "dumpsys window windows | grep -iE 'CompanyPortal|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMStartupActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity|BiometricActivity|biometric_prompt'",
-            ser,
-            timeout=1.2
-        )
-        auth_out = auth_chk.get("stdout", "")
-        mam_active = any(k.lower() in auth_out.lower() for k in [
-            "companyportal", "confirmcredential", "pinactivity", "authenticationactivity",
-            "lockpatternactivity", "mamstartupactivity", "mammsalauthactivity",
-            "brokerauthorizationactivity", "accountchooseractivity", "biometricactivity", "biometric_prompt"
-        ])
-
-        if mam_active or force:
-            auth_detected = True
-            # Enter PIN on external desktop display if available
+        # B. Intune MAM PIN Pad prompt entry
+        if auth_eval.get("requires_mam_pin") or (force and not auth_eval.get("requires_keyguard_unlock")):
             if ext_id and ext_id > 0:
                 await run_adb_shell(
                     f"input -d {ext_id} tap 960 660; "
@@ -747,11 +944,10 @@ async def auto_handle_pin_authentication(
                 )
                 actions.append(f"Submitted PIN {active_pin} to Intune MAM prompt on desktop display #{ext_id}")
 
-            # Also enter PIN on phone display in case prompt is rendered on Display 0
             await run_adb_shell(f"input -d 0 text {active_pin}; input -d 0 keyevent 66", ser, timeout=1.5)
             actions.append(f"Submitted PIN {active_pin} on phone display #0")
 
-        if auth_detected and actions:
+        if actions:
             try:
                 from services.state import ws_manager
                 await ws_manager.broadcast({
@@ -764,7 +960,8 @@ async def auto_handle_pin_authentication(
 
         return {
             "status": "ok",
-            "auth_detected": auth_detected,
+            "auth_detected": True,
+            "auth_type": "pin",
             "pin_submitted": bool(actions),
             "keyguard_unlocked": keyguard_unlocked,
             "actions": actions
@@ -772,7 +969,8 @@ async def auto_handle_pin_authentication(
     except Exception as e:
         return {
             "status": "error",
-            "auth_detected": auth_detected,
+            "auth_detected": True,
+            "auth_type": "pin",
             "pin_submitted": False,
             "keyguard_unlocked": keyguard_unlocked,
             "error": str(e),
@@ -890,8 +1088,28 @@ async def enforce_markdown_only_on_desktop(
 
     actions = []
     phone_cleared = False
+    from services import state
+    # GUARD 1: If Desktop Mode is disabled by user, strictly do NOT interfere with phone screen!
+    if not getattr(state, "desktop_mode_enabled", True):
+        return {
+            "status": "desktop_mode_disabled",
+            "phone_cleared": False,
+            "desktop_markdown_active": False,
+            "actions": ["Desktop mode disabled; phone screen is untouched for user interaction"]
+        }
 
-    # 1. Auto-handle PIN code authentication if suddenly displayed
+    # GUARD 2: If an authentication / login screen is active (e.g. TruStage login, Azure AD BrokerAuthorizationActivity):
+    # Strictly do NOT send HOME key, do NOT dismiss keyboard, do NOT interfere with user typing!
+    auth_eval = await detect_auth_screen_type(ser, ext_id)
+    if auth_eval.get("auth_type") == "username_password":
+        return {
+            "status": "auth_in_progress",
+            "phone_cleared": False,
+            "desktop_markdown_active": False,
+            "actions": [f"Authentication in progress ({auth_eval.get('details')}); strictly preserving phone screen and keyboard for login"]
+        }
+
+    # 1. Auto-handle PIN code authentication if suddenly displayed (for numeric PIN only)
     pin_res = await auto_handle_pin_authentication(ser, ext_id)
     if pin_res.get("auth_detected"):
         actions.extend(pin_res.get("actions", []))
@@ -904,15 +1122,15 @@ async def enforce_markdown_only_on_desktop(
     disp0_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
     ext_info = parsed.get(ext_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
 
-    # 3. Check if FilePreviewActivity or Teams is resident on Phone Display (Display 0)
+    # 3. Check if FilePreviewActivity is resident specifically on Phone Display (Display 0)
+    # Only remove Markdown viewer (FilePreviewActivity), NEVER knock user out of Teams login or main app
     phone_md_tasks = disp0_info.get("file_preview_tasks", [])
     ext_md_tasks = set(ext_info.get("file_preview_tasks", []))
-    is_phone_resumed_teams = any("com.microsoft.teams" in r for r in disp0_info.get("resumed_activities", []))
 
-    if phone_md_tasks or is_phone_resumed_teams:
-        # Send HOME keyevent to phone display (Display 0) to ensure phone launcher is visible
+    if phone_md_tasks:
+        # Send HOME keyevent to phone display (Display 0) only if Markdown preview is stuck on phone
         await run_adb_shell("input -d 0 keyevent 3", ser, timeout=1.5)
-        actions.append("Dispatched HOME keyevent to phone display #0")
+        actions.append("Dispatched HOME keyevent to phone display #0 to background FilePreviewActivity")
         phone_cleared = True
 
         # Remove any FilePreviewActivity tasks tied specifically to Display 0
@@ -938,7 +1156,7 @@ async def enforce_markdown_only_on_desktop(
         # Neutral tap on top left title bar area away from center caption handle
         await run_adb_shell(f"input -d {ext_id} tap 240 40 >/dev/null 2>&1", ser, timeout=1.5)
 
-    # 5. Silently assure virtual keyboard is closed on desktop display
+    # 5. Silently assure virtual keyboard is closed on desktop display without touching phone
     await dismiss_keyboard(ser, ext_id)
 
     # 6. Check once more for any lingering PIN authentication prompt after display switch
@@ -971,11 +1189,36 @@ async def awake_keepalive_loop():
             await asyncio.sleep(15.0)
             ser = await get_active_adb_serial()
             if ser:
+                from services import state
+                # If desktop mode is disabled, user is working on the phone screen: DO NOT INTERFERE!
+                if not getattr(state, "desktop_mode_enabled", True):
+                    # Ensure on-screen keyboard is enabled and normal for user
+                    await run_adb_shell(
+                        "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                        "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                        "settings put secure show_ime_with_hard_keyboard 1",
+                        ser,
+                        timeout=1.5
+                    )
+                    continue
+
+                # If an authentication screen (TruStage login, Username/Password) is active: DO NOT INTERFERE!
+                auth_chk = await detect_auth_screen_type(ser)
+                if auth_chk.get("auth_type") == "username_password":
+                    # Ensure on-screen keyboard is enabled for login entry
+                    await run_adb_shell(
+                        "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                        "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                        "settings put secure show_ime_with_hard_keyboard 1",
+                        ser,
+                        timeout=1.5
+                    )
+                    continue
+
                 await configure_display_awake_policies(ser)
                 await auto_handle_pin_authentication(ser)
                 await enforce_markdown_only_on_desktop(ser)
                 await pulse_display_awake_heartbeat(ser)
-                # Keep external desktop responsive by clearing any frozen system/launcher dialogs
                 await dismiss_anr_dialogs(ser)
         except Exception:
             await asyncio.sleep(10.0)
@@ -1021,39 +1264,46 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         return False
 
 async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[int] = None) -> bool:
-    """Closes soft keyboard on Android device if open without disturbing editor content."""
+    """Closes soft keyboard on Android desktop display without disturbing phone display or editor content."""
     ser = await get_active_adb_serial(serial)
     if not ser: return True
     try:
         from services import state
+        # If desktop mode is disabled, user is working on the phone screen: NEVER DISMISS OR INTERFERE WITH KEYBOARD!
+        if not getattr(state, "desktop_mode_enabled", True):
+            await run_adb_shell(
+                "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                "settings put secure show_ime_with_hard_keyboard 1",
+                ser,
+                timeout=1.5
+            )
+            return True
+
         is_prohibited = getattr(state, "desktop_keyboard_prohibited", False)
         did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
         valid_d = sanitize_input_display_id(did)
 
-        if is_prohibited:
-            cmd = "ime disable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; settings put secure show_ime_with_hard_keyboard 0"
-            if valid_d and valid_d > 0:
-                cmd += f"; input -d {valid_d} keyevent 111 >/dev/null 2>&1"
+        # NEVER disable LatinIME! Doing so forces Android to switch to Google Voice Typing (VoiceInputMethodService)
+        # Instead, ensure Gboard is enabled and default, and manage soft keyboard display on the desktop monitor only.
+        if is_prohibited and valid_d and valid_d > 0:
+            cmd = (
+                "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
+                "settings put secure show_ime_with_hard_keyboard 0; "
+                f"input -d {valid_d} keyevent 111 >/dev/null 2>&1"
+            )
             await run_adb_shell(cmd, ser, timeout=1.5)
             _ime_visible_cache["val"] = False
             _ime_visible_cache["ts"] = time.time()
+            return True
 
         is_open = await is_ime_visible(ser, force_check=True)
-        if is_open:
-            if valid_d and valid_d > 0:
-                await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
-            # Enforce hardware keyboard policy and dismiss active IME window on display 0 if open
-            cmd = "settings put secure show_ime_with_hard_keyboard 0; input -d 0 keyevent 111 >/dev/null 2>&1; input -d 0 keyevent 4 >/dev/null 2>&1"
-            await run_adb_shell(cmd, ser, timeout=2.0)
+        if is_open and valid_d and valid_d > 0:
+            await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
             await asyncio.sleep(0.12)
             is_open = await is_ime_visible(ser, force_check=True)
-            if is_open and valid_d and valid_d > 0:
-                await run_adb_shell(f"input -d {valid_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.5)
-                await asyncio.sleep(0.12)
-                is_open = await is_ime_visible(ser, force_check=True)
-        else:
-            # Maintain hardware keyboard policy without injecting unnecessary keyevents
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0 >/dev/null 2>&1", ser, timeout=1.0)
+
         return not is_open
     except Exception:
         return True

@@ -13,6 +13,7 @@ import os
 import asyncio
 from services.adb_service import (
     parse_activities_by_display,
+    detect_auth_screen_type,
     auto_handle_pin_authentication,
     enforce_markdown_only_on_desktop
 )
@@ -63,6 +64,15 @@ async def test_enforce_markdown_only_on_desktop_mock():
     res = await enforce_markdown_only_on_desktop(serial="mock:9999", ext_display_id=11)
     assert res["status"] == "mock"
     assert res["desktop_markdown_active"] is True
+
+
+@pytest.mark.asyncio
+async def test_detect_auth_screen_type_mock():
+    """Verify detect_auth_screen_type safely identifies mock environment without error."""
+    res = await detect_auth_screen_type(serial="mock:9999", ext_display_id=11)
+    assert "auth_type" in res
+    assert res["auth_type"] == "none"
+    assert res["is_pin_safe"] is False
 
 
 @pytest.mark.asyncio

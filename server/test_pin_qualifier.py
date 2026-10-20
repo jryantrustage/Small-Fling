@@ -115,3 +115,45 @@ def test_registry_registration_and_priority():
     c = reg.get_classifier("pin_code_requested")
     assert c is not None
     assert isinstance(c, PinCodeRequestedClassifier)
+
+
+@pytest.mark.asyncio
+async def test_pin_vs_username_password_differentiation_classifier():
+    """
+    Verify PinCodeRequestedClassifier strictly differentiates between:
+      1. A true PIN prompt (detect returns True, fix enters PIN)
+      2. A Username / Password prompt (detect returns False, fix halts with safety refusal)
+    to guarantee the numeric PIN is NEVER typed into a username or email field.
+    """
+    classifier = PinCodeRequestedClassifier()
+
+    # Case A: Username/Password or Account Chooser screen active
+    ctx_user_pw = ClassifierContext(
+        serial="mock:9999",
+        metadata={"mock_username_password_requested": True}
+    )
+    res_detect_user_pw = await classifier.detect(ctx_user_pw)
+    # Must NOT detect as a PIN prompt!
+    assert res_detect_user_pw.issue_detected is False
+    assert res_detect_user_pw.metadata.get("pin_prohibited") is True
+    assert "PIN entry prohibited" in res_detect_user_pw.details
+
+    # Attempting fix on a username/password screen must be blocked
+    res_fix_user_pw = await classifier.fix(ctx_user_pw)
+    assert res_fix_user_pw.success is False
+    assert res_fix_user_pw.metadata.get("blocked_by_credential_presence") is True
+    assert "prohibited to prevent entering PIN into username field" in res_fix_user_pw.message
+
+    # Case B: True PIN prompt active
+    ctx_pin = ClassifierContext(
+        serial="mock:9999",
+        metadata={"mock_pin_requested": True, "force_enter_pin": True}
+    )
+    res_detect_pin = await classifier.detect(ctx_pin)
+    assert res_detect_pin.issue_detected is True
+    assert "PIN Code requested" in res_detect_pin.details
+
+    res_fix_pin = await classifier.fix(ctx_pin)
+    assert res_fix_pin.success is True
+    assert "1213" in res_fix_pin.message
+

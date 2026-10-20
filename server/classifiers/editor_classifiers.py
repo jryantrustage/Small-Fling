@@ -830,7 +830,19 @@ class PinCodeRequestedClassifier(BaseClassifier):
     severity = "blocking"
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
-        # Mock / test hook
+        # Mock / test hook for username/password prompt
+        if context.metadata.get("mock_username_password_requested"):
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details="Username / Password prompt detected (PIN entry prohibited)",
+                metadata={"mock": True, "auth_type": "username_password", "pin_prohibited": True}
+            )
+
+        # Mock / test hook for PIN prompt
         if context.metadata.get("mock_pin_requested") is not None:
             detected = bool(context.metadata["mock_pin_requested"])
             return ClassificationResult(
@@ -840,7 +852,7 @@ class PinCodeRequestedClassifier(BaseClassifier):
                 fix_name=self.fix_description,
                 severity=self.severity,
                 details="PIN Code requested (simulated)" if detected else "No PIN requested (simulated)",
-                metadata={"mock": True}
+                metadata={"mock": True, "auth_type": "pin" if detected else "none"}
             )
 
         serial = await get_active_adb_serial(context.serial)
@@ -855,68 +867,47 @@ class PinCodeRequestedClassifier(BaseClassifier):
                 metadata={"mock": True}
             )
 
-        reasons = []
+        from services.adb_service import detect_auth_screen_type
+        raw_disp = context.display_id if context.display_id is not None else await detect_external_display_id(serial)
+        disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else None
 
-        # 1. Check window manager for MAM/Authenticator/Keyguard prompts
-        try:
-            auth_chk = await run_adb_shell(
-                "dumpsys window windows | grep -iE 'MAMStartupActivity|ConfirmCredential|PinActivity|AuthenticationActivity|LockPatternActivity|MAMMsalAuthActivity|BrokerAuthorizationActivity|AccountChooserActivity'",
-                serial,
-                timeout=1.2
+        auth_eval = await detect_auth_screen_type(
+            serial=serial,
+            ext_display_id=disp_id,
+            screen_img=_get_cv_img(context)
+        )
+        auth_type = auth_eval.get("auth_type", "none")
+
+        # When Username / Password / Account Chooser is detected: STRICTLY PROHIBIT PIN ENTRY!
+        if auth_type == "username_password":
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details=f"Username / Password sign-in active ({auth_eval.get('details')}). PIN entry strictly prohibited to protect account.",
+                metadata={"auth_type": "username_password", "pin_prohibited": True, "details": auth_eval}
             )
-            auth_out = auth_chk.get("stdout", "")
-            if any(k.lower() in auth_out.lower() for k in [
-                "mamstartupactivity", "confirmcredential", "pinactivity",
-                "authenticationactivity", "lockpatternactivity", "mammsalauthactivity",
-                "brokerauthorizationactivity", "accountchooseractivity"
-            ]):
-                reasons.append("Intune / Teams MAM PIN authentication window active in WindowManager")
-        except Exception:
-            pass
 
-        # 2. Check lockscreen / keyguard status
-        try:
-            kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", serial, timeout=1.2)
-            kg_out = kg_chk.get("stdout", "")
-            if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
-                reasons.append("Device keyguard / lockscreen is currently showing")
-        except Exception:
-            pass
-
-        # 3. Visual OCR inspection if screen image is available
-        img = _get_cv_img(context)
-        if img is not None:
-            try:
-                from ocr_engine import get_rapid_ocr
-                r = get_rapid_ocr()
-                res, _ = r(img)
-                lines_text = [str(x[1]).strip().lower() for x in (res or [])]
-                full_screen_text = " ".join(lines_text)
-                if any(phrase in full_screen_text for phrase in [
-                    "enter your pin", "wrong pin", "enter pin", "confirm your pin",
-                    "managed by your organization"
-                ]):
-                    reasons.append("PIN entry dialog text detected on screen via OCR")
-            except Exception:
-                pass
-
-        has_issue = len(reasons) > 0
+        has_pin_issue = (auth_type == "pin")
         auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", False)
-        if has_issue and not auto_pin_enabled:
-            details_msg = f"PIN authentication prompt active ({'; '.join(reasons)}). Auto-enter is OFF in Settings to prevent lockout."
-        elif has_issue:
-            details_msg = f"PIN authentication prompt active ({'; '.join(reasons)})"
+
+        if has_pin_issue and not auto_pin_enabled:
+            details_msg = f"PIN authentication prompt active ({auth_eval.get('details')}). Auto-enter is OFF in Settings to prevent lockout."
+        elif has_pin_issue:
+            details_msg = f"PIN authentication prompt active ({auth_eval.get('details')})"
         else:
             details_msg = "No PIN prompt active (clean)"
 
         return ClassificationResult(
             classifier_id=self.id,
-            issue_detected=has_issue,
+            issue_detected=has_pin_issue,
             issue_name=self.issue_description,
             fix_name=self.fix_description,
             severity=self.severity,
             details=details_msg,
-            metadata={"reasons": reasons, "auto_enter_pin": auto_pin_enabled}
+            metadata={"auth_type": auth_type, "auto_enter_pin": auto_pin_enabled, "auth_eval": auth_eval}
         )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
@@ -924,6 +915,16 @@ class PinCodeRequestedClassifier(BaseClassifier):
         pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
         auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", False)
         force_entry = bool(context.metadata.get("force_enter_pin", False))
+
+        # Check mock hook for username/password prompt
+        if context.metadata.get("mock_username_password_requested"):
+            return FixResult(
+                classifier_id=self.id,
+                success=False,
+                message="Username/Password prompt detected. Automated PIN entry is prohibited to prevent entering PIN into username field.",
+                actions_taken=["Suppressed automated PIN entry: username/password present"],
+                metadata={"blocked_by_credential_presence": True}
+            )
 
         # SAFETY LOCK: If Auto Enter PIN is disabled and not explicitly triggered by user, halt without sending keys!
         if not auto_pin_enabled and not force_entry:
@@ -952,14 +953,24 @@ class PinCodeRequestedClassifier(BaseClassifier):
         raw_disp = context.display_id if context.display_id is not None else await detect_external_display_id(serial)
         disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else 0
 
-        pin_res = await auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=True)
+        pin_res = await auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=force_entry)
         actions = pin_res.get("actions", [])
+
+        if pin_res.get("status") == "blocked_username_password":
+            return FixResult(
+                classifier_id=self.id,
+                success=False,
+                message="Username/Password prompt detected. Automated PIN entry was blocked to prevent typing PIN into username field.",
+                actions_taken=actions or ["Blocked automated PIN entry: username/password screen active"],
+                metadata={"blocked_username_password": True, "pin_res": pin_res}
+            )
+
         await asyncio.sleep(0.4)
 
         return FixResult(
             classifier_id=self.id,
-            success=True,
-            message=f"Supplied PIN {pin} to authentication prompt and unlocked editor",
+            success=pin_res.get("pin_submitted", False) or pin_res.get("keyguard_unlocked", False),
+            message=f"Supplied PIN {pin} to authentication prompt and unlocked editor" if pin_res.get("pin_submitted") else pin_res.get("message", "PIN handling completed"),
             actions_taken=actions or [f"Submitted PIN {pin} to authentication prompt"],
             metadata={"pin_length": len(pin), "pin_res": pin_res}
         )
