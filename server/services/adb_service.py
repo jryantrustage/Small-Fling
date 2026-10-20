@@ -1162,22 +1162,18 @@ async def enforce_markdown_only_on_desktop(
     ext_md_tasks = set(ext_info.get("file_preview_tasks", []))
     phone_md_tasks = [t for t in disp0_info.get("file_preview_tasks", []) if t not in ext_md_tasks]
 
-    if phone_md_tasks:
+    if phone_md_tasks and not ext_md_tasks:
         # Send HOME keyevent to phone display (Display 0) only if Markdown preview is stuck on phone
         await run_adb_shell("input -d 0 keyevent 3", ser, timeout=1.5)
         actions.append("Dispatched HOME keyevent to phone display #0 to background FilePreviewActivity")
         phone_cleared = True
-
-        # Remove any FilePreviewActivity tasks tied specifically to Display 0
-        for tid in phone_md_tasks:
-            await run_adb_shell(f"cmd activity stack remove {tid}", ser, timeout=2.0)
-            actions.append(f"Removed phone Markdown task #{tid} from Display 0")
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.1)
 
     # 4. Check status on External Desktop Display
     is_ext_md_resumed = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", [])) or len(ext_md_tasks) > 0
+    is_any_md_open = "FilePreviewActivity" in out
 
-    if not is_ext_md_resumed:
+    if not is_ext_md_resumed and not is_any_md_open:
         # Launch / Bring com.microsoft.teams to the foreground on the external desktop display
         await run_adb_shell(
             f"monkey -p com.microsoft.teams -c android.intent.category.LAUNCHER 1 --display {ext_id} >/dev/null 2>&1",
@@ -1186,9 +1182,6 @@ async def enforce_markdown_only_on_desktop(
         )
         actions.append(f"Launched / focused Teams on desktop display #{ext_id}")
         await asyncio.sleep(0.3)
-
-        # Neutral tap on top left title bar area away from center caption handle
-        await run_adb_shell(f"input -d {ext_id} tap 240 40 >/dev/null 2>&1", ser, timeout=1.5)
     elif ext_md_tasks:
         # Ensure resident Markdown editor task has focus without reloading
         top_tid = next(iter(ext_md_tasks))
@@ -1318,33 +1311,29 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             )
             return True
 
-        is_prohibited = getattr(state, "desktop_keyboard_prohibited", False)
-        did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
-        valid_d = sanitize_input_display_id(did)
+        # Enforce hardware keyboard IME suppression on external desktop displays
+        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser, timeout=1.5)
 
-        # NEVER disable LatinIME! Doing so forces Android to switch to Google Voice Typing (VoiceInputMethodService)
-        # Instead, ensure Gboard is enabled and default, and manage soft keyboard display on the desktop monitor only.
-        if is_prohibited and valid_d and valid_d > 0:
-            cmd = (
-                "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
-                "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
-                "settings put secure show_ime_with_hard_keyboard 0"
-            )
-            await run_adb_shell(cmd, ser, timeout=1.5)
-            is_open = await is_ime_visible(ser, force_check=True)
-            if is_open:
-                await run_adb_shell(f"input -d {valid_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.5)
+        # Check if IME is actually visible on screen!
+        # If NOT visible, NEVER dispatch keyevent 4 or back keys (which would close FilePreviewActivity!)
+        if not await is_ime_visible(ser, force_check=True):
             _ime_visible_cache["val"] = False
             _ime_visible_cache["ts"] = time.time()
             return True
 
-        is_open = await is_ime_visible(ser, force_check=True)
-        if is_open and valid_d and valid_d > 0:
-            await run_adb_shell(f"input -d {valid_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.5)
-            await asyncio.sleep(0.12)
-            is_open = await is_ime_visible(ser, force_check=True)
+        # IME is visible: dispatch back key to external display to dismiss keyboard cleanly
+        did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+        target_d = did if (did is not None and did > 0) else 0
+        await run_adb_shell(f"input -d {target_d} keyevent 4", ser, timeout=1.0)
+        await asyncio.sleep(0.08)
 
-        return not is_open
+        # If stubborn, tap the taskbar soft-keyboard collapse chevron at (1630, 1055)
+        if await is_ime_visible(ser, force_check=True):
+            await run_adb_shell(f"input -d {target_d} tap 1630 1055 >/dev/null 2>&1", ser, timeout=1.0)
+
+        _ime_visible_cache["val"] = False
+        _ime_visible_cache["ts"] = time.time()
+        return True
     except Exception:
         return True
 
@@ -1916,8 +1905,7 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         if "mock" not in str(ser).lower() and target_d and target_d > 0:
             try:
                 if await is_ime_visible(ser):
-                    await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
-                    await asyncio.sleep(0.08)
+                    await dismiss_keyboard(ser, target_d)
             except Exception:
                 pass
 
@@ -1931,6 +1919,10 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
 
         full_cmd = "; ".join(base_cmds)
         await run_adb_shell(full_cmd, ser, timeout=5.0)
+        # Cleanly dismiss any IME popup triggered by caret repositioning
+        await asyncio.sleep(0.08)
+        if await is_ime_visible(ser):
+            await dismiss_keyboard(ser, target_d)
         dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
         await record_dispatched_key_event(

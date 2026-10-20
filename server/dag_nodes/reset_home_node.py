@@ -44,24 +44,22 @@ class ResetHomeNode(BaseDagNode):
         except Exception:
             pass
 
-        # 1. Enforce Markdown exclusively on desktop display & focus without tapping editable text
-        try:
-            from services.adb_service import enforce_markdown_only_on_desktop
-            await enforce_markdown_only_on_desktop(serial, disp_id)
-        except Exception:
-            pass
-        disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        # Tap neutral title text area on left (x=240, y=40) away from center window caption handle
-        await run_adb_shell(f"input -d {disp_id} tap 240 40 >/dev/null 2>&1", serial)
-        await asyncio.sleep(0.08)
-        await dismiss_keyboard(serial, disp_id)
-        await asyncio.sleep(0.08)
-
         is_verified = False
         detected_first = 0
 
         # Execute up to 3 focused attempts to return to Line 1
         for attempt in range(1, 4):
+            if attempt > 1:
+                # Re-focus editor gutter only on retry attempts if first attempt did not reach Line 1
+                disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+                gutter_x = 80
+                gutter_y = min(disp_h // 2, 400) if disp_h > 0 else 400
+                await run_adb_shell(f"input -d {disp_id} tap {gutter_x} {gutter_y} >/dev/null 2>&1", serial)
+                await asyncio.sleep(0.08)
+                await dismiss_keyboard(serial, disp_id)
+                await asyncio.sleep(0.08)
+
+            # Pure HID Ctrl+Home: directly navigates to Line 1
             await send_hid_keycombination(113, 122, serial=serial, caller_node="reset_home")
             await asyncio.sleep(0.5)
             await dismiss_keyboard(serial, disp_id)

@@ -52,9 +52,9 @@ class InitEndNode(BaseDagNode):
         except Exception:
             pass
         disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-        focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
-        focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
-        # Tap editor canvas to focus without keeping soft keyboard open
+        focus_x = 80
+        focus_y = min(disp_h // 2, 400) if disp_h > 0 else 400
+        # Tap editor gutter to focus without keeping soft keyboard open
         await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
         await asyncio.sleep(0.08)
         await dismiss_keyboard(serial, disp_id)

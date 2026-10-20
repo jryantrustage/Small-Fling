@@ -79,15 +79,15 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     scale_y = h / 1080.0
 
     results: Dict[str, Tuple[int, int]] = {
-        "pencil": (int(1655 * scale_x), int(250 * scale_y)),
-        "split": (int(1710 * scale_x), int(250 * scale_y)),
-        "preview": (int(1760 * scale_x), int(250 * scale_y)),
-        "theme_dropdown": (int(1840 * scale_x), int(250 * scale_y)),
+        "pencil": (int(1625 * scale_x), int(230 * scale_y)),
+        "split": (int(1680 * scale_x), int(230 * scale_y)),
+        "preview": (int(1735 * scale_x), int(230 * scale_y)),
+        "theme_dropdown": (int(1825 * scale_x), int(230 * scale_y)),
     }
 
-    # Search secondary markdown toolbar strip (y: ~10%..35%, x: >= 1200)
-    tb_y1, tb_y2 = int(h * 0.10), int(h * 0.35)
-    tb_x1, tb_x2 = int(1200 * scale_x), w
+    # Search strictly in secondary markdown toolbar strip (y: 195..255 on 1080p, x: >= 1580)
+    tb_y1, tb_y2 = int(195 * scale_y), int(255 * scale_y)
+    tb_x1, tb_x2 = int(1580 * scale_x), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
@@ -102,7 +102,7 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     if len(matching_rows) > 0:
         center_y = tb_y1 + int(matching_rows[0] + matching_rows[-1]) // 2
     else:
-        center_y = int(250 * scale_y)
+        center_y = int(230 * scale_y)
 
     # Detect horizontal blobs in the icon band
     icons_mask = (gray > 45) if is_dark else (gray < 220)
@@ -134,7 +134,7 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
             results["split"] = (int(centers[1]), int(center_y))
     else:
         for cx in centers:
-            if cx < int(1550 * scale_x):
+            if cx < int(1700 * scale_x):
                 results["pencil"] = (int(cx), int(center_y))
             else:
                 results["theme_dropdown"] = (int(cx), int(center_y))
@@ -295,7 +295,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
                 actions.append(f"Located theme pull-down anchor at {anchor_coords} via toolbar vision engine")
 
     if not anchor_coords:
-        anchor_coords = (int(1840 * scale_x), int(250 * scale_y))
+        anchor_coords = (int(1825 * scale_x), int(230 * scale_y))
         actions.append(f"Using calibrated theme dropdown anchor {anchor_coords}")
 
     # 3. Touch motion to open the theme pull-down menu
@@ -337,8 +337,8 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
 
     # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit (Row 1 of popup menu relative to anchor)
     if not dark_mode_coords:
-        dark_mode_coords = (max(100, ax - int(85 * scale_x)), ay + int(60 * scale_y))
-        actions.append(f"Using relative 'Dark Mode' menu row at {dark_mode_coords}")
+        dark_mode_coords = (int(1730 * scale_x), int(285 * scale_y))
+        actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
     if dark_mode_coords:

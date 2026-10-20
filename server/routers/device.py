@@ -280,10 +280,24 @@ async def send_device_key_endpoint(key_name: str, req: Optional[Dict[str, Any]] 
     ser = await adb.get_active_adb_serial(req.get("serial"))
     disp_id = await adb.detect_external_display_id(ser)
     kn = key_name.lower().replace("-", "_").replace(" ", "_")
+    target_d = disp_id or 3
+    disp_w, disp_h = await adb.get_display_dimensions(ser, target_d)
+    focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+    focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
     if "end" in kn:
+        await adb.run_adb_shell(f"input -d {target_d} tap {focus_x} {focus_y} >/dev/null 2>&1", ser)
+        await asyncio.sleep(0.08)
+        await adb.dismiss_keyboard(ser, target_d)
+        await asyncio.sleep(0.08)
         await adb.send_hid_keycombination(113, 123, ser)
     elif "home" in kn:
+        await adb.run_adb_shell(f"input -d {target_d} tap {focus_x} {focus_y} >/dev/null 2>&1", ser)
+        await asyncio.sleep(0.08)
+        await adb.dismiss_keyboard(ser, target_d)
+        await asyncio.sleep(0.08)
         await adb.send_hid_keycombination(113, 122, ser)
+        await asyncio.sleep(0.2)
+        await adb.dismiss_keyboard(ser, target_d)
     await adb.auto_fix_viewport(ser, disp_id)
     return {"status": "ok", "key": key_name}
 

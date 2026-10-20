@@ -16,6 +16,10 @@ from services.adb_service import (
     get_device_info,
     DEVICE_PROFILES,
     extract_device_hardware_specs,
+    run_adb_shell,
+    dismiss_keyboard,
+    get_display_dimensions,
+    detect_external_display_id,
 )
 
 try:
@@ -124,9 +128,26 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
             "total_lines": total_lines
         })
 
-        # 2. Fast home: Dispatch Ctrl+Home: keycode 113 + 122
+        # 2. Fast home: Focus editor canvas, dismiss keyboard, and dispatch Ctrl+Home: keycode 113 + 122
+        disp_id = await detect_external_display_id(serial) or 3
+        try:
+            disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+            focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+            focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+            await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
+            await asyncio.sleep(0.08)
+            await dismiss_keyboard(serial, disp_id)
+            await asyncio.sleep(0.08)
+        except Exception:
+            pass
+
         await auto_fix_viewport(serial)
         await send_hid_keycombination(113, 122, serial)
+        await asyncio.sleep(0.2)
+        try:
+            await dismiss_keyboard(serial, disp_id)
+        except Exception:
+            pass
         
         home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
         is_verified = False
@@ -511,8 +532,25 @@ async def verify_project_home(project_id: str, request: Request):
     contents = await extract_request_image(request)
     if not contents:
         serial = await get_active_adb_serial()
+        disp_id = await detect_external_display_id(serial) or 3
+        try:
+            disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+            focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+            focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+            await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
+            await asyncio.sleep(0.08)
+            await dismiss_keyboard(serial, disp_id)
+            await asyncio.sleep(0.08)
+        except Exception:
+            pass
+
         await auto_fix_viewport(serial)
         await send_hid_keycombination(113, 122, serial)
+        await asyncio.sleep(0.2)
+        try:
+            await dismiss_keyboard(serial, disp_id)
+        except Exception:
+            pass
         
         home_path = state.FRAMES_DIR / f"calib_home_{project_id}.png"
         is_verified = False

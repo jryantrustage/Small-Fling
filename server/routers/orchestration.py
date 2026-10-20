@@ -1684,17 +1684,28 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 serial=active_serial
             )
 
-            valid_disp_id = sanitize_input_display_id(disp_id)
-            d_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
-            disp_w, disp_h = await get_display_dimensions(active_serial, valid_disp_id or disp_id or 0)
-            sb_x = max(100, disp_w - 5)
+            target_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 3)
+            try:
+                from services.adb_service import enforce_markdown_only_on_desktop, auto_fix_viewport
+                await enforce_markdown_only_on_desktop(active_serial, target_d)
+                await auto_fix_viewport(active_serial, target_d)
+            except Exception:
+                pass
+
+            disp_w, disp_h = await get_display_dimensions(active_serial, target_d)
+            gutter_x = 80
+            gutter_y = min(disp_h // 2, 400) if disp_h > 0 else 400
 
             # Execute focused attempts to return to Line 1
             for attempt in range(1, 4):
-                # Suppress soft keyboard and send Ctrl+Home + reverse inertial flings without tapping text
-                await dismiss_keyboard(active_serial, disp_id)
+                # Ensure editor canvas has focus before sending Ctrl+Home
+                await run_adb_shell(f"input -d {target_d} tap {gutter_x} {gutter_y} >/dev/null 2>&1", active_serial)
+                await asyncio.sleep(0.08)
+                await dismiss_keyboard(active_serial, target_d)
+                await asyncio.sleep(0.08)
                 await send_hid_keycombination(113, 122, serial=active_serial, caller_node="reset_home")
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.5)
+                await dismiss_keyboard(active_serial, target_d)
 
                 # Fetch active density/DPI from the phone right before OCR to normalize line 1 verification boxes
                 dpi_factor, active_dpi = await fetch_current_display_dpi_factor(active_serial, disp_id)
@@ -3465,6 +3476,22 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     disp_id = await detect_external_display_id(active_serial)
     if loop_idx == 1 or not state.orchestration_state.get("edit_mode"):
         await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
+        # If running cycle 1 from page 1, ensure document is at Line 1 before capturing
+        if state.latest_telemetry.get("current_page", 0) <= 1:
+            try:
+                snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                if snap_check:
+                    dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial, disp_id)
+                    calib_check = state.FRAMES_DIR / "dag2_start_check.png"
+                    with open(calib_check, "wb") as f: f.write(snap_check)
+                    top_detected = await state.detect_top_line_in_process(calib_check, dpi_factor=dpi_factor)
+                    if top_detected and top_detected > 2:
+                        print(f"[execute_dag_group_capture_markdown] Initial cycle top line is at {top_detected}. Simply pressing HID Ctrl+Home to return to Line 1...")
+                        await send_hid_keycombination(113, 122, serial=active_serial, caller_node="dag2_home")
+                        await asyncio.sleep(0.5)
+                        await dismiss_keyboard(active_serial, disp_id)
+            except Exception as e:
+                print(f"[execute_dag_group_capture_markdown] Initial Line 1 return check note: {e}")
 
     loop_start_ms = int(time.time() * 1000)
     loop_t0 = time.perf_counter()
@@ -3859,6 +3886,23 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
         disp_id = await detect_external_display_id(active_serial)
         await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
+
+        # If starting continuous capture loop from Page 1, ensure document is returned to Line 1 before capturing
+        if state.latest_telemetry.get("current_page", 0) <= 1:
+            try:
+                snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+                if snap_check:
+                    dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial, disp_id)
+                    calib_check = state.FRAMES_DIR / "dag2_start_check.png"
+                    with open(calib_check, "wb") as f: f.write(snap_check)
+                    top_detected = await state.detect_top_line_in_process(calib_check, dpi_factor=dpi_factor)
+                    if top_detected and top_detected > 2:
+                        print(f"[run_continuous_capture_loop_worker] Starting DAG 2 but top line is at {top_detected}. Simply pressing HID Ctrl+Home to return to Line 1...")
+                        await send_hid_keycombination(113, 122, serial=active_serial, caller_node="dag2_home")
+                        await asyncio.sleep(0.5)
+                        await dismiss_keyboard(active_serial, disp_id)
+            except Exception as e:
+                print(f"[run_continuous_capture_loop_worker] Initial Line 1 return check note: {e}")
 
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)

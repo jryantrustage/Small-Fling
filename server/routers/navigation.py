@@ -10,6 +10,7 @@ from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, run_adb_shell,
     ensure_adb_keyboard_closed, capture_external_screenshot, send_hid_keycombination,
     auto_fix_viewport, get_device_info, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
+    dismiss_keyboard, get_display_dimensions,
 )
 
 router = APIRouter(tags=["Navigation"])
@@ -178,11 +179,21 @@ async def navigation_control_end():
 async def navigation_control_home():
     serial = await get_active_adb_serial()
     if not serial: raise HTTPException(status_code=503, detail="No active ADB device connected")
-    disp_id = await detect_external_display_id(serial)
+    disp_id = await detect_external_display_id(serial) or 3
+
+    disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+    focus_x = min(disp_w // 3, 500) if disp_w > 0 else 500
+    focus_y = min(disp_h // 2, 500) if disp_h > 0 else 500
+    await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
+    await asyncio.sleep(0.08)
+    await dismiss_keyboard(serial, disp_id)
+    await asyncio.sleep(0.08)
 
     await _scroll_mouse(serial, disp_id, 200, 12)
     await send_hid_keycombination(113, 122, serial)
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.2)
+    await dismiss_keyboard(serial, disp_id)
+    await asyncio.sleep(0.3)
 
     top_line = await _snap_and_detect(serial, "nav_home.png", state.detect_top_line_in_process) or 1
     state.latest_telemetry.update({"current_top_line": top_line, "status_message": f"Dispatched Ctrl+Home (Top Ln: {top_line}) ✔"})

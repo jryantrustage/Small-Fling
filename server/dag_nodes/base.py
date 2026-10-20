@@ -143,7 +143,6 @@ class BaseDagNode(ABC):
     def __init__(self):
         # Default attached observation actions
         self.attached_actions: List[str] = [
-            "markdown_not_open_navigate_onedrive",
             "keyboard_detected_close",
             "view_mode_to_edit_mode",
             "light_mode_to_dark_mode",
