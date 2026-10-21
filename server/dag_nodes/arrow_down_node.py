@@ -16,7 +16,7 @@ from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, sanitize_input_display_id,
     dismiss_keyboard, run_adb_shell, capture_external_screenshot,
-    dispatch_accelerated_viewport_step
+    dispatch_accelerated_viewport_step, get_display_dimensions
 )
 from services import state
 from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
@@ -107,6 +107,7 @@ class ArrowDownPagerNode(BaseDagNode):
         new_cursor_line = target_top + (prev_bottom - cur_top)
         state.orchestration_state["cursor_line"] = new_cursor_line
         state.orchestration_state["scroll_padding_lines"] = padding
+        state.orchestration_state["last_arrow_count"] = tracked_arrow_count
 
         if is_mock:
             state.dag_state["nodes"]["arrow_down"].update({
@@ -152,6 +153,16 @@ class ArrowDownPagerNode(BaseDagNode):
         await dismiss_keyboard(serial, valid_disp_id)
         await asyncio.sleep(0.05)
 
+        # Establish text caret focus on editor canvas (especially when starting at line 1)
+        disp_w, disp_h = await get_display_dimensions(serial, valid_disp_id)
+        focus_x = min(int(disp_w * 0.25), 500)
+        focus_y = min(int(disp_h * 0.40), 400)
+        if cur_top == 1:
+            await run_adb_shell(f"input -d {valid_disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
+            await asyncio.sleep(0.12)
+            await dismiss_keyboard(serial, valid_disp_id)
+            await asyncio.sleep(0.05)
+
         # 2. Viewport step dispatch
         dispatch_meth = str(cfg.get("dispatch_method", "arrow_down"))
         await dispatch_accelerated_viewport_step(
@@ -186,6 +197,13 @@ class ArrowDownPagerNode(BaseDagNode):
                 break
 
             diff = target_top - (actual_top or target_top)
+            if (actual_top == cur_top or actual_top is None) and _ in (0, 1):
+                # Viewport has not advanced from initial line; caret focus may be on container. Re-tap canvas!
+                await run_adb_shell(f"input -d {valid_disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
+                await asyncio.sleep(0.12)
+                await dismiss_keyboard(serial, valid_disp_id)
+                await asyncio.sleep(0.05)
+
             if diff > 0:
                 adjust_step = min(diff, 25)
                 keys = " ".join(["20"] * adjust_step)
@@ -222,6 +240,7 @@ class ArrowDownPagerNode(BaseDagNode):
             raise RuntimeError(error_msg)
 
         state.orchestration_state["cursor_line"] = new_cursor_line
+        state.orchestration_state["last_arrow_count"] = total_arrows_pressed
         state.latest_telemetry["current_top_line"] = target_top
         blackboard.top_line = target_top
         blackboard.arrow_count = total_arrows_pressed

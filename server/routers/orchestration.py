@@ -3471,13 +3471,13 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
 
     opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "pipelined": False, "skip_env_heal": True}
 
-    # Enforce Edit Mode and Dark Mode ONLY on the initial cycle (loop 1) or if edit_mode isn't verified.
+    # Enforce Edit Mode and Dark Mode ONLY on the initial cycle (loop 1).
     # On subsequent cycles, avoid tactile touches or viewport resets so that Node 6's precise alignment is preserved.
     disp_id = await detect_external_display_id(active_serial)
-    if loop_idx == 1 or not state.orchestration_state.get("edit_mode"):
+    if loop_idx == 1:
         await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
-        # If running cycle 1 from page 1, ensure document is at Line 1 before capturing
-        if state.latest_telemetry.get("current_page", 0) <= 1:
+        # If running cycle 1 from page 1 and no frames are captured yet, ensure document is at Line 1 before capturing
+        if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
             try:
                 snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                 if snap_check:
@@ -3805,8 +3805,13 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     loop_dur_ms = max(1, int((loop_t1 - loop_t0) * 1000))
     _save_dag2_loop_record(loop_idx, loop_start_ms, loop_end_ms, loop_dur_ms, "success", loop_nodes)
 
+    next_page = max(loop_idx + 1, len(state.captured_frames) + 1)
+    state.latest_telemetry["current_page"] = next_page
+    state.orchestration_state["page"] = next_page
+
     loop_rec = {
         "loop_index": loop_idx,
+        "next_page": next_page,
         "duration_ms": loop_dur_ms,
         "duration_formatted": format_duration_min_sec(loop_dur_ms),
         "started_at_ms": loop_start_ms,
@@ -3816,6 +3821,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "type": "dag2_loop_completed",
         "loop": loop_rec,
         "loop_index": loop_idx,
+        "next_page": next_page,
         "duration_ms": loop_dur_ms,
         "duration_formatted": format_duration_min_sec(loop_dur_ms)
     })
@@ -3887,8 +3893,8 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         disp_id = await detect_external_display_id(active_serial)
         await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
-        # If starting continuous capture loop from Page 1, ensure document is returned to Line 1 before capturing
-        if state.latest_telemetry.get("current_page", 0) <= 1:
+        # If starting continuous capture loop from Page 1 with no frames yet, ensure document is returned to Line 1 before capturing
+        if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
             try:
                 snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
                 if snap_check:
@@ -4023,6 +4029,20 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
     opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
     if payload:
         opts.update(payload)
+
+    # Environmental assertion for DAG 3: editor must be full-screen, in single-pane edit mode and dark mode
+    if active_serial and "mock" not in str(active_serial).lower():
+        try:
+            from services.adb_service import is_editor_full_screen
+            ext_did = await detect_external_display_id(active_serial)
+            fs = await is_editor_full_screen(active_serial, ext_did)
+            if not fs.get("is_fullscreen", True):
+                await auto_fix_viewport(active_serial, ext_did)
+            await enable_edit_mode(active_serial, ext_did)
+            await select_dark_mode(active_serial, ext_did)
+            await dismiss_keyboard(active_serial, ext_did)
+        except Exception:
+            pass
 
     await emit_dag_telemetry_event(
         category="SYSTEM",

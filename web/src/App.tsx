@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
   ZoomIn, ZoomOut, Check, ListTree, FileText,
-  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard
+  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard, ArrowDown
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -2611,7 +2611,29 @@ function AppContent() {
                               ><ListTree size={12} /></button>
                             </div>
                             <div className="frame-card-info">
-                              <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
+                                {f.page_index > 1 && (
+                                  <span
+                                    className="frame-arrows-badge"
+                                    style={{
+                                      fontSize: '10px',
+                                      color: '#00ff9d',
+                                      background: 'rgba(0, 255, 157, 0.12)',
+                                      border: '1px solid rgba(0, 255, 157, 0.25)',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px',
+                                      fontWeight: 600
+                                    }}
+                                    title={`${f.arrow_count ?? 0} down-arrow key presses to reach page`}
+                                  >
+                                    <ArrowDown size={10} color="#00ff9d" /> {f.arrow_count ?? 0}
+                                  </span>
+                                )}
+                              </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
                                 <span className="frame-status-text" title={f.status}>{f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}</span>

@@ -86,6 +86,7 @@ export const CapturedFramesReportModal: React.FC<CapturedFramesReportModalProps>
       topLine: top,
       bottomLine: bot,
       span,
+      arrowCount: f.arrow_count || 0,
       flags,
       status: f.status || 'processed',
       createdAt: f.created_at
@@ -240,6 +241,7 @@ export const CapturedFramesReportModal: React.FC<CapturedFramesReportModalProps>
                   <th style={{ padding: '8px 12px' }}>Page</th>
                   <th style={{ padding: '8px 12px' }}>Viewport Bounds</th>
                   <th style={{ padding: '8px 12px' }}>Lines Visible</th>
+                  <th style={{ padding: '8px 12px' }}>Down Arrows</th>
                   <th style={{ padding: '8px 12px' }}>Continuity Status</th>
                   <th style={{ padding: '8px 12px' }}>Capture Status</th>
                 </tr>
@@ -247,7 +249,7 @@ export const CapturedFramesReportModal: React.FC<CapturedFramesReportModalProps>
               <tbody>
                 {frameBreakdown.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: '#8b949e' }}>
+                    <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: '#8b949e' }}>
                       No captured frames available.
                     </td>
                   </tr>
@@ -265,6 +267,9 @@ export const CapturedFramesReportModal: React.FC<CapturedFramesReportModalProps>
                         </td>
                         <td style={{ padding: '8px 12px' }}>
                           {row.span} lines
+                        </td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'monospace', color: '#00ff9d' }}>
+                          {row.pageIndex === 1 ? '0 (Start)' : `${row.arrowCount ?? 0} ↓`}
                         </td>
                         <td style={{ padding: '8px 12px' }}>
                           {isContinuous ? (

@@ -16,7 +16,7 @@ import numpy as np
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, fetch_current_display_dpi_factor,
-    DEVICE_PROFILES, current_device_model
+    capture_external_screenshot, DEVICE_PROFILES, current_device_model
 )
 from services import state
 from services import ocr_service as ocr_svc
@@ -45,7 +45,18 @@ class FrameOcrNode(BaseDagNode):
         cfg = blackboard.config or self.default_config
 
         temp_calib = blackboard.current_image_path or (state.FRAMES_DIR / "dag_node3_capture_temp.png")
-        if not temp_calib.exists() or temp_calib.stat().st_size < 2000:
+        snap = None
+        if temp_calib.exists() and temp_calib.stat().st_size >= 2000:
+            with open(temp_calib, "rb") as f:
+                snap = f.read()
+        elif serial and "mock" not in str(serial).lower():
+            # In standalone mode or if Node 3 hasn't run, capture directly from display
+            snap = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+            if snap and len(snap) >= 2000:
+                with open(temp_calib, "wb") as f:
+                    f.write(snap)
+
+        if not snap or len(snap) < 2000:
             candidates = sorted(
                 [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
                 key=lambda p: p.stat().st_mtime,
@@ -53,11 +64,10 @@ class FrameOcrNode(BaseDagNode):
             )
             if candidates:
                 temp_calib = candidates[0]
+                with open(temp_calib, "rb") as f:
+                    snap = f.read()
             else:
                 raise RuntimeError("No captured frame found. Please execute DAG Node 3 (Screen Capture) first.")
-
-        with open(temp_calib, "rb") as f:
-            snap = f.read()
 
         blackboard.latest_frame_bytes = snap
         blackboard.current_image_bytes = snap
@@ -67,29 +77,19 @@ class FrameOcrNode(BaseDagNode):
         blackboard.dpi_factor = dpi_factor
         blackboard.active_dpi = active_dpi
 
-        prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 31}))
-        lpp = prof.get("lines_per_page", 31)
+        prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
+        lpp = prof.get("lines_per_page", 24)
 
-        pidx = len(state.captured_frames) + 1
-
-        # CRITICAL: Page 1 must ALWAYS start at Line 1
-        if pidx == 1 or len(state.captured_frames) == 0:
-            expected_top = 1
-        else:
-            sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or ""))
-            last_bot = sorted_f[-1].get("bottom_line", 0) if sorted_f else 0
-            expected_top = (last_bot + 1) if last_bot > 0 else (state.dag_state["nodes"].get("frame_ocr", {}).get("target_top_line") or 1)
+        sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or ""))
+        last_bot = sorted_f[-1].get("bottom_line", 0) if sorted_f else 0
+        expected_top = (last_bot + 1) if last_bot > 0 else (state.dag_state["nodes"].get("frame_ocr", {}).get("target_top_line") or 1)
 
         is_fast = bool(cfg.get("fast_loop", False) or (blackboard.payload and blackboard.payload.get("fast_loop")))
 
         if is_fast:
             t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
-            if pidx == 1:
-                top_ln = 1
-                bot_ln = b_det if (b_det and b_det > 1) else lpp
-            else:
-                top_ln = t_det if t_det > 0 else expected_top
-                bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
+            top_ln = t_det if t_det > 0 else expected_top
+            bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
             lines_detected = [
                 {
                     "line_number": ln,
@@ -112,43 +112,102 @@ class FrameOcrNode(BaseDagNode):
                 node_id="frame_ocr",
                 expected_top=expected_top
             )
-            if pidx == 1:
-                top_ln = 1
-                if bot_ln <= top_ln or bot_ln > 80:
-                    bot_ln = lpp
-            else:
-                if top_ln <= 0:
-                    top_ln = expected_top
-                if bot_ln <= top_ln:
-                    bot_ln = top_ln + lpp - 1
+            if top_ln <= 0:
+                top_ln = expected_top
+            if bot_ln <= top_ln:
+                bot_ln = top_ln + lpp - 1
 
             with open(temp_calib, "rb") as f:
                 snap = f.read()
             scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": lines_detected}
 
+        # Resolve logical page index and check duplicate content
+        content_hash = hashlib.sha256(snap).hexdigest()
+        is_duplicate = False
+        duplicate_fid = None
+
+        if top_ln == 1:
+            pidx = 1
+            # If Page 1 already exists, check if this is an identical re-read of Page 1
+            p1_frames = [f for f in sorted_f if f.get("page_index") == 1]
+            if p1_frames:
+                is_duplicate = True
+                duplicate_fid = p1_frames[0]["frame_id"]
+        elif sorted_f:
+            last_f = sorted_f[-1]
+            if last_f.get("content_hash") == content_hash:
+                is_duplicate = True
+                duplicate_fid = last_f["frame_id"]
+                pidx = last_f.get("page_index", len(sorted_f))
+            elif last_f.get("top_line") == top_ln and last_f.get("bottom_line") == bot_ln:
+                is_duplicate = True
+                duplicate_fid = last_f["frame_id"]
+                pidx = last_f.get("page_index", len(sorted_f))
+            else:
+                pidx = last_f.get("page_index", len(sorted_f)) + 1
+        else:
+            pidx = 1
+
         pid = blackboard.project_id or state.get_current_project_id()
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
-        fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
-        fn = f"{fid}.png"
-        frame_path = state.FRAMES_DIR / fn
-        with open(frame_path, "wb") as f:
-            f.write(snap)
 
-        content_hash = hashlib.sha256(snap).hexdigest()
-        frame_info = {
-            "frame_id": fid,
-            "filename": fn,
-            "top_line": top_ln,
-            "bottom_line": bot_ln,
-            "page_index": pidx,
-            "file_size": len(snap),
-            "content_hash": content_hash,
-            "status": "processed",
-            "created_at": datetime.now().isoformat(),
-            "extracted_line_count": len(lines_detected) if lines_detected else lpp,
-            "model_used": cfg.get("engine", "RapidOCR"),
-        }
-        state.captured_frames[fid] = frame_info
+        if is_duplicate and duplicate_fid in state.captured_frames:
+            fid = duplicate_fid
+            state.captured_frames[fid].update({
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "status": "processed",
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp
+            })
+            frame_info = state.captured_frames[fid]
+        else:
+            arrow_count = 0 if pidx == 1 else (state.orchestration_state.get("last_arrow_count") or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count") or 0)
+            fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
+            fn = f"{fid}.png"
+            frame_path = state.FRAMES_DIR / fn
+            with open(frame_path, "wb") as f:
+                f.write(snap)
+
+            frame_info = {
+                "frame_id": fid,
+                "filename": fn,
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "page_index": pidx,
+                "file_size": len(snap),
+                "content_hash": content_hash,
+                "status": "processed",
+                "created_at": datetime.now().isoformat(),
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
+                "model_used": cfg.get("engine", "RapidOCR"),
+                "arrow_count": arrow_count
+            }
+            state.captured_frames[fid] = frame_info
+
+        # Broadcast new_frame and emit FRAME telemetry event
+        await state.ws_manager.broadcast({
+            "type": "new_frame",
+            "frame": frame_info,
+            "data": frame_info
+        })
+        try:
+            from routers.orchestration import emit_dag_telemetry_event
+            await emit_dag_telemetry_event(
+                category="FRAME",
+                message=f"DAG 2 • Captured Frame {pidx} (Ln {top_ln} → {bot_ln}, {frame_info.get('arrow_count', 0)} down-arrows)",
+                dag="capture_entire_markdown",
+                node_id="frame_ocr",
+                serial=serial,
+                data={
+                    "frame_id": fid,
+                    "top_line": top_ln,
+                    "bottom_line": bot_ln,
+                    "page_index": pidx,
+                    "arrow_count": frame_info.get("arrow_count", 0)
+                }
+            )
+        except Exception:
+            pass
 
         # Populate document master lines if text was detected
         for item in lines_detected:

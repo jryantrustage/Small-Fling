@@ -78,6 +78,11 @@ def init_db():
         if "scroll_padding_lines" not in prof_cols:
             c.execute("ALTER TABLE device_profiles ADD COLUMN scroll_padding_lines INTEGER DEFAULT 4;")
 
+        # Ensure arrow_count column exists on frames table
+        frame_cols = {row["name"] for row in c.execute("PRAGMA table_info(frames);").fetchall()}
+        if "arrow_count" not in frame_cols:
+            c.execute("ALTER TABLE frames ADD COLUMN arrow_count INTEGER DEFAULT 0;")
+
         # Seed default editable templates in device_profiles if none exist
         if c.execute("SELECT COUNT(*) FROM device_profiles;").fetchone()[0] == 0:
             now = datetime.now().isoformat()
@@ -454,13 +459,19 @@ def get_frames(project_id: Optional[str]) -> List[Dict[str, Any]]:
         res.append(d)
     return res
 
-def save_frame(project_id: str, frame_id: str, filename: str, top_line: int, bottom_line: int, page_index: int, file_size: int = 0, status: str = "processed", extracted_line_count: int = 0, custom_offset_y: float = 0.0, token_usage: Dict[str, Any] = None, bounding_boxes: Dict[str, Any] = None, model_used: str = "", created_at: str = None) -> Dict[str, Any]:
+def save_frame(project_id: str, frame_id: str, filename: str, top_line: int, bottom_line: int, page_index: int, file_size: int = 0, status: str = "processed", extracted_line_count: int = 0, custom_offset_y: float = 0.0, token_usage: Dict[str, Any] = None, bounding_boxes: Dict[str, Any] = None, model_used: str = "", created_at: str = None, arrow_count: int = 0) -> Dict[str, Any]:
     now = created_at or datetime.now().isoformat()
     with get_connection() as conn:
         c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO frames VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", (frame_id, project_id, filename, top_line, bottom_line, page_index, file_size, status, extracted_line_count, custom_offset_y, json.dumps(token_usage or {}), json.dumps(bounding_boxes or {}), model_used, now))
+        c.execute("""
+            INSERT OR REPLACE INTO frames (
+                frame_id, project_id, filename, top_line, bottom_line, page_index,
+                file_size, status, extracted_line_count, custom_offset_y,
+                token_usage_json, bounding_boxes_json, model_used, created_at, arrow_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (frame_id, project_id, filename, top_line, bottom_line, page_index, file_size, status, extracted_line_count, custom_offset_y, json.dumps(token_usage or {}), json.dumps(bounding_boxes or {}), model_used, now, arrow_count or 0))
         c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id)); conn.commit()
-    return {"frame_id": frame_id, "project_id": project_id, "filename": filename, "top_line": top_line, "bottom_line": bottom_line, "page_index": page_index, "file_size": file_size, "status": status, "extracted_line_count": extracted_line_count, "custom_offset_y": custom_offset_y, "token_usage": token_usage or {}, "bounding_boxes": bounding_boxes or {}, "model_used": model_used, "created_at": now}
+    return {"frame_id": frame_id, "project_id": project_id, "filename": filename, "top_line": top_line, "bottom_line": bottom_line, "page_index": page_index, "file_size": file_size, "status": status, "extracted_line_count": extracted_line_count, "custom_offset_y": custom_offset_y, "token_usage": token_usage or {}, "bounding_boxes": bounding_boxes or {}, "model_used": model_used, "created_at": now, "arrow_count": arrow_count or 0}
 
 def update_frame_position(frame_id: str, custom_offset_y: float) -> bool:
     return _execute("UPDATE frames SET custom_offset_y = ? WHERE frame_id = ?;", (custom_offset_y, frame_id)) > 0

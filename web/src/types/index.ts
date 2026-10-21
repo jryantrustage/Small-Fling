@@ -56,6 +56,7 @@ export interface FrameData {
   extracted_line_count: number;
   custom_offset_y?: number;
   model_used?: string;
+  arrow_count?: number;
   token_usage?: {
     prompt_tokens: number;
     candidates_tokens: number;

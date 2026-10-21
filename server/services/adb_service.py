@@ -1470,23 +1470,39 @@ async def is_editor_full_screen(
     d_match = re.search(rf'Display #{did}\b.*?(?=Display #|\Z)', stdout, re.DOTALL)
     search_block = d_match.group(0) if d_match else stdout
 
-    # Match exact Task hosting FilePreviewActivity:
-    m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
-    if not m_act:
-        m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
-
+    # Match active topResumedActivity or visible Task hosting FilePreviewActivity:
+    m_top = re.search(r'(?:topResumedActivity|resumedActivity|mResumedActivity)[:=]\s*ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
     tid: Optional[int] = None
+    if m_top:
+        tid = int(m_top.group(1))
+    else:
+        m_vis = re.search(r'Task\{[0-9a-fA-F]+\s+#(\d+)\b[^\}]*visible=true[^\}]*\}.*?ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity', search_block, re.DOTALL)
+        if m_vis:
+            tid = int(m_vis.group(1))
+        else:
+            m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
+            if not m_act:
+                m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
+            if m_act:
+                tid = int(m_act.group(1))
+
     mode = "unknown"
     bounds = [0, 0, disp_w, disp_h]
 
-    if m_act:
-        tid = int(m_act.group(1))
+    if tid is not None:
         m_task = re.search(
             rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}.*?'
             r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\))',
-            stdout,
+            search_block if search_block else stdout,
             re.DOTALL
         )
+        if not m_task:
+            m_task = re.search(
+                rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}.*?'
+                r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\))',
+                stdout,
+                re.DOTALL
+            )
         if m_task:
             mode = m_task.group("mode").lower()
             l = int(m_task.group("bl") or m_task.group("rl") or 0)
@@ -1498,7 +1514,19 @@ async def is_editor_full_screen(
             w_span = r - l
             h_span = b - t
 
-            if mode == "freeform" and (w_span < disp_w - 60 or h_span < disp_h - 150):
+            # Check horizontal and vertical spans against display dimensions.
+            # In Android Desktop Mode, windows are mode='freeform' even when maximized.
+            is_horiz_max = (w_span >= disp_w - 60)
+            is_vert_max = (h_span >= disp_h - 200)
+
+            # If soft keyboard (IME) is visible, window height may temporarily be compressed;
+            # do not treat an open keyboard on an otherwise maximized window as an unmaximized freeform window.
+            if not is_vert_max and is_horiz_max:
+                ime_up = await is_ime_visible(ser)
+                if ime_up:
+                    is_vert_max = True
+
+            if mode == "freeform" and (not is_horiz_max or not is_vert_max):
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
@@ -1509,7 +1537,7 @@ async def is_editor_full_screen(
                     "reason": f"Activity task #{tid} is running in freeform window mode ({w_span}x{h_span})"
                 }
 
-            if w_span < disp_w - 60 or h_span < disp_h - 150:
+            if not is_horiz_max or not is_vert_max:
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
@@ -1602,11 +1630,25 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     fs_status = await is_editor_full_screen(ser, display_id)
     if not fs_status.get("is_fullscreen", True):
         b = fs_status.get("bounds", [0, 0, disp_w, disp_h])
+        # Only attempt to tap maximize if the window is genuinely narrower than full screen width.
+        # Tapping near top right of an ALREADY maximized window will unmaximize or close it!
         if (b[2] - b[0]) < disp_w - 60 and b[2] > 150 and b[1] >= 0:
             max_x = b[2] - 120
             max_y = b[1] + 30
             await run_adb_shell(f"input -d {display_id} tap {max_x} {max_y} >/dev/null 2>&1", ser)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.35)
+            # When Teams transitions from floating to maximized, it resets its WebView layout
+            # and reverts to Light Mode or Split View / Preview Mode (862x400 box with black borders).
+            # We must immediately restore single-pane Edit Mode and Dark Mode!
+            try:
+                from services.ui_automator_service import enable_edit_mode, select_dark_mode
+                await enable_edit_mode(ser, display_id)
+                await asyncio.sleep(0.2)
+                await select_dark_mode(ser, display_id)
+                await asyncio.sleep(0.1)
+                await dismiss_keyboard(ser, display_id)
+            except Exception:
+                pass
             fs_status = await is_editor_full_screen(ser, display_id)
 
     try:

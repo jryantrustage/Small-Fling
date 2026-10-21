@@ -552,8 +552,10 @@ async def get_page_report():
                 overlap_count = prev_bottom - top + 1
                 flags.append(f"ℹ️ Overlap with Pg {prev_page}: Ln {top} → {prev_bottom} ({overlap_count} lines)")
 
+        arr_cnt = f.get("arrow_count", 0)
+        arr_str = f", {arr_cnt} down-arrows" if (p_num > 1 or arr_cnt > 0) else ""
         flag_str = f" [{' | '.join(flags)}]" if flags else ""
-        lines_report.append(f"- Page {p_num:2d}: Ln {top:4d} → {bot:4d} ({span:2d} lines){flag_str}")
+        lines_report.append(f"- Page {p_num:2d}: Ln {top:4d} → {bot:4d} ({span:2d} lines{arr_str}){flag_str}")
 
         prev_top = top
         prev_bot = bot

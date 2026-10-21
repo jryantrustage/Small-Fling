@@ -879,7 +879,16 @@ def save_persisted_state():
         if not pid:
             return
         for fid, f in captured_frames.items():
-            db.save_frame(pid, fid, f.get("filename", f"{fid}.png"), f.get("top_line", 0), f.get("bottom_line", 0), f.get("page_index", 1), f.get("file_size", 0), f.get("status", "processed"), f.get("extracted_line_count", 0), f.get("custom_offset_y", 0.0), f.get("token_usage", {}), f.get("bounding_boxes", {}), f.get("model_used", ""), f.get("created_at"))
+            db.save_frame(
+                pid, fid, f.get("filename", f"{fid}.png"),
+                f.get("top_line", 0), f.get("bottom_line", 0),
+                f.get("page_index", 1), f.get("file_size", 0),
+                f.get("status", "processed"), f.get("extracted_line_count", 0),
+                f.get("custom_offset_y", 0.0), f.get("token_usage", {}),
+                f.get("bounding_boxes", {}), f.get("model_used", ""),
+                f.get("created_at"),
+                f.get("arrow_count", 0)
+            )
         db.save_document_lines(pid, document_lines)
         db.save_project_telemetry(pid, latest_telemetry, token_stats)
         with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:

@@ -67,10 +67,13 @@ export const FrameTracePanel: React.FC<Props> = ({ frame, eventsLog, onClose }) 
       }
       if (ev.category === 'ERROR' || ev.level === 'error') errors++;
     }
+    if (downs === 0 && (frame.arrow_count || 0) > 0) {
+      downs = frame.arrow_count || 0;
+    }
     const first = windowEvents[0]?.ts, last = windowEvents[windowEvents.length - 1]?.ts;
     const spanMs = first && last ? last - first : 0;
     return { downs, pageDowns, keyDispatches, keyMs, navAway, errors, spanMs };
-  }, [windowEvents]);
+  }, [windowEvents, frame.arrow_count]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
