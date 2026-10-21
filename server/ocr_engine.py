@@ -427,7 +427,7 @@ def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[
     if not gutter: return False, 0
     first_ln = gutter[0][1]
     has_line_1 = any(ln == 1 for _, ln in gutter[:4])
-    is_at_home = has_line_1 or (first_ln <= 15 and gutter[0][0] < int(300 * max(0.4, dpi_factor)))
+    is_at_home = has_line_1 or (first_ln in (1, 2))
     return is_at_home, (1 if is_at_home else first_ln)
 
 def extract_content_text_rows(img: np.ndarray, gutter_w: int = 140, min_y: int = 140, max_y: int = 980) -> List[Dict[str, Any]]:

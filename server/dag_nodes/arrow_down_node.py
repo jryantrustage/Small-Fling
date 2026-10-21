@@ -87,14 +87,10 @@ class ArrowDownPagerNode(BaseDagNode):
 
         visible_span = max(1, prev_bottom - cur_top + 1)
         needed_lines = max(1, target_top - cur_top)
-        if padding > 0:
-            calibrated_step = needed_lines + padding
-            calibrated_init = (needed_lines + padding) * 2
-        else:
-            cursor_travel = max(0, prev_bottom - cursor_line)
-            viewport_scroll = max(1, target_top - cur_top)
-            calibrated_init = cursor_travel + viewport_scroll
-            calibrated_step = viewport_scroll
+        cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
+        viewport_scroll = max(1, target_top - cur_top)
+        calibrated_init = cursor_travel + viewport_scroll + 2
+        calibrated_step = viewport_scroll
 
         step_arrows = int(payload.get("arrow_count_step") or calibrated_step)
         init_arrows = int(payload.get("arrow_count_init") or calibrated_init)
@@ -153,16 +149,6 @@ class ArrowDownPagerNode(BaseDagNode):
         await dismiss_keyboard(serial, valid_disp_id)
         await asyncio.sleep(0.05)
 
-        # Establish text caret focus on editor canvas (especially when starting at line 1)
-        disp_w, disp_h = await get_display_dimensions(serial, valid_disp_id)
-        focus_x = min(int(disp_w * 0.25), 500)
-        focus_y = min(int(disp_h * 0.40), 400)
-        if cur_top == 1:
-            await run_adb_shell(f"input -d {valid_disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
-            await asyncio.sleep(0.12)
-            await dismiss_keyboard(serial, valid_disp_id)
-            await asyncio.sleep(0.05)
-
         # 2. Viewport step dispatch
         dispatch_meth = str(cfg.get("dispatch_method", "arrow_down"))
         await dispatch_accelerated_viewport_step(
@@ -197,24 +183,20 @@ class ArrowDownPagerNode(BaseDagNode):
                 break
 
             diff = target_top - (actual_top or target_top)
-            if (actual_top == cur_top or actual_top is None) and _ in (0, 1):
-                # Viewport has not advanced from initial line; caret focus may be on container. Re-tap canvas!
-                await run_adb_shell(f"input -d {valid_disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
-                await asyncio.sleep(0.12)
-                await dismiss_keyboard(serial, valid_disp_id)
-                await asyncio.sleep(0.05)
 
+            disp_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
             if diff > 0:
                 adjust_step = min(diff, 25)
                 keys = " ".join(["20"] * adjust_step)
                 total_arrows_pressed += adjust_step
-                await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", serial)
+                await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
             else:
                 diff_up = abs(diff)
                 adjust_step = min(diff_up, 25)
-                keys = " ".join(["19"] * adjust_step)
+                up_count = adjust_step + (visible_span if _ == 0 else 0)
+                keys = " ".join(["19"] * up_count)
                 total_arrows_pressed += adjust_step
-                await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", serial)
+                await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
 
             await asyncio.sleep(0.18)
             await dismiss_keyboard(serial, valid_disp_id)

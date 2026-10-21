@@ -50,14 +50,8 @@ class ResetHomeNode(BaseDagNode):
         # Execute up to 3 focused attempts to return to Line 1
         for attempt in range(1, 4):
             if attempt > 1:
-                # Re-focus editor gutter only on retry attempts if first attempt did not reach Line 1
-                disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-                gutter_x = 80
-                gutter_y = min(disp_h // 2, 400) if disp_h > 0 else 400
-                await run_adb_shell(f"input -d {disp_id} tap {gutter_x} {gutter_y} >/dev/null 2>&1", serial)
-                await asyncio.sleep(0.08)
                 await dismiss_keyboard(serial, disp_id)
-                await asyncio.sleep(0.08)
+                await asyncio.sleep(0.1)
 
             # Pure HID Ctrl+Home: directly navigates to Line 1
             await send_hid_keycombination(113, 122, serial=serial, caller_node="reset_home")

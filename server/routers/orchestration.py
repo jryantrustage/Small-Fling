@@ -3352,6 +3352,19 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         state.latest_telemetry["target_total_lines"] = total_lines
         state.latest_telemetry["status_message"] = f"DAG Group 'Initialize' complete: {total_lines:,} total lines ready for capture ✔"
 
+        # Reset session frames and document lines for clean fresh capture starting from Line 1
+        state.captured_frames.clear()
+        state.document_lines.clear()
+        state.orchestration_state["page"] = 1
+        state.orchestration_state["last_arrow_count"] = 0
+        state.orchestration_state["cursor_line"] = 1
+        active_pid = project_id or state.get_current_project_id()
+        if active_pid:
+            try:
+                db.clear_project_data(active_pid)
+            except Exception:
+                pass
+
         await state.ws_manager.broadcast({
             "type": "project_init_progress",
             "stage": f"Project Initialized Successfully! {total_lines:,} total lines calibrated and Line 1 verified ✔",
@@ -4039,34 +4052,26 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
     if payload:
         opts.update(payload)
 
-    # Environmental assertion for DAG 3: editor must be full-screen, in single-pane edit mode and dark mode
+    # Environmental assertion for DAG 3: silently dismiss soft keyboard if open
     if active_serial and "mock" not in str(active_serial).lower():
         try:
-            is_open, _, _ = await assert_markdown_open(active_serial)
-            if not is_open:
-                from services.adb_service import is_editor_full_screen
-                ext_did = await detect_external_display_id(active_serial)
-                fs = await is_editor_full_screen(active_serial, ext_did)
-                if not fs.get("is_fullscreen", True):
-                    await auto_fix_viewport(active_serial, ext_did)
-                await enable_edit_mode(active_serial, ext_did)
-                await select_dark_mode(active_serial, ext_did)
+            ext_did = await detect_external_display_id(active_serial)
+            if await is_ime_visible(active_serial):
                 await dismiss_keyboard(active_serial, ext_did)
         except Exception:
             pass
 
-    # If no frames captured yet, acquire initial frame via Node 3 so gutter OCR has a frame to read
-    if len(state.captured_frames) == 0:
-        await emit_dag_telemetry_event(
-            category="SYSTEM",
-            message="DAG 3 • Acquiring initial frame for gutter OCR positioning...",
-            dag="position_navigation",
-            serial=active_serial
-        )
-        n3_res = await run_single_dag_node("frame_acquire", opts)
-        if n3_res.get("status") == "error":
-            position_group["status"] = "error"
-            return {"status": "error", "group": "position_navigation", "node_id": "frame_acquire", "result": n3_res}
+    # 1. Acquire current display frame so gutter OCR has a fresh frame and UI displays the current screen
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message="DAG 3 • Acquiring frame for gutter OCR positioning...",
+        dag="position_navigation",
+        serial=active_serial
+    )
+    n3_res = await run_single_dag_node("frame_acquire", opts)
+    if n3_res.get("status") == "error":
+        position_group["status"] = "error"
+        return {"status": "error", "group": "position_navigation", "node_id": "frame_acquire", "result": n3_res}
 
     await emit_dag_telemetry_event(
         category="SYSTEM",
@@ -4075,7 +4080,7 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         serial=active_serial
     )
 
-    # Node 5: frame_ocr
+    # 2. Node 5: frame_ocr
     n5_res = await run_single_dag_node("frame_ocr", opts)
     if n5_res.get("status") == "error":
         position_group["status"] = "error"
@@ -4088,7 +4093,7 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         opts["cur_top"] = top_ln
         opts["target_top"] = bot_ln + 1
 
-    # Node 6: arrow_down
+    # 3. Node 6: arrow_down
     n6_res = await run_single_dag_node("arrow_down", opts)
     if (
         n6_res.get("status") in ("error", "prevented")
@@ -4101,6 +4106,9 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         state.latest_telemetry["status_message"] = f"DAG 3 halted: {err_msg}"
         return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
 
+    # 4. Acquire the newly positioned frame so the user sees the advanced page in the UI
+    n3_post_res = await run_single_dag_node("frame_acquire", opts)
+
     position_group["status"] = "completed"
     tgt_t = opts.get("target_top", bot_ln + 1)
     await emit_dag_telemetry_event(
@@ -4110,12 +4118,15 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
         level="success",
         serial=active_serial
     )
+    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "group_id": "position_navigation"})
 
     return {
         "status": "success",
         "group": "position_navigation",
+        "node3_init": n3_res,
         "node5": n5_res,
         "node6": n6_res,
+        "node3_post": n3_post_res,
         "target_top": tgt_t
     }
 

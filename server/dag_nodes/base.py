@@ -141,13 +141,9 @@ class BaseDagNode(ABC):
     default_config: Dict[str, Any] = {}
 
     def __init__(self):
-        # Default attached observation actions
+        # Default attached observation actions: only safe keyboard dismissal to prevent disruptive blind taps
         self.attached_actions: List[str] = [
-            "keyboard_detected_close",
-            "view_mode_to_edit_mode",
-            "light_mode_to_dark_mode",
-            "top_line_missing_detect",
-            "bottom_line_missing_detect"
+            "keyboard_detected_close"
         ]
 
     @property

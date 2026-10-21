@@ -60,32 +60,65 @@ class FrameAcquireNode(BaseDagNode):
             except Exception:
                 pass
 
-        # 4. Determine page index and line bounds
-        pid = blackboard.project_id or state.get_current_project_id()
-        existing_frames = list(state.captured_frames.values())
-        if not existing_frames and pid:
-            existing_frames = db.get_frames(pid)
+        # 4. Save temporary screenshot to run gutter bounds detection
+        temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+        with open(temp_calib, "wb") as f:
+            f.write(snap)
 
-        page_idx = state.orchestration_state.get("page", 1)
-        if existing_frames:
-            page_idx = max(len(existing_frames) + 1, page_idx)
+        dpi_factor, active_dpi = await fetch_current_display_dpi_factor(serial, disp_id)
+        t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
 
-        # Estimate line bounds based on position / history
+        # 5. Determine line bounds and page index
         prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
         lpp = prof.get("lines_per_page", 24)
 
-        if existing_frames:
-            sorted_f = sorted(existing_frames, key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or ""))
-            last_bot = sorted_f[-1].get("bottom_line", 0) if sorted_f else 0
-            top_ln = (last_bot + 1) if last_bot > 0 else (state.dag_state["nodes"].get("frame_ocr", {}).get("target_top_line") or 1)
+        target_top = (
+            blackboard.top_line
+            or (blackboard.config or {}).get("target_top")
+            or state.latest_telemetry.get("current_top_line")
+        )
+
+        if t_det > 0:
+            top_ln = t_det
+            bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
+        elif target_top and target_top > 0:
+            top_ln = target_top
+            bot_ln = top_ln + lpp - 1
         else:
             top_ln = 1
-        bot_ln = top_ln + lpp - 1
+            bot_ln = lpp
 
-        # 5. Save image files
+        # Normalize line 1/2 to line 1 for Page 1
+        if top_ln in (1, 2):
+            top_ln = 1
+            page_idx = 1
+        else:
+            orch_page = state.orchestration_state.get("page", 1)
+            if orch_page > 1:
+                page_idx = orch_page
+            else:
+                page_idx = max(2, round((top_ln - 1) / max(1, lpp)) + 1)
+
+        # Accurate arrow_count resolution for this frame
+        if page_idx <= 1 or top_ln <= 1:
+            arr_count = 0
+        else:
+            recorded_arrows = (
+                state.orchestration_state.get("last_arrow_count")
+                or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count")
+                or blackboard.arrow_count
+            )
+            if recorded_arrows and recorded_arrows > 0:
+                arr_count = recorded_arrows
+            elif page_idx == 2 or top_ln <= (lpp + 2):
+                arr_count = 49  # Calibrated initial down arrows for Page 1 -> 2
+            else:
+                arr_count = 24  # Calibrated step down arrows for Page N -> N+1
+
+        # 6. Save image files
         now_dt = datetime.now()
         now_str = now_dt.strftime("%Y%m%d_%H%M%S_%f")[:19]
-        fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{page_idx:03d}_{now_str}"
+        fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
         fn = f"{fid}.png"
         frame_path = state.FRAMES_DIR / fn
         with open(frame_path, "wb") as f:
@@ -96,15 +129,13 @@ class FrameAcquireNode(BaseDagNode):
         with open(raw_path, "wb") as f:
             f.write(snap)
 
-        temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
-        with open(temp_calib, "wb") as f:
-            f.write(snap)
-
         blackboard.current_image_bytes = snap
         blackboard.latest_frame_bytes = snap
         blackboard.current_image_path = frame_path
         blackboard.top_line = top_ln
         blackboard.bottom_line = bot_ln
+        blackboard.arrow_count = arr_count
+        pid = blackboard.project_id or state.get_current_project_id()
 
         # 6. Save to Database
         if pid:
@@ -121,7 +152,7 @@ class FrameAcquireNode(BaseDagNode):
                     extracted_line_count=0,
                     model_used="Display Capture (Node 3)",
                     created_at=now_dt.isoformat(),
-                    arrow_count=0
+                    arrow_count=arr_count
                 )
             except Exception as e:
                 print(f"[FrameAcquireNode] db.save_frame note: {e}")
@@ -139,7 +170,7 @@ class FrameAcquireNode(BaseDagNode):
             "created_at": now_dt.isoformat(),
             "extracted_line_count": 0,
             "model_used": "Display Capture (Node 3)",
-            "arrow_count": 0
+            "arrow_count": arr_count
         }
         state.captured_frames[fid] = frame_info
 

@@ -77,7 +77,7 @@ class InitEndNode(BaseDagNode):
 
                 if b_sample > total_lines:
                     total_lines = b_sample
-                if t_sample > 0 and (top_line == 0 or t_sample < top_line):
+                if t_sample > 0:
                     top_line = t_sample
 
                 if b_sample > 0 and b_sample == prev_bot:
@@ -99,25 +99,20 @@ class InitEndNode(BaseDagNode):
             t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
             if b_fix > total_lines:
                 total_lines = b_fix
-            if t_fix > 0 and (top_line <= 0 or t_fix < top_line):
+            if t_fix > 0:
                 top_line = t_fix
 
         # Evaluate if stuck on line 1 or partial scroll
         is_stuck = False
         if cfg.get("manual_total_lines", 0) > 0:
             total_lines = int(cfg["manual_total_lines"])
-        elif 0 < top_line <= 15 or (total_lines < 500 and top_line <= 30):
+        elif total_lines < 500 and (top_line <= 30 or total_lines <= 0):
             is_stuck = True
 
-        # Retry jump if stuck
+        # Retry jump if stuck without canvas tap to prevent IME popup
         if is_stuck:
-            disp_w, disp_h = await get_display_dimensions(serial, disp_id)
-            focus_x = 200
-            focus_y = min(disp_h // 2, 400) if disp_h > 0 else 400
-            await run_adb_shell(f"input -d {disp_id} tap {focus_x} {focus_y} >/dev/null 2>&1", serial)
-            await asyncio.sleep(0.08)
             await dismiss_keyboard(serial, disp_id)
-            await asyncio.sleep(0.08)
+            await asyncio.sleep(0.1)
             await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end_retry")
             await asyncio.sleep(1.0)
             await dismiss_keyboard(serial, disp_id)

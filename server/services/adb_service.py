@@ -1278,13 +1278,16 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         chk = await run_adb_shell("dumpsys input_method", ser, timeout=2.0)
         out = chk.get("stdout", "")
         has_visible_window = False
-        for line in out.splitlines():
-            line_str = line.strip()
-            if "mImeWindowVis=" in line_str:
-                val_part = line_str.split("mImeWindowVis=")[1].split()[0]
-                if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
-                    has_visible_window = True
-                    break
+        if "mInputShown=true" in out:
+            has_visible_window = True
+        else:
+            for line in out.splitlines():
+                line_str = line.strip()
+                if "mImeWindowVis=" in line_str:
+                    val_part = line_str.split("mImeWindowVis=")[1].split()[0]
+                    if any(v in val_part for v in ["1", "2", "3", "0x1", "0x2", "0x3"]):
+                        has_visible_window = True
+                        break
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
         return has_visible_window
@@ -1318,16 +1321,25 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             _ime_visible_cache["ts"] = time.time()
             return True
 
-        # IME is visible: send keyevent 111 (KEYCODE_ESCAPE) to target display to dismiss soft keyboard.
-        # NEVER dispatch keyevent 4 (KEYCODE_BACK) as that navigates away or closes FilePreviewActivity!
+        # IME is confirmed visible: dismiss via navigation bar hide-keyboard button on desktop display
         did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
-        target_d = did if (did is not None and did > 0) else 0
-        await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
-        await asyncio.sleep(0.05)
+        valid_d = sanitize_input_display_id(did)
+        d_arg = f"-d {valid_d} " if (valid_d and valid_d > 0) else ""
 
-        _ime_visible_cache["val"] = False
+        disp_w, disp_h = await get_display_dimensions(ser, did)
+        nav_x = int(1730 * (disp_w / 1920.0))
+        nav_y = int(1060 * (disp_h / 1080.0))
+        await run_adb_shell(f"input {d_arg}tap {nav_x} {nav_y} >/dev/null 2>&1", ser, timeout=1.0)
+        await asyncio.sleep(0.1)
+
+        still_visible = await is_ime_visible(ser, force_check=True)
+        if still_visible:
+            await run_adb_shell(f"input {d_arg}keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
+            still_visible = await is_ime_visible(ser, force_check=True)
+
+        _ime_visible_cache["val"] = still_visible
         _ime_visible_cache["ts"] = time.time()
-        return True
+        return not still_visible
     except Exception:
         return True
 
@@ -1942,7 +1954,6 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         ]
         if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
-            base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
         else:
             base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 
@@ -2263,11 +2274,11 @@ async def dispatch_accelerated_viewport_step(
         # Fast 120ms crisp gesture
         shell_cmds.append(f"input {disp_cmd}swipe 960 {y_from} 960 {y_to} 120 >/dev/null 2>&1")
     else:
-        # Option B: Batched ADB DownArrow keyevents (keycode 20) paced in non-blocking batches
-        # to prevent Android InputDispatcher from timing out and triggering "Teams isn't responding" ANRs
+        # Option B: Batched ADB DownArrow keyevents (keycode 20)
+        # Passing keyevents in a single shell command runs in < 1s without process-spawning overhead
         count = max(1, min(delta_lines, 200))
         key_sequence = ["20"] * count
-        chunk_size = 12
+        chunk_size = 70
         if count <= chunk_size:
             keys_str = " ".join(key_sequence)
             shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
@@ -2276,10 +2287,10 @@ async def dispatch_accelerated_viewport_step(
             for i in range(0, count, chunk_size):
                 chunk = key_sequence[i:i + chunk_size]
                 sub_cmds.append(f"input {disp_cmd}keyevent {' '.join(chunk)} >/dev/null 2>&1")
-            shell_cmds.append("; sleep 0.02; ".join(sub_cmds))
+            shell_cmds.append("; sleep 0.05; ".join(sub_cmds))
 
     full_cmd = "; ".join(shell_cmds)
-    res = await run_adb_shell(full_cmd, ser, timeout=2.0)
+    res = await run_adb_shell(full_cmd, ser, timeout=10.0)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
     ev_name = f"PageDown(93)" if chosen_method == "pagedown" else (f"DownArrow(20) x{delta_lines}" if chosen_method != "swipe" else "TouchSwipe")
