@@ -170,6 +170,7 @@ class FrameOcrNode(BaseDagNode):
 
             frame_info = {
                 "frame_id": fid,
+                "project_id": pid,
                 "filename": fn,
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
@@ -183,6 +184,25 @@ class FrameOcrNode(BaseDagNode):
                 "arrow_count": arrow_count
             }
             state.captured_frames[fid] = frame_info
+
+        if pid:
+            try:
+                db.save_frame(
+                    project_id=pid,
+                    frame_id=fid,
+                    filename=frame_info.get("filename", fn),
+                    top_line=top_ln,
+                    bottom_line=bot_ln,
+                    page_index=pidx,
+                    file_size=len(snap),
+                    status="processed",
+                    extracted_line_count=len(lines_detected) if lines_detected else lpp,
+                    model_used=cfg.get("engine", "RapidOCR"),
+                    created_at=frame_info.get("created_at"),
+                    arrow_count=arrow_count
+                )
+            except Exception as e:
+                print(f"[FrameOcrNode] db.save_frame note: {e}")
 
         # Broadcast new_frame and emit FRAME telemetry event
         await state.ws_manager.broadcast({

@@ -321,7 +321,16 @@ async def purge_all_frames():
 
 @router.get("/api/frames")
 async def get_frames():
-    return db.get_frames(state.get_current_project_id())
+    pid = state.get_current_project_id()
+    db_frames = db.get_frames(pid)
+    if not db_frames and state.captured_frames:
+        return list(state.captured_frames.values())
+    if db_frames and state.captured_frames:
+        existing_ids = {f.get("frame_id") for f in db_frames}
+        for fid, finfo in state.captured_frames.items():
+            if fid not in existing_ids:
+                db_frames.append(finfo)
+    return db_frames
 
 @router.get("/api/frames/{frame_id}/image")
 async def get_frame_image(frame_id: str):

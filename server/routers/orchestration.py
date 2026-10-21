@@ -314,7 +314,10 @@ async def get_dag_status():
         "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 0),
         "current_page": state.latest_telemetry.get("current_page", 1),
         "active_node": state.dag_state.get("current_active_node"),
-        "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {})
+        "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}),
+        "telemetry": state.get_fresh_telemetry(),
+        "latest_telemetry": state.get_fresh_telemetry(),
+        "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {})
     }
 
 NODE_ALIAS_MAP = {
@@ -4039,16 +4042,31 @@ async def execute_dag_group_position_navigation(serial: Optional[str] = None, pa
     # Environmental assertion for DAG 3: editor must be full-screen, in single-pane edit mode and dark mode
     if active_serial and "mock" not in str(active_serial).lower():
         try:
-            from services.adb_service import is_editor_full_screen
-            ext_did = await detect_external_display_id(active_serial)
-            fs = await is_editor_full_screen(active_serial, ext_did)
-            if not fs.get("is_fullscreen", True):
-                await auto_fix_viewport(active_serial, ext_did)
-            await enable_edit_mode(active_serial, ext_did)
-            await select_dark_mode(active_serial, ext_did)
-            await dismiss_keyboard(active_serial, ext_did)
+            is_open, _, _ = await assert_markdown_open(active_serial)
+            if not is_open:
+                from services.adb_service import is_editor_full_screen
+                ext_did = await detect_external_display_id(active_serial)
+                fs = await is_editor_full_screen(active_serial, ext_did)
+                if not fs.get("is_fullscreen", True):
+                    await auto_fix_viewport(active_serial, ext_did)
+                await enable_edit_mode(active_serial, ext_did)
+                await select_dark_mode(active_serial, ext_did)
+                await dismiss_keyboard(active_serial, ext_did)
         except Exception:
             pass
+
+    # If no frames captured yet, acquire initial frame via Node 3 so gutter OCR has a frame to read
+    if len(state.captured_frames) == 0:
+        await emit_dag_telemetry_event(
+            category="SYSTEM",
+            message="DAG 3 • Acquiring initial frame for gutter OCR positioning...",
+            dag="position_navigation",
+            serial=active_serial
+        )
+        n3_res = await run_single_dag_node("frame_acquire", opts)
+        if n3_res.get("status") == "error":
+            position_group["status"] = "error"
+            return {"status": "error", "group": "position_navigation", "node_id": "frame_acquire", "result": n3_res}
 
     await emit_dag_telemetry_event(
         category="SYSTEM",
