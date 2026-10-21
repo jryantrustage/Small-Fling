@@ -84,6 +84,18 @@ class ResetHomeNode(BaseDagNode):
                         top_detected = await state.detect_top_line_in_process(calib, dpi_factor=dpi_factor)
                         if top_detected == 1 or (0 < top_detected <= 2):
                             is_verified, detected_first = True, 1
+                    if not is_verified:
+                        try:
+                            scan_res = await state.scan_image_in_process(calib)
+                            top_scan = scan_res.get("top_line")
+                            if top_scan == 1 or (top_scan and 0 < top_scan <= 2):
+                                is_verified, detected_first = True, 1
+                            elif any(l.get("line_number") == 1 for l in scan_res.get("lines", [])):
+                                is_verified, detected_first = True, 1
+                            elif any(l.get("text", "").strip().startswith("#") for l in scan_res.get("lines", [])[:3]):
+                                is_verified, detected_first = True, 1
+                        except Exception:
+                            pass
 
                     if is_verified:
                         break

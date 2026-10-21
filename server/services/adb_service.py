@@ -1285,9 +1285,6 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
                 if any(v in val_part for v in ["2", "3", "0x2", "0x3"]):
                     has_visible_window = True
                     break
-            if "minputshown=true" in line_str.lower():
-                has_visible_window = True
-                break
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
         return has_visible_window
@@ -1321,17 +1318,12 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             _ime_visible_cache["ts"] = time.time()
             return True
 
-        # IME is visible: send keyevent 111 (KEYCODE_ESCAPE) to target display.
-        # If IME remains open (e.g. Gboard on Android 15 Desktop Mode), safely dispatch keyevent 4
-        # directly to target display, which the IME window consumes to collapse itself.
-        # NEVER tap taskbar navigation buttons (e.g. 1630, 1055) which closes FilePreviewActivity!
+        # IME is visible: send keyevent 111 (KEYCODE_ESCAPE) to target display to dismiss soft keyboard.
+        # NEVER dispatch keyevent 4 (KEYCODE_BACK) as that navigates away or closes FilePreviewActivity!
         did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
         target_d = did if (did is not None and did > 0) else 0
         await run_adb_shell(f"input -d {target_d} keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
         await asyncio.sleep(0.05)
-        if await is_ime_visible(ser, force_check=True):
-            await run_adb_shell(f"input -d {target_d} keyevent 4 >/dev/null 2>&1", ser, timeout=1.0)
-            await asyncio.sleep(0.08)
 
         _ime_visible_cache["val"] = False
         _ime_visible_cache["ts"] = time.time()
@@ -1945,19 +1937,12 @@ async def send_hid_keycombination(key1: int, key2: int, serial: Optional[str] = 
         valid_d = sanitize_input_display_id(disp_id)
         target_d = valid_d if valid_d is not None else (8 if ("10" in current_device_model.lower() or "mustang" in current_device_model.lower()) else 4)
 
-        # Ensure IME is closed on target display so it does not intercept keycombination
-        if "mock" not in str(ser).lower() and target_d and target_d > 0:
-            try:
-                if await is_ime_visible(ser):
-                    await dismiss_keyboard(ser, target_d)
-            except Exception:
-                pass
-
         base_cmds = [
             "settings put secure show_ime_with_hard_keyboard 0",
         ]
         if target_d and target_d > 0:
             base_cmds.append(f"input -d {target_d} keycombination -t 150 {key1} {key2}")
+            base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
         else:
             base_cmds.append(f"input keycombination -t 150 {key1} {key2}")
 

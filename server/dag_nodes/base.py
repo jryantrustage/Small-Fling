@@ -227,7 +227,8 @@ class BaseDagNode(ABC):
 
         # 1. Pre-execution Phase
         t_pre = time.perf_counter()
-        await self._run_actions_for_phase("pre", blackboard, actions_run)
+        if not (blackboard.payload and blackboard.payload.get("skip_env_heal")):
+            await self._run_actions_for_phase("pre", blackboard, actions_run)
         timings["pre_actions_ms"] = round((time.perf_counter() - t_pre) * 1000, 2)
 
         # 2. Core Execution Phase

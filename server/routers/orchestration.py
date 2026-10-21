@@ -3225,16 +3225,18 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         disp_id = await detect_external_display_id(active_serial)
         await dismiss_keyboard(active_serial, disp_id)
 
-        # Enforce Edit Mode (pencil icon) and Dark Mode (theme pull-down) before proceeding with DAG 1
-        init_group["progress"] = {"percent": 15, "stage": "Enforcing Edit Mode and Dark Mode...", "status": "running"}
-        await state.ws_manager.broadcast({
-            "type": "project_init_progress",
-            "stage": "Enforcing Edit Mode and Dark Mode...",
-            "percent": 15,
-            "status": "running",
-            "dag": state.dag_state
-        })
-        await auto_heal_pipeline_environment(active_serial, disp_id, "init_end")
+        # Pre-check: only invoke environment healing if editor is not currently open
+        is_open, _, _ = await assert_markdown_open(active_serial)
+        if not is_open:
+            init_group["progress"] = {"percent": 15, "stage": "Restoring Markdown Editor on external display...", "status": "running"}
+            await state.ws_manager.broadcast({
+                "type": "project_init_progress",
+                "stage": "Restoring Markdown Editor on external display...",
+                "percent": 15,
+                "status": "running",
+                "dag": state.dag_state
+            })
+            await auto_heal_pipeline_environment(active_serial, disp_id, "init_end")
 
         # Step 1: Run Node 1 (init_end)
         init_group["progress"] = {"percent": 25, "stage": "Sending Ctrl+End to determine EOF total lines...", "status": "running"}
@@ -3475,7 +3477,9 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # On subsequent cycles, avoid tactile touches or viewport resets so that Node 6's precise alignment is preserved.
     disp_id = await detect_external_display_id(active_serial)
     if loop_idx == 1:
-        await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
+        is_open, _, _ = await assert_markdown_open(active_serial)
+        if not is_open:
+            await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
         # If running cycle 1 from page 1 and no frames are captured yet, ensure document is at Line 1 before capturing
         if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
             try:
@@ -3891,7 +3895,9 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     try:
         # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
         disp_id = await detect_external_display_id(active_serial)
-        await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
+        is_open, _, _ = await assert_markdown_open(active_serial)
+        if not is_open:
+            await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
         # If starting continuous capture loop from Page 1 with no frames yet, ensure document is returned to Line 1 before capturing
         if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
