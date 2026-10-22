@@ -57,10 +57,10 @@ class ViewToEditAction(ObservationActionPlugin):
             vertical_lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=120, minLineLength=int(h * 0.3), maxLineGap=15)
             has_split_divider = vertical_lines is not None and len(vertical_lines) > 0
             pencil_x = int(1655 * (w / 1920.0))
-            pencil_y = int(250 * (h / 1080.0))
+            pencil_y = int(190 * (h / 1080.0))
         else:
             has_split_divider = False
-            pencil_x, pencil_y = 1655, 250
+            pencil_x, pencil_y = 1655, 190
 
         # 2. Check classifier as complementary source
         cl_detected = False
@@ -114,7 +114,7 @@ class ViewToEditAction(ObservationActionPlugin):
             # Attempt 2: Target coordinates tap
             disp_w, disp_h = await get_display_dimensions(serial, disp_id)
             target_x = int(1655 * (disp_w / 1920.0))
-            target_y = int(250 * (disp_h / 1080.0))
+            target_y = int(190 * (disp_h / 1080.0))
             await run_adb_shell(f"input -d {disp_id} tap {target_x} {target_y} >/dev/null 2>&1", serial)
             actions_taken.append(f"Tapped edit icon at ({target_x}, {target_y}) on display {disp_id}")
 

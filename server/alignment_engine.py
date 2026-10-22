@@ -124,9 +124,9 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     # ---------------------------------------------------------
     # 3. WHITE BOX 1: Edit Mode ("Pencil Icon" Active)
     # ---------------------------------------------------------
-    tb_y1 = max(0, file_bottom_y)
-    # Search band for toolbar: spans from file_bottom_y to below the action toolbar row
-    tb_search_y2 = min(h, tb_y1 + int(max(90, 160 * dpi_factor)))
+    tb_y1 = max(int(h * 0.05), min(file_bottom_y, int(h * 0.15)))
+    # Search band for toolbar: spans from below file title / header to above editor code area
+    tb_search_y2 = min(h, max(tb_y1 + int(max(90, 160 * dpi_factor)), int(h * 0.28)))
 
     # In landscape/desktop (w >= h): pencil icon is clustered on the right: x >= w * 0.50
     # In portrait: x >= w * 0.45
@@ -134,28 +134,70 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     crop_tb = img[tb_y1:tb_search_y2, min_pencil_x:]
 
     edit_mode_active = False
+    split_screen_detected = False
     blue_pixel_count = 0
     best_pencil = None
     best_area = 0
+    scale_w = (w / 1920.0) if w > 0 else 1.0
 
-    # Search for blue pencil icon in right-hand toolbar region
+    # Search for active mode icon in right-hand toolbar region
     if crop_tb.size > 0:
         hsv_tb = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
         blue_mask = cv2.inRange(hsv_tb, np.array([95, 50, 50]), np.array([135, 255, 255]))
         contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        for c in contours:
+        valid_conts = [c for c in contours if cv2.contourArea(c) >= 15]
+        valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+        
+        for c in valid_conts:
             area = cv2.contourArea(c)
-            if area >= 15:
-                bx, by, bw, bh = cv2.boundingRect(c)
-                # Compact icon aspect ratio and reasonable icon height
-                if 0.45 <= (bw / max(1, bh)) <= 2.2 and bh <= int(60 * dpi_factor):
-                    if area > best_area:
-                        best_area = area
-                        best_pencil = (min_pencil_x + bx, tb_y1 + by, bw, bh)
+            bx, by, bw, bh = cv2.boundingRect(c)
+            # Compact icon aspect ratio and reasonable icon height
+            if 0.45 <= (bw / max(1, bh)) <= 2.5 and bh <= int(60 * dpi_factor) and area <= 2000 * (dpi_factor ** 2):
+                abs_cx = min_pencil_x + bx + bw // 2
+                abs_cy = tb_y1 + by + bh // 2
+
+                # Check for neighbor mode icons horizontally aligned in the toolbar row
+                r_y1 = max(0, abs_cy - int(18 * dpi_factor))
+                r_y2 = min(h, abs_cy + int(18 * dpi_factor))
+                row_strip = img[r_y1:r_y2, int(w * 0.50):]
+                gray = cv2.cvtColor(row_strip, cv2.COLOR_BGR2GRAY)
+                edges = cv2.Canny(gray, 40, 140)
+                e_conts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                neighbor_offsets = []
+                for ec in e_conts:
+                    if cv2.contourArea(ec) >= 8:
+                        ex, ey, ew, eh = cv2.boundingRect(ec)
+                        abs_ex = int(w * 0.50) + ex + ew // 2
+                        offset = abs_ex - abs_cx
+                        if int(20 * dpi_factor) <= abs(offset) <= int(90 * dpi_factor):
+                            neighbor_offsets.append(offset)
+
+                has_left_mode_icon = any(-int(80 * dpi_factor) <= off <= -int(25 * dpi_factor) for off in neighbor_offsets)
+                has_right_mode_icon = any(int(25 * dpi_factor) <= off <= int(80 * dpi_factor) for off in neighbor_offsets)
+
+                if not has_left_mode_icon:
+                    # Blue pill is on leftmost mode icon (Pencil icon) -> Single-pane Edit Mode
+                    edit_mode_active = True
+                    split_screen_detected = False
+                    best_area = area
+                    best_pencil = (min_pencil_x + bx, tb_y1 + by, bw, bh)
+                    break
+                elif has_left_mode_icon and has_right_mode_icon:
+                    # Blue pill is between mode icons (Split View icon) -> Split Screen Preview Mode
+                    split_screen_detected = True
+                    edit_mode_active = False
+                    best_pencil = (int(abs_cx - 50 * dpi_factor), tb_y1 + by, bw, bh)
+                    break
+                else:
+                    # Blue pill is on Preview Only icon -> Full Preview Mode
+                    edit_mode_active = False
+                    split_screen_detected = False
+                    best_pencil = (int(abs_cx - 100 * dpi_factor), tb_y1 + by, bw, bh)
+                    break
 
     if best_pencil:
         px, py, pw, ph = best_pencil
-        edit_mode_active = True
         blue_pixel_count = int(best_area)
         edit_box = [max(0, px - 6), max(0, py - 6), pw + 12, ph + 12]
         tb_row_y = py + ph // 2
@@ -171,23 +213,23 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         if tb_row_y is None:
             tb_row_y = tb_y1 + int(45 * dpi_factor)
 
-        default_pencil_x = int(w * 0.86) if w >= h else int(w * 0.70)
+        default_pencil_x = int(1655 * scale_w) if w >= h else int(w * 0.70)
         edit_box = [max(0, default_pencil_x - int(15 * dpi_factor)), max(0, tb_row_y - int(15 * dpi_factor)), int(30 * dpi_factor), int(30 * dpi_factor)]
 
     # Toolbar bottom is safely below the toolbar row
     tb_y2 = min(h, tb_row_y + int(max(20, 25 * dpi_factor)))
 
-    # Check for split screen mode (preview side-by-side)
-    split_screen_detected = False
-    center_strip = img[int(h * 0.25):int(h * 0.75), int(w * 0.46):int(w * 0.54)]
-    if center_strip.size > 0:
-        cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
-        sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
-        sobel_abs = cv2.convertScaleAbs(sobel_x)
-        col_means = np.mean(sobel_abs, axis=0)
-        if np.max(col_means) > 28.0:
-            split_screen_detected = True
-            edit_mode_active = False
+    # Fallback check for split screen mode divider line ONLY if toolbar wasn't already edit mode
+    if not edit_mode_active and not split_screen_detected:
+        center_strip = img[int(h * 0.25):int(h * 0.75), int(w * 0.46):int(w * 0.54)]
+        if center_strip.size > 0:
+            cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
+            sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
+            sobel_abs = cv2.convertScaleAbs(sobel_x)
+            # Continuous vertical line check: requires >65% of rows in a single column to have an edge
+            col_continuity = [np.count_nonzero(sobel_abs[:, col] > 40) / float(sobel_abs.shape[0]) for col in range(sobel_abs.shape[1])]
+            if col_continuity and max(col_continuity) >= 0.65:
+                split_screen_detected = True
 
     # ---------------------------------------------------------
     # 4. WHITE BOX 2: Dark Mode ("Moon Icon" & Dark Luminance)

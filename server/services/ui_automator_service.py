@@ -75,19 +75,19 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     - 'theme_dropdown' (sun/moon theme dropdown anchor)
     """
     h, w = img.shape[:2]
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
+    scale_x = (w / 1920.0) if w > 0 else 1.0
+    scale_y = (h / 1080.0) if h > 0 else 1.0
 
     results: Dict[str, Tuple[int, int]] = {
-        "pencil": (int(1625 * scale_x), int(230 * scale_y)),
-        "split": (int(1680 * scale_x), int(230 * scale_y)),
-        "preview": (int(1735 * scale_x), int(230 * scale_y)),
-        "theme_dropdown": (int(1825 * scale_x), int(230 * scale_y)),
+        "pencil": (int(1655 * scale_x), int(190 * scale_y)),
+        "split": (int(1710 * scale_x), int(190 * scale_y)),
+        "preview": (int(1760 * scale_x), int(190 * scale_y)),
+        "theme_dropdown": (int(1850 * scale_x), int(190 * scale_y)),
     }
 
-    # Search strictly in secondary markdown toolbar strip (y: 195..255 on 1080p, x: >= 1580)
-    tb_y1, tb_y2 = int(195 * scale_y), int(255 * scale_y)
-    tb_x1, tb_x2 = int(1580 * scale_x), w
+    # Search strictly in secondary markdown toolbar strip (y: 150..230 on 1080p, x: >= 1550)
+    tb_y1, tb_y2 = int(150 * scale_y), int(230 * scale_y)
+    tb_x1, tb_x2 = int(1550 * scale_x), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
@@ -95,16 +95,6 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     is_dark = np.mean(gray) < 100
-    strip_mask = (gray < 70) if is_dark else (gray > 220)
-    row_counts = np.sum(strip_mask, axis=1)
-
-    matching_rows = np.where(row_counts > 0.25 * crop.shape[1])[0]
-    if len(matching_rows) > 0:
-        center_y = tb_y1 + int(matching_rows[0] + matching_rows[-1]) // 2
-    else:
-        center_y = int(230 * scale_y)
-
-    # Detect horizontal blobs in the icon band
     icons_mask = (gray > 45) if is_dark else (gray < 220)
     col_counts = np.sum(icons_mask, axis=0)
     active_cols = np.where(col_counts > 2)[0]
@@ -123,21 +113,14 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 6]
     centers = [tb_x1 + (b[0] + b[1]) // 2 for b in significant_blobs]
 
-    # The right-hand toolbar cluster contains: [pencil, (split), (preview), theme_dropdown]
+    center_y = int(190 * scale_y)
     if len(centers) >= 2:
         results["pencil"] = (int(centers[0]), int(center_y))
-        # Theme dropdown is the rightmost cluster
         results["theme_dropdown"] = (int(centers[-1]), int(center_y))
         if len(centers) >= 3:
             results["preview"] = (int(centers[-2]), int(center_y))
         if len(centers) >= 4:
             results["split"] = (int(centers[1]), int(center_y))
-    else:
-        for cx in centers:
-            if cx < int(1700 * scale_x):
-                results["pencil"] = (int(cx), int(center_y))
-            else:
-                results["theme_dropdown"] = (int(cx), int(center_y))
 
     return results
 
@@ -154,7 +137,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
         return {
             "success": True,
             "actions": ["Tapped pencil icon to enter single-pane edit mode (mock)"],
-            "target_coords": (1655, 250),
+            "target_coords": (1655, 190),
             "edit_mode_passed": True,
             "message": "Switched to single-pane Edit Mode ✔"
         }
@@ -162,7 +145,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     disp_id = display_id or await detect_external_display_id(ser)
     actions = []
 
-    # 1. Capture current display screenshot to accurately locate toolbar and inspect active mode
+    # 1. Capture current display screenshot to accurately inspect active mode
     snap = await capture_external_screenshot(ser, bypass_lock=True)
     target_coords = None
 
@@ -170,34 +153,44 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
         img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
         if img is not None:
             h_i, w_i = img.shape[:2]
-            scale_x = w_i / 1920.0
-            scale_y = h_i / 1080.0
+            scale_x = (w_i / 1920.0) if w_i > 0 else 1.0
+            scale_y = (h_i / 1080.0) if h_i > 0 else 1.0
 
-            # Check if pencil icon is already highlighted with blue pill and no split screen
-            crop_pencil = img[int(100 * scale_y):int(350 * scale_y), int(1200 * scale_x):int(1850 * scale_x)]
-            if crop_pencil.size > 0:
-                hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
+            # Detect current active toolbar button
+            tb_y1 = int(140 * scale_y)
+            tb_y2 = int(245 * scale_y)
+            tb_x1 = int(1450 * scale_x)
+            crop_tb = img[tb_y1:tb_y2, tb_x1:]
+            active_button = None
+            if crop_tb.size > 0:
+                hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
                 blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
-                blue_cnt = int(np.count_nonzero(blue_mask))
+                conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                valid_conts = [c for c in conts if cv2.contourArea(c) >= 15]
+                valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+                for c in valid_conts:
+                    bx, by, bw, bh = cv2.boundingRect(c)
+                    norm_cx = (tb_x1 + bx + bw // 2) / scale_x
+                    if norm_cx < 1685:
+                        active_button = "pencil"
+                        break
+                    elif 1685 <= norm_cx < 1735:
+                        active_button = "split"
+                        break
+                    elif norm_cx >= 1735:
+                        active_button = "preview"
+                        break
 
-                center_strip = img[int(h_i * 0.25):int(h_i * 0.75), int(w_i * 0.46):int(w_i * 0.54)]
-                is_split = False
-                if center_strip.size > 0:
-                    cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
-                    sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
-                    is_split = np.max(np.mean(cv2.convertScaleAbs(sobel_x), axis=0)) > 28.0
-
-                if blue_cnt >= 20 and not is_split:
-                    actions.append(f"Pencil icon already active (blue pill detected, {blue_cnt} px, single pane)")
-                    # Ensure keyboard remains suppressed
-                    await dismiss_keyboard(ser, disp_id)
-                    return {
-                        "success": True,
-                        "actions": actions,
-                        "target_coords": (int(1655 * scale_x), int(250 * scale_y)),
-                        "edit_mode_passed": True,
-                        "message": "Editor is already in single-pane Edit Mode ✔"
-                    }
+            if active_button == "pencil":
+                actions.append("Pencil icon already active (single-pane Edit Mode verified)")
+                await dismiss_keyboard(ser, disp_id)
+                return {
+                    "success": True,
+                    "actions": actions,
+                    "target_coords": (int(1655 * scale_x), int(190 * scale_y)),
+                    "edit_mode_passed": True,
+                    "message": "Editor is already in single-pane Edit Mode ✔"
+                }
 
             icons = locate_toolbar_icons_cv(img)
             target_coords = icons.get("pencil")
@@ -220,10 +213,10 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     # 3. Default resolution-scaled coordinates fallback (Pencil icon in secondary toolbar)
     if not target_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        target_coords = (int(1655 * disp_w / 1920), int(250 * disp_h / 1080))
+        target_coords = (int(1655 * disp_w / 1920), int(190 * disp_h / 1080))
         actions.append(f"Using calibrated toolbar coordinates {target_coords} on display {disp_id}")
 
-    # 4. Dispatch touch motion
+    # 4. Dispatch touch motion directly on pencil icon
     x, y = target_coords
     await run_adb_shell(f"input -d {disp_id} tap {x} {y}", ser)
     actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")

@@ -24,7 +24,15 @@ export const AlignmentDiagnosticsModal: React.FC<Props> = ({
 }) => {
   if (!isOpen) return null;
   const rawIssues = alignmentData.classifier_issues || alignmentData.classifiers?.issues || [];
-  const classifierIssues = rawIssues.filter(i => !dismissedItems.includes(i.classifier_id) && !dismissedItems.includes(`classifier_${i.classifier_id}`));
+  const isClassifierDismissed = (cid: string) => {
+    if (dismissedItems.includes(cid) || dismissedItems.includes(`classifier_${cid}`)) return true;
+    if ((cid === 'view_mode' || cid === 'edit_mode') && (
+      dismissedItems.includes('edit_mode') || dismissedItems.includes('view_mode') ||
+      dismissedItems.includes('classifier_edit_mode') || dismissedItems.includes('classifier_view_mode')
+    )) return true;
+    return false;
+  };
+  const classifierIssues = rawIssues.filter(i => !isClassifierDismissed(i.classifier_id));
   const isAligned = alignmentData.is_aligned;
 
   return (

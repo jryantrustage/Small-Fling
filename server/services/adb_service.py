@@ -1568,29 +1568,34 @@ async def is_editor_full_screen(
     bounds = [0, 0, disp_w, disp_h]
 
     if tid is not None:
-        m_task = re.search(
-            rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}.*?'
-            r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\))',
-            search_block if search_block else stdout,
-            re.DOTALL
-        )
-        if not m_task:
-            m_task = re.search(
-                rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}.*?'
-                r'(?:bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]|mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\))',
-                stdout,
-                re.DOTALL
-            )
-        if m_task:
-            mode = m_task.group("mode").lower()
-            l = int(m_task.group("bl") or m_task.group("rl") or 0)
-            t = int(m_task.group("bt") or m_task.group("rt") or 0)
-            r = int(m_task.group("br") or m_task.group("rr") or disp_w)
-            b = int(m_task.group("bb") or m_task.group("rb") or disp_h)
-            bounds = [l, t, r, b]
+        # Match task header line for FilePreviewActivity
+        m_head = re.search(rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}', search_block if search_block else stdout)
+        if m_head:
+            mode = m_head.group("mode").lower()
 
-            w_span = r - l
-            h_span = b - t
+            # Isolate the task block to avoid picking up stale mGlobalConfig from other tasks
+            task_pos = m_head.start()
+            target_str = search_block if search_block else stdout
+            next_task = re.search(r'\n\s*\* Task\{', target_str[task_pos + 1:])
+            task_block = target_str[task_pos : task_pos + 1 + next_task.start()] if next_task else target_str[task_pos:]
+
+            # Check direct bounds in task block: bounds=[l,t][r,b] or mBounds=Rect(l, t - r, b)
+            m_b = re.search(r'bounds=\[(?P<bl>\d+),(?P<bt>\d+)\]\[(?P<br>\d+),(?P<bb>\d+)\]', task_block[:600])
+            if m_b:
+                bounds = [int(m_b.group("bl")), int(m_b.group("bt")), int(m_b.group("br")), int(m_b.group("bb"))]
+            else:
+                m_mb = re.search(r'mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\)', task_block[:600])
+                if m_mb:
+                    bounds = [int(m_mb.group("rl")), int(m_mb.group("rt")), int(m_mb.group("rr")), int(m_mb.group("rb"))]
+                else:
+                    m_cfg = re.search(r'(?:CurrentConfiguration|mOverrideConfig)=.*?winConfig=\{[^\}]*?mBounds=Rect\((?P<rl>\d+),\s*(?P<rt>\d+)\s*-\s*(?P<rr>\d+),\s*(?P<rb>\d+)\)', task_block)
+                    if m_cfg:
+                        bounds = [int(m_cfg.group("rl")), int(m_cfg.group("rt")), int(m_cfg.group("rr")), int(m_cfg.group("rb"))]
+                    elif mode == "fullscreen":
+                        bounds = [0, 0, disp_w, disp_h]
+
+            w_span = bounds[2] - bounds[0]
+            h_span = bounds[3] - bounds[1]
 
             # Check horizontal and vertical spans against display dimensions.
             # In Android Desktop Mode, windows are mode='freeform' even when maximized.
@@ -1625,6 +1630,16 @@ async def is_editor_full_screen(
                     "display_dimensions": [disp_w, disp_h],
                     "reason": f"Activity task #{tid} bounds ({w_span}x{h_span}) are smaller than display viewport ({disp_w}x{disp_h})"
                 }
+
+            return {
+                "is_fullscreen": True,
+                "mode": mode,
+                "bounds": bounds,
+                "task_id": tid,
+                "display_id": did,
+                "display_dimensions": [disp_w, disp_h],
+                "reason": f"Activity task #{tid} occupies full display bounds"
+            }
 
     # Computer Vision fallback / sanity check if image_bytes provided
     if image_bytes and len(image_bytes) > 2000:
@@ -1707,17 +1722,12 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     # Check fullscreen status post-fix and maximize freeform floating window if needed
     fs_status = await is_editor_full_screen(ser, display_id)
     if not fs_status.get("is_fullscreen", True):
-        b = fs_status.get("bounds", [0, 0, disp_w, disp_h])
-        # Only attempt to tap maximize if the window is genuinely narrower than full screen width.
-        # Tapping near top right of an ALREADY maximized window will unmaximize or close it!
-        if (b[2] - b[0]) < disp_w - 60 and b[2] > 150 and b[1] >= 0:
-            max_x = b[2] - 120
-            max_y = b[1] + 30
-            await run_adb_shell(f"input -d {display_id} tap {max_x} {max_y} >/dev/null 2>&1", ser)
+        tid = fs_status.get("task_id")
+        if tid:
+            # Resize freeform task to full display bounds via clean ADB command, never blindly tap the app toolbar!
+            await run_adb_shell(f"am task resize {tid} 0 0 {disp_w} {disp_h} >/dev/null 2>&1; cmd activity task to-front {tid} >/dev/null 2>&1", ser)
             await asyncio.sleep(0.35)
-            # When Teams transitions from floating to maximized, it resets its WebView layout
-            # and reverts to Light Mode or Split View / Preview Mode (862x400 box with black borders).
-            # We must immediately restore single-pane Edit Mode and Dark Mode!
+            # Ensure single-pane Edit Mode and Dark Mode without keyboard
             try:
                 from services.ui_automator_service import enable_edit_mode, select_dark_mode
                 await enable_edit_mode(ser, display_id)

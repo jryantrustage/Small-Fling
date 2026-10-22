@@ -279,7 +279,9 @@ class EditModeClassifier(BaseClassifier):
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
         em = (context.alignment_data or {}).get("boxes", {}).get("edit_mode", {})
-        if em.get("dismissed"):
+        from services.state import dismissed_alignment_items
+        dismissed_set = set(dismissed_alignment_items)
+        if em.get("dismissed") or self.id in dismissed_set or "edit_mode" in dismissed_set or "view_mode" in dismissed_set:
             return ClassificationResult(
                 classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
                 fix_name=self.fix_description, details="Edit mode check dismissed by user (false positive ignored)"
@@ -289,34 +291,80 @@ class EditModeClassifier(BaseClassifier):
         split_screen_detected = bool(em.get("split_screen_detected", False))
         edit_mode_active = em.get("passed") is True
 
-        target_coords = _get_box_center(context, "edit_mode")
         w_t = 1920
         h_t = 1080
         if img is not None:
             h_t, w_t = img.shape[:2]
-            scale_x = w_t / 1920.0
-            scale_y = h_t / 1080.0
-            # Inspect secondary toolbar for active blue pill on pencil edit icon
-            crop_pencil = img[int(100 * scale_y):int(350 * scale_y), int(1200 * scale_x):int(1850 * scale_x)]
-            if crop_pencil.size > 0:
-                hsv_p = cv2.cvtColor(crop_pencil, cv2.COLOR_BGR2HSV)
+            scale_x = (w_t / 1920.0) if w_t > 0 else 1.0
+            scale_y = (h_t / 1080.0) if h_t > 0 else 1.0
+
+            # Inspect secondary toolbar for active mode button
+            tb_y1 = int(70 * scale_y)
+            tb_y2 = int(270 * scale_y)
+            tb_x1 = int(1400 * scale_x)
+            crop_tb = img[tb_y1:tb_y2, tb_x1:]
+            if crop_tb.size > 0:
+                hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
                 blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
-                if int(np.count_nonzero(blue_mask)) >= 20:
-                    edit_mode_active = True
+                conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                valid_conts = [c for c in conts if cv2.contourArea(c) >= 15]
+                valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
 
-            # Check center strip for vertical split-screen boundary (solid continuous divider line)
-            center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
-            if center_strip.size > 0:
-                cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
-                sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
-                sobel_abs = cv2.convertScaleAbs(sobel_x)
-                col_means = np.mean(sobel_abs, axis=0)
-                if np.max(col_means) > 28.0:
-                    split_screen_detected = True
-                    edit_mode_active = False
+                for c in valid_conts:
+                    area = cv2.contourArea(c)
+                    bx, by, bw, bh = cv2.boundingRect(c)
+                    if 0.45 <= (bw / max(1, bh)) <= 2.5 and bh <= int(60 * scale_y) and area <= 2000 * (scale_y ** 2):
+                        abs_cx = tb_x1 + bx + bw // 2
+                        abs_cy = tb_y1 + by + bh // 2
 
-        if not target_coords:
-            target_coords = (int(w_t * 0.69), int(h_t * 0.08))
+                        # Check for neighbor mode icons horizontally aligned in the toolbar row
+                        r_y1 = max(0, abs_cy - int(18 * scale_y))
+                        r_y2 = min(h_t, abs_cy + int(18 * scale_y))
+                        row_strip = img[r_y1:r_y2, int(w_t * 0.50):]
+                        gray = cv2.cvtColor(row_strip, cv2.COLOR_BGR2GRAY)
+                        edges = cv2.Canny(gray, 40, 140)
+                        e_conts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+                        neighbor_offsets = []
+                        for ec in e_conts:
+                            if cv2.contourArea(ec) >= 8:
+                                ex, ey, ew, eh = cv2.boundingRect(ec)
+                                abs_ex = int(w_t * 0.50) + ex + ew // 2
+                                offset = abs_ex - abs_cx
+                                if int(20 * scale_x) <= abs(offset) <= int(90 * scale_x):
+                                    neighbor_offsets.append(offset)
+
+                        has_left_mode_icon = any(-int(80 * scale_x) <= off <= -int(25 * scale_x) for off in neighbor_offsets)
+                        has_right_mode_icon = any(int(25 * scale_x) <= off <= int(80 * scale_x) for off in neighbor_offsets)
+
+                        if not has_left_mode_icon:
+                            # Blue pill is on leftmost mode icon (Pencil icon) -> Single-pane Edit Mode
+                            edit_mode_active = True
+                            split_screen_detected = False
+                            break
+                        elif has_left_mode_icon and has_right_mode_icon:
+                            # Blue pill is between mode icons (Split View icon) -> Split Screen Preview Mode
+                            split_screen_detected = True
+                            edit_mode_active = False
+                            break
+                        else:
+                            # Blue pill is on Preview Only icon -> Full Preview Mode
+                            edit_mode_active = False
+                            split_screen_detected = False
+                            break
+
+            # Fallback center strip check for solid vertical divider line ONLY if not already in edit mode
+            if not edit_mode_active and not split_screen_detected:
+                center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
+                if center_strip.size > 0:
+                    cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
+                    sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)
+                    sobel_abs = cv2.convertScaleAbs(sobel_x)
+                    col_continuity = [np.count_nonzero(sobel_abs[:, col] > 40) / float(sobel_abs.shape[0]) for col in range(sobel_abs.shape[1])]
+                    if col_continuity and max(col_continuity) >= 0.65:
+                        split_screen_detected = True
+
+        target_coords = (int(1655 * (w_t / 1920.0)), int(190 * (h_t / 1080.0)))
 
         if not edit_mode_active or split_screen_detected:
             reason = "Split screen with duplicated text detected across panes (pencil inactive)" if split_screen_detected else "Edit button (pencil icon) not selected; editor in read-only / split preview"

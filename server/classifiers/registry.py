@@ -76,7 +76,12 @@ class ClassifierRegistry:
             dismissed_set = set()
 
         async def _eval_one(c: BaseClassifier) -> ClassificationResult:
-            if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
+            is_dismissed = (
+                c.id in dismissed_set
+                or f"classifier_{c.id}" in dismissed_set
+                or (c.id in ("view_mode", "edit_mode") and ("edit_mode" in dismissed_set or "view_mode" in dismissed_set or "classifier_edit_mode" in dismissed_set or "classifier_view_mode" in dismissed_set))
+            )
+            if is_dismissed:
                 return ClassificationResult(
                     classifier_id=c.id,
                     issue_detected=False,
@@ -86,7 +91,7 @@ class ClassifierRegistry:
                 )
             try:
                 res = await c.detect(context)
-                if c.id in dismissed_set or f"classifier_{c.id}" in dismissed_set:
+                if is_dismissed:
                     res.issue_detected = False
                 return res
             except Exception as e:
@@ -99,6 +104,12 @@ class ClassifierRegistry:
                 )
 
         selected = [c for c in self._classifiers.values() if target_ids is None or c.id in target_ids]
+        # Avoid duplicate edit mode / view mode reports when evaluating all
+        if target_ids is None:
+            has_edit_mode = any(c.id == "edit_mode" for c in selected)
+            if has_edit_mode:
+                selected = [c for c in selected if c.id != "view_mode"]
+
         results = await asyncio.gather(*[_eval_one(c) for c in selected])
         self._latest_results = list(results)
         return list(results)
