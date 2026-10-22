@@ -17,6 +17,7 @@ from .action_light_to_dark import LightToDarkAction
 from .action_close_keyboard import CloseKeyboardAction
 from .action_detect_top_line import DetectTopLineAction
 from .action_detect_bottom_line import DetectBottomLineAction
+from .action_focus_editor import FocusEditorAction
 from .action_open_markdown_from_onedrive import (
     OpenMarkdownFromOneDriveAction,
     RecoverMarkdownEditorAction,
@@ -35,6 +36,7 @@ class ObservationActionRegistry:
         # Register standard catalog
         self.register(OpenMarkdownFromOneDriveAction())
         self.register(CloseKeyboardAction())
+        self.register(FocusEditorAction())
         self.register(ViewToEditAction())
         self.register(LightToDarkAction())
         self.register(DetectTopLineAction())
@@ -91,6 +93,7 @@ __all__ = [
     "ViewToEditAction",
     "LightToDarkAction",
     "CloseKeyboardAction",
+    "FocusEditorAction",
     "DetectTopLineAction",
     "DetectBottomLineAction",
     "OpenMarkdownFromOneDriveAction",

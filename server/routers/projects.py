@@ -51,6 +51,13 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         return (requested_target, False, 1)
 
     try:
+        # 0. Ensure editor content focus & title bar assistant overlay
+        try:
+            from services.adb_service import ensure_editor_content_focused
+            await ensure_editor_content_focused(serial)
+        except Exception:
+            pass
+
         # 1. Dispatch Ctrl+End: keycode 113 + 123
         await send_hid_keycombination(113, 123, serial)
         await asyncio.sleep(0.6)
@@ -69,7 +76,55 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
         await auto_fix_viewport(serial)
 
-        is_stuck_on_line_1 = (0 < top_line <= 2)
+        is_stuck_on_line_1 = (0 < top_line <= 2 or total_lines <= 0)
+        if is_stuck_on_line_1:
+            # Queue automated recovery event to regain editor focus and re-dispatch Ctrl+End
+            from services.dag_event_queue import queue_dag_event
+            from services.adb_service import ensure_editor_content_focused
+
+            async def _recover_calibration_focus():
+                await ensure_editor_content_focused(serial)
+                await asyncio.sleep(0.15)
+                await send_hid_keycombination(113, 123, serial)
+                await asyncio.sleep(0.8)
+                await auto_fix_viewport(serial)
+                r_bytes = await capture_external_screenshot(serial)
+                if r_bytes:
+                    calib_p = state.FRAMES_DIR / f"calib_end_{project_id}.png"
+                    with open(calib_p, "wb") as f: f.write(r_bytes)
+                    r_tot = await state.detect_last_line_in_process(calib_p)
+                    r_top = await state.detect_top_line_in_process(calib_p)
+                    if r_tot <= 0 or r_top <= 0:
+                        s_r = await state.scan_image_in_process(calib_p)
+                        if r_tot <= 0: r_tot = s_r.get("bottom_line", 0)
+                        if r_top <= 0: r_top = s_r.get("top_line", 0)
+                    return {"total_lines": r_tot, "top_line": r_top}
+                return {"total_lines": 0, "top_line": 0}
+
+            evt_res = await queue_dag_event(
+                event_type="editor_focus_lost",
+                category="FOCUS",
+                message=f"Editor focus lost during calibration (Ln {top_line or 1}): Queued automated focus recovery event.",
+                node_id="init_end",
+                serial=serial,
+                automated_steps=[
+                    {"step": 1, "action": "cmd activity task to-front", "target": "com.microsoft.teams"},
+                    {"step": 2, "action": "reposition_keyboard_assistant_overlay", "target": "yellow bounding box in title bar"},
+                    {"step": 3, "action": "input tap editor text canvas", "target": "editor body at (x=450, y=360)"},
+                    {"step": 4, "action": "dismiss soft keyboard", "target": "enforce physical keyboard layout"},
+                    {"step": 5, "action": "re-dispatch Ctrl+End", "target": "EOF calibration"}
+                ],
+                handler=_recover_calibration_focus
+            )
+
+            if evt_res.get("status") == "resolved" and isinstance(evt_res.get("result"), dict):
+                r_data = evt_res["result"]
+                if r_data.get("total_lines", 0) > 0:
+                    total_lines = r_data["total_lines"]
+                    top_line = r_data.get("top_line", 0)
+                    if total_lines >= 500 or top_line > 30:
+                        is_stuck_on_line_1 = False
+
         if is_stuck_on_line_1:
             err_msg = f"EOF Navigation Failed: Editor remained on Line {top_line or 1} at top (bottom: {total_lines})."
             state.dag_state["nodes"]["init_end"].update({
@@ -261,6 +316,8 @@ async def create_project(req: ProjectCreateRequest):
     )
     state.captured_frames.clear()
     state.document_lines.clear()
+    state.recapture_queue.clear()
+    state.save_persisted_state()
     state.load_persisted_state()
 
     # Initialize DAG state for new project with initialize group active
@@ -620,9 +677,14 @@ async def activate_project(project_id: str):
 async def delete_project(project_id: str):
     if not db.delete_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    state.captured_frames.clear()
+    state.document_lines.clear()
+    state.recapture_queue.clear()
     state.load_persisted_state()
     active_proj = db.get_active_project()
     active_pid = active_proj["id"] if active_proj else None
+    if not active_proj:
+        state.save_persisted_state()
 
     # Broadcast project deletion and state synchronization to all connected clients
     try:

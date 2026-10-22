@@ -585,20 +585,70 @@ async def update_frame_position(frame_id: str, req: FramePositionRequest):
 
 @router.delete("/api/frames/{frame_id}")
 async def delete_frame(frame_id: str):
-    if not db.delete_frame(frame_id):
-        raise HTTPException(status_code=404, detail="Frame not found")
-    state.load_persisted_state()
+    pid = state.get_current_project_id()
+    deleted_from_db = False
     try:
-        with open(state.DOCUMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(state.document_lines.items())},
-                "frames": state.captured_frames, "token_stats": state.token_stats, "latest_telemetry": state.latest_telemetry, "updated_at": datetime.now().isoformat()
-            }, f, indent=2)
-    except Exception as e:
-        print(f"Error saving JSON after frame deletion: {e}")
-    await state.ws_manager.broadcast({"type": "frame_deleted", "frame_id": frame_id, "frames": db.get_frames(state.get_current_project_id())})
-    await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
-    return {"status": "success", "frame_id": frame_id}
+        deleted_from_db = db.delete_frame(frame_id)
+    except Exception as dbe:
+        print(f"[delete_frame] db.delete_frame error: {dbe}")
+
+    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
+    deleted_from_mem = False
+    if frame_id in state.captured_frames:
+        state.captured_frames.pop(frame_id, None)
+        deleted_from_mem = True
+    if clean_id in state.captured_frames:
+        state.captured_frames.pop(clean_id, None)
+        deleted_from_mem = True
+
+    # Clean up physical files on disk
+    for p in [
+        state.FRAMES_DIR / f"{frame_id}.png",
+        state.FRAMES_DIR / f"{clean_id}.png",
+        state.FRAMES_DIR / frame_id,
+        db.FRAMES_DIR / f"{frame_id}.png",
+        db.FRAMES_DIR / f"{clean_id}.png",
+        db.FRAMES_DIR / frame_id
+    ]:
+        if p.exists() and p.is_file():
+            try: p.unlink(missing_ok=True)
+            except Exception: pass
+
+    for p in state.FRAMES_DIR.glob(f"*{clean_id}*.png"):
+        if p.is_file():
+            try: p.unlink(missing_ok=True)
+            except Exception: pass
+
+    # Clean up associated document lines
+    lines_to_del = [
+        k for k, v in list(state.document_lines.items())
+        if (isinstance(v, dict) and v.get("frame_id") in (frame_id, clean_id))
+        or (hasattr(v, "frame_id") and getattr(v, "frame_id") in (frame_id, clean_id))
+    ]
+    for lk in lines_to_del:
+        state.document_lines.pop(lk, None)
+        if pid:
+            try: db.delete_document_line(pid, int(lk))
+            except Exception: pass
+
+    state.save_persisted_state()
+
+    remaining_frames = db.get_frames(pid) if pid else []
+    await state.ws_manager.broadcast({
+        "type": "frame_deleted",
+        "frame_id": frame_id,
+        "frames": remaining_frames
+    })
+    await state.ws_manager.broadcast({
+        "type": "document_updated",
+        "data": _doc_payload()
+    })
+    return {
+        "status": "success",
+        "frame_id": frame_id,
+        "deleted_from_db": deleted_from_db,
+        "deleted_from_mem": deleted_from_mem
+    }
 
 @router.post("/api/frames/{frame_id}/delete")
 async def delete_frame_post(frame_id: str):
@@ -609,22 +659,45 @@ async def batch_delete_frames(req: Dict[str, Any]):
     frame_ids = req.get("frame_ids", [])
     if not isinstance(frame_ids, list):
         raise HTTPException(status_code=400, detail="frame_ids must be a list")
+    pid = state.get_current_project_id()
     deleted = []
     for fid in frame_ids:
-        if db.delete_frame(str(fid)):
-            deleted.append(str(fid))
-    if deleted:
-        state.load_persisted_state()
-        try:
-            with open(state.DOCUMENT_FILE, "w", encoding="utf-8") as f:
-                json.dump({
-                    "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(state.document_lines.items())},
-                    "frames": state.captured_frames, "token_stats": state.token_stats, "latest_telemetry": state.latest_telemetry, "updated_at": datetime.now().isoformat()
-                }, f, indent=2)
-        except Exception as e:
-            print(f"Error saving JSON after batch frame deletion: {e}")
-        await state.ws_manager.broadcast({"type": "frame_deleted", "frame_ids": deleted, "frames": db.get_frames(state.get_current_project_id())})
-        await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
+        sfid = str(fid)
+        clean_id = sfid[:-4] if sfid.endswith(".png") else sfid
+        try: db.delete_frame(sfid)
+        except Exception: pass
+
+        if sfid in state.captured_frames: state.captured_frames.pop(sfid, None)
+        if clean_id in state.captured_frames: state.captured_frames.pop(clean_id, None)
+
+        for p in [state.FRAMES_DIR / f"{sfid}.png", state.FRAMES_DIR / f"{clean_id}.png", state.FRAMES_DIR / sfid]:
+            if p.exists() and p.is_file():
+                try: p.unlink(missing_ok=True)
+                except Exception: pass
+
+        lines_to_del = [
+            k for k, v in list(state.document_lines.items())
+            if (isinstance(v, dict) and v.get("frame_id") in (sfid, clean_id))
+            or (hasattr(v, "frame_id") and getattr(v, "frame_id") in (sfid, clean_id))
+        ]
+        for lk in lines_to_del:
+            state.document_lines.pop(lk, None)
+            if pid:
+                try: db.delete_document_line(pid, int(lk))
+                except Exception: pass
+        deleted.append(sfid)
+
+    state.save_persisted_state()
+    remaining_frames = db.get_frames(pid) if pid else []
+    await state.ws_manager.broadcast({
+        "type": "frame_deleted",
+        "frame_ids": deleted,
+        "frames": remaining_frames
+    })
+    await state.ws_manager.broadcast({
+        "type": "document_updated",
+        "data": _doc_payload()
+    })
     return {"status": "success", "deleted_count": len(deleted), "deleted_frames": deleted}
 
 
@@ -652,15 +725,20 @@ async def purge_all_frames():
 @router.get("/api/frames")
 async def get_frames():
     pid = state.get_current_project_id()
-    db_frames = db.get_frames(pid)
-    if not db_frames and state.captured_frames:
-        return list(state.captured_frames.values())
-    if db_frames and state.captured_frames:
-        existing_ids = {f.get("frame_id") for f in db_frames}
-        for fid, finfo in state.captured_frames.items():
-            if fid not in existing_ids:
-                db_frames.append(finfo)
-    return db_frames
+    db_frames = db.get_frames(pid) if pid else []
+    if pid:
+        db_ids = {f.get("frame_id") for f in db_frames}
+        # Purge any leaked frames in memory that belong to other projects
+        for fid in list(state.captured_frames.keys()):
+            finfo = state.captured_frames[fid]
+            frame_proj = finfo.get("project_id")
+            if frame_proj and frame_proj != pid:
+                state.captured_frames.pop(fid, None)
+            elif fid not in db_ids and not frame_proj:
+                # Untagged or orphaned frame
+                state.captured_frames.pop(fid, None)
+        return db_frames
+    return list(state.captured_frames.values())
 
 @router.get("/api/frames/{frame_id}/image")
 async def get_frame_image(frame_id: str):

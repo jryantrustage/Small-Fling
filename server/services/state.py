@@ -857,12 +857,15 @@ def load_persisted_state():
             try:
                 with open(DOCUMENT_FILE, "r", encoding="utf-8") as f:
                     doc_data = json.load(f)
-                    for k, v in doc_data.get("lines", {}).items():
-                        document_lines[int(k)] = v
-                    if not captured_frames:
-                        captured_frames.update(doc_data.get("frames", {}))
-                    if doc_data.get("latest_telemetry"):
-                        latest_telemetry.update(doc_data["latest_telemetry"])
+                    doc_pid = doc_data.get("project_id")
+                    # ONLY load fallback if DOCUMENT_FILE matches the current active project, or neither has an ID
+                    if (pid and doc_pid == pid) or (not pid and not doc_pid):
+                        for k, v in doc_data.get("lines", {}).items():
+                            document_lines[int(k)] = v
+                        if not captured_frames:
+                            captured_frames.update(doc_data.get("frames", {}))
+                        if doc_data.get("latest_telemetry"):
+                            latest_telemetry.update(doc_data["latest_telemetry"])
             except Exception as ex:
                 print(f"Fallback loading DOCUMENT_FILE error: {ex}")
     except Exception as e:
@@ -895,7 +898,14 @@ def save_persisted_state():
         db.save_document_lines(pid, document_lines)
         db.save_project_telemetry(pid, latest_telemetry, token_stats)
         with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump({"lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())}, "frames": captured_frames, "token_stats": token_stats, "latest_telemetry": latest_telemetry, "updated_at": datetime.now().isoformat()}, f, indent=2, cls=NumpySafeJSONEncoder)
+            json.dump({
+                "project_id": pid,
+                "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())},
+                "frames": captured_frames,
+                "token_stats": token_stats,
+                "latest_telemetry": latest_telemetry,
+                "updated_at": datetime.now().isoformat()
+            }, f, indent=2, cls=NumpySafeJSONEncoder)
         with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f:
             json.dump(recapture_queue, f, indent=2, cls=NumpySafeJSONEncoder)
     except Exception as e:

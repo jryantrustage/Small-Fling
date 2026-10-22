@@ -31,6 +31,13 @@ class InitEndNode(BaseDagNode):
         "manual_total_lines": 0
     }
 
+    def __init__(self):
+        super().__init__()
+        self.attached_actions = [
+            "keyboard_detected_close",
+            "editor_not_focused_gain_focus"
+        ]
+
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
@@ -43,6 +50,13 @@ class InitEndNode(BaseDagNode):
             await dismiss_anr_dialogs(serial, disp_id)
         except Exception:
             pass
+
+        # 0. Ensure editor content is focused and physical keyboard assistant overlay is in the title bar
+        try:
+            from services.adb_service import ensure_editor_content_focused
+            await ensure_editor_content_focused(serial, disp_id)
+        except Exception as fe:
+            print(f"[InitEndNode] Focus pre-check note: {fe}")
 
         # 1. Dispatch pure HID Ctrl+End to navigate to EOF
         await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end")
@@ -109,26 +123,57 @@ class InitEndNode(BaseDagNode):
         elif total_lines < 500 and (top_line <= 30 or total_lines <= 0):
             is_stuck = True
 
-        # Retry jump if stuck without canvas tap to prevent IME popup
+        # If blocked by lack of editor focus, queue an automated recovery event to restore focus and retry
         if is_stuck:
-            await dismiss_keyboard(serial, disp_id)
-            await asyncio.sleep(0.1)
-            await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end_retry")
-            await asyncio.sleep(1.0)
-            await dismiss_keyboard(serial, disp_id)
+            from services.dag_event_queue import queue_dag_event
+            from services.adb_service import ensure_editor_content_focused
 
-            snap_retry = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
-            if snap_retry:
-                with open(calib, "wb") as f:
-                    f.write(snap_retry)
-                r_top, r_total = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
-                if r_total > total_lines:
-                    total_lines = r_total
-                if r_top > 0:
-                    if r_top > 500 or top_line == 0 or r_top < top_line:
-                        top_line = r_top
+            async def _automated_focus_recovery():
+                # 1. Bring Teams task to front and tap editor content
+                await ensure_editor_content_focused(serial, disp_id)
+                await asyncio.sleep(0.15)
+                # 2. Re-dispatch Ctrl+End
+                await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end_event_recovery")
+                await asyncio.sleep(settle_s)
+                await dismiss_keyboard(serial, disp_id)
+
+                snap_r = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+                if snap_r:
+                    with open(calib, "wb") as f: f.write(snap_r)
+                    r_top, r_bot = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
+                    if r_bot <= 0:
+                        sr = await state.scan_image_in_process(calib)
+                        r_bot = sr.get("bottom_line", 0)
+                        if r_top <= 0: r_top = sr.get("top_line", 0)
+                    return {"top_line": r_top, "total_lines": r_bot}
+                return {"top_line": 0, "total_lines": 0}
+
+            evt_res = await queue_dag_event(
+                event_type="editor_focus_lost",
+                category="FOCUS",
+                message=f"Editor focus lost: Ctrl+End failed (Ln {top_line or 1}). Queued automated focus recovery event.",
+                node_id=self.node_id,
+                serial=serial,
+                display_id=disp_id,
+                automated_steps=[
+                    {"step": 1, "action": "cmd activity task to-front", "target": "com.microsoft.teams"},
+                    {"step": 2, "action": "reposition_keyboard_assistant_overlay", "target": "yellow bounding box in title bar"},
+                    {"step": 3, "action": "input tap editor text canvas", "target": "editor body at (x=450, y=360)"},
+                    {"step": 4, "action": "dismiss soft keyboard", "target": "enforce physical keyboard layout"},
+                    {"step": 5, "action": "re-dispatch Ctrl+End", "target": "navigate to EOF"}
+                ],
+                handler=_automated_focus_recovery
+            )
+
+            if evt_res.get("status") == "resolved" and isinstance(evt_res.get("result"), dict):
+                recovered = evt_res["result"]
+                rec_top = recovered.get("top_line", 0)
+                rec_bot = recovered.get("total_lines", 0)
+                if rec_bot > total_lines: total_lines = rec_bot
+                if rec_top > 0: top_line = rec_top
                 if total_lines >= 500 or top_line > 30:
                     is_stuck = False
+                    blackboard.actions_run.append("[Automated Event] Editor focus restored and Ctrl+End navigated to EOF ✔")
 
         if is_stuck:
             raise RuntimeError(

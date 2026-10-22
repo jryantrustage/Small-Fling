@@ -1,7 +1,8 @@
-import asyncio, json, os, re, subprocess, time
+import asyncio, json, os, re, subprocess, time, logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
+logger = logging.getLogger("adb_service")
 import cv2
 import numpy as np
 
@@ -1195,13 +1196,88 @@ async def enforce_markdown_only_on_desktop(
     if pin_res2.get("auth_detected"):
         actions.extend(pin_res2.get("actions", []))
 
+async def reposition_keyboard_assistant_overlay(
+    serial: Optional[str] = None,
+    ext_display_id: Optional[int] = None,
+    target_x: int = 600,
+    target_y: int = 140
+) -> bool:
+    """
+    Checks if Gboard's floating assistant / suggestion bar (InputMethod window) is showing
+    over the editor content on the external desktop display.
+    If showing, drags the handle from default center (1050, 310) to the user's chosen title bar
+    location (target_x=600, target_y=140, outlined in yellow) so it does not block editor text or line numbers.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return False
+    ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
+    try:
+        win_chk = await run_adb_shell("dumpsys window | grep -E 'InputMethod.*shown=true|mIsFloatingLayer=true'", ser, timeout=1.2)
+        out = win_chk.get("stdout", "")
+        if "InputMethod" in out or "mIsFloatingLayer=true" in out:
+            await run_adb_shell(f"input -d {ext_id} draganddrop 1050 310 {target_x} {target_y} 300 >/dev/null 2>&1", ser, timeout=1.5)
+            await asyncio.sleep(0.15)
+            return True
+    except Exception as ex:
+        logger.warning(f"Error repositioning keyboard assistant overlay: {ex}")
+    return False
+
+
+async def ensure_editor_content_focused(
+    serial: Optional[str] = None,
+    ext_display_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Guarantees active input focus and blinking cursor on the Teams editor content:
+      1. Brings Teams task to the foreground on the external display via `cmd activity task to-front`
+      2. Repositions the physical keyboard assistant overlay to the title bar if visible
+      3. Taps safe editor content coordinates (x=450, y=360) on external display
+      4. Silently enforces keyboard suppression policy
+      5. Settle delay to let focus register
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active ADB serial"}
+
+    ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
+    actions = []
+
+    # 1. Bring Teams Task to front
+    try:
+        task_res = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", ser, timeout=1.5)
+        m_t = re.search(r'#(\d+)\s+type=', task_res.get("stdout", ""))
+        if m_t:
+            tid = m_t.group(1)
+            await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.5)
+            await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser, timeout=1.0)
+            actions.append(f"Brought Teams task #{tid} to front on display {ext_id}")
+    except Exception as te:
+        actions.append(f"Task focus note: {te}")
+
+    # 2. Reposition physical keyboard assistant overlay if it appeared over content
+    overlay_moved = await reposition_keyboard_assistant_overlay(ser, ext_id)
+    if overlay_moved:
+        actions.append("Repositioned keyboard assistant overlay into top title bar")
+
+    # 3. Tap safe editor content coordinates to guarantee input connection focus
+    disp_w, disp_h = await get_display_dimensions(ser, ext_id)
+    focus_x = min(disp_w // 4, 450) if disp_w > 0 else 450
+    focus_y = min(disp_h // 3, 360) if disp_h > 0 else 360
+    await run_adb_shell(f"input -d {ext_id} tap {focus_x} {focus_y} >/dev/null 2>&1", ser, timeout=1.0)
+    actions.append(f"Tapped editor content canvas at ({focus_x}, {focus_y}) on display {ext_id}")
+
+    # 4. Suppress soft keyboard policy
+    await dismiss_keyboard(ser, ext_id)
+    actions.append("Dismissed soft keyboard")
+
+    await asyncio.sleep(0.18)
     return {
         "status": "ok",
-        "phone_cleared": phone_cleared,
-        "desktop_markdown_active": True,
-        "external_display_id": ext_id,
+        "display_id": ext_id,
         "actions": actions
     }
+
 
 async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)

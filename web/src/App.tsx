@@ -1310,7 +1310,7 @@ function AppContent() {
     setDeletingFrameId(id);
     try {
       const res = await api(`/api/frames/${id}`, { method: 'DELETE' });
-      if (res.ok) {
+      if (res.ok || res.status === 404) {
         setFrames(prev => prev.filter(f => f.frame_id !== id));
         if (selectedFrameId === id) setSelectedFrameId(null);
         await fetchData();

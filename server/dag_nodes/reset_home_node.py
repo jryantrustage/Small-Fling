@@ -32,6 +32,13 @@ class ResetHomeNode(BaseDagNode):
         "expected_line": 1
     }
 
+    def __init__(self):
+        super().__init__()
+        self.attached_actions = [
+            "keyboard_detected_close",
+            "editor_not_focused_gain_focus"
+        ]
+
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
@@ -50,8 +57,13 @@ class ResetHomeNode(BaseDagNode):
         # Execute up to 3 focused attempts to return to Line 1
         for attempt in range(1, 4):
             if attempt > 1:
+                try:
+                    from services.adb_service import ensure_editor_content_focused
+                    await ensure_editor_content_focused(serial, disp_id)
+                except Exception:
+                    pass
                 await dismiss_keyboard(serial, disp_id)
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.15)
 
             # Pure HID Ctrl+Home: directly navigates to Line 1
             await send_hid_keycombination(113, 122, serial=serial, caller_node="reset_home")
