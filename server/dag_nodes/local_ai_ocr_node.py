@@ -162,6 +162,13 @@ class LocalAiOcrNode(BaseDagNode):
             "lines_count": lines_count,
             "char_count": char_count,
             "model_used": engine_name,
+            "image_id": temp_calib.stem,
+            "image_name": temp_calib.name,
+            "image_url": f"/api/frames/{temp_calib.stem}/image",
+            "image_width": scan_res.get("image_width", 1920),
+            "image_height": scan_res.get("image_height", 1080),
+            "lines": lines_detected,
+            "bounding_boxes": scan_res.get("bounding_boxes", {}),
             "evaluator": "Multimodal Vision Evaluator",
             "telemetry_insight": f"Extracted {lines_count} lines ({char_count} chars) verbatim via {engine_name}",
             "error": None
@@ -175,6 +182,13 @@ class LocalAiOcrNode(BaseDagNode):
                 "lines_count": lines_count,
                 "char_count": char_count,
                 "extracted_text": extracted_text,
-                "model_used": engine_name
+                "model_used": engine_name,
+                "image_id": temp_calib.stem,
+                "image_name": temp_calib.name,
+                "image_url": f"/api/frames/{temp_calib.stem}/image",
+                "image_width": scan_res.get("image_width", 1920),
+                "image_height": scan_res.get("image_height", 1080),
+                "lines": lines_detected,
+                "bounding_boxes": scan_res.get("bounding_boxes", {})
             }
         )

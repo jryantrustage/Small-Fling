@@ -497,13 +497,57 @@ def save_document_lines(project_id: str, lines: Dict[int, Dict[str, Any]]):
     now = datetime.now().isoformat()
     with get_connection() as conn:
         c = conn.cursor()
-        for lnum, ld in lines.items():
-            c.execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", (project_id, lnum, ld.get("text", ""), ld.get("confidence", 1.0), ld.get("frame_id", ""), 1 if ld.get("verified", False) else 0, ld.get("updated_at", now)))
-        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id)); conn.commit()
+        if not lines:
+            c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        else:
+            for lnum, ld in lines.items():
+                c.execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", (project_id, lnum, ld.get("text", ""), ld.get("confidence", 1.0), ld.get("frame_id", ""), 1 if ld.get("verified", False) else 0, ld.get("updated_at", now)))
+            existing = [r[0] for r in c.execute("SELECT line_number FROM document_lines WHERE project_id = ?;", (project_id,)).fetchall()]
+            to_del = [ln for ln in existing if ln not in lines]
+            if to_del:
+                for i in range(0, len(to_del), 500):
+                    chunk = to_del[i:i + 500]
+                    placeholders = ",".join("?" * len(chunk))
+                    c.execute(f"DELETE FROM document_lines WHERE project_id = ? AND line_number IN ({placeholders});", [project_id] + chunk)
+        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
 
 def save_document_line(project_id: str, line_number: int, text: str, confidence: float = 1.0, frame_id: str = "", verified: bool = False):
     now = datetime.now().isoformat()
     _execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", (project_id, line_number, text, confidence, frame_id, 1 if verified else 0, now))
+
+def delete_document_line(project_id: str, line_number: int):
+    if not project_id:
+        return
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM document_lines WHERE project_id = ? AND line_number = ?;", (project_id, line_number))
+        now = datetime.now().isoformat()
+        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
+
+def delete_document_lines(project_id: str, line_numbers: List[int]):
+    if not project_id or not line_numbers:
+        return
+    with get_connection() as conn:
+        c = conn.cursor()
+        for i in range(0, len(line_numbers), 500):
+            chunk = line_numbers[i:i + 500]
+            placeholders = ",".join("?" * len(chunk))
+            c.execute(f"DELETE FROM document_lines WHERE project_id = ? AND line_number IN ({placeholders});", [project_id] + chunk)
+        now = datetime.now().isoformat()
+        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
+
+def clear_document_lines(project_id: str):
+    if not project_id:
+        return
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        now = datetime.now().isoformat()
+        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
 
 def get_project_telemetry(project_id: Optional[str]) -> Dict[str, Any]:
     if not project_id: return {"telemetry": {}, "token_stats": {}}

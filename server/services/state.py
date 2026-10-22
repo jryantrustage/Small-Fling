@@ -769,7 +769,7 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
         return []
     min_k = min(document_lines.keys())
     max_k = max(document_lines.keys())
-    start_k = 1 if (1 < min_k <= 120) else min_k
+    start_k = min_k
 
     res = []
     for k in range(start_k, max_k + 1):
@@ -827,8 +827,11 @@ def get_fresh_telemetry() -> Dict[str, Any]:
             t["status_message"] = "Pacer Standby / Awaiting Device Connection"
     return t
 
+_state_initialized = False
+
 def load_persisted_state():
-    global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry
+    global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry, _state_initialized
+    _state_initialized = True
     try:
         p = db.get_active_project()
         if not p:

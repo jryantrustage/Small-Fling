@@ -514,6 +514,89 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
         await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
+def interpolate_line_boxes(lines: List[Dict[str, Any]], known_boxes: Dict[int, Dict[str, Any]], image_w: int = 1920, image_h: int = 1080) -> Dict[int, Dict[str, Any]]:
+    boxes = {int(k): dict(v) for k, v in known_boxes.items()}
+    if not lines:
+        return boxes
+    heights = [b["height"] for b in boxes.values() if b.get("height", 0) > 10]
+    avg_h = int(sum(heights) / len(heights)) if heights else 26
+    widths = [b["width"] for b in boxes.values() if b.get("width", 0) > 50]
+    avg_w = int(sum(widths) / len(widths)) if widths else int(image_w * 0.75)
+    xs = [b["x"] for b in boxes.values() if b.get("x", 0) > 0]
+    avg_x = min(xs) if xs else 60
+
+    sorted_known_lns = sorted(boxes.keys())
+
+    for l in lines:
+        raw_ln = l.get("line_number")
+        if not raw_ln:
+            continue
+        try:
+            ln = int(raw_ln)
+        except Exception:
+            continue
+
+        if ln in boxes:
+            l["bbox"] = boxes[ln]
+            continue
+
+        prev_lns = [k for k in sorted_known_lns if k < ln]
+        next_lns = [k for k in sorted_known_lns if k > ln]
+
+        if prev_lns and next_lns:
+            p_ln, n_ln = prev_lns[-1], next_lns[0]
+            p_box, n_box = boxes[p_ln], boxes[n_ln]
+            ratio = (ln - p_ln) / max(1, (n_ln - p_ln))
+            interp_y = int(p_box["y"] + ratio * (n_box["y"] - p_box["y"]))
+            new_box = {
+                "x": avg_x,
+                "y": max(0, interp_y),
+                "width": avg_w,
+                "height": avg_h,
+                "line_number": ln,
+                "interpolated": True
+            }
+        elif prev_lns:
+            p_ln = prev_lns[-1]
+            p_box = boxes[p_ln]
+            delta = ln - p_ln
+            new_box = {
+                "x": avg_x,
+                "y": min(image_h - avg_h, p_box["y"] + delta * avg_h),
+                "width": avg_w,
+                "height": avg_h,
+                "line_number": ln,
+                "interpolated": True
+            }
+        elif next_lns:
+            n_ln = next_lns[0]
+            n_box = boxes[n_ln]
+            delta = n_ln - ln
+            new_box = {
+                "x": avg_x,
+                "y": max(0, n_box["y"] - delta * avg_h),
+                "width": avg_w,
+                "height": avg_h,
+                "line_number": ln,
+                "interpolated": True
+            }
+        else:
+            new_box = {
+                "x": avg_x,
+                "y": int(image_h * 0.2 + (ln - 1) * avg_h),
+                "width": avg_w,
+                "height": avg_h,
+                "line_number": ln,
+                "interpolated": True
+            }
+        boxes[ln] = new_box
+        l["bbox"] = new_box
+        sorted_known_lns.append(ln)
+        sorted_known_lns.sort()
+
+    return boxes
+
+
 async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] = None) -> Dict[str, Any]:
     """
     Scan image with local vision model (MiniCPM-V in Ollama, with OpenVINO RapidOCR fallback)
@@ -525,6 +608,7 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
     detected_filename = None
     model_used = None
     bboxes = {}
+    img_w, img_h = 1920, 1080
 
     try:
         raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path), expected_top)
@@ -536,6 +620,10 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
                 from ocr_engine import worker_scan_image
                 aux = await asyncio.to_thread(worker_scan_image, str(image_path))
                 bboxes = aux.get("bounding_boxes", {})
+                img_w = aux.get("image_width", 1920)
+                img_h = aux.get("image_height", 1080)
+                known = bboxes.get("line_boxes", {})
+                bboxes["line_boxes"] = interpolate_line_boxes(plines, known, img_w, img_h)
             except Exception:
                 pass
     except Exception as e:
@@ -552,6 +640,10 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
                 top_ln = fallback_res.get("top_line", top_ln)
                 bot_ln = fallback_res.get("bottom_line", bot_ln)
                 bboxes = fallback_res.get("bounding_boxes", {})
+                img_w = fallback_res.get("image_width", 1920)
+                img_h = fallback_res.get("image_height", 1080)
+                known = bboxes.get("line_boxes", {})
+                bboxes["line_boxes"] = interpolate_line_boxes(plines, known, img_w, img_h)
                 formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
                 model_used = "Local RapidOCR (OpenVINO Accelerated)"
         except Exception as ex:
@@ -565,6 +657,8 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
             "lines": plines,
             "extracted_text": formatted,
             "lines_count": len(plines),
+            "image_width": img_w,
+            "image_height": img_h,
             "bounding_boxes": bboxes,
             "model_used": model_used or "Local Vision OCR",
             "detected_filename": detected_filename
@@ -578,6 +672,8 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
             "lines": [],
             "extracted_text": "",
             "lines_count": 0,
+            "image_width": img_w,
+            "image_height": img_h,
             "bounding_boxes": {},
             "model_used": "Local OCR (Empty)"
         }

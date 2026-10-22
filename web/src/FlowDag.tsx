@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
-  RotateCcw, LayoutGrid, ZoomIn, ZoomOut,
+  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Eye,
   ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
@@ -21,7 +21,7 @@ import { DagInspectorModal } from './components/dag/DagInspectorModal';
 import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
 import { Dag2PerformanceReportModal } from './components/dag/Dag2PerformanceReportModal';
 import {
-  Node3bExtractedTextModal,
+  Dag4OcrFullInspectorModal,
   UniversalNodeConfigModal
 } from './components/dag/DagConfigModals';
 
@@ -1591,6 +1591,22 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>Snap Clean Layout</span>
             </button>
 
+            {/* Direct DAG 4 OCR Full Inspector Launcher */}
+            <button
+              type="button"
+              onClick={() => setIsTextModalOpen(true)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px',
+                borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.45)',
+                background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8',
+                fontSize: '9px', fontWeight: 800, cursor: 'pointer'
+              }}
+              title="Open DAG 4 OCR Full Inspector: View source image, line bounding boxes, and verbatim acquired text with live connectors"
+            >
+              <Eye size={11} />
+              <span>DAG 4 OCR Full Inspector ↗</span>
+            </button>
+
             <div style={{ display: 'inline-flex', alignItems: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', padding: '1px' }}>
               <button
                 type="button"
@@ -1840,14 +1856,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         />
       )}
 
-      {/* MODAL 4: Node 3b Full Extracted Text Modal */}
-      <Node3bExtractedTextModal
+      {/* MODAL 4: DAG 4 OCR Full Inspector Modal (Source Image + Bounding Boxes + Connectors + Verbatim Text) */}
+      <Dag4OcrFullInspectorModal
         isOpen={isTextModalOpen}
         onClose={() => setIsTextModalOpen(false)}
-        extractedText={node3b.extracted_text || ''}
-        linesCount={node3b.lines_count || 0}
-        charCount={node3b.char_count || 0}
-        modelUsed={node3b.model_used || 'MiniCPM-V'}
+        apiBase={apiBase}
+        initialImageId={node3b.image_id || 'dag_node3_capture_temp'}
+        nodeExtractedText={node3b.extracted_text || ''}
+        nodeLinesCount={node3b.lines_count || 0}
+        nodeModelUsed={node3b.model_used || 'MiniCPM-V (Ollama)'}
+        onRefresh={onRefresh}
       />
 
       {/* MODAL 5: AI Resolution Prompt & Performance Diagnostics Modal */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Play, Square, FileText, Check, Copy, Sparkles, Clock, RefreshCw, AlertTriangle, ExternalLink
+  Play, Square, FileText, Check, Copy, Sparkles, Clock, RefreshCw, AlertTriangle, ExternalLink, Eye
 } from 'lucide-react';
 import { Modal } from '../../ConfirmModal';
 import type { NodeMeta, NodeLiveStatus, PerformanceDiagnosis } from '../../types/dag';
@@ -132,6 +132,24 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
             </button>
           )}
 
+          {selectedNodeMeta.id === 'local_ai_ocr' && onOpenTextModal && (
+            <button
+              type="button"
+              onClick={onOpenTextModal}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 11px',
+                borderRadius: '6px', border: '1px solid rgba(56, 189, 248, 0.6)',
+                background: 'rgba(56, 189, 248, 0.16)',
+                color: '#38bdf8', fontSize: '11px', fontWeight: 800, cursor: 'pointer',
+                fontFamily: 'inherit'
+              }}
+              title="Open DAG 4 OCR Full Inspector: View source image, line bounding boxes, and verbatim acquired text with live connectors"
+            >
+              <Eye size={12} color="#38bdf8" />
+              <span>OCR Full Inspector ↗</span>
+            </button>
+          )}
+
           {selectedNodeMeta.id === 'local_ai_ocr' && node3bExtractedText && onOpenTextModal && (
             <button
               type="button"
@@ -141,6 +159,7 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
                 borderRadius: '6px', border: '1px solid #30363d', background: '#21262d',
                 color: '#58a6ff', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
               }}
+              title="View full extracted verbatim text"
             >
               <FileText size={12} />
               <span>Full Text</span>

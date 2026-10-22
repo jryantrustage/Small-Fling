@@ -21,6 +21,7 @@ export interface ModalProps {
   loading?: boolean;
   width?: string;
   maxWidth?: string;
+  bodyStyle?: React.CSSProperties;
   showCloseButton?: boolean;
   autoFocus?: 'confirm' | 'cancel';
   children: ReactNode;
@@ -29,7 +30,7 @@ export interface ModalProps {
 export const Modal: React.FC<ModalProps> = ({
   isOpen = true, title, subtitle, icon: IconProp, variant, danger, onClose, onConfirm,
   confirmText = 'Save', cancelText = onConfirm ? 'Cancel' : 'Close', confirmIcon: ConfirmIcon = Check,
-  cancelIcon: CancelIcon, disabled = false, loading = false, width, maxWidth, showCloseButton = true,
+  cancelIcon: CancelIcon, disabled = false, loading = false, width, maxWidth, bodyStyle, showCloseButton = true,
   autoFocus, children,
 }) => {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
@@ -81,21 +82,23 @@ export const Modal: React.FC<ModalProps> = ({
             </button>
           )}
         </div>
-        <div className="modal-body">{children}</div>
-        <div className="modal-footer">
-          {cancelText && (
-            <button ref={cancelBtnRef} type="button" className="btn btn-outline modal-btn-cancel" onClick={onClose} disabled={loading}>
-              {CancelIcon && <CancelIcon size={14} style={{ marginRight: '6px' }} />}
-              {cancelText}
-            </button>
-          )}
-          {onConfirm && (
-            <button ref={confirmBtnRef} type="button" className={`btn modal-btn-confirm modal-btn-${effectiveVariant}`} onClick={onConfirm} disabled={disabled || loading}>
-              {loading ? <span className="modal-spinner" /> : ConfirmIcon ? <ConfirmIcon size={14} style={{ marginRight: '6px' }} /> : null}
-              <span>{confirmText}</span>
-            </button>
-          )}
-        </div>
+        <div className="modal-body" style={bodyStyle}>{children}</div>
+        {(cancelText || onConfirm) && (
+          <div className="modal-footer">
+            {cancelText && (
+              <button ref={cancelBtnRef} type="button" className="btn btn-outline modal-btn-cancel" onClick={onClose} disabled={loading}>
+                {CancelIcon && <CancelIcon size={14} style={{ marginRight: '6px' }} />}
+                {cancelText}
+              </button>
+            )}
+            {onConfirm && (
+              <button ref={confirmBtnRef} type="button" className={`btn modal-btn-confirm modal-btn-${effectiveVariant}`} onClick={onConfirm} disabled={disabled || loading}>
+                {loading ? <span className="modal-spinner" /> : ConfirmIcon ? <ConfirmIcon size={14} style={{ marginRight: '6px' }} /> : null}
+                <span>{confirmText}</span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -747,6 +747,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     rows.sort(key=lambda r: sum(x["y"] for x in r) / len(r))
 
     lines_list: List[Dict[str, Any]] = []
+    line_boxes: Dict[int, Dict[str, Any]] = {}
     curr = top_line or 1
     for r in rows:
         r.sort(key=lambda x: x["x"])
@@ -757,11 +758,35 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             is_w = True
         line_str = " ".join(x["text"] for x in r if not x.get("is_gutter") and x["x"] >= (gutter_width - 15))
         if len(line_str) > 60 or "\n" in line_str: is_w = True
+
+        rx_min = int(min(x["x"] for x in r))
+        ry_min = int(min(x["y"] for x in r))
+        rx_max = int(max(x["x"] + x["width"] for x in r))
+        ry_max = int(max(x["y"] + x["height"] for x in r))
+        row_box = {
+            "x": rx_min,
+            "y": ry_min,
+            "width": max(20, rx_max - rx_min),
+            "height": max(14, ry_max - ry_min),
+            "line_number": curr
+        }
+
         lines_list.append({
             "line_number": curr, "gutter_number": curr, "text": line_str,
             "is_blank": not bool(line_str.strip()), "is_wrapped": is_w,
-            "wrapped_line_count": 2 if is_w else 1, "status": "verified", "confidence": 0.95
+            "wrapped_line_count": 2 if is_w else 1, "status": "verified", "confidence": 0.95,
+            "bbox": row_box
         })
+
+        if curr not in line_boxes:
+            line_boxes[curr] = row_box
+        else:
+            prev = line_boxes[curr]
+            bx = min(prev["x"], row_box["x"])
+            by = min(prev["y"], row_box["y"])
+            bw = max(prev["x"] + prev["width"], row_box["x"] + row_box["width"]) - bx
+            bh = max(prev["y"] + prev["height"], row_box["y"] + row_box["height"]) - by
+            line_boxes[curr] = {"x": bx, "y": by, "width": bw, "height": bh, "line_number": curr}
 
     wrapped_boxes: List[Dict[str, Any]] = []
     content_min_x = gutter_width
@@ -784,7 +809,12 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     return {
         "top_line": top_line, "bottom_line": bottom_line, "lines": lines_list,
         "image_width": w, "image_height": h,
-        "bounding_boxes": {"first_line": first_line_box, "last_line": last_line_box, "wrapped_lines": deduped_wrapped}
+        "bounding_boxes": {
+            "first_line": first_line_box,
+            "last_line": last_line_box,
+            "wrapped_lines": deduped_wrapped,
+            "line_boxes": line_boxes
+        }
     }
 
 class BaseOCREngine(ABC):

@@ -78,3 +78,5 @@ export const Node3bExtractedTextModal: React.FC<Node3bExtractedTextModalProps> =
 };
 
 export { UniversalNodeConfigModal } from './UniversalNodeConfigModal';
+export { Dag4OcrFullInspectorModal } from './Dag4OcrFullInspectorModal';
+export type { Dag4OcrFullInspectorModalProps } from './Dag4OcrFullInspectorModal';

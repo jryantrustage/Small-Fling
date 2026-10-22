@@ -21,9 +21,28 @@ import services.ocr_service as ocr_svc
 router = APIRouter(tags=["Frames & Document"])
 
 def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
-    ipath = state.FRAMES_DIR / (filename or f"{frame_id}.png")
-    if ipath.exists():
-        return ipath
+    if filename:
+        cand = state.FRAMES_DIR / filename
+        if cand.exists():
+            return cand
+
+    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
+    if (state.FRAMES_DIR / frame_id).exists():
+        return state.FRAMES_DIR / frame_id
+    if (state.FRAMES_DIR / f"{clean_id}.png").exists():
+        return state.FRAMES_DIR / f"{clean_id}.png"
+
+    if frame_id in ("latest", "current", "temp"):
+        temp_c = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+        if temp_c.exists() and temp_c.stat().st_size >= 2000:
+            return temp_c
+        cands = sorted(
+            [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        if cands:
+            return cands[0]
 
     matches = list(state.FRAMES_DIR.glob(f"*{frame_id}*.png"))
     if matches:
@@ -56,10 +75,198 @@ def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
     except Exception:
         pass
 
-    raise HTTPException(status_code=404, detail="Frame image file not found")
+    raise HTTPException(status_code=404, detail=f"Frame image file '{frame_id}' not found")
+
+def _get_available_ocr_images() -> List[Dict[str, Any]]:
+    images = []
+    seen_paths = set()
+
+    # 1. Latest DAG 3/4 capture
+    latest_temp = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+    if latest_temp.exists() and latest_temp.stat().st_size >= 2000:
+        seen_paths.add(latest_temp.resolve())
+        mtime = datetime.fromtimestamp(latest_temp.stat().st_mtime).isoformat()
+        images.append({
+            "id": "dag_node3_capture_temp",
+            "name": "dag_node3_capture_temp.png",
+            "label": "Latest Capture (DAG 3/4 Temp)",
+            "category": "latest",
+            "size": latest_temp.stat().st_size,
+            "created_at": mtime,
+            "url": "/api/frames/dag_node3_capture_temp/image",
+            "is_latest": True
+        })
+
+    # 2. Registered frames from state
+    for fid, finfo in state.captured_frames.items():
+        try:
+            p = _get_frame_path(fid, finfo.get("filename"))
+            if p.exists() and p.resolve() not in seen_paths:
+                seen_paths.add(p.resolve())
+                images.append({
+                    "id": fid,
+                    "name": p.name,
+                    "label": f"Page {finfo.get('page_index', '?')} ({fid[:14]})",
+                    "category": "frames",
+                    "size": p.stat().st_size,
+                    "created_at": finfo.get("created_at") or datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                    "url": f"/api/frames/{fid}/image",
+                    "top_line": finfo.get("top_line"),
+                    "bottom_line": finfo.get("bottom_line"),
+                    "lines_count": finfo.get("extracted_line_count", 0),
+                    "model_used": finfo.get("model_used")
+                })
+        except Exception:
+            continue
+
+    # 3. Any other png files in FRAMES_DIR
+    all_pngs = sorted(
+        [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and p.resolve() not in seen_paths and not p.name.startswith("temp_")],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True
+    )
+    for p in all_pngs:
+        seen_paths.add(p.resolve())
+        images.append({
+            "id": p.stem,
+            "name": p.name,
+            "label": p.name,
+            "category": "storage",
+            "size": p.stat().st_size,
+            "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+            "url": f"/api/frames/{p.stem}/image"
+        })
+
+    return images
+
+@router.get("/api/ocr/images")
+async def get_ocr_images():
+    """List all available images for OCR full inspection."""
+    return {"status": "success", "images": _get_available_ocr_images()}
+
+_ocr_inspect_cache: Dict[str, Dict[str, Any]] = {}
+
+@router.get("/api/ocr/inspect")
+@router.post("/api/ocr/inspect")
+async def inspect_ocr_image(
+    image_id: Optional[str] = Query(None),
+    rescan: bool = Query(False),
+    req: Optional[Dict[str, Any]] = None
+):
+    """
+    Returns source image details, verbatim extracted text, and line-mapped bounding boxes
+    with connectors for the selected image.
+    """
+    target_id = (req.get("image_id") if req else None) or image_id or "latest"
+    force_rescan = (req.get("rescan") if req else None) or rescan
+
+    try:
+        ipath = _get_frame_path(target_id)
+    except HTTPException:
+        ipath = _get_frame_path("latest")
+        target_id = ipath.stem
+
+    img_w, img_h = 1920, 1080
+    try:
+        from PIL import Image
+        with Image.open(ipath) as im:
+            img_w, img_h = im.size
+    except Exception:
+        pass
+
+    file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
+    cache_key = f"{str(ipath.resolve())}_{file_mtime}"
+
+    cached_frame = state.captured_frames.get(target_id)
+    n4_state = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
+
+    can_use_cache = (
+        not force_rescan and
+        (
+            cache_key in _ocr_inspect_cache or
+            (cached_frame and cached_frame.get("lines") and cached_frame.get("bounding_boxes")) or
+            (n4_state.get("image_id") == target_id and n4_state.get("lines"))
+        )
+    )
+
+    if can_use_cache:
+        if cache_key in _ocr_inspect_cache:
+            entry = _ocr_inspect_cache[cache_key]
+            lines = entry["lines"]
+            bboxes = entry["bboxes"]
+            model_used = entry["model_used"]
+            extracted_text = entry["extracted_text"]
+            top_ln = entry["top_ln"]
+            bot_ln = entry["bot_ln"]
+            img_w = entry["img_w"]
+            img_h = entry["img_h"]
+        elif cached_frame and cached_frame.get("lines"):
+            lines = cached_frame.get("lines", [])
+            bboxes = cached_frame.get("bounding_boxes", {})
+            model_used = cached_frame.get("model_used", "MiniCPM-V (Ollama)")
+            extracted_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in lines)
+            top_ln = cached_frame.get("top_line", min((l.get("line_number", 0) for l in lines), default=0))
+            bot_ln = cached_frame.get("bottom_line", max((l.get("line_number", 0) for l in lines), default=0))
+        else:
+            lines = n4_state.get("lines", [])
+            bboxes = n4_state.get("bounding_boxes", {})
+            model_used = n4_state.get("model_used", "MiniCPM-V (Ollama)")
+            extracted_text = n4_state.get("extracted_text", "")
+            top_ln = min((l.get("line_number", 0) for l in lines), default=0)
+            bot_ln = max((l.get("line_number", 0) for l in lines), default=0)
+    else:
+        exp_top = cached_frame.get("top_line") if cached_frame else None
+        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top)
+        lines = res.get("lines", [])
+        bboxes = res.get("bounding_boxes", {})
+        model_used = res.get("model_used", "MiniCPM-V (Ollama)")
+        extracted_text = res.get("extracted_text", "")
+        top_ln = res.get("top_line", 0)
+        bot_ln = res.get("bottom_line", 0)
+        img_w = res.get("image_width", img_w)
+        img_h = res.get("image_height", img_h)
+
+        _ocr_inspect_cache[cache_key] = {
+            "lines": lines,
+            "bboxes": bboxes,
+            "model_used": model_used,
+            "extracted_text": extracted_text,
+            "top_ln": top_ln,
+            "bot_ln": bot_ln,
+            "img_w": img_w,
+            "img_h": img_h
+        }
+
+        if cached_frame:
+            cached_frame.update({
+                "lines": lines,
+                "bounding_boxes": bboxes,
+                "model_used": model_used,
+                "extracted_line_count": len(lines)
+            })
+            state.save_persisted_state()
+
+    available = _get_available_ocr_images()
+
+    return {
+        "status": "success",
+        "image_id": target_id,
+        "image_name": ipath.name,
+        "image_url": f"/api/frames/{ipath.stem}/image",
+        "image_width": img_w,
+        "image_height": img_h,
+        "top_line": top_ln,
+        "bottom_line": bot_ln,
+        "lines_count": len(lines),
+        "model_used": model_used,
+        "extracted_text": extracted_text,
+        "lines": lines,
+        "bounding_boxes": bboxes,
+        "available_images": available
+    }
 
 def _doc_payload() -> Dict[str, Any]:
-    if not state.document_lines or not state.captured_frames:
+    if not getattr(state, "_state_initialized", False):
         state.load_persisted_state()
     sl = state.get_serialized_lines()
     issues = [item for item in sl if item.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
@@ -390,6 +597,9 @@ async def delete_line(line_number: int):
     if line_number not in state.document_lines:
         raise HTTPException(status_code=404, detail=f"Line {line_number} not found")
     del state.document_lines[line_number]
+    pid = state.get_current_project_id()
+    if pid:
+        db.delete_document_line(pid, line_number)
     state.save_persisted_state()
     await state.ws_manager.broadcast({"type": "line_deleted", "line_number": line_number})
     await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
@@ -401,6 +611,7 @@ async def batch_delete_lines(req: Dict[str, Any]):
     if not isinstance(line_numbers, list):
         raise HTTPException(status_code=400, detail="line_numbers must be a list")
     deleted = []
+    pid = state.get_current_project_id()
     for ln in line_numbers:
         try:
             ln_int = int(ln)
@@ -410,10 +621,26 @@ async def batch_delete_lines(req: Dict[str, Any]):
         except (ValueError, TypeError):
             continue
     if deleted:
+        if pid:
+            if not state.document_lines:
+                db.clear_document_lines(pid)
+            else:
+                db.delete_document_lines(pid, deleted)
         state.save_persisted_state()
         await state.ws_manager.broadcast({"type": "lines_deleted", "line_numbers": deleted})
         await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
     return {"status": "success", "deleted_count": len(deleted), "deleted_lines": deleted}
+
+@router.post("/api/lines/clear")
+async def clear_all_lines():
+    count = len(state.document_lines)
+    pid = state.get_current_project_id()
+    state.document_lines.clear()
+    if pid:
+        db.clear_document_lines(pid)
+    state.save_persisted_state()
+    await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
+    return {"status": "success", "cleared_count": count}
 
 @router.post("/api/lines/{line_number}/flag")
 async def flag_line(line_number: int, req: FlagRequest):
