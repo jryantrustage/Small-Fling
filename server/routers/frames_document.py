@@ -177,15 +177,36 @@ async def inspect_ocr_image(
     file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
     cache_key = f"{str(ipath.resolve())}_{file_mtime}"
 
+    ed_top = max(280, int(img_h * 0.260))
+    ed_bot = min(int(img_h * 0.875), img_h - 135)
+    def _is_valid_entry(cand_lines, cand_bboxes):
+        if not cand_lines or not cand_bboxes:
+            return False
+        g_boxes = cand_bboxes.get("gutter_boxes", {})
+        if not g_boxes:
+            return False
+        first_ln = min((int(k) for k in g_boxes.keys()), default=0)
+        first_y = g_boxes.get(first_ln, {}).get("y", 0)
+        if first_y < (ed_top - 35):
+            return False
+        last_ln = max((int(k) for k in g_boxes.keys()), default=0)
+        last_y = g_boxes.get(last_ln, {}).get("y", 0)
+        if last_y > (ed_bot + 25):
+            return False
+        return True
+
     cached_frame = state.captured_frames.get(target_id)
     n4_state = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
+
+    if force_rescan:
+        _ocr_inspect_cache.pop(cache_key, None)
 
     can_use_cache = (
         not force_rescan and
         (
-            cache_key in _ocr_inspect_cache or
-            (cached_frame and cached_frame.get("lines") and cached_frame.get("bounding_boxes")) or
-            (n4_state.get("image_id") == target_id and n4_state.get("lines"))
+            (cache_key in _ocr_inspect_cache and _is_valid_entry(_ocr_inspect_cache[cache_key].get("lines"), _ocr_inspect_cache[cache_key].get("bboxes"))) or
+            (cached_frame and _is_valid_entry(cached_frame.get("lines"), cached_frame.get("bounding_boxes"))) or
+            (n4_state.get("image_id") == target_id and _is_valid_entry(n4_state.get("lines"), n4_state.get("bounding_boxes")))
         )
     )
 
@@ -200,7 +221,7 @@ async def inspect_ocr_image(
             bot_ln = entry["bot_ln"]
             img_w = entry["img_w"]
             img_h = entry["img_h"]
-        elif cached_frame and cached_frame.get("lines"):
+        elif cached_frame and _is_valid_entry(cached_frame.get("lines"), cached_frame.get("bounding_boxes")):
             lines = cached_frame.get("lines", [])
             bboxes = cached_frame.get("bounding_boxes", {})
             model_used = cached_frame.get("model_used", "MiniCPM-V (Ollama)")
@@ -263,6 +284,108 @@ async def inspect_ocr_image(
         "lines": lines,
         "bounding_boxes": bboxes,
         "available_images": available
+    }
+
+@router.get("/api/ocr/rescan-lines")
+@router.post("/api/ocr/rescan-lines")
+async def rescan_ocr_lines(
+    image_id: Optional[str] = Query(None),
+    lines: Optional[str] = Query(None),
+    req: Optional[Dict[str, Any]] = None
+):
+    """
+    Selectively rescans only the specified line numbers in the selected image frame,
+    overwriting the extracted result text for those line numbers in state, cache,
+    and verified document lines. Supports both GET with ?image_id=...&lines=1,2,3 and POST JSON.
+    """
+    target_id = (req.get("image_id") if req else None) or image_id or "latest"
+    raw_lns = (req.get("line_numbers") if req else None) or (lines.split(",") if lines else [])
+    if isinstance(raw_lns, (int, str)):
+        raw_lns = [raw_lns]
+    line_numbers = [int(str(x).strip()) for x in raw_lns if str(x).strip().isdigit()]
+
+    if not line_numbers:
+        raise HTTPException(status_code=400, detail="No valid line_numbers provided for selective rescan")
+
+    try:
+        ipath = _get_frame_path(target_id)
+    except HTTPException:
+        ipath = _get_frame_path("latest")
+        target_id = ipath.stem
+
+    file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
+    cache_key = f"{str(ipath.resolve())}_{file_mtime}"
+
+    cached_frame = state.captured_frames.get(target_id)
+    n4_state = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
+
+    current_lines = []
+    current_bboxes = {}
+
+    if req and req.get("lines"):
+        current_lines = [dict(l) for l in req["lines"]]
+        current_bboxes = dict(req.get("bounding_boxes", {}))
+    elif cache_key in _ocr_inspect_cache:
+        current_lines = [dict(l) for l in _ocr_inspect_cache[cache_key].get("lines", [])]
+        current_bboxes = dict(_ocr_inspect_cache[cache_key].get("bboxes", {}))
+    elif cached_frame and cached_frame.get("lines"):
+        current_lines = [dict(l) for l in cached_frame.get("lines", [])]
+        current_bboxes = dict(cached_frame.get("bounding_boxes", {}))
+    elif n4_state.get("lines"):
+        current_lines = [dict(l) for l in n4_state.get("lines", [])]
+        current_bboxes = dict(n4_state.get("bounding_boxes", {}))
+    else:
+        from ocr_engine import worker_scan_image
+        quick_scan = await asyncio.to_thread(worker_scan_image, str(ipath))
+        current_lines = quick_scan.get("lines", [])
+        current_bboxes = quick_scan.get("bounding_boxes", {})
+
+    from services.ocr_service import rescan_lines_on_image_sync
+    updated_lines, rescanned = await asyncio.to_thread(
+        rescan_lines_on_image_sync,
+        ipath,
+        line_numbers,
+        current_lines,
+        current_bboxes
+    )
+
+    updated_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in updated_lines)
+
+    if cache_key in _ocr_inspect_cache:
+        _ocr_inspect_cache[cache_key]["lines"] = updated_lines
+        _ocr_inspect_cache[cache_key]["extracted_text"] = updated_text
+
+    if cached_frame:
+        cached_frame["lines"] = updated_lines
+        state.save_persisted_state()
+
+    for ln in rescanned:
+        line_item = next((l for l in updated_lines if l.get("line_number") == ln), None)
+        if line_item and hasattr(state, "document_lines"):
+            if ln in state.document_lines:
+                state.document_lines[ln]["text"] = line_item.get("text", "")
+                state.document_lines[ln]["status"] = "verified"
+                state.document_lines[ln]["overwritten"] = True
+    state.save_persisted_state()
+
+    try:
+        if hasattr(state, "ws_manager") and state.ws_manager:
+            await state.ws_manager.broadcast({
+                "type": "ocr_lines_rescanned",
+                "image_id": target_id,
+                "rescanned_lines": rescanned
+            })
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "message": f"Successfully rescanned and overwritten {len(rescanned)} line(s)",
+        "rescanned_lines": rescanned,
+        "image_id": target_id,
+        "lines": updated_lines,
+        "extracted_text": updated_text,
+        "bounding_boxes": current_bboxes
     }
 
 def _doc_payload() -> Dict[str, Any]:

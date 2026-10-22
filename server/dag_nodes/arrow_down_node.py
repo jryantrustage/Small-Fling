@@ -87,10 +87,14 @@ class ArrowDownPagerNode(BaseDagNode):
 
         visible_span = max(1, prev_bottom - cur_top + 1)
         needed_lines = max(1, target_top - cur_top)
-        cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
-        viewport_scroll = max(1, target_top - cur_top)
-        calibrated_init = cursor_travel + viewport_scroll + 2
-        calibrated_step = viewport_scroll
+        if padding > 0:
+            calibrated_init = (visible_span + padding) * 2
+            calibrated_step = visible_span + padding
+        else:
+            cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
+            viewport_scroll = max(1, target_top - cur_top)
+            calibrated_init = cursor_travel + viewport_scroll
+            calibrated_step = viewport_scroll
 
         step_arrows = int(payload.get("arrow_count_step") or calibrated_step)
         init_arrows = int(payload.get("arrow_count_init") or calibrated_init)

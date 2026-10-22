@@ -1321,20 +1321,18 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             _ime_visible_cache["ts"] = time.time()
             return True
 
-        # IME is confirmed visible: dismiss via navigation bar hide-keyboard button on desktop display
+        # IME is confirmed visible: dismiss cleanly via keyevent 111 (KEYCODE_ESCAPE)
         did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
         valid_d = sanitize_input_display_id(did)
         d_arg = f"-d {valid_d} " if (valid_d and valid_d > 0) else ""
 
-        disp_w, disp_h = await get_display_dimensions(ser, did)
-        nav_x = int(1730 * (disp_w / 1920.0))
-        nav_y = int(1060 * (disp_h / 1080.0))
-        await run_adb_shell(f"input {d_arg}tap {nav_x} {nav_y} >/dev/null 2>&1", ser, timeout=1.0)
-        await asyncio.sleep(0.1)
-
+        await run_adb_shell(f"input {d_arg}keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
         still_visible = await is_ime_visible(ser, force_check=True)
         if still_visible:
-            await run_adb_shell(f"input {d_arg}keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
+            disp_w, disp_h = await get_display_dimensions(ser, did)
+            nav_x = int(1730 * (disp_w / 1920.0))
+            nav_y = int(1060 * (disp_h / 1080.0))
+            await run_adb_shell(f"input {d_arg}tap {nav_x} {nav_y} >/dev/null 2>&1", ser, timeout=1.0)
             still_visible = await is_ime_visible(ser, force_check=True)
 
         _ime_visible_cache["val"] = still_visible

@@ -224,22 +224,22 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter (scaled dynamically up to 360px for high DPI)
-    gutter_w = int(max(130.0, min(360.0, 180.0 * norm_multiplier)))
-    top_y1 = max(80, int(h * 0.10))
-    top_y2 = min(h - 100, int(h * 0.60))
+    # 1. Primary: standard fullscreen gutter (strictly within numeric gutter column x <= 90)
+    gutter_w = int(max(65.0, min(90.0, 90.0 * norm_multiplier)))
+    # Editor boundaries: strictly avoid status bar + Teams title + formatting toolbar (y < 280)
+    # and bottom Android dock / navigation bar / Teams offline status pill (y > 945)
+    top_y1 = max(280, int(h * 0.260))
+    top_y2 = min(h - 150, int(h * 0.65))
     top_crop = img[top_y1:top_y2, :gutter_w]
-    bot_crop = img[int(h * 0.55):int(h * 0.98), :gutter_w]
+    bot_y1 = int(h * 0.55)
+    bot_y2 = min(int(h * 0.875), h - 135)
+    bot_crop = img[bot_y1:bot_y2, :gutter_w]
 
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
     f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled)
     f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
     top_nums = clean_slice_numbers(f_top.result())
     bot_nums = f_bot.result()
-
-    if top_nums and top_nums[0] > 1 and len(top_nums) >= 2:
-        if top_nums[0] <= 12:
-            top_nums.insert(0, 1)
 
     if top_nums and bot_nums:
         t, b = top_nums[0], bot_nums[-1]
@@ -255,7 +255,7 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     sidebar_x2 = sidebar_x1 + gutter_w
     if sidebar_x2 < w:
         top_crop2 = img[top_y1:top_y2, sidebar_x1:sidebar_x2]
-        bot_crop2 = img[int(h * 0.55):int(h * 0.98), sidebar_x1:sidebar_x2]
+        bot_crop2 = img[bot_y1:bot_y2, sidebar_x1:sidebar_x2]
         top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
         f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
@@ -285,9 +285,9 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
-    gutter_w = int(max(130.0, min(360.0, 180.0 * norm_multiplier)))
-    top_y1 = max(80, int(h * 0.10))
-    top_y2 = min(h - 100, int(h * 0.60))
+    gutter_w = int(max(90.0, min(240.0, 110.0 * norm_multiplier)))
+    top_y1 = max(285, int(h * 0.265))
+    top_y2 = min(h - 150, int(h * 0.60))
 
     top_crop = img[top_y1:top_y2, :gutter_w]
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
@@ -312,8 +312,8 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     """
     if img is None: return []
     h, w = img.shape[:2]
-    top_y = max(int(h * 0.12), 270)
-    bot_y = int(h * 0.96)
+    top_y = max(280, int(h * 0.260))
+    bot_y = min(int(h * 0.875), h - 135)
     ocr = get_rapid_ocr()
     if ocr is None: return []
 
@@ -686,134 +686,185 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                     })
         except Exception as e: print(f"[worker_scan_image] RapidOCR error: {e}")
 
-    processed_boxes: List[Dict[str, Any]] = []
+    # 1. Editor Vertical and Horizontal Boundaries:
+    # Top boundary: ignore Android status bar, Teams title header, and markdown formatting toolbar (ends at ~265).
+    ed_top = max(280, int(h * 0.260))
+    # Bottom boundary: ignore bottom Android system navigation bar / dock and Teams offline status pill (at y > 950).
+    ed_bot = min(int(h * 0.875), h - 135)
+
+    # Gutter horizontal bounds:
+    gx_min = max(16, int(w * 0.015))
+    gx_max = max(70, min(90, int(w * 0.047)))
+    content_min_x = gx_max + 1
+
+    # 2. Extract genuine gutter candidate digits and content words within [ed_top, ed_bot]
+    raw_gutter_pairs: List[Tuple[float, int, Dict[str, Any]]] = []
+    content_boxes: List[Dict[str, Any]] = []
+
     for b in ocr_boxes:
-        # Ignore top toolbar/title elements above y < 135 if the image is full HD
-        if h >= 800 and b["y"] < 135:
+        cy = b["center_y"]
+        if cy < ed_top or cy > ed_bot:
             continue
-        txt = b["text"]
-        if b["x"] < 130:
-            if txt.isdigit() and len(txt) <= 6 and b["width"] <= 95:
-                processed_boxes.append({
-                    **b, "is_gutter": True, "line_number": int(txt)
-                })
-                continue
-            if m := re.match(r'^(\d{1,6})\s*([^\d\s].*)$', txt):
-                g_num = m.group(1)
-                code_txt = m.group(2)
-                processed_boxes.append({
-                    **b, "text": g_num, "width": 35, "is_gutter": True, "line_number": int(g_num)
-                })
-                processed_boxes.append({
-                    **b, "text": code_txt, "x": b["x"] + 40, "width": max(10, b["width"] - 40), "is_gutter": False
-                })
-                continue
-        processed_boxes.append({**b, "is_gutter": False})
+        txt = b["text"].strip()
+        bx = b["x"]
+        bw = b["width"]
 
-    raw_candidates = sorted([b for b in processed_boxes if b.get("is_gutter")], key=lambda x: x["y"])
-    gutter_candidates = []
-    if raw_candidates:
-        pairs = [(b["y"], b["line_number"]) for b in raw_candidates]
-        corrected = correct_gutter_sequence(pairs)
-        corr_map = {y: num for y, num in corrected}
-        for b in raw_candidates:
-            if b["y"] in corr_map:
-                b["line_number"] = corr_map[b["y"]]
-            gutter_candidates.append(b)
+        # Filter Android/Teams status pills like "Offline" appearing near the bottom bar
+        if txt.lower() in ["offline", "online", "syncing", "saved"] and cy > (ed_bot - 30):
+            continue
 
-    top_line = bottom_line = 0
-    first_line_box = last_line_box = None
-    if gutter_candidates:
-        fc, lc = gutter_candidates[0], gutter_candidates[-1]
-        top_line, bottom_line = fc["line_number"], lc["line_number"]
-        if bottom_line > 0 and top_line > 0 and (bottom_line - top_line) > 75:
-            if str(bottom_line - 57).startswith(str(top_line)) or (bottom_line - top_line > 100):
-                top_line = max(1, bottom_line - 57)
-        first_line_box = {"x": fc["x"], "y": fc["y"], "width": fc["width"], "height": fc["height"], "line_number": top_line}
-        last_line_box = {"x": lc["x"], "y": lc["y"], "width": lc["width"], "height": lc["height"], "line_number": bottom_line}
-
-    gutter_width = 75
-    if gutter_candidates:
-        max_gx = max(b["x"] + b["width"] for b in gutter_candidates)
-        gutter_width = max(55, min(max_gx + 10, 85))
-
-    rows: List[List[Dict[str, Any]]] = []
-    for b in processed_boxes:
-        placed = False
-        for r in rows:
-            if abs(b["center_y"] - sum(x["center_y"] for x in r) / len(r)) < 18:
-                r.append(b); placed = True; break
-        if not placed: rows.append([b])
-    rows.sort(key=lambda r: sum(x["y"] for x in r) / len(r))
-
-    lines_list: List[Dict[str, Any]] = []
-    line_boxes: Dict[int, Dict[str, Any]] = {}
-    curr = top_line or 1
-    for r in rows:
-        r.sort(key=lambda x: x["x"])
-        gt = next((x for x in r if x.get("is_gutter")), None)
-        if gt and "line_number" in gt:
-            curr, is_w = gt["line_number"], False
+        if bx < gx_max:
+            if txt.isdigit() and len(txt) <= 6:
+                raw_gutter_pairs.append((cy, int(txt), b))
+            elif m := re.match(r'^(\d{1,6})\s*([^\d\s].*)$', txt):
+                g_num = int(m.group(1))
+                c_txt = m.group(2).strip()
+                raw_gutter_pairs.append((cy, g_num, {**b, "width": 35}))
+                if c_txt:
+                    content_boxes.append({
+                        **b,
+                        "x": max(content_min_x, bx + 28),
+                        "text": c_txt,
+                        "width": max(30, bw - 28)
+                    })
+            elif (bx + bw) >= content_min_x:
+                content_boxes.append(b)
         else:
-            is_w = True
-        line_str = " ".join(x["text"] for x in r if not x.get("is_gutter") and x["x"] >= (gutter_width - 15))
-        if len(line_str) > 60 or "\n" in line_str: is_w = True
+            content_boxes.append(b)
 
-        rx_min = int(min(x["x"] for x in r))
-        ry_min = int(min(x["y"] for x in r))
-        rx_max = int(max(x["x"] + x["width"] for x in r))
-        ry_max = int(max(x["y"] + x["height"] for x in r))
-        row_box = {
-            "x": rx_min,
-            "y": ry_min,
-            "width": max(20, rx_max - rx_min),
-            "height": max(14, ry_max - ry_min),
-            "line_number": curr
+    raw_gutter_pairs.sort(key=lambda p: p[0])
+
+    # Filter strictly increasing sequences using correct_gutter_sequence and back-project to ed_top
+    pairs_for_corr = [(p[0], p[1]) for p in raw_gutter_pairs]
+    corrected_pairs = correct_gutter_sequence(pairs_for_corr, min_content_y=ed_top)
+
+    raw_box_map = {p[1]: p[2] for p in raw_gutter_pairs}
+    avg_gw = max(28, int(np.mean([p[2]["width"] for p in raw_gutter_pairs]))) if raw_gutter_pairs else (gx_max - gx_min)
+
+    valid_pairs: List[Tuple[float, int, Dict[str, Any]]] = []
+    for cy, c_num in corrected_pairs:
+        b = raw_box_map.get(c_num)
+        if not b:
+            b = {
+                "x": gx_min,
+                "y": int(cy - 12),
+                "width": avg_gw,
+                "height": 24,
+                "confidence": 0.95
+            }
+        valid_pairs.append((float(cy), c_num, {**b, "line_number": c_num}))
+
+    # 3. Fit monospaced line grid (pitch and intercept)
+    if len(valid_pairs) >= 2:
+        ys = np.array([p[0] for p in valid_pairs])
+        lns = np.array([p[1] for p in valid_pairs])
+        slope, intercept = np.polyfit(lns, ys, 1)
+        pitch = max(18.0, min(65.0, float(slope)))
+    elif len(valid_pairs) == 1:
+        y0, ln0, _ = valid_pairs[0]
+        pitch = 27.0 if h <= 1200 else 60.0
+        intercept = y0 - ln0 * pitch
+    else:
+        pitch = 27.0 if h <= 1200 else 60.0
+        intercept = ed_top - pitch
+
+    # Determine top_line (starting line number in the editor)
+    # y(ln) = intercept + ln * pitch
+    y_ln1 = intercept + 1 * pitch
+    if abs(y_ln1 - ed_top) <= pitch * 1.5:
+        top_line = 1
+    else:
+        top_line = max(1, int(round((ed_top - intercept) / pitch)))
+
+    # Determine bottom_line (ending line number in the editor)
+    bottom_line = max(top_line, int(round((ed_bot - intercept) / pitch)))
+
+    gutter_boxes: Dict[int, Dict[str, Any]] = {}
+    line_boxes: Dict[int, Dict[str, Any]] = {}
+    lines_list: List[Dict[str, Any]] = []
+
+    for ln in range(top_line, bottom_line + 1):
+        ly = intercept + ln * pitch
+        box_y = max(ed_top, int(ly - pitch * 0.5))
+        box_h = int(pitch)
+        if box_y + box_h > ed_bot + 10:
+            box_h = max(16, (ed_bot + 10) - box_y)
+
+        # Gutter box strictly inside [ed_top, ed_bot]
+        gbox = {
+            "x": gx_min,
+            "y": box_y,
+            "width": avg_gw,
+            "height": box_h,
+            "line_number": ln,
+            "confidence": 0.95
         }
+        gutter_boxes[ln] = gbox
 
+        # Content words for this line
+        matched_words = [
+            b for b in content_boxes
+            if (b["x"] + b["width"]) >= content_min_x and abs(b["center_y"] - ly) < pitch * 0.48
+        ]
+        matched_words.sort(key=lambda b: b["x"])
+
+        # Content bounding box
+        if matched_words:
+            rx_min = max(content_min_x, int(min(b["x"] for b in matched_words)))
+            rx_max = int(max(b["x"] + b["width"] for b in matched_words))
+            content_box = {
+                "x": rx_min,
+                "y": box_y,
+                "width": max(50, rx_max - rx_min),
+                "height": box_h,
+                "line_number": ln
+            }
+            line_str = " ".join(b["text"] for b in matched_words)
+        else:
+            content_box = {
+                "x": content_min_x,
+                "y": box_y,
+                "width": int(w * 0.75),
+                "height": box_h,
+                "line_number": ln,
+                "interpolated": True
+            }
+            line_str = ""
+
+        # Clean line_str of accidental duplicate gutter digit prefix
+        line_str = re.sub(rf"^{ln}\s*[:\.]?\s*", "", line_str.strip())
+        is_blank = not bool(line_str.strip())
+        is_w = len(line_str) > 65
+
+        line_boxes[ln] = content_box
         lines_list.append({
-            "line_number": curr, "gutter_number": curr, "text": line_str,
-            "is_blank": not bool(line_str.strip()), "is_wrapped": is_w,
-            "wrapped_line_count": 2 if is_w else 1, "status": "verified", "confidence": 0.95,
-            "bbox": row_box
+            "line_number": ln,
+            "gutter_number": ln,
+            "text": line_str,
+            "is_blank": is_blank,
+            "is_wrapped": is_w,
+            "wrapped_line_count": 2 if is_w else 1,
+            "status": "verified" if not is_blank else "empty",
+            "confidence": 0.95,
+            "bbox": content_box,
+            "gutter_bbox": gbox
         })
 
-        if curr not in line_boxes:
-            line_boxes[curr] = row_box
-        else:
-            prev = line_boxes[curr]
-            bx = min(prev["x"], row_box["x"])
-            by = min(prev["y"], row_box["y"])
-            bw = max(prev["x"] + prev["width"], row_box["x"] + row_box["width"]) - bx
-            bh = max(prev["y"] + prev["height"], row_box["y"] + row_box["height"]) - by
-            line_boxes[curr] = {"x": bx, "y": by, "width": bw, "height": bh, "line_number": curr}
-
-    wrapped_boxes: List[Dict[str, Any]] = []
-    content_min_x = gutter_width
-    for line in lines_list:
-        if line.get("is_wrapped") or len(line.get("text", "")) > 60:
-            matched = [b for b in ocr_boxes if b["x"] >= content_min_x and (any(word in line["text"] for word in b["text"].split() if len(word) >= 3) or (line["text"] and b["text"][:10] in line["text"]))]
-            if matched:
-                bx1, bx2 = min(t["x"] for t in matched), max(t["x"] + t["width"] for t in matched)
-                by1, by2 = min(t["y"] for t in matched), max(t["y"] + t["height"] for t in matched)
-                wrapped_boxes.append({"x": bx1 - 4, "y": by1 - 4, "width": (bx2 - bx1) + 8, "height": (by2 - by1) + 8, "line_number": line["line_number"], "text_snippet": line["text"][:35]})
-
-    deduped_wrapped: List[Dict[str, Any]] = []
-    for wb in wrapped_boxes:
-        if not any(abs(wb["y"] - d["y"]) < 25 and abs(wb["x"] - d["x"]) < 40 for d in deduped_wrapped):
-            deduped_wrapped.append(wb)
-
-    if not first_line_box and lines_list: first_line_box = {"x": 105, "y": 240, "width": 55, "height": 30, "line_number": top_line}
-    if not last_line_box and lines_list: last_line_box = {"x": 105, "y": int(h * 0.92), "width": 55, "height": 30, "line_number": bottom_line}
+    first_line_box = line_boxes.get(top_line, {"x": content_min_x, "y": ed_top, "width": 55, "height": int(pitch), "line_number": top_line})
+    last_line_box = line_boxes.get(bottom_line, {"x": content_min_x, "y": ed_bot - int(pitch), "width": 55, "height": int(pitch), "line_number": bottom_line})
 
     return {
-        "top_line": top_line, "bottom_line": bottom_line, "lines": lines_list,
-        "image_width": w, "image_height": h,
+        "top_line": top_line,
+        "bottom_line": bottom_line,
+        "lines": lines_list,
+        "image_width": w,
+        "image_height": h,
         "bounding_boxes": {
             "first_line": first_line_box,
             "last_line": last_line_box,
-            "wrapped_lines": deduped_wrapped,
-            "line_boxes": line_boxes
+            "wrapped_lines": [l["bbox"] for l in lines_list if l.get("is_wrapped")],
+            "line_boxes": line_boxes,
+            "gutter_boxes": gutter_boxes
         }
     }
 

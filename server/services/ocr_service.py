@@ -280,8 +280,9 @@ def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = Non
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, 4 Lion Cove P-cores with AVX-VNNI).
     """
     with Image.open(image_path) as raw_img:
-        # Preprocess with ROI crop strictly to editor content area (excluding gutter numbers)
-        img = preprocess_frame_for_ocr(raw_img, roi_crop=True, exclude_gutter=True)
+        # Preprocess with ROI crop strictly to editor bounds, keeping left gutter line numbers visible
+        # so vision models can read and ground against the actual physical gutter numbers
+        img = preprocess_frame_for_ocr(raw_img, roi_crop=True, exclude_gutter=False)
         buf = io.BytesIO()
         # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
         img.convert("RGB").save(buf, format="PNG", optimize=False)
@@ -289,12 +290,13 @@ def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = Non
 
     start_ex = expected_top if (expected_top and expected_top > 0) else 1
     prompt = (
-        "You are an expert OCR transcription engine.\n"
-        "Transcribe the document text in this image line by line from top to bottom.\n"
-        f"Number each line sequentially starting from {start_ex} (e.g. {start_ex}: line content).\n"
-        f"If a line is blank or empty, output ONLY the line number and colon with no content (e.g. {start_ex + 1}: ).\n"
-        "DO NOT include any gutter line numbers in the text content.\n"
-        "Preserve all markdown syntax and characters exactly verbatim.\n"
+        "You are an expert OCR transcription engine for code and markdown.\n"
+        "The image contains an editor document with line numbers in the left gutter (e.g. 1, 2, 3, 4, 6, 10...).\n"
+        "Transcribe each document line from top to bottom.\n"
+        "Use the exact line number shown in the gutter for each line (format: '<number>: <content>').\n"
+        "If a line has no text or is empty, output ONLY the line number and colon (e.g. '5: ').\n"
+        "DO NOT output the gutter line number inside the code/markdown content.\n"
+        "Preserve indentation, symbols, brackets, and markdown verbatim.\n"
         "Output only the numbered lines:"
     )
     models = []
@@ -359,7 +361,7 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
         if cand and cand.upper() not in {"NONE", "N/A", "NULL", "UNKNOWN", "NOT VISIBLE"}:
             detected_filename = cand
 
-    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?\[?(\d+)\]?\s*(?:[:|.)\]\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
+    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?[\[<]?(\d+)[\]>]?\s*(?:[:|.)\]>\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
 
     line_map: Dict[int, List[str]] = {}
     current_ln: Optional[int] = None
@@ -514,16 +516,30 @@ async def route_frame_ocr(frame_id: str, image_path: Path, top_line: int = 0, bo
         await process_frame_with_target(frame_id, image_path, top_line, bottom_line, target)
         return {"top_line": state.captured_frames[frame_id].get("top_line", 0), "bottom_line": state.captured_frames[frame_id].get("bottom_line", 0), "lines": []}
 
-def interpolate_line_boxes(lines: List[Dict[str, Any]], known_boxes: Dict[int, Dict[str, Any]], image_w: int = 1920, image_h: int = 1080) -> Dict[int, Dict[str, Any]]:
+def interpolate_line_boxes(
+    lines: List[Dict[str, Any]],
+    known_boxes: Dict[int, Dict[str, Any]],
+    image_w: int = 1920,
+    image_h: int = 1080,
+    known_gutter_boxes: Optional[Dict[int, Dict[str, Any]]] = None
+) -> Tuple[Dict[int, Dict[str, Any]], Dict[int, Dict[str, Any]]]:
     boxes = {int(k): dict(v) for k, v in known_boxes.items()}
+    g_boxes = {int(k): dict(v) for k, v in (known_gutter_boxes or {}).items()}
     if not lines:
-        return boxes
+        return boxes, g_boxes
+
+    ed_top = max(285, int(image_h * 0.265))
+    ed_bot = min(int(image_h * 0.908), image_h - 100)
+
     heights = [b["height"] for b in boxes.values() if b.get("height", 0) > 10]
     avg_h = int(sum(heights) / len(heights)) if heights else 26
     widths = [b["width"] for b in boxes.values() if b.get("width", 0) > 50]
     avg_w = int(sum(widths) / len(widths)) if widths else int(image_w * 0.75)
     xs = [b["x"] for b in boxes.values() if b.get("x", 0) > 0]
-    avg_x = min(xs) if xs else 60
+    avg_x = min(xs) if xs else 92
+
+    avg_gx = int(sum(b["x"] for b in g_boxes.values()) / len(g_boxes)) if g_boxes else 38
+    avg_gw = int(sum(b["width"] for b in g_boxes.values()) / len(g_boxes)) if g_boxes else 28
 
     sorted_known_lns = sorted(boxes.keys())
 
@@ -538,116 +554,226 @@ def interpolate_line_boxes(lines: List[Dict[str, Any]], known_boxes: Dict[int, D
 
         if ln in boxes:
             l["bbox"] = boxes[ln]
+        else:
+            prev_lns = [k for k in sorted_known_lns if k < ln]
+            next_lns = [k for k in sorted_known_lns if k > ln]
+
+            if prev_lns and next_lns:
+                p_ln, n_ln = prev_lns[-1], next_lns[0]
+                p_box, n_box = boxes[p_ln], boxes[n_ln]
+                ratio = (ln - p_ln) / max(1, (n_ln - p_ln))
+                interp_y = int(p_box["y"] + ratio * (n_box["y"] - p_box["y"]))
+                new_box = {
+                    "x": avg_x,
+                    "y": max(ed_top, min(ed_bot - avg_h, interp_y)),
+                    "width": avg_w,
+                    "height": avg_h,
+                    "line_number": ln,
+                    "interpolated": True
+                }
+            elif prev_lns:
+                p_ln = prev_lns[-1]
+                p_box = boxes[p_ln]
+                delta = ln - p_ln
+                new_box = {
+                    "x": avg_x,
+                    "y": max(ed_top, min(ed_bot - avg_h, p_box["y"] + delta * avg_h)),
+                    "width": avg_w,
+                    "height": avg_h,
+                    "line_number": ln,
+                    "interpolated": True
+                }
+            elif next_lns:
+                n_ln = next_lns[0]
+                n_box = boxes[n_ln]
+                delta = n_ln - ln
+                new_box = {
+                    "x": avg_x,
+                    "y": max(ed_top, min(ed_bot - avg_h, n_box["y"] - delta * avg_h)),
+                    "width": avg_w,
+                    "height": avg_h,
+                    "line_number": ln,
+                    "interpolated": True
+                }
+            else:
+                new_box = {
+                    "x": avg_x,
+                    "y": max(ed_top, min(ed_bot - avg_h, ed_top + (ln - 1) * avg_h)),
+                    "width": avg_w,
+                    "height": avg_h,
+                    "line_number": ln,
+                    "interpolated": True
+                }
+            boxes[ln] = new_box
+            l["bbox"] = new_box
+            sorted_known_lns.append(ln)
+            sorted_known_lns.sort()
+
+        if ln in g_boxes:
+            l["gutter_bbox"] = g_boxes[ln]
+        else:
+            gb = {
+                "x": avg_gx,
+                "y": boxes[ln]["y"],
+                "width": avg_gw,
+                "height": boxes[ln]["height"],
+                "line_number": ln,
+                "interpolated": True
+            }
+            g_boxes[ln] = gb
+            l["gutter_bbox"] = gb
+
+    return boxes, g_boxes
+
+
+def rescan_lines_on_image_sync(
+    image_path: Path,
+    line_numbers: List[int],
+    existing_lines: List[Dict[str, Any]],
+    existing_bboxes: Dict[str, Any]
+) -> Tuple[List[Dict[str, Any]], List[int]]:
+    """
+    Selectively rescans only the specified line numbers using RapidOCR on tight image crops.
+    Flags and overwrites the text for those lines in existing_lines.
+    """
+    import cv2
+    import numpy as np
+    from ocr_engine import get_rapid_ocr
+
+    img = cv2.imread(str(image_path))
+    if img is None:
+        raise FileNotFoundError(f"Image not found: {image_path}")
+
+    h, w = img.shape[:2]
+    ocr = get_rapid_ocr()
+    if ocr is None:
+        raise RuntimeError("RapidOCR engine is not available")
+
+    line_boxes = existing_bboxes.get("line_boxes", {})
+    gutter_boxes = existing_bboxes.get("gutter_boxes", {})
+    lines_map = {l.get("line_number"): l for l in existing_lines if l.get("line_number") is not None}
+    rescanned_lns = []
+
+    for ln in line_numbers:
+        target_line = lines_map.get(ln)
+        if not target_line:
+            target_line = {
+                "line_number": ln,
+                "gutter_number": ln,
+                "text": "",
+                "is_blank": True,
+                "is_wrapped": False,
+                "status": "flagged",
+                "confidence": 0.95
+            }
+            existing_lines.append(target_line)
+            lines_map[ln] = target_line
+
+        bbox = target_line.get("bbox") or line_boxes.get(ln)
+        gbox = target_line.get("gutter_bbox") or gutter_boxes.get(ln)
+
+        if bbox:
+            y1 = max(0, int(bbox.get("y", 0)) - 6)
+            y2 = min(h, int(bbox.get("y", 0) + bbox.get("height", 30)) + 6)
+        elif gbox:
+            y1 = max(0, int(gbox.get("y", 0)) - 6)
+            y2 = min(h, int(gbox.get("y", 0) + gbox.get("height", 30)) + 6)
+        else:
+            y1 = max(0, int(h * 0.15 + (ln - 1) * 32))
+            y2 = min(h, y1 + 38)
+
+        gx_end = int(gbox.get("x", 20) + gbox.get("width", 50)) if gbox else 75
+        x1 = max(0, gx_end + 8)
+        x2 = w
+
+        crop = img[y1:y2, x1:x2]
+        if crop.size == 0:
             continue
 
-        prev_lns = [k for k in sorted_known_lns if k < ln]
-        next_lns = [k for k in sorted_known_lns if k > ln]
-
-        if prev_lns and next_lns:
-            p_ln, n_ln = prev_lns[-1], next_lns[0]
-            p_box, n_box = boxes[p_ln], boxes[n_ln]
-            ratio = (ln - p_ln) / max(1, (n_ln - p_ln))
-            interp_y = int(p_box["y"] + ratio * (n_box["y"] - p_box["y"]))
-            new_box = {
-                "x": avg_x,
-                "y": max(0, interp_y),
-                "width": avg_w,
-                "height": avg_h,
-                "line_number": ln,
-                "interpolated": True
-            }
-        elif prev_lns:
-            p_ln = prev_lns[-1]
-            p_box = boxes[p_ln]
-            delta = ln - p_ln
-            new_box = {
-                "x": avg_x,
-                "y": min(image_h - avg_h, p_box["y"] + delta * avg_h),
-                "width": avg_w,
-                "height": avg_h,
-                "line_number": ln,
-                "interpolated": True
-            }
-        elif next_lns:
-            n_ln = next_lns[0]
-            n_box = boxes[n_ln]
-            delta = n_ln - ln
-            new_box = {
-                "x": avg_x,
-                "y": max(0, n_box["y"] - delta * avg_h),
-                "width": avg_w,
-                "height": avg_h,
-                "line_number": ln,
-                "interpolated": True
-            }
+        res, _ = ocr(crop)
+        new_text = ""
+        if res:
+            sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
+            new_text = " ".join(r[1].strip() for r in sorted_words if r[1].strip())
         else:
-            new_box = {
-                "x": avg_x,
-                "y": int(image_h * 0.2 + (ln - 1) * avg_h),
-                "width": avg_w,
-                "height": avg_h,
-                "line_number": ln,
-                "interpolated": True
-            }
-        boxes[ln] = new_box
-        l["bbox"] = new_box
-        sorted_known_lns.append(ln)
-        sorted_known_lns.sort()
+            try:
+                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                enhanced = clahe.apply(gray)
+                res_enh, _ = ocr(enhanced)
+                if res_enh:
+                    sorted_words = sorted(res_enh, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
+                    new_text = " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+            except Exception:
+                pass
 
-    return boxes
+        new_text = re.sub(rf"^{ln}\s*[:\.]?\s*", "", new_text.strip())
+
+        target_line["text"] = new_text
+        target_line["is_blank"] = not bool(new_text.strip())
+        target_line["status"] = "rescanned"
+        target_line["overwritten"] = True
+        target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
+        rescanned_lns.append(ln)
+
+    existing_lines.sort(key=lambda l: l.get("line_number", 0))
+    return existing_lines, rescanned_lns
 
 
 async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] = None) -> Dict[str, Any]:
     """
     Scan image with local vision model (MiniCPM-V in Ollama, with OpenVINO RapidOCR fallback)
     for verbatim code/markdown line extraction and bounding boxes.
+    Always uses worker_scan_image's ground truth gutter grid (top_ln..bot_ln) to anchor line numbers
+    and bounding boxes strictly within editor boundaries [ed_top, ed_bot].
     """
-    plines = []
-    top_ln = bot_ln = 0
-    formatted = ""
+    from ocr_engine import worker_scan_image
+
+    aux = await asyncio.to_thread(worker_scan_image, str(image_path))
+    top_ln = aux.get("top_line", 1)
+    bot_ln = aux.get("bottom_line", 26)
+    img_w = aux.get("image_width", 1920)
+    img_h = aux.get("image_height", 1080)
+    bboxes = aux.get("bounding_boxes", {})
+    ground_truth_lines = aux.get("lines", [])
+    model_used = "Local RapidOCR (OpenVINO Accelerated)"
     detected_filename = None
-    model_used = None
-    bboxes = {}
-    img_w, img_h = 1920, 1080
+    plines = list(ground_truth_lines)
 
     try:
-        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path), expected_top)
-        plines, top_ln, bot_ln, formatted, detected_filename = parse_minicpm_output(raw_resp)
-        non_blank = [p for p in plines if (p.get("text") or "").strip()]
-        if non_blank:
+        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path), expected_top or top_ln)
+        mcpm_lines, _, _, _, det_fn = parse_minicpm_output(raw_resp)
+        if det_fn:
+            detected_filename = det_fn
+        if mcpm_lines:
             model_used = f"MiniCPM-V ({model_name})"
-            try:
-                from ocr_engine import worker_scan_image
-                aux = await asyncio.to_thread(worker_scan_image, str(image_path))
-                bboxes = aux.get("bounding_boxes", {})
-                img_w = aux.get("image_width", 1920)
-                img_h = aux.get("image_height", 1080)
-                known = bboxes.get("line_boxes", {})
-                bboxes["line_boxes"] = interpolate_line_boxes(plines, known, img_w, img_h)
-            except Exception:
-                pass
+            if not any(bool((l.get("text") or "").strip()) for l in ground_truth_lines):
+                plines = mcpm_lines
+                top_ln = min((p["line_number"] for p in plines), default=top_ln)
+                bot_ln = max((p["line_number"] for p in plines), default=bot_ln)
+            else:
+                mcpm_map = {l.get("line_number"): l.get("text", "") for l in mcpm_lines if l.get("line_number") is not None}
+                for gl in ground_truth_lines:
+                    g_ln = gl["line_number"]
+                    if g_ln in mcpm_map:
+                        raw_m = mcpm_map[g_ln]
+                        m_txt = sanitize_line_text(g_ln, raw_m).strip()
+                        g_txt = gl.get("text", "").strip()
+                        # Only accept MiniCPM enhancement if:
+                        # 1) Ground truth line has text and shares vocabulary with m_txt
+                        # 2) Or ground truth text is an exact substring / substring match
+                        if g_txt and m_txt:
+                            g_words = set(re.findall(r'\w{2,}', g_txt.lower()))
+                            m_words = set(re.findall(r'\w{2,}', m_txt.lower()))
+                            if (g_words & m_words) or (g_txt.lower() in m_txt.lower()) or (m_txt.lower() in g_txt.lower()):
+                                gl["text"] = m_txt
+                                gl["is_blank"] = not bool(m_txt.strip())
     except Exception as e:
-        print(f"[MiniCPM-V OCR] Ollama call error: {e}")
+        print(f"[MiniCPM-V OCR] Ollama call note: {e}")
 
-    # If MiniCPM-V failed, timed out, or produced no lines with text, fallback to OpenVINO RapidOCR
-    if not plines or not any((p.get("text") or "").strip() for p in plines):
-        try:
-            from ocr_engine import worker_scan_image
-            fallback_res = await asyncio.to_thread(worker_scan_image, str(image_path))
-            f_lines = fallback_res.get("lines", [])
-            if f_lines:
-                plines = f_lines
-                top_ln = fallback_res.get("top_line", top_ln)
-                bot_ln = fallback_res.get("bottom_line", bot_ln)
-                bboxes = fallback_res.get("bounding_boxes", {})
-                img_w = fallback_res.get("image_width", 1920)
-                img_h = fallback_res.get("image_height", 1080)
-                known = bboxes.get("line_boxes", {})
-                bboxes["line_boxes"] = interpolate_line_boxes(plines, known, img_w, img_h)
-                formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
-                model_used = "Local RapidOCR (OpenVINO Accelerated)"
-        except Exception as ex:
-            print(f"[Local OCR Fallback] error: {ex}")
+    if not plines:
+        plines = ground_truth_lines
+    formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
 
     if plines:
         return {

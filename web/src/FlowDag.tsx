@@ -3,7 +3,7 @@ import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
   RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Eye, Shrink, Expand, GripHorizontal,
-  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, FileText
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -1310,6 +1310,25 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 </span>
               </button>
             )}
+
+            {/* Direct DAG 4 OCR Full Inspector Launch Button */}
+            <button
+              type="button"
+              onClick={() => setIsTextModalOpen(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                borderRadius: '4px',
+                border: '1px solid rgba(56, 189, 248, 0.55)',
+                background: 'rgba(56, 189, 248, 0.15)',
+                color: '#38bdf8',
+                fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px',
+                boxShadow: '0 0 8px rgba(56, 189, 248, 0.25)'
+              }}
+              title="Open DAG 4 OCR Full Inspector (Source Image Bounding Boxes, Gutter Overwrite & Live Connectors)"
+            >
+              <FileText size={10} />
+              <span>OCR INSPECTOR</span>
+            </button>
 
             {/* Window Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
