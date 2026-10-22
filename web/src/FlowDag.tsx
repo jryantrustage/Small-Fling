@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
-  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Eye,
+  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Eye, Shrink, Expand, GripHorizontal,
   ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
@@ -104,6 +104,65 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
+
+  // Canvas height sizing state (persisted in localStorage)
+  const [canvasHeight, setCanvasHeight] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('dag_canvas_height');
+      if (saved) {
+        const val = parseInt(saved, 10);
+        if (!isNaN(val) && val >= 110 && val <= 850) return val;
+      }
+    } catch {}
+    return 320;
+  });
+
+  const [isResizingHeight, setIsResizingHeight] = useState<boolean>(false);
+  const resizeStartYRef = useRef<number>(0);
+  const resizeStartHeightRef = useRef<number>(320);
+
+  const handleStartResizeHeight = (e: React.MouseEvent | React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingHeight(true);
+    resizeStartYRef.current = e.clientY;
+    resizeStartHeightRef.current = canvasHeight;
+
+    const handleMove = (moveEvent: MouseEvent | PointerEvent) => {
+      const delta = moveEvent.clientY - resizeStartYRef.current;
+      const nextH = Math.min(850, Math.max(110, Math.round(resizeStartHeightRef.current + delta)));
+      setCanvasHeight(nextH);
+      try {
+        localStorage.setItem('dag_canvas_height', String(nextH));
+      } catch {}
+    };
+
+    const handleUp = () => {
+      setIsResizingHeight(false);
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+  };
+
+  const handleSetHeightPreset = (targetH: number) => {
+    setCanvasHeight(targetH);
+    if (targetH <= 180) {
+      setPan(p => ({ x: p.x, y: -90 }));
+    } else if (canvasHeight <= 180) {
+      setPan(p => ({ x: p.x, y: 0 }));
+    }
+    try {
+      localStorage.setItem('dag_canvas_height', String(targetH));
+    } catch {}
+  };
+
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
   const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => {
@@ -470,7 +529,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           localStorage.setItem('dag_node_positions', JSON.stringify(data.layout));
         } catch {}
       }
-      setPan({ x: 0, y: 0 });
+      setPan({ x: 0, y: canvasHeight <= 180 ? -90 : 0 });
       setZoom(1.0);
       setNodeFeedback({
         id: 'clean_layout',
@@ -957,12 +1016,12 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       background: '#0a0e17',
       border: '1px solid #30363d',
       borderRadius: '10px',
-      padding: '8px 12px',
+      padding: canvasHeight <= 180 ? '6px 10px' : '8px 12px',
       color: '#e6edf3',
       fontFamily: 'var(--font-mono, monospace)',
       display: 'flex',
       flexDirection: 'column',
-      gap: '6px',
+      gap: canvasHeight <= 180 ? '4px' : '6px',
       ...(isMaximized ? { inset: '14px', overflowY: 'auto', boxShadow: '0 12px 48px rgba(0,0,0,0.85)' } : {})
     }}>
       <DagSvgAssets />
@@ -1254,6 +1313,26 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
             {/* Window Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
+              <button
+                type="button"
+                className="win-btn"
+                onClick={() => {
+                  if (canvasHeight <= 180) {
+                    handleSetHeightPreset(320);
+                  } else {
+                    handleSetHeightPreset(150);
+                  }
+                }}
+                title={canvasHeight <= 180 ? 'Expand DAG Area (Standard 320px)' : 'Reduce DAG Area (Compact 150px)'}
+                style={{
+                  width: '22px', height: '22px',
+                  color: canvasHeight <= 180 ? '#00ff9d' : '#8b949e',
+                  background: canvasHeight <= 180 ? 'rgba(0, 255, 157, 0.15)' : 'transparent',
+                  border: canvasHeight <= 180 ? '1px solid rgba(0, 255, 157, 0.4)' : undefined
+                }}
+              >
+                {canvasHeight <= 180 ? <Expand size={11} /> : <Shrink size={11} />}
+              </button>
               <button
                 type="button"
                 className="win-btn"
@@ -1607,6 +1686,61 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>DAG 4 OCR Full Inspector ↗</span>
             </button>
 
+            {/* DAG Area Size Presets */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', padding: '1px', gap: '1px' }}>
+              <button
+                type="button"
+                onClick={() => handleSetHeightPreset(150)}
+                style={{
+                  background: canvasHeight <= 180 ? 'rgba(0, 255, 157, 0.2)' : 'none',
+                  border: 'none',
+                  color: canvasHeight <= 180 ? '#00ff9d' : '#8b949e',
+                  fontWeight: canvasHeight <= 180 ? 800 : 500,
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '9px',
+                  borderRadius: '3px'
+                }}
+                title="Reduce DAG area to compact ribbon (150px) - ideal for viewing document and verification lines below"
+              >
+                Compact
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetHeightPreset(320)}
+                style={{
+                  background: (canvasHeight > 180 && canvasHeight <= 380) ? 'rgba(56, 189, 248, 0.2)' : 'none',
+                  border: 'none',
+                  color: (canvasHeight > 180 && canvasHeight <= 380) ? '#38bdf8' : '#8b949e',
+                  fontWeight: (canvasHeight > 180 && canvasHeight <= 380) ? 800 : 500,
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '9px',
+                  borderRadius: '3px'
+                }}
+                title="Standard DAG area size (320px)"
+              >
+                Standard
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetHeightPreset(500)}
+                style={{
+                  background: canvasHeight > 380 ? 'rgba(88, 166, 255, 0.2)' : 'none',
+                  border: 'none',
+                  color: canvasHeight > 380 ? '#58a6ff' : '#8b949e',
+                  fontWeight: canvasHeight > 380 ? 800 : 500,
+                  cursor: 'pointer',
+                  padding: '2px 6px',
+                  fontSize: '9px',
+                  borderRadius: '3px'
+                }}
+                title="Tall DAG area size (500px)"
+              >
+                Tall
+              </button>
+            </div>
+
             <div style={{ display: 'inline-flex', alignItems: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', padding: '1px' }}>
               <button
                 type="button"
@@ -1650,16 +1784,18 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           onMouseDown={handleCanvasMouseDown}
           style={{
             width: '100%',
-            height: isMaximized ? 'calc(100vh - 240px)' : '350px',
-            minHeight: '300px',
+            height: isMaximized ? 'calc(100vh - 240px)' : `${canvasHeight}px`,
+            minHeight: isMaximized ? '400px' : '110px',
             background: 'radial-gradient(circle at 50% 50%, #161b22 0%, #0d1117 100%)',
             border: '1.5px solid #30363d',
-            borderRadius: '9px',
+            borderRadius: isMaximized ? '9px' : '9px 9px 0 0',
+            borderBottom: isMaximized ? '1.5px solid #30363d' : 'none',
             position: 'relative',
             overflow: 'hidden',
             cursor: isPanning ? 'grabbing' : (wiringState ? 'crosshair' : 'default'),
             userSelect: 'none',
-            boxShadow: 'inset 0 0 24px rgba(0,0,0,0.65)'
+            boxShadow: 'inset 0 0 24px rgba(0,0,0,0.65)',
+            transition: isResizingHeight ? 'none' : 'height 0.15s ease'
           }}
         >
           {/* SVG Grid Blueprint Pattern */}
@@ -1790,6 +1926,53 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Draggable Vertical Resize Bar for DAG Area */}
+        {!isMaximized && (
+          <div
+            onMouseDown={handleStartResizeHeight}
+            onPointerDown={handleStartResizeHeight}
+            onDoubleClick={() => handleSetHeightPreset(320)}
+            title="Drag vertically to reduce or enlarge DAG area size • Double-click to reset (320px)"
+            className={`dag-area-resizer ${isResizingHeight ? 'resizing' : ''}`}
+            style={{
+              width: '100%',
+              height: '14px',
+              cursor: 'ns-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              background: isResizingHeight ? 'rgba(0, 255, 157, 0.16)' : '#161b22',
+              border: '1.5px solid #30363d',
+              borderTop: '1px solid rgba(48, 54, 61, 0.8)',
+              borderRadius: '0 0 9px 9px',
+              userSelect: 'none',
+              transition: 'background 0.15s ease, border-color 0.15s ease'
+            }}
+          >
+            <GripHorizontal size={14} color={isResizingHeight ? '#00ff9d' : '#8b949e'} />
+            <div
+              style={{
+                width: '36px',
+                height: '3px',
+                borderRadius: '2px',
+                background: isResizingHeight ? '#00ff9d' : '#484f58',
+                boxShadow: isResizingHeight ? '0 0 6px #00ff9d' : 'none',
+                transition: 'background 0.15s ease, width 0.15s ease'
+              }}
+            />
+            <span style={{
+              fontSize: '8.5px',
+              fontWeight: 700,
+              color: isResizingHeight ? '#00ff9d' : '#8b949e',
+              fontFamily: 'var(--font-mono)',
+              opacity: isResizingHeight ? 1 : 0.75
+            }}>
+              {canvasHeight}px {isResizingHeight ? '(dragging)' : '↕'}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* DYNAMIC HOVER / PINNED POPOVER */}

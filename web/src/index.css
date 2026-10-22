@@ -359,6 +359,28 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .panel-resizer:hover .panel-resizer-line,
 .panel-resizer.dragging .panel-resizer-line { background: var(--color-primary); box-shadow: 0 0 8px var(--color-primary-glow); }
 .panel-resizer.dragging { cursor: col-resize !important; }
+.dag-area-resizer {
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.dag-area-resizer:hover {
+  background: rgba(56, 189, 248, 0.18) !important;
+  border-color: rgba(56, 189, 248, 0.5) !important;
+}
+.dag-area-resizer:hover > div {
+  background: #38bdf8 !important;
+  width: 58px !important;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.6) !important;
+}
+.dag-area-resizer.resizing {
+  background: rgba(0, 255, 157, 0.22) !important;
+  border-color: rgba(0, 255, 157, 0.6) !important;
+  cursor: ns-resize !important;
+}
+.dag-area-resizer.resizing > div {
+  background: #00ff9d !important;
+  width: 64px !important;
+  box-shadow: 0 0 10px rgba(0, 255, 157, 0.8) !important;
+}
 .telemetry-toaster-wrapper {
   position: fixed;
   bottom: 14px;
