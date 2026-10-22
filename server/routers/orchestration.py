@@ -2722,6 +2722,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     final_top = target_top
                     break
 
+                if actual_top is None and first_gutter is not None:
+                    actual_top = first_gutter
+
+                if actual_top is None:
+                    await asyncio.sleep(0.18)
+                    continue
+
                 diff = target_top - actual_top
                 if diff > 0:
                     # Viewport undershot (target is further down): send DownArrows (keycode 20)
@@ -2729,7 +2736,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     keys = " ".join(["20"] * adjust_step)
                     total_arrows_pressed += adjust_step
                     await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", active_serial)
-                else:
+                elif diff < 0:
                     # Viewport overshot (target was scrolled past): send UpArrows (keycode 19)
                     diff_up = abs(diff)
                     adjust_step = min(diff_up, 25)
@@ -3496,22 +3503,6 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         is_open, _, _ = await assert_markdown_open(active_serial)
         if not is_open:
             await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
-        # If running cycle 1 from page 1 and no frames are captured yet, ensure document is at Line 1 before capturing
-        if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
-            try:
-                snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                if snap_check:
-                    dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial, disp_id)
-                    calib_check = state.FRAMES_DIR / "dag2_start_check.png"
-                    with open(calib_check, "wb") as f: f.write(snap_check)
-                    top_detected = await state.detect_top_line_in_process(calib_check, dpi_factor=dpi_factor)
-                    if top_detected and top_detected > 2:
-                        print(f"[execute_dag_group_capture_markdown] Initial cycle top line is at {top_detected}. Simply pressing HID Ctrl+Home to return to Line 1...")
-                        await send_hid_keycombination(113, 122, serial=active_serial, caller_node="dag2_home")
-                        await asyncio.sleep(0.5)
-                        await dismiss_keyboard(active_serial, disp_id)
-            except Exception as e:
-                print(f"[execute_dag_group_capture_markdown] Initial Line 1 return check note: {e}")
 
     loop_start_ms = int(time.time() * 1000)
     loop_t0 = time.perf_counter()
@@ -3915,22 +3906,7 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         if not is_open:
             await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
-        # If starting continuous capture loop from Page 1 with no frames yet, ensure document is returned to Line 1 before capturing
-        if state.latest_telemetry.get("current_page", 0) <= 1 and len(state.captured_frames) == 0:
-            try:
-                snap_check = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                if snap_check:
-                    dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial, disp_id)
-                    calib_check = state.FRAMES_DIR / "dag2_start_check.png"
-                    with open(calib_check, "wb") as f: f.write(snap_check)
-                    top_detected = await state.detect_top_line_in_process(calib_check, dpi_factor=dpi_factor)
-                    if top_detected and top_detected > 2:
-                        print(f"[run_continuous_capture_loop_worker] Starting DAG 2 but top line is at {top_detected}. Simply pressing HID Ctrl+Home to return to Line 1...")
-                        await send_hid_keycombination(113, 122, serial=active_serial, caller_node="dag2_home")
-                        await asyncio.sleep(0.5)
-                        await dismiss_keyboard(active_serial, disp_id)
-            except Exception as e:
-                print(f"[run_continuous_capture_loop_worker] Initial Line 1 return check note: {e}")
+
 
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)

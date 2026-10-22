@@ -1559,7 +1559,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => handleRunGroup('capture_entire_markdown')}
+              onClick={() => handleRunGroup('capture_entire_markdown', { single_cycle: true })}
               disabled={runningGroupId !== null || runningNodeId !== null}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
@@ -1567,10 +1567,10 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 background: 'rgba(0, 255, 157, 0.08)', color: '#00ff9d',
                 fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
               }}
-              title="Run Capture (Nodes 3→4) to capture screen and transcribe markdown"
+              title="Run 1 Complete Cycle (Nodes 3➔8) to capture, transcribe, step arrow down, and assemble"
             >
               <Play size={7.5} fill="#00ff9d" />
-              <span>Capture</span>
+              <span>Capture Step</span>
             </button>
             <button
               type="button"

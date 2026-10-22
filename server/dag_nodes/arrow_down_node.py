@@ -80,33 +80,28 @@ class ArrowDownPagerNode(BaseDagNode):
         if cursor_line is None:
             cursor_line = 1 if cur_top == 1 else cur_top
 
-        # Viewport scroll padding
-        padding = int(cfg.get("scroll_padding_lines", 4))
-        if payload.get("scroll_padding_lines") is not None:
-            padding = int(payload["scroll_padding_lines"])
-
         visible_span = max(1, prev_bottom - cur_top + 1)
-        needed_lines = max(1, target_top - cur_top)
+        needed_scroll = max(1, target_top - cur_top)
+        padding = int(payload.get("scroll_padding_lines") if payload.get("scroll_padding_lines") is not None else cfg.get("scroll_padding_lines", 0))
+
         if padding > 0:
-            calibrated_init = (visible_span + padding) * 2
-            calibrated_step = visible_span + padding
+            calibrated_init = (needed_scroll + padding) * 2
+            calibrated_step = needed_scroll + padding
         else:
-            cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
+            cursor_travel = max(0, prev_bottom - cursor_line)
             viewport_scroll = max(1, target_top - cur_top)
             calibrated_init = cursor_travel + viewport_scroll
             calibrated_step = viewport_scroll
 
-        step_arrows = int(payload.get("arrow_count_step") or calibrated_step)
-        init_arrows = int(payload.get("arrow_count_init") or calibrated_init)
-
         if cur_top == 1 or cursor_line <= cur_top:
-            tracked_arrow_count = init_arrows
+            calibrated_stride = calibrated_init
         else:
-            tracked_arrow_count = step_arrows
+            calibrated_stride = calibrated_step
+
+        tracked_arrow_count = int(payload.get("arrow_count") or payload.get("arrow_count_step") or calibrated_stride)
 
         new_cursor_line = target_top + (prev_bottom - cur_top)
         state.orchestration_state["cursor_line"] = new_cursor_line
-        state.orchestration_state["scroll_padding_lines"] = padding
         state.orchestration_state["last_arrow_count"] = tracked_arrow_count
 
         if is_mock:
@@ -186,19 +181,25 @@ class ArrowDownPagerNode(BaseDagNode):
                 matched = True
                 break
 
-            diff = target_top - (actual_top or target_top)
+            if actual_top is None and first_gutter is not None:
+                actual_top = first_gutter
 
+            if actual_top is None:
+                # Still settling; brief wait before next attempt
+                await asyncio.sleep(0.18)
+                continue
+
+            diff = target_top - actual_top
             disp_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
             if diff > 0:
                 adjust_step = min(diff, 25)
                 keys = " ".join(["20"] * adjust_step)
                 total_arrows_pressed += adjust_step
                 await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
-            else:
+            elif diff < 0:
                 diff_up = abs(diff)
                 adjust_step = min(diff_up, 25)
-                up_count = adjust_step + (visible_span if _ == 0 else 0)
-                keys = " ".join(["19"] * up_count)
+                keys = " ".join(["19"] * adjust_step)
                 total_arrows_pressed += adjust_step
                 await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
 
