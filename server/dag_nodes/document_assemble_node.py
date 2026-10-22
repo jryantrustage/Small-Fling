@@ -32,9 +32,10 @@ class DocumentAssembleNode(BaseDagNode):
         captured_count = len([k for k, v in state.document_lines.items() if str(v).strip()])
         latest_bottom = blackboard.bottom_line or state.latest_telemetry.get("current_bottom_line", 0)
 
+        max_k = max(state.document_lines.keys()) if state.document_lines else 0
         doc_lines = []
-        for k in sorted(state.document_lines.keys()):
-            val = state.document_lines[k]
+        for ln in range(1, max_k + 1):
+            val = state.document_lines.get(ln, "")
             if isinstance(val, dict):
                 doc_lines.append(val.get("text", ""))
             elif hasattr(val, "text"):
@@ -42,6 +43,18 @@ class DocumentAssembleNode(BaseDagNode):
             else:
                 doc_lines.append(str(val))
         full_markdown = "\n".join(doc_lines)
+
+        # Write out reproduced markdown file to disk
+        try:
+            from pathlib import Path
+            out_dir = Path("c:/Projects/Small-Fling/storage")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+            data_dir = out_dir / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            (data_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+        except Exception as se:
+            print(f"[DocumentAssembleNode] File write note: {se}")
 
         is_complete = False
         if total_lines_target > 0 and latest_bottom >= total_lines_target:

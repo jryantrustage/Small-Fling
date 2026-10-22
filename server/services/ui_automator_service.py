@@ -41,7 +41,7 @@ async def get_display_dimensions(serial: str, display_id: int) -> Tuple[int, int
 async def dump_ui_hierarchy(serial: str) -> Optional[ET.Element]:
     """Dumps the active UI hierarchy XML via Android UIAutomator."""
     try:
-        res = await run_adb_shell("uiautomator dump /dev/stdout", serial, timeout=3.5)
+        res = await run_adb_shell("uiautomator dump /data/local/tmp/ui_dump.xml >/dev/null 2>&1 && cat /data/local/tmp/ui_dump.xml", serial, timeout=4.5)
         stdout = res.get("stdout", "")
         if "<hierarchy" in stdout:
             xml_str = stdout[stdout.find("<hierarchy"):]
@@ -79,14 +79,14 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     scale_y = (h / 1080.0) if h > 0 else 1.0
 
     results: Dict[str, Tuple[int, int]] = {
-        "pencil": (int(1655 * scale_x), int(190 * scale_y)),
-        "split": (int(1710 * scale_x), int(190 * scale_y)),
-        "preview": (int(1760 * scale_x), int(190 * scale_y)),
-        "theme_dropdown": (int(1850 * scale_x), int(190 * scale_y)),
+        "pencil": (int(1660 * scale_x), int(236 * scale_y)),
+        "split": (int(1710 * scale_x), int(236 * scale_y)),
+        "preview": (int(1760 * scale_x), int(236 * scale_y)),
+        "theme_dropdown": (int(1850 * scale_x), int(236 * scale_y)),
     }
 
-    # Search strictly in secondary markdown toolbar strip (y: 150..230 on 1080p, x: >= 1550)
-    tb_y1, tb_y2 = int(150 * scale_y), int(230 * scale_y)
+    # Search in secondary markdown toolbar strip (y: 120..280 on 1080p, x: >= 1550)
+    tb_y1, tb_y2 = int(120 * scale_y), int(280 * scale_y)
     tb_x1, tb_x2 = int(1550 * scale_x), w
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
@@ -113,7 +113,7 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 6]
     centers = [tb_x1 + (b[0] + b[1]) // 2 for b in significant_blobs]
 
-    center_y = int(190 * scale_y)
+    center_y = int(236 * scale_y)
     if len(centers) >= 2:
         results["pencil"] = (int(centers[0]), int(center_y))
         results["theme_dropdown"] = (int(centers[-1]), int(center_y))
@@ -187,7 +187,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
                 return {
                     "success": True,
                     "actions": actions,
-                    "target_coords": (int(1655 * scale_x), int(190 * scale_y)),
+                    "target_coords": (int(1660 * scale_x), int(236 * scale_y)),
                     "edit_mode_passed": True,
                     "message": "Editor is already in single-pane Edit Mode ✔"
                 }
@@ -213,7 +213,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     # 3. Default resolution-scaled coordinates fallback (Pencil icon in secondary toolbar)
     if not target_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        target_coords = (int(1655 * disp_w / 1920), int(190 * disp_h / 1080))
+        target_coords = (int(1660 * disp_w / 1920), int(236 * disp_h / 1080))
         actions.append(f"Using calibrated toolbar coordinates {target_coords} on display {disp_id}")
 
     # 4. Dispatch touch motion directly on pencil icon

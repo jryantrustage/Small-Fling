@@ -56,14 +56,13 @@ class ResetHomeNode(BaseDagNode):
 
         # Execute up to 3 focused attempts to return to Line 1
         for attempt in range(1, 4):
-            if attempt > 1:
-                try:
-                    from services.adb_service import ensure_editor_content_focused
-                    await ensure_editor_content_focused(serial, disp_id)
-                except Exception:
-                    pass
-                await dismiss_keyboard(serial, disp_id)
-                await asyncio.sleep(0.15)
+            try:
+                from services.adb_service import ensure_editor_content_focused
+                await ensure_editor_content_focused(serial, disp_id)
+            except Exception:
+                pass
+            await dismiss_keyboard(serial, disp_id)
+            await asyncio.sleep(0.15)
 
             # Pure HID Ctrl+Home: directly navigates to Line 1
             await send_hid_keycombination(113, 122, serial=serial, caller_node="reset_home")

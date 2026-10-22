@@ -117,6 +117,11 @@ class FrameOcrNode(BaseDagNode):
             if bot_ln <= top_ln:
                 bot_ln = top_ln + lpp - 1
 
+            if not lines_detected or not any(bool((l.get("text") or "").strip()) for l in lines_detected):
+                full_scan = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=top_ln)
+                if full_scan.get("lines"):
+                    lines_detected = full_scan["lines"]
+
             with open(temp_calib, "rb") as f:
                 snap = f.read()
             scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": lines_detected}
@@ -151,6 +156,7 @@ class FrameOcrNode(BaseDagNode):
         pid = blackboard.project_id or state.get_current_project_id()
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
 
+        arrow_count = 0 if pidx == 1 else (state.orchestration_state.get("last_arrow_count") or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count") or 0)
         if is_duplicate and duplicate_fid in state.captured_frames:
             fid = duplicate_fid
             state.captured_frames[fid].update({
@@ -161,7 +167,6 @@ class FrameOcrNode(BaseDagNode):
             })
             frame_info = state.captured_frames[fid]
         else:
-            arrow_count = 0 if pidx == 1 else (state.orchestration_state.get("last_arrow_count") or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count") or 0)
             fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
             fn = f"{fid}.png"
             frame_path = state.FRAMES_DIR / fn
@@ -185,12 +190,13 @@ class FrameOcrNode(BaseDagNode):
             }
             state.captured_frames[fid] = frame_info
 
+        fn_to_save = frame_info.get("filename") or f"{fid}.png"
         if pid:
             try:
                 db.save_frame(
                     project_id=pid,
                     frame_id=fid,
-                    filename=frame_info.get("filename", fn),
+                    filename=fn_to_save,
                     top_line=top_ln,
                     bottom_line=bot_ln,
                     page_index=pidx,
@@ -232,7 +238,7 @@ class FrameOcrNode(BaseDagNode):
         # Populate document master lines if text was detected
         for item in lines_detected:
             ln = item.get("line_number")
-            raw_txt = (item.get("text") or "").strip()
+            raw_txt = (item.get("text") or "").rstrip("\r\n")
             if ln:
                 raw_txt = ocr_svc.sanitize_line_text(ln, raw_txt)
                 if ln in state.document_lines:
@@ -240,7 +246,7 @@ class FrameOcrNode(BaseDagNode):
                     ex_txt = (existing.get("text") if isinstance(existing, dict) else str(existing)).strip()
                     if ex_txt and not ex_txt.startswith(f"Line {ln}"):
                         continue
-                if not raw_txt or raw_txt == f"Line {ln}":
+                if raw_txt.strip() == f"Line {ln}":
                     continue
                 state.document_lines[ln] = state.MasterLine(
                     raw_txt,

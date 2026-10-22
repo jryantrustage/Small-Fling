@@ -291,6 +291,24 @@ class EditModeClassifier(BaseClassifier):
         split_screen_detected = bool(em.get("split_screen_detected", False))
         edit_mode_active = em.get("passed") is True
 
+        # 1. Ground truth check: In Teams markdown editor, Edit Mode displays the code line number gutter.
+        # Preview mode renders formatted markdown without gutter numbers.
+        if img is not None:
+            from ocr_engine import find_gutter_numbers_cluster
+            cluster = find_gutter_numbers_cluster(img)
+            if cluster and len(cluster) >= 3:
+                # Gutter numbers are clearly present in the left margin -> Editor is verified in Edit Mode!
+                return ClassificationResult(
+                    classifier_id=self.id,
+                    issue_detected=False,
+                    issue_name=self.issue_description,
+                    fix_name=self.fix_description,
+                    severity=self.severity,
+                    details=f"Editor is in active single-pane edit mode (verified {len(cluster)} gutter line numbers)",
+                    target_coordinates=None,
+                    metadata={"edit_mode_active": True, "split_screen_detected": False, "gutter_cluster_size": len(cluster)}
+                )
+
         w_t = 1920
         h_t = 1080
         if img is not None:
@@ -298,11 +316,12 @@ class EditModeClassifier(BaseClassifier):
             scale_x = (w_t / 1920.0) if w_t > 0 else 1.0
             scale_y = (h_t / 1080.0) if h_t > 0 else 1.0
 
-            # Inspect secondary toolbar for active mode button
+            # Only inspect toolbar within actual editor bounds (x < 1100), not the outer desktop wallpaper
             tb_y1 = int(70 * scale_y)
             tb_y2 = int(270 * scale_y)
-            tb_x1 = int(1400 * scale_x)
-            crop_tb = img[tb_y1:tb_y2, tb_x1:]
+            tb_x1 = max(int(600 * scale_x), min(int(1050 * scale_x), int(w_t * 0.55)))
+            tb_x2 = min(w_t, int(1100 * scale_x))
+            crop_tb = img[tb_y1:tb_y2, tb_x1:tb_x2] if tb_x2 > tb_x1 else img[tb_y1:tb_y2, :]
             if crop_tb.size > 0:
                 hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
                 blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
@@ -320,7 +339,7 @@ class EditModeClassifier(BaseClassifier):
                         # Check for neighbor mode icons horizontally aligned in the toolbar row
                         r_y1 = max(0, abs_cy - int(18 * scale_y))
                         r_y2 = min(h_t, abs_cy + int(18 * scale_y))
-                        row_strip = img[r_y1:r_y2, int(w_t * 0.50):]
+                        row_strip = img[r_y1:r_y2, tb_x1:tb_x2]
                         gray = cv2.cvtColor(row_strip, cv2.COLOR_BGR2GRAY)
                         edges = cv2.Canny(gray, 40, 140)
                         e_conts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -329,7 +348,7 @@ class EditModeClassifier(BaseClassifier):
                         for ec in e_conts:
                             if cv2.contourArea(ec) >= 8:
                                 ex, ey, ew, eh = cv2.boundingRect(ec)
-                                abs_ex = int(w_t * 0.50) + ex + ew // 2
+                                abs_ex = tb_x1 + ex + ew // 2
                                 offset = abs_ex - abs_cx
                                 if int(20 * scale_x) <= abs(offset) <= int(90 * scale_x):
                                     neighbor_offsets.append(offset)
@@ -338,24 +357,21 @@ class EditModeClassifier(BaseClassifier):
                         has_right_mode_icon = any(int(25 * scale_x) <= off <= int(80 * scale_x) for off in neighbor_offsets)
 
                         if not has_left_mode_icon:
-                            # Blue pill is on leftmost mode icon (Pencil icon) -> Single-pane Edit Mode
                             edit_mode_active = True
                             split_screen_detected = False
                             break
                         elif has_left_mode_icon and has_right_mode_icon:
-                            # Blue pill is between mode icons (Split View icon) -> Split Screen Preview Mode
                             split_screen_detected = True
                             edit_mode_active = False
                             break
                         else:
-                            # Blue pill is on Preview Only icon -> Full Preview Mode
                             edit_mode_active = False
                             split_screen_detected = False
                             break
 
             # Fallback center strip check for solid vertical divider line ONLY if not already in edit mode
             if not edit_mode_active and not split_screen_detected:
-                center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.46):int(w_t * 0.54)]
+                center_strip = img[int(h_t * 0.20):int(h_t * 0.80), int(w_t * 0.25):int(w_t * 0.35)]
                 if center_strip.size > 0:
                     cs_gray = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY)
                     sobel_x = cv2.Sobel(cs_gray, cv2.CV_16S, 1, 0, ksize=3)

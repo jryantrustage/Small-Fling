@@ -1,0 +1,44 @@
+    "module": "NodeNext",    
+"moduleResolution": "NodeNext",    
+"rootDir": "src",    
+"outDir": "dist",    
+"sourceMap": true,    
+"strict": true,    
+"esModuleInterop": true,    
+"forceConsistentCasingInFileNames": true,    
+"skipLibCheck": true  
+},  
+"include": ["src/**/*.ts"]
+}
+```
+<!-- CODESCAN_FILE_END -->
+---
+### 45. `C:\DevAnalysis\internal-open-source\Matrix\vite.config.ts`
+<!-- CODESCAN_FILE_START path="C:\DevAnalysis\internal-open-source\Matrix\vite.config.ts" type=".ts" size="866" lines="25" chars="866" -->
+```typescript
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+const serverPort = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 4300;
+export default defineConfig({  
+plugins: [react()],  
+build: {    
+outDir: 'dist/public',    
+emptyOutDir: true,  
+},  
+server: {    
+// Bind explicitly to 127.0.0.1 (not just "localhost") so it matches the loopback    
+// results server's HOST and can't silently resolve to a different address (e.g. ::1).    
+host: '127.0.0.1',    
+port: 5173,    
+proxy: {      
+'/api': `http://127.0.0.1:${serverPort}`,      
+// Node-state and WIQL-count updates arrive over this socket; without ws:true it never connects      
+// when the web app is served from the standalone Vite dev server (port 5173).      
+'/ws': { target: `ws://127.0.0.1:${serverPort}`, ws: true },    
+},  
+},
+});
+```
+<!-- CODESCAN_FILE_END -->
+---
+s

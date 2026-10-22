@@ -234,7 +234,19 @@ async def verify_viewport_before_keystroke(serial: Optional[str] = None, image_b
     if ser and "mock" in str(ser).lower():
         return True, "Mock device verified", {"tier": "mock"}
 
-    # 1. Quick check: Is soft keyboard currently covering the view?
+    snap = image_bytes or await capture_external_screenshot(ser, max_cache_age_s=0.25, bypass_lock=True)
+    if not snap:
+        return False, "Unable to capture external display screenshot for pre-scroll visual check", {"captured": False}
+
+    # 1. Tier 1 (Ultra-fast CV gutter check, ~2ms): If line numbers are clearly present in left gutter, it is 100% in editor
+    nparr = np.frombuffer(snap, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is not None:
+        t_top, t_bot = fast_detect_gutter_bounds(img, dpi_factor=1.0)
+        if t_top > 0 or t_bot > 0:
+            return True, f"Markdown editor verified via gutter bounds (Ln {t_top} -> {t_bot})", {"tier": "fast_cv", "top": t_top, "bottom": t_bot}
+
+    # 2. Check if soft keyboard is currently covering the view
     ime_visible = await is_ime_visible(ser)
     if ime_visible:
         disp_id = await detect_external_display_id(ser)
@@ -242,18 +254,6 @@ async def verify_viewport_before_keystroke(serial: Optional[str] = None, image_b
         # Re-check after auto-fix
         if await is_ime_visible(ser):
             return False, "Soft keyboard is active on screen; keystrokes prevented to avoid text disruption", {"keyboard_open": True}
-
-    snap = image_bytes or await capture_external_screenshot(ser, max_cache_age_s=0.25, bypass_lock=True)
-    if not snap:
-        return False, "Unable to capture external display screenshot for pre-scroll visual check", {"captured": False}
-
-    # 2. Tier 1 (Ultra-fast CV gutter check, ~2ms): If line numbers are clearly present in left gutter, it is 100% in editor
-    nparr = np.frombuffer(snap, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is not None:
-        t_top, t_bot = fast_detect_gutter_bounds(img, dpi_factor=1.0)
-        if t_top > 0 or t_bot > 0:
-            return True, f"Markdown editor verified via gutter bounds (Ln {t_top} -> {t_bot})", {"tier": "fast_cv", "top": t_top, "bottom": t_bot}
 
     # 3. Tier 2 (Visual Model VQA via Ollama, ~80ms): Verify if screen is in viewer or directory
     vqa_res = classify_editor_viewport(snap)

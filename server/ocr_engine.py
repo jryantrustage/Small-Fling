@@ -696,6 +696,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     gx_min = max(16, int(w * 0.015))
     gx_max = max(70, min(90, int(w * 0.047)))
     content_min_x = gx_max + 1
+    content_max_x = min(w - 20, 1080)
 
     # 2. Extract genuine gutter candidate digits and content words within [ed_top, ed_bot]
     raw_gutter_pairs: List[Tuple[float, int, Dict[str, Any]]] = []
@@ -708,6 +709,10 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         txt = b["text"].strip()
         bx = b["x"]
         bw = b["width"]
+
+        # Reject any bounding boxes belonging to wallpaper icons or background windows past the 1080px editor margin
+        if bx >= content_max_x or (bx + bw // 2) > (content_max_x + 10):
+            continue
 
         # Filter Android/Teams status pills like "Offline" appearing near the bottom bar
         if txt.lower() in ["offline", "online", "syncing", "saved"] and cy > (ed_bot - 30):
@@ -804,14 +809,14 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         # Content words for this line
         matched_words = [
             b for b in content_boxes
-            if (b["x"] + b["width"]) >= content_min_x and abs(b["center_y"] - ly) < pitch * 0.48
+            if content_min_x <= (b["x"] + b["width"]) <= (content_max_x + 30) and abs(b["center_y"] - ly) < pitch * 0.48
         ]
         matched_words.sort(key=lambda b: b["x"])
 
         # Content bounding box
         if matched_words:
             rx_min = max(content_min_x, int(min(b["x"] for b in matched_words)))
-            rx_max = int(max(b["x"] + b["width"] for b in matched_words))
+            rx_max = int(min(content_max_x, max(b["x"] + b["width"] for b in matched_words)))
             content_box = {
                 "x": rx_min,
                 "y": box_y,
@@ -819,20 +824,35 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                 "height": box_h,
                 "line_number": ln
             }
-            line_str = " ".join(b["text"] for b in matched_words)
+            # Compute leading indentation from monospace character pitch (~8.2px per char)
+            indent_spaces = max(0, int(round((rx_min - content_min_x) / 8.2)))
+            indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
+            line_str = indent_prefix + " ".join(b["text"] for b in matched_words)
         else:
             content_box = {
                 "x": content_min_x,
                 "y": box_y,
-                "width": int(w * 0.75),
+                "width": int(content_max_x - content_min_x),
                 "height": box_h,
                 "line_number": ln,
                 "interpolated": True
             }
             line_str = ""
+            # Inspect localized line slice for thin markdown symbols (fences, dots, tree lines)
+            slice_crop = img[box_y:box_y + box_h, content_min_x:content_max_x]
+            if slice_crop.size > 0:
+                sc_gray = cv2.cvtColor(slice_crop, cv2.COLOR_BGR2GRAY)
+                bright_coords = np.argwhere(sc_gray > 75)
+                if len(bright_coords) >= 15:
+                    # Run quick slice OCR with CLAHE
+                    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                    enhanced_sc = clahe.apply(sc_gray)
+                    sc_res, _ = (ocr(enhanced_sc) if ocr else (None, None))
+                    if sc_res:
+                        line_str = " ".join(r[1].strip() for r in sorted(sc_res, key=lambda x: float(np.min(np.array(x[0])[:, 0]))))
 
         # Clean line_str of accidental duplicate gutter digit prefix
-        line_str = re.sub(rf"^{ln}\s*[:\.]?\s*", "", line_str.strip())
+        line_str = re.sub(rf"^{ln}\s*[:\.]?\s*", "", line_str)
         is_blank = not bool(line_str.strip())
         is_w = len(line_str) > 65
 

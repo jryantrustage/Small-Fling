@@ -1243,15 +1243,17 @@ async def ensure_editor_content_focused(
     ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
     actions = []
 
-    # 1. Bring Teams Task to front
+    # 1. Bring Teams FilePreviewActivity Task to front and focus
     try:
-        task_res = await run_adb_shell("dumpsys activity tasks | grep -E 'Task\\{.*com\\.microsoft\\.teams'", ser, timeout=1.5)
-        m_t = re.search(r'#(\d+)\s+type=', task_res.get("stdout", ""))
+        task_res = await run_adb_shell("dumpsys activity activities", ser, timeout=2.5)
+        stdout = task_res.get("stdout", "")
+        m_t = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
+        if not m_t:
+            m_t = re.search(r'Task\{[0-9a-fA-F]+\s+#(\d+)\b[^\}]*com\.microsoft\.teams', stdout)
         if m_t:
             tid = m_t.group(1)
-            await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.5)
             await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser, timeout=1.0)
-            actions.append(f"Brought Teams task #{tid} to front on display {ext_id}")
+            actions.append(f"Focused Teams FilePreviewActivity task #{tid} on display {ext_id}")
     except Exception as te:
         actions.append(f"Task focus note: {te}")
 
@@ -1262,7 +1264,7 @@ async def ensure_editor_content_focused(
 
     # 3. Tap safe editor content coordinates to guarantee input connection focus
     disp_w, disp_h = await get_display_dimensions(ser, ext_id)
-    focus_x = min(disp_w // 4, 450) if disp_w > 0 else 450
+    focus_x = min(disp_w // 8, 250) if disp_w > 0 else 250
     focus_y = min(disp_h // 3, 360) if disp_h > 0 else 360
     await run_adb_shell(f"input -d {ext_id} tap {focus_x} {focus_y} >/dev/null 2>&1", ser, timeout=1.0)
     actions.append(f"Tapped editor content canvas at ({focus_x}, {focus_y}) on display {ext_id}")
@@ -1354,15 +1356,27 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         chk = await run_adb_shell("dumpsys input_method", ser, timeout=2.0)
         out = chk.get("stdout", "")
         has_visible_window = False
-        if "mInputShown=true" in out:
-            has_visible_window = True
+
+        # In Desktop Mode on external display, Gboard suggestion bar is active at y < 150 (height ~78px)
+        # Check actual touchable window geometry from WindowManager to ensure only real occluding keyboards are flagged
+        win_chk = await run_adb_shell("dumpsys window windows", ser, timeout=2.0)
+        win_out = win_chk.get("stdout", "")
+        m = re.search(r'InputMethod.*?touchableRegion=SkRegion\(\((\d+),(\d+),(\d+),(\d+)\)\)', win_out)
+        if m:
+            l, t, r, b = map(int, m.groups())
+            height = b - t
+            # Real virtual keyboard occludes the screen: height > 200 and bottom of screen (b > 700)
+            has_visible_window = (height > 200 and b > 700)
+        elif "mInputShown=true" in out:
+            # Fallback: if in desktop mode (Display #2 active), suggestion strip is non-occluding
+            has_visible_window = not ("Display #2" in win_out)
         else:
             for line in out.splitlines():
                 line_str = line.strip()
                 if "mImeWindowVis=" in line_str:
                     val_part = line_str.split("mImeWindowVis=")[1].split()[0]
                     if any(v in val_part for v in ["1", "2", "3", "0x1", "0x2", "0x3"]):
-                        has_visible_window = True
+                        has_visible_window = not ("Display #2" in win_out)
                         break
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
@@ -1724,19 +1738,11 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     if not fs_status.get("is_fullscreen", True):
         tid = fs_status.get("task_id")
         if tid:
-            # Resize freeform task to full display bounds via clean ADB command, never blindly tap the app toolbar!
-            await run_adb_shell(f"am task resize {tid} 0 0 {disp_w} {disp_h} >/dev/null 2>&1; cmd activity task to-front {tid} >/dev/null 2>&1", ser)
-            await asyncio.sleep(0.35)
-            # Ensure single-pane Edit Mode and Dark Mode without keyboard
-            try:
-                from services.ui_automator_service import enable_edit_mode, select_dark_mode
-                await enable_edit_mode(ser, display_id)
-                await asyncio.sleep(0.2)
-                await select_dark_mode(ser, display_id)
-                await asyncio.sleep(0.1)
-                await dismiss_keyboard(ser, display_id)
-            except Exception:
-                pass
+            # Bring task to front and focus without resizing (am task resize corrupts Chromium WebView!)
+            await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser)
+            await asyncio.sleep(0.15)
+            # Dismiss any keyboard without blind toolbar toggling
+            await dismiss_keyboard(ser, display_id)
             fs_status = await is_editor_full_screen(ser, display_id)
 
     try:
