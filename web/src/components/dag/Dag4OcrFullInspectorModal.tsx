@@ -116,7 +116,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
     }
   }, [inline]);
 
-  const [selectedImageId, setSelectedImageId] = useState<string>(initialImageId);
+  const [selectedImageId, setSelectedImageId] = useState<string>(initialImageId || '');
   const [availableImages, setAvailableImages] = useState<AvailableOcrImage[]>([]);
   const [inspectData, setInspectData] = useState<OcrInspectionData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -124,6 +124,15 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   const [isRescanningSelected, setIsRescanningSelected] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [rescanSuccessMessage, setRescanSuccessMessage] = useState<string | null>(null);
+
+  // Keep a stable ref to onRefresh to avoid re-triggering fetch effects on parent renders
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  // Track in-flight request to avoid re-entrant concurrent fetches
+  const fetchingIdRef = useRef<string | null>(null);
 
   // Inspector interactive states
   const [hoveredLineNumber, setHoveredLineNumber] = useState<number | null>(null);
@@ -164,15 +173,29 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
         const data = await res.json();
         if (data.images && Array.isArray(data.images)) {
           setAvailableImages(data.images);
+          return data.images as AvailableOcrImage[];
         }
       }
     } catch (e) {
       console.warn('[Dag4OcrFullInspectorModal] Failed to fetch available images:', e);
     }
+    return [];
   }, [apiBase]);
 
   // Fetch inspection data for selected image
   const fetchInspectData = useCallback(async (imgId: string, forceRescan: boolean = false) => {
+    if (!imgId || imgId === 'none') {
+      setInspectData(null);
+      setConnectorPaths([]);
+      setIsLoading(false);
+      return;
+    }
+
+    if (fetchingIdRef.current === imgId && !forceRescan) {
+      return; // Already in-flight for this image
+    }
+
+    fetchingIdRef.current = imgId;
     if (forceRescan) {
       setIsRescanningAll(true);
     } else {
@@ -184,6 +207,9 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
       const url = `${apiBase}/api/ocr/inspect?image_id=${encodeURIComponent(imgId)}${forceRescan ? '&rescan=true' : ''}`;
       const res = await fetch(url);
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('No capture frame found on disk. Run DAG or capture a new frame to inspect.');
+        }
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
       const data: OcrInspectionData = await res.json();
@@ -191,31 +217,58 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
       if (data.available_images && data.available_images.length > 0) {
         setAvailableImages(data.available_images);
       }
-      if (forceRescan && onRefresh) {
-        onRefresh();
+      if (forceRescan && onRefreshRef.current) {
+        onRefreshRef.current();
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to inspect image OCR text and bounding boxes');
+      setInspectData(null);
+      setConnectorPaths([]);
+      setSelectedLinesToOverwrite(new Set());
     } finally {
       setIsLoading(false);
       setIsRescanningAll(false);
+      fetchingIdRef.current = null;
     }
-  }, [apiBase, onRefresh]);
+  }, [apiBase]);
 
-  // Initial load
+  // Initial load: fetch available images and sync selection
   useEffect(() => {
-    if (isOpen) {
-      fetchAvailableImages();
+    if (!isOpen) return;
+
+    fetchAvailableImages().then((imgs) => {
+      if (imgs && imgs.length > 0) {
+        setSelectedImageId(prev => {
+          if (prev && imgs.some(i => i.id === prev)) return prev;
+          if (initialImageId && imgs.some(i => i.id === initialImageId)) return initialImageId;
+          return imgs[0].id;
+        });
+      } else {
+        setSelectedImageId('');
+        setInspectData(null);
+        setConnectorPaths([]);
+      }
+    });
+  }, [isOpen, fetchAvailableImages, initialImageId]);
+
+  // When selectedImageId changes, fetch inspect data
+  useEffect(() => {
+    if (!isOpen) return;
+    if (selectedImageId) {
       fetchInspectData(selectedImageId);
+    } else {
+      setInspectData(null);
+      setConnectorPaths([]);
+      setIsLoading(false);
     }
-  }, [isOpen, selectedImageId, fetchAvailableImages, fetchInspectData]);
+  }, [isOpen, selectedImageId, fetchInspectData]);
 
-  // When initialImageId prop changes, update selection
+  // When initialImageId prop changes externally, update selectedImageId
   useEffect(() => {
-    if (initialImageId) {
+    if (initialImageId && initialImageId !== selectedImageId) {
       setSelectedImageId(initialImageId);
     }
-  }, [initialImageId]);
+  }, [initialImageId, selectedImageId]);
 
   // Global ESC key listener to completely close modal
   useEffect(() => {
@@ -1046,13 +1099,23 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 <AlertCircle size={24} />
                 <span style={{ fontSize: '12px', fontWeight: 700 }}>Inspection Error</span>
                 <span style={{ fontSize: '11px', color: '#8b949e', maxWidth: '340px' }}>{error}</span>
-                <button
-                  type="button"
-                  onClick={() => fetchInspectData(selectedImageId)}
-                  style={{ marginTop: '8px', padding: '4px 10px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '5px', fontSize: '11px', cursor: 'pointer' }}
-                >
-                  Retry Inspection
-                </button>
+                {selectedImageId && (
+                  <button
+                    type="button"
+                    onClick={() => fetchInspectData(selectedImageId)}
+                    style={{ marginTop: '8px', padding: '4px 10px', background: '#21262d', border: '1px solid #30363d', color: '#e6edf3', borderRadius: '5px', fontSize: '11px', cursor: 'pointer' }}
+                  >
+                    Retry Inspection
+                  </button>
+                )}
+              </div>
+            ) : (!inspectData || !selectedImageId) ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '10px', color: '#8b949e', padding: '30px', textAlign: 'center' }}>
+                <ImageIcon size={32} color="#30363d" />
+                <span style={{ fontSize: '13px', fontWeight: 700, color: '#c9d1d9' }}>No Active Project Frames Available</span>
+                <span style={{ fontSize: '11px', maxWidth: '360px', lineHeight: 1.45, color: '#8b949e' }}>
+                  This project does not have any captured frames yet. Run the DAG pipeline or double-click a frame in the sidebar to inspect OCR text and bounding boxes.
+                </span>
               </div>
             ) : (
               <div
@@ -1470,7 +1533,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
             <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
               {filteredLines.length === 0 ? (
                 <div style={{ padding: '30px', textAlign: 'center', color: '#8b949e', fontSize: '12px' }}>
-                  No matching OCR lines found for &quot;{searchFilter}&quot;
+                  {searchFilter ? `No matching OCR lines found for "${searchFilter}"` : 'No OCR lines mapped for this image yet.'}
                 </div>
               ) : (
                 filteredLines.map(line => {

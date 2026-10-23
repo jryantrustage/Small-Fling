@@ -21,57 +21,57 @@ import services.ocr_service as ocr_svc
 router = APIRouter(tags=["Frames & Document"])
 
 def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
+    search_dirs = [state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR]
+
     if filename:
-        cand = state.FRAMES_DIR / filename
-        if cand.exists():
-            return cand
-
-    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
-    if (state.FRAMES_DIR / frame_id).exists():
-        return state.FRAMES_DIR / frame_id
-    if (state.FRAMES_DIR / f"{clean_id}.png").exists():
-        return state.FRAMES_DIR / f"{clean_id}.png"
-
-    if frame_id in ("latest", "current", "temp"):
-        temp_c = state.FRAMES_DIR / "dag_node3_capture_temp.png"
-        if temp_c.exists() and temp_c.stat().st_size >= 2000:
-            return temp_c
-        cands = sorted(
-            [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
-            key=lambda p: p.stat().st_mtime,
-            reverse=True
-        )
-        if cands:
-            return cands[0]
-
-    matches = list(state.FRAMES_DIR.glob(f"*{frame_id}*.png"))
-    if matches:
-        return matches[0]
-
-    finfo = state.captured_frames.get(frame_id)
-    if finfo:
-        if finfo.get("filename"):
-            cand = state.FRAMES_DIR / finfo["filename"]
+        for fdir in search_dirs:
+            cand = fdir / filename
             if cand.exists():
                 return cand
-        pidx = finfo.get("page_index")
-        if pidx:
-            raw_matches = list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx:03d}*.png")) or list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx}*.png"))
-            if raw_matches:
-                return raw_matches[-1]
+
+    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
+    for fdir in search_dirs:
+        if (fdir / frame_id).exists():
+            return fdir / frame_id
+        if (fdir / f"{clean_id}.png").exists():
+            return fdir / f"{clean_id}.png"
+
+    if frame_id in ("latest", "current", "temp"):
+        for fdir in search_dirs:
+            temp_c = fdir / "dag_node3_capture_temp.png"
+            if temp_c.exists() and temp_c.stat().st_size >= 2000:
+                return temp_c
+        for fdir in search_dirs:
+            cands = sorted(
+                [p for p in fdir.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
+                key=lambda p: p.stat().st_mtime,
+                reverse=True
+            )
+            if cands:
+                return cands[0]
+
+    for fdir in search_dirs:
+        matches = list(fdir.glob(f"*{frame_id}*.png"))
+        if matches:
+            return matches[0]
+
+    finfo = state.captured_frames.get(frame_id)
+    if finfo and finfo.get("filename"):
+        for fdir in search_dirs:
+            cand = fdir / finfo["filename"]
+            if cand.exists():
+                return cand
 
     try:
         frames = db.get_frames(state.get_current_project_id())
         for f in frames:
             if f.get("frame_id") == frame_id:
                 fn = f.get("filename")
-                if fn and (state.FRAMES_DIR / fn).exists():
-                    return state.FRAMES_DIR / fn
-                pidx = f.get("page_index")
-                if pidx:
-                    raw_matches = list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx:03d}*.png")) or list(state.FRAMES_DIR.glob(f"raw_capture_p{pidx}*.png"))
-                    if raw_matches:
-                        return raw_matches[-1]
+                if fn:
+                    for fdir in search_dirs:
+                        cand = fdir / fn
+                        if cand.exists():
+                            return cand
     except Exception:
         pass
 
@@ -164,6 +164,10 @@ async def get_ocr_images(project_id: Optional[str] = Query(None)):
 
 _ocr_inspect_cache: Dict[str, Dict[str, Any]] = {}
 
+def clear_ocr_inspect_cache():
+    """Clear in-memory inspect cache when switching or deleting projects."""
+    _ocr_inspect_cache.clear()
+
 @router.get("/api/ocr/inspect")
 @router.post("/api/ocr/inspect")
 async def inspect_ocr_image(
@@ -181,8 +185,14 @@ async def inspect_ocr_image(
     try:
         ipath = _get_frame_path(target_id)
     except HTTPException:
-        ipath = _get_frame_path("latest")
-        target_id = ipath.stem
+        try:
+            ipath = _get_frame_path("latest")
+            target_id = ipath.stem
+        except HTTPException:
+            raise HTTPException(status_code=404, detail="No capture images available for this project yet")
+
+    if not ipath or not ipath.exists():
+        raise HTTPException(status_code=404, detail="Frame image file not found on disk")
 
     img_w, img_h = 1920, 1080
     try:

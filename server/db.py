@@ -3,8 +3,10 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
+import config
+
 DB_PATH = Path(__file__).parent / "data" / "matrix_capture.db"
-DATA_DIR, FRAMES_DIR = Path(__file__).parent / "data", Path(__file__).parent / "data" / "frames"
+DATA_DIR, FRAMES_DIR = Path(__file__).parent / "data", config.FRAMES_DIR
 
 def get_connection() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True); FRAMES_DIR.mkdir(parents=True, exist_ok=True)

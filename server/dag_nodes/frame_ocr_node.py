@@ -131,25 +131,32 @@ class FrameOcrNode(BaseDagNode):
         is_duplicate = False
         duplicate_fid = None
 
-        if top_ln == 1:
+        cur_acquire_fid = getattr(blackboard, "frame_id", None)
+        other_frames = [f for f in sorted_f if f.get("frame_id") != cur_acquire_fid]
+
+        if getattr(blackboard, "page_index", None) and blackboard.page_index >= 1:
+            pidx = blackboard.page_index
+        elif not other_frames:
+            pidx = 1
+        elif top_ln == 1 or not any(f.get("page_index") == 1 for f in other_frames):
             pidx = 1
             # If Page 1 already exists, check if this is an identical re-read of Page 1
-            p1_frames = [f for f in sorted_f if f.get("page_index") == 1]
+            p1_frames = [f for f in other_frames if f.get("page_index") == 1]
             if p1_frames:
                 is_duplicate = True
                 duplicate_fid = p1_frames[0]["frame_id"]
-        elif sorted_f:
-            last_f = sorted_f[-1]
+        elif other_frames:
+            last_f = other_frames[-1]
             if last_f.get("content_hash") == content_hash:
                 is_duplicate = True
                 duplicate_fid = last_f["frame_id"]
-                pidx = last_f.get("page_index", len(sorted_f))
+                pidx = last_f.get("page_index", len(other_frames))
             elif last_f.get("top_line") == top_ln and last_f.get("bottom_line") == bot_ln:
                 is_duplicate = True
                 duplicate_fid = last_f["frame_id"]
-                pidx = last_f.get("page_index", len(sorted_f))
+                pidx = last_f.get("page_index", len(other_frames))
             else:
-                pidx = last_f.get("page_index", len(sorted_f)) + 1
+                pidx = last_f.get("page_index", len(other_frames)) + 1
         else:
             pidx = 1
 
@@ -157,13 +164,26 @@ class FrameOcrNode(BaseDagNode):
         now_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
 
         arrow_count = 0 if pidx == 1 else (state.orchestration_state.get("last_arrow_count") or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count") or 0)
-        if is_duplicate and duplicate_fid in state.captured_frames:
+        if cur_acquire_fid and cur_acquire_fid in state.captured_frames:
+            fid = cur_acquire_fid
+            state.captured_frames[fid].update({
+                "top_line": top_ln,
+                "bottom_line": bot_ln,
+                "page_index": pidx,
+                "status": "processed",
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
+                "arrow_count": arrow_count
+            })
+            frame_info = state.captured_frames[fid]
+        elif is_duplicate and duplicate_fid in state.captured_frames:
             fid = duplicate_fid
             state.captured_frames[fid].update({
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
+                "page_index": pidx,
                 "status": "processed",
-                "extracted_line_count": len(lines_detected) if lines_detected else lpp
+                "extracted_line_count": len(lines_detected) if lines_detected else lpp,
+                "arrow_count": arrow_count
             })
             frame_info = state.captured_frames[fid]
         else:

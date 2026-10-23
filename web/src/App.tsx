@@ -219,20 +219,27 @@ function AppContent() {
   const handleOpenInlineOcrInspector = (imageId?: string) => {
     if (imageId) {
       setOcrInspectImageId(imageId);
-      if (frames.some(f => f.frame_id === imageId)) {
+      if (imageId !== 'dag_node3_capture_temp') {
         setSelectedFrameId(imageId);
       }
     } else if (selectedFrameId) {
       setOcrInspectImageId(selectedFrameId);
     }
     setInspectorMode('ocr_inspect');
-    setInspectorMaximized(true);
+    setInspectorMaximized(false);
+    setFramesMinimized(false);
   };
 
   const handleCloseInlineOcrInspector = () => {
     setInspectorMode(selectedFrameId ? 'single' : 'live');
     setInspectorMaximized(false);
+    setFramesMinimized(false);
   };
+
+  const handleOcrInspectorRefresh = useCallback(() => {
+    apiJson<any>('/api/document').then(d => { if (d) setDocumentData(d); });
+    apiJson<any>('/api/frames').then(d => { if (d?.frames) setFrames(d.frames); });
+  }, []);
   const [splicedScale, setSplicedScale] = useState<number>(100);
   const [splicedFitMode, setSplicedFitMode] = useState<'width' | 'fit'>('width');
   const [splicedRefreshKey, setSplicedRefreshKey] = useState<number>(() => Date.now());
@@ -882,14 +889,21 @@ function AppContent() {
   }, [projectInitProgress?.active, projectInitProgress?.status, fetchData]);
 
   const handleSwitchProject = async (id: string) => {
+    setInspectorMode('live');
+    setOcrInspectImageId('');
     await api(`/api/projects/${id}/activate`, { method: 'POST' });
     await fetchData();
   };
 
-  const handleCreateProject = async () => {
-    const projName = newProject.name.trim();
+  const isCreatingProjectRef = useRef(false);
+  const handleCreateProject = async (overrideName?: string) => {
+    if (isCreatingProjectRef.current) return;
+    const projName = (typeof overrideName === 'string' ? overrideName : newProject.name).trim();
     if (!projName) return;
+    isCreatingProjectRef.current = true;
 
+    setInspectorMode('live');
+    setOcrInspectImageId('');
     setShowDag(true);
     setSelectedDag('all');
     setProjectInitProgress({
@@ -938,6 +952,8 @@ function AppContent() {
       }
     } catch (e: any) {
       setProjectInitProgress(prev => prev ? ({ ...prev, status: 'error', error: e.message, stage: 'Network error creating project' }) : null);
+    } finally {
+      isCreatingProjectRef.current = false;
     }
   };
 
@@ -1310,6 +1326,8 @@ function AppContent() {
           setSelectedFrameIds(new Set());
           setSelectedLineNumbers(new Set());
           setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+          setInspectorMode('live');
+          setOcrInspectImageId('');
         }
         addTelemetryEvent('SYSTEM', `Deleted project "${projName}" (${id})`);
       } else {
@@ -1394,6 +1412,8 @@ function AppContent() {
             }
             if (activeProjectRef.current?.id === msg.project_id || !msg.active_project) {
               setActiveProject(msg.active_project || null);
+              setInspectorMode('live');
+              setOcrInspectImageId('');
               if (!msg.active_project) {
                 setFrames([]);
                 setSelectedFrameId(null);
@@ -1404,6 +1424,8 @@ function AppContent() {
             }
           } else if (msg.type === 'project_switched' || msg.type === 'project_updated') {
             setActiveProject(msg.project || null);
+            setInspectorMode('live');
+            setOcrInspectImageId('');
             fetchData();
           } else if (msg.type === 'document_updated') {
             const docObj = msg.data || msg.document;
@@ -1860,7 +1882,7 @@ function AppContent() {
   };
 
   const sortedFrames = [...frames].sort((a, b) => (a.page_index || 0) - (b.page_index || 0) || (a.created_at || '').localeCompare(b.created_at || '') || (a.top_line || 0) - (b.top_line || 0));
-  const activeFrame = frames.find(f => f.frame_id === selectedFrameId) || frames[0] || null;
+  const activeFrame = (selectedFrameId ? frames.find(f => f.frame_id === selectedFrameId) : null) || sortedFrames[0] || null;
 
   const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;
@@ -2604,18 +2626,28 @@ function AppContent() {
                       const prevFrame = idx > 0 ? sortedFrames[idx - 1] : null;
                       const hasGap = prevFrame && prevFrame.bottom_line > 0 && f.top_line > prevFrame.bottom_line + 1;
                       const isSelected = selectedFrameIds.has(f.frame_id);
+                      const isVeryFirstFrame = idx === 0;
+                      const hasPage1InSet = sortedFrames.some(sf => sf.page_index === 1);
+                      const displayPageNum = (isVeryFirstFrame && (!f.page_index || f.page_index > 1) && !hasPage1InSet)
+                        ? 1
+                        : (f.page_index || (idx + 1));
                       return (
                         <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
                           <div
                             className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${isSelected ? 'selected-for-edit' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
-                            onClick={() => setSelectedFrameId(f.frame_id)}
+                            onClick={() => {
+                              setSelectedFrameId(f.frame_id);
+                              setInspectorMode('single');
+                              setInspectorMaximized(false);
+                              setFramesMinimized(false);
+                            }}
                             onDoubleClick={(e) => {
                               e.stopPropagation();
                               handleOpenInlineOcrInspector(f.frame_id);
                             }}
                             style={{ cursor: 'pointer' }}
-                            title="Click to select frame • Double-click to open OCR Full Inspector inline"
+                            title="Click to select & view frame • Double-click to open OCR Full Inspector inline"
                           >
                             <div className="frame-card-preview">
                               <input
@@ -2626,23 +2658,14 @@ function AppContent() {
                                 onClick={(e) => e.stopPropagation()}
                                 title="Select frame for group operations"
                               />
-                              <img src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
-                              <span className="frame-badge">Pg {f.page_index}</span>
+                              <img key={`thumb_${f.frame_id}`} src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
+                              <span className="frame-badge">Pg {displayPageNum}</span>
                               {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
-                              <button className="frame-card-delete-overlay" onClick={(e) => handleDeleteFrame(f.frame_id, e)} disabled={deletingFrameId === f.frame_id} title="Delete frame"><Trash2 size={12} /></button>
-                              <button
-                                type="button"
-                                id={`frame-trace-btn-${f.frame_id.slice(0, 8)}`}
-                                className="frame-card-delete-overlay"
-                                style={{ left: '40px', borderColor: 'rgba(0, 255, 157, 0.45)', color: '#00ff9d' }}
-                                onClick={(e) => { e.stopPropagation(); setSelectedFrameId(f.frame_id); setTraceFrameId(f.frame_id); }}
-                                title="View detailed event trace (key presses, DAG events) for this capture"
-                              ><ListTree size={12} /></button>
                             </div>
                             <div className="frame-card-info">
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
-                                {f.page_index > 1 && (
+                                {displayPageNum > 1 && (
                                   <span
                                     className="frame-arrows-badge"
                                     style={{
@@ -2672,11 +2695,31 @@ function AppContent() {
                                   </button>
                                 )}
                               </div>
-                              <div className="frame-position-controls" onClick={e => e.stopPropagation()} title="Nudge offset (px)">
-                                <MoveVertical size={10} color="#8b949e" />
-                                <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, -1)}>▲</button>
-                                <span className="nudge-val">{f.custom_offset_y || 0}px</span>
-                                <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, 1)}>▼</button>
+                              <div className="frame-card-actions-group" onClick={e => e.stopPropagation()}>
+                                <div className="frame-position-controls" style={{ margin: 0 }} title="Nudge offset (px)">
+                                  <MoveVertical size={10} color="#8b949e" />
+                                  <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, -1)}>▲</button>
+                                  <span className="nudge-val">{f.custom_offset_y || 0}px</span>
+                                  <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, 1)}>▼</button>
+                                </div>
+                                <button
+                                  type="button"
+                                  id={`frame-trace-btn-${f.frame_id.slice(0, 8)}`}
+                                  className="frame-card-action-btn frame-card-trace-btn"
+                                  onClick={(e) => { e.stopPropagation(); setSelectedFrameId(f.frame_id); setTraceFrameId(f.frame_id); }}
+                                  title="View detailed event trace (key presses, DAG events) for this capture"
+                                >
+                                  <ListTree size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="frame-card-action-btn frame-card-delete-btn"
+                                  onClick={(e) => { e.stopPropagation(); handleDeleteFrame(f.frame_id, e); }}
+                                  disabled={deletingFrameId === f.frame_id}
+                                  title="Delete frame"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -3107,6 +3150,7 @@ function AppContent() {
                 ) : inspectorMode === 'ocr_inspect' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
                     <Dag4OcrFullInspectorModal
+                      key={`ocr_inspect_${activeProject?.id || 'none'}_${ocrInspectImageId}`}
                       isOpen={true}
                       inline={true}
                       onClose={handleCloseInlineOcrInspector}
@@ -3115,10 +3159,7 @@ function AppContent() {
                       nodeExtractedText=""
                       nodeModelUsed="MiniCPM-V (Ollama)"
                       nodeLinesCount={0}
-                      onRefresh={() => {
-                        apiJson<any>('/api/document').then(d => { if (d) setDocumentData(d); });
-                        apiJson<any>('/api/frames').then(d => { if (d?.frames) setFrames(d.frames); });
-                      }}
+                      onRefresh={handleOcrInspectorRefresh}
                     />
                   </div>
                 ) : activeFrame ? (
@@ -3130,7 +3171,11 @@ function AppContent() {
                       style={{ cursor: 'pointer' }}
                       title="Double-click frame to open OCR Full Inspector inline"
                     >
-                      <img src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image?t=${encodeURIComponent(activeFrame.created_at || '')}`} alt={activeFrame.frame_id} />
+                      <img
+                        key={`frame_img_${activeFrame.frame_id}`}
+                        src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image?t=${encodeURIComponent(activeFrame.created_at || '')}`}
+                        alt={activeFrame.frame_id}
+                      />
                       {frameBoundingBoxes[activeFrame.frame_id] && (
                         <svg className="bbox-svg-overlay" viewBox="0 0 1920 1080" preserveAspectRatio="none">
                           {frameBoundingBoxes[activeFrame.frame_id].first_line && <rect x={frameBoundingBoxes[activeFrame.frame_id].first_line!.x} y={frameBoundingBoxes[activeFrame.frame_id].first_line!.y} width={frameBoundingBoxes[activeFrame.frame_id].first_line!.width} height={frameBoundingBoxes[activeFrame.frame_id].first_line!.height} className="bbox-rect-green" />}
@@ -4419,73 +4464,127 @@ function AppContent() {
       )}
 
       {showNewProjectModal && (
-        <Modal title="Create New Project" onClose={() => setShowNewProjectModal(false)} onConfirm={handleCreateProject} confirmText="Create & Activate" confirmIcon={Plus} disabled={!newProject.name.trim()}>
-          <div className="modal-form-group" style={{ marginBottom: '12px' }}>
-            <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>PROJECT NAME *</label>
-            <input type="text" placeholder="e.g. Small-Fling Core" className="modal-input" value={newProject.name} onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && newProject.name.trim()) { e.preventDefault(); handleCreateProject(); } }} autoFocus />
-          </div>
-
-          <div className="modal-form-group" style={{ marginBottom: '12px' }}>
-            <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>TARGET DEVICE &amp; CHARACTERISTICS</label>
-            <select
-              className="modal-input"
-              style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-              value={newProject.deviceProfileId}
-              onChange={e => setNewProject(p => ({ ...p, deviceProfileId: e.target.value }))}
-            >
-              <option value="auto">⚡ Auto-Detect Connected Hardware (Zero Hardcoding)</option>
-              {deviceProfiles.map(prof => (
-                <option key={prof.id} value={prof.id}>
-                  📱 {prof.display_name || prof.name} ({prof.target_dpi} DPI • {prof.display_width}x{prof.display_height})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{
-            background: 'var(--bg-main)',
-            border: `1px solid ${newProject.lockDevice ? 'rgba(210, 153, 34, 0.35)' : 'var(--border-color)'}`,
-            borderRadius: '8px',
-            padding: '10px 12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '10px'
-          }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: newProject.lockDevice ? '#e3b341' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Lock size={13} color={newProject.lockDevice ? '#e3b341' : '#8b949e'} />
-                <span>Lock Project to Device Characteristics</span>
-              </div>
-              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.4 }}>
-                {newProject.lockDevice
-                  ? 'DAG execution strictly verifies hardware matches this device profile. Switching devices safely halts runs.'
-                  : 'Unlocked: DAG dynamically extracts DPI & resolution from whichever device is attached.'}
-              </div>
+        <Modal
+          title="Create New Project"
+          onClose={() => setShowNewProjectModal(false)}
+          onConfirm={() => handleCreateProject()}
+          confirmText="Create & Activate"
+          confirmIcon={Plus}
+          disabled={!newProject.name.trim()}
+        >
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              const val = (newProject.name || '').trim();
+              if (val) {
+                const confirmBtn = (document.getElementById('modal-confirm-btn') || document.querySelector('.modal-btn-confirm')) as HTMLButtonElement | null;
+                if (confirmBtn) {
+                  confirmBtn.classList.add('is-pressed');
+                  setTimeout(() => {
+                    confirmBtn.classList.remove('is-pressed');
+                    handleCreateProject(val);
+                  }, 120);
+                } else {
+                  handleCreateProject(val);
+                }
+              }
+            }}
+          >
+            <div className="modal-form-group" style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>PROJECT NAME *</label>
+              <input
+                type="text"
+                placeholder="e.g. Small-Fling Core"
+                className="modal-input"
+                value={newProject.name}
+                onChange={e => setNewProject(p => ({ ...p, name: e.target.value }))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const val = (e.currentTarget.value || newProject.name || '').trim();
+                    if (val) {
+                      if (newProject.name !== val) {
+                        setNewProject(p => ({ ...p, name: val }));
+                      }
+                      const confirmBtn = (document.getElementById('modal-confirm-btn') || document.querySelector('.modal-btn-confirm')) as HTMLButtonElement | null;
+                      if (confirmBtn) {
+                        confirmBtn.classList.add('is-pressed');
+                        setTimeout(() => {
+                          confirmBtn.classList.remove('is-pressed');
+                          handleCreateProject(val);
+                        }, 120);
+                      } else {
+                        handleCreateProject(val);
+                      }
+                    }
+                  }
+                }}
+                autoFocus
+              />
             </div>
-            <button
-              type="button"
-              onClick={() => setNewProject(p => ({ ...p, lockDevice: !p.lockDevice }))}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '4px 10px',
-                borderRadius: '5px',
-                border: `1px solid ${newProject.lockDevice ? '#d29922' : '#30363d'}`,
-                background: newProject.lockDevice ? 'rgba(210, 153, 34, 0.25)' : '#21262d',
-                color: newProject.lockDevice ? '#e3b341' : '#8b949e',
-                fontSize: '10px',
-                fontFamily: 'var(--font-mono)',
-                fontWeight: 700,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {newProject.lockDevice ? <Lock size={11} /> : <Sliders size={11} />}
-              <span>{newProject.lockDevice ? 'LOCKED' : 'UNLOCKED'}</span>
-            </button>
-          </div>
+
+            <div className="modal-form-group" style={{ marginBottom: '12px' }}>
+              <label style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', fontWeight: 700 }}>TARGET DEVICE &amp; CHARACTERISTICS</label>
+              <select
+                className="modal-input"
+                style={{ width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                value={newProject.deviceProfileId}
+                onChange={e => setNewProject(p => ({ ...p, deviceProfileId: e.target.value }))}
+              >
+                <option value="auto">⚡ Auto-Detect Connected Hardware (Zero Hardcoding)</option>
+                {deviceProfiles.map(prof => (
+                  <option key={prof.id} value={prof.id}>
+                    📱 {prof.display_name || prof.name} ({prof.target_dpi} DPI • {prof.display_width}x{prof.display_height})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{
+              background: 'var(--bg-main)',
+              border: `1px solid ${newProject.lockDevice ? 'rgba(210, 153, 34, 0.35)' : 'var(--border-color)'}`,
+              borderRadius: '8px',
+              padding: '10px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px'
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: newProject.lockDevice ? '#e3b341' : 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Lock size={13} color={newProject.lockDevice ? '#e3b341' : '#8b949e'} />
+                  <span>Lock Project to Device Characteristics</span>
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.4 }}>
+                  {newProject.lockDevice
+                    ? 'DAG execution strictly verifies hardware matches this device profile. Switching devices safely halts runs.'
+                    : 'Unlocked: DAG dynamically extracts DPI & resolution from whichever device is attached.'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNewProject(p => ({ ...p, lockDevice: !p.lockDevice }))}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 10px',
+                  borderRadius: '5px',
+                  border: `1px solid ${newProject.lockDevice ? '#d29922' : '#30363d'}`,
+                  background: newProject.lockDevice ? 'rgba(210, 153, 34, 0.25)' : '#21262d',
+                  color: newProject.lockDevice ? '#e3b341' : '#8b949e',
+                  fontSize: '10px',
+                  fontFamily: 'var(--font-mono)',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {newProject.lockDevice ? <Lock size={11} /> : <Sliders size={11} />}
+                <span>{newProject.lockDevice ? 'LOCKED' : 'UNLOCKED'}</span>
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
 

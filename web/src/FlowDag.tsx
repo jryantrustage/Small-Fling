@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
-  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Eye, Shrink, Expand, GripHorizontal,
-  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, FileText
+  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Shrink, Expand, GripHorizontal,
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -21,7 +21,6 @@ import { DagInspectorModal } from './components/dag/DagInspectorModal';
 import { AiPerformancePromptModal } from './components/dag/AiPerformancePromptModal';
 import { Dag2PerformanceReportModal } from './components/dag/Dag2PerformanceReportModal';
 import {
-  Dag4OcrFullInspectorModal,
   UniversalNodeConfigModal
 } from './components/dag/DagConfigModals';
 
@@ -185,7 +184,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isInspectorModalOpen, setIsInspectorModalOpen] = useState(false);
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [promptModalNodeId, setPromptModalNodeId] = useState<string>('init_end');
-  const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [isDag2ReportModalOpen, setIsDag2ReportModalOpen] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
@@ -240,7 +238,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [wiringState, setWiringState] = useState<{ active: boolean; fromNodeId: string; mouseX: number; mouseY: number } | null>(null);
   const [universalConfigNodeId, setUniversalConfigNodeId] = useState<string | null>(null);
 
-  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isTextModalOpen || isDag2ReportModalOpen || Boolean(universalConfigNodeId);
+  const isAnyModalOpen = isInspectorModalOpen || isPromptModalOpen || isDag2ReportModalOpen || Boolean(universalConfigNodeId);
 
   // Real-time synchronization
   useEffect(() => {
@@ -280,7 +278,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const initGroup = dagStatus.dag?.groups?.initialize || {};
   const captureGroup = dagStatus.dag?.groups?.capture_entire_markdown || {};
   const node1 = dagStatus.dag?.nodes?.init_end || {};
-  const node3b = dagStatus.dag?.nodes?.local_ai_ocr || {};
 
   const isNode1Running = activeRunningId === 'init_end';
   const isNode2Running = activeRunningId === 'reset_home';
@@ -1311,24 +1308,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </button>
             )}
 
-            {/* Direct DAG 4 OCR Full Inspector Launch Button */}
-            <button
-              type="button"
-              onClick={() => setIsTextModalOpen(true)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
-                borderRadius: '4px',
-                border: '1px solid rgba(56, 189, 248, 0.55)',
-                background: 'rgba(56, 189, 248, 0.15)',
-                color: '#38bdf8',
-                fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px',
-                boxShadow: '0 0 8px rgba(56, 189, 248, 0.25)'
-              }}
-              title="Open DAG 4 OCR Full Inspector (Source Image Bounding Boxes, Gutter Overwrite & Live Connectors)"
-            >
-              <FileText size={10} />
-              <span>OCR INSPECTOR</span>
-            </button>
 
             {/* Window Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
@@ -1689,21 +1668,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>Snap Clean Layout</span>
             </button>
 
-            {/* Direct DAG 4 OCR Full Inspector Launcher */}
-            <button
-              type="button"
-              onClick={() => setIsTextModalOpen(true)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px',
-                borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.45)',
-                background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8',
-                fontSize: '9px', fontWeight: 800, cursor: 'pointer'
-              }}
-              title="Open DAG 4 OCR Full Inspector: View source image, line bounding boxes, and verbatim acquired text with live connectors"
-            >
-              <Eye size={11} />
-              <span>DAG 4 OCR Full Inspector ↗</span>
-            </button>
 
             {/* DAG Area Size Presets */}
             <div style={{ display: 'inline-flex', alignItems: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', padding: '1px', gap: '1px' }}>
@@ -2046,8 +2010,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           onAbortNode={handleAbortNode}
           onCopyNodeForAi={handleCopyNodeDetailsForAi}
           onOpenPromptModal={handleOpenPromptModal}
-          onOpenTextModal={() => setIsTextModalOpen(true)}
-          node3bExtractedText={node3b.extracted_text}
           diagnosis={promptDiagnosis}
           nodeTelemetryEvents={eventsLog.filter(e => !e.dag || e.message.toLowerCase().includes(selectedNodeMeta.shortName.toLowerCase()))}
           isNode1Calibrated={isNode1Calibrated}
@@ -2057,18 +2019,6 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           onRefresh={onRefresh}
         />
       )}
-
-      {/* MODAL 4: DAG 4 OCR Full Inspector Modal (Source Image + Bounding Boxes + Connectors + Verbatim Text) */}
-      <Dag4OcrFullInspectorModal
-        isOpen={isTextModalOpen}
-        onClose={() => setIsTextModalOpen(false)}
-        apiBase={apiBase}
-        initialImageId={node3b.image_id || 'dag_node3_capture_temp'}
-        nodeExtractedText={node3b.extracted_text || ''}
-        nodeLinesCount={node3b.lines_count || 0}
-        nodeModelUsed={node3b.model_used || 'MiniCPM-V (Ollama)'}
-        onRefresh={onRefresh}
-      />
 
       {/* MODAL 5: AI Resolution Prompt & Performance Diagnostics Modal */}
       {isPromptModalOpen && (

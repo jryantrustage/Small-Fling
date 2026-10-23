@@ -46,15 +46,25 @@ def get_hardware_acceleration_profile() -> Dict[str, Any]:
         "opencv_threads": cv2.getNumThreads() if hasattr(cv2, "getNumThreads") else 4
     }
 
+import threading
+
 class _OpenVINOInferSessionWrapper:
-    """Wraps an OpenVINO compiled model to match RapidOCR's OrtInferSession interface."""
+    """Wraps an OpenVINO compiled model to match RapidOCR's OrtInferSession interface with thread-safe locking and ONNX fallback."""
     def __init__(self, compiled_model, original_infer):
         self.compiled_model = compiled_model
         self.orig = original_infer
+        self._lock = threading.Lock()
 
     def __call__(self, input_content: np.ndarray):
-        res = self.compiled_model([input_content])
-        return [res[out] for out in self.compiled_model.outputs]
+        with self._lock:
+            try:
+                res = self.compiled_model([input_content])
+                return [res[out] for out in self.compiled_model.outputs]
+            except Exception as e:
+                try:
+                    return self.orig(input_content)
+                except Exception:
+                    raise e
 
     def get_input_names(self): return self.orig.get_input_names()
     def get_output_names(self): return self.orig.get_output_names()

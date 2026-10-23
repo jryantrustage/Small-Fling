@@ -78,26 +78,26 @@ class FrameAcquireNode(BaseDagNode):
             or state.latest_telemetry.get("current_top_line")
         )
 
-        if t_det > 0:
+        pid = blackboard.project_id or state.get_current_project_id()
+        existing_frames = db.get_frames(pid) if pid else list(state.captured_frames.values())
+        is_first_frame = (len(existing_frames) == 0) or (target_top == 1) or (blackboard.top_line == 1)
+
+        if is_first_frame or not existing_frames:
+            top_ln = 1
+            bot_ln = b_det if (b_det > 0 and b_det > 1) else (1 + lpp - 1)
+            page_idx = 1
+        elif t_det > 0:
             top_ln = t_det
             bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
+            page_idx = len(existing_frames) + 1
         elif target_top and target_top > 0:
             top_ln = target_top
             bot_ln = top_ln + lpp - 1
+            page_idx = len(existing_frames) + 1
         else:
             top_ln = 1
             bot_ln = lpp
-
-        # Normalize line 1/2 to line 1 for Page 1
-        if top_ln in (1, 2):
-            top_ln = 1
-            page_idx = 1
-        else:
-            orch_page = state.orchestration_state.get("page", 1)
-            if orch_page > 1:
-                page_idx = orch_page
-            else:
-                page_idx = max(2, round((top_ln - 1) / max(1, lpp)) + 1)
+            page_idx = len(existing_frames) + 1
 
         # Accurate arrow_count resolution for this frame
         if page_idx <= 1 or top_ln <= 1:
@@ -132,6 +132,8 @@ class FrameAcquireNode(BaseDagNode):
         blackboard.current_image_bytes = snap
         blackboard.latest_frame_bytes = snap
         blackboard.current_image_path = frame_path
+        blackboard.frame_id = fid
+        blackboard.page_index = page_idx
         blackboard.top_line = top_ln
         blackboard.bottom_line = bot_ln
         blackboard.arrow_count = arr_count

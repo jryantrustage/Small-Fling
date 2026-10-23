@@ -21,26 +21,26 @@ f
 │   ├── azure-6ddress": "F1",              
 "value": null            
 }          
+}          
 ]        
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+},        
+{          
+"row": 2,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A2",              
+"value": "Initial Disclosure and Fraud Statement"            
+},            
+{              
+"column": 2,              
+"address": "B2",              
+"value": null            
+},            
+{              
+"column": 3,              
+"address": "C2",              
+"value": "The final step will be to record your voice signature. To begin, I'll share a brief disclosure with you, ask you to confirm a couple of items, and then gather your voice signature.\r\n\r\nNew York: “You have a right to apply for this coverage and authorize payment in writing.”\r\n“The final step is to record your voice signature.  This includes questions regarding your desire to enter into an electronic transaction, the amount of Coverage, billing options, and a review of the health questions I asked earlier.  After you respond I will ask you to state your full name and today’s date, which is your signature and authorization to this agreement.”"            
 },            
 {              
 "column": 4,              
@@ -114,45 +114,45 @@ f
 },            
 {              
 "column": 4,              
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+"address": "D4",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E4",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F4",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 5,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A5",              
+"value": "Coverage"            
+},            
+{              
+"column": 2,              
+"address": "B5",              
+"value": "Prefill applied for coverage amount and type"            
+},            
+{              
+"column": 3,              
+"address": "C5",              
+"value": "Are you applying for [$5,000] of [term/whole] life insurance [along with a [$25,000] [Accidental Death Benefit Rider]]? "            
+},            
+{              
+"column": 4,              
+"address": "D5",              
+"value": "Display coverage amount, product type, and if applicable, coverage and name of Rider"            
+},            
+{              
 "column": 5,              
 "address": "E5",              
 "value": null            
@@ -271,3 +271,419 @@ f
 },        
 {          
 "row": 9,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A9",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B9",              
+"value": "If \"Yes\" to existing insurance but \"No\" to Replacement"            
+},            
+{              
+"column": 3,              
+"address": "C9",              
+"value": "You indicated you have life insurance but will not be replacing. Is this correct? \r\nTo sign your replacement notice, please state your full name and today's date."            
+},            
+{              
+"column": 4,              
+"address": "D9",              
+"value": "Replacement Questions for NAIC Model States if Existing Insurance Questions = Yes: \r\nAre you considering discontinuing making premium payments, surrendering, forfeiting, assigning to the insurer, or otherwise terminating your existing policy or contract?\r\n Are you considering using funds from your existing policies or contracts to pay premiums due on the new policy or contract?*"            
+},            
+{              
+"column": 5,              
+"address": "E9",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F9",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 10,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A10",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B10",              
+"value": "If \"Yes\" to existing insurance and \"Yes\" to Replacement"            
+},            
+{              
+"column": 3,              
+"address": "C10",              
+"value": "You indicated you have life insurance and will be replacing your current coverage. Is this correct?\r\nTo sign your replacement notice, please state your full name and today's date."            
+},            
+{              
+"column": 4,              
+"address": "D10",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E10",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F10",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 11,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A11",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B11",              
+"value": "Non-Model States"            
+},            
+{              
+"column": 3,              
+"address": "C11",              
+"value": "CA, DC, DE, FL, GA, ID, IL, IN, KS, MA, MI, MN, ND, NV, NY, OK, PA, TN, WA, WY"            
+},            
+{              
+"column": 4,              
+"address": "D11",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E11",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F11",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 12,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A12",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B12",              
+"value": "If \"No\" to Replacement"            
+},            
+{              
+"column": 3,              
+"address": "C12",              
+"value": "You indicated you will not be replacing any coverage you may currently have. Is this correct?"            
+},            
+{              
+"column": 4,              
+"address": "D12",              
+"value": "Replacement Question = Will the coverage applied for replace, discontinue, or change any existing life coverage or annuities in this or any other company?"            
+},            
+{              
+"column": 5,              
+"address": "E12",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F12",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 13,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A13",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B13",              
+"value": "If \"Yes\" to Replacement"            
+},            
+{              
+"column": 3,              
+"address": "C13",              
+"value": "You indicated you will be replacing life insurance you currently have. Is this correct?\r\nTo sign your replacement notice, please state your full name and today's date."            
+},            
+{              
+"column": 4,              
+"address": "D13",              
+"value": "Note: Replacements are not allowed for agent sold in the following states: AR, CA (internal only), FL, NY, OK, RI (internal only), WA, WY (external only)"            
+},            
+{              
+"column": 5,              
+"address": "E13",              
+"value": "Day 2: 1230CA-LPMLIC"            
+},            
+{              
+"column": 6,              
+"address": "F13",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 14,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A14",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B14",              
+"value": "If CA, MA, MN, NV, or PA and \"Yes\" to Replacement"            
+},            
+{              
+"column": 3,              
+"address": "C14",              
+"value": "See 'Replacement Disclosures' tab and populate the appropriate state disclosure"            
+},            
+{              
+"column": 4,              
+"address": "D14",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E14",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F14",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 15,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A15",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B15",              
+"value": "NY"            
+},            
+{              
+"column": 3,              
+"address": "C15",              
+"value": "You indicated you will not be replacing any existing life insurance. Is this correct? "            
+},            
+{              
+"column": 4,              
+"address": "D15",              
+"value": "Can we get to a recap of the replacement information for the state of New York?"            
+},            
+{              
+"column": 5,              
+"address": "E15",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F15",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 16,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A16",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B16",              
+"value": "FL, WY"            
+},            
+{              
+"column": 3,              
+"address": "C16",              
+"value": "N/A"            
+},            
+{              
+"column": 4,              
+"address": "D16",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E16",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F16",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 17,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A17",              
+"value": "Billing"            
+},            
+{              
+"column": 2,              
+"address": "B17",              
+"value": "Direct Bill (not available in NY)"            
+},            
+{              
+"column": 3,              
+"address": "C17",              
+"value": "I have reviewed the billing authorization language with you and you will receive an initial bill for [premium amount]?"            
+},            
+{              
+"column": 4,              
+"address": "D17",              
+"value": "Note: premium amount field value - For dollar deviated states, populate theactual premium amount, not $1"            
+},            
+{              
+"column": 5,              
+"address": "E17",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F17",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 18,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A18",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B18",              
+"value": "ACH (payment date not specified)"            
+},            
+{              
+"column": 3,              
+"address": "C18",              
+"value": "Do you agree I have reviewed the Billing Authorization language with you and you are requesting to have your premium of [premium amount] deducted from your [account type] account [payment frequency]?\r\nYour coverage will start once payment is received and the transaction on your statement will say TRUSTAGE LIFE INS."            
+},            
+{              
+"column": 4,              
+"address": "D18",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E18",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F18",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 19,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A19",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B19",              
+"value": "ACH (payment date specified)"            
+},            
+{              
+"column": 3,              
+"address": "C19",              
+"value": "Do you agree I have reviewed the Billing Authorization language with you and you are requesting to have your premium of [premium amount] deducted from your [account type] account [payment frequency] on the [day of the month for deduction] of the month?\r\nWe'll initiate your payment on [insert date]. Your coverage will start once payment is received and the transaction on your statement will say TRUSTAGE LIFE INS."            
+},            
+{              
+"column": 4,              
+"address": "D19",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E19",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F19",              
+"value": null            
+}          
+]        
+},        
+{          
+"row": 20,          
+"cells": [            
+{              
+"column": 1,              
+"address": "A20",              
+"value": null            
+},            
+{              
+"column": 2,              
+"address": "B20",              
+"value": "Credit Card (payment date not specified)"            
+},            
+{              
+"column": 3,              
+"address": "C20",              
+"value": "Do you understand your billing options and have you requested to have your [payment frequency] payment of [premium amount] charged to your Credit Card?\r\nYour coverage will start once payment is received and the transaction on your statement will say TRUSTAGE LIFE INS."            
+},            
+{              
+"column": 4,              
+"address": "D20",              
+"value": null            
+},            
+{              
+"column": 5,              
+"address": "E20",              
+"value": null            
+},            
+{              
+"column": 6,              
+"address": "F20",              
+"value": null            
+}          

@@ -35,7 +35,17 @@ export const Modal: React.FC<ModalProps> = ({
 }) => {
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+  const [isConfirmPressed, setIsConfirmPressed] = useState(false);
   const effectiveVariant: ModalVariant = variant || (danger ? 'danger' : 'default');
+
+  const triggerConfirm = useCallback(() => {
+    if (!onConfirm || disabled || loading) return;
+    setIsConfirmPressed(true);
+    setTimeout(() => {
+      setIsConfirmPressed(false);
+      onConfirm();
+    }, 120);
+  }, [onConfirm, disabled, loading]);
 
   useEffect(() => {
     if (!isOpen || !autoFocus) return;
@@ -46,16 +56,20 @@ export const Modal: React.FC<ModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-      else if (e.key === 'Enter' && onConfirm && !disabled && !loading) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === 'Enter' && onConfirm && !disabled && !loading) {
         const tag = (e.target as HTMLElement)?.tagName;
-        if (tag !== 'TEXTAREA' && tag !== 'BUTTON') { e.preventDefault(); onConfirm(); }
+        if (tag !== 'TEXTAREA' && tag !== 'BUTTON') {
+          e.preventDefault();
+          triggerConfirm();
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose, onConfirm, disabled, loading]);
+  }, [isOpen, onClose, onConfirm, disabled, loading, triggerConfirm]);
 
   if (!isOpen) return null;
 
@@ -92,7 +106,14 @@ export const Modal: React.FC<ModalProps> = ({
               </button>
             )}
             {onConfirm && (
-              <button ref={confirmBtnRef} type="button" className={`btn modal-btn-confirm modal-btn-${effectiveVariant}`} onClick={onConfirm} disabled={disabled || loading}>
+              <button
+                ref={confirmBtnRef}
+                id="modal-confirm-btn"
+                type="button"
+                className={`btn modal-btn-confirm modal-btn-${effectiveVariant} ${isConfirmPressed ? 'is-pressed' : ''}`}
+                onClick={triggerConfirm}
+                disabled={disabled || loading}
+              >
                 {loading ? <span className="modal-spinner" /> : ConfirmIcon ? <ConfirmIcon size={14} style={{ marginRight: '6px' }} /> : null}
                 <span>{confirmText}</span>
               </button>

@@ -317,6 +317,14 @@ async def create_project(req: ProjectCreateRequest):
     state.captured_frames.clear()
     state.document_lines.clear()
     state.recapture_queue.clear()
+    from routers.frames_document import clear_ocr_inspect_cache
+    clear_ocr_inspect_cache()
+    temp_c = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+    if temp_c.exists():
+        try:
+            temp_c.unlink()
+        except Exception:
+            pass
     state.save_persisted_state()
     state.load_persisted_state()
 
@@ -677,6 +685,23 @@ async def activate_project(project_id: str):
 async def delete_project(project_id: str):
     if not db.delete_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    from routers.frames_document import clear_ocr_inspect_cache
+    clear_ocr_inspect_cache()
+
+    # Clean up any leftover temporary frame files so they do not bleed into other projects
+    for tmp_file in ["dag_node3_capture_temp.png", "dag_node1_end.png"]:
+        tmp_p = state.FRAMES_DIR / tmp_file
+        if tmp_p.exists():
+            try:
+                tmp_p.unlink()
+            except Exception:
+                pass
+    for calib_p in state.FRAMES_DIR.glob(f"calib_end_{project_id}*.png"):
+        try:
+            calib_p.unlink()
+        except Exception:
+            pass
+
     state.captured_frames.clear()
     state.document_lines.clear()
     state.recapture_queue.clear()
@@ -684,6 +709,20 @@ async def delete_project(project_id: str):
     active_proj = db.get_active_project()
     active_pid = active_proj["id"] if active_proj else None
     if not active_proj:
+        for node_data in state.dag_state.get("nodes", {}).values():
+            node_data.update({
+                "status": "idle",
+                "is_active": False,
+                "error": None,
+                "total_lines": 0
+            })
+        for grp_data in state.dag_state.get("groups", {}).values():
+            grp_data.update({
+                "status": "idle",
+                "progress": None
+            })
+        state.dag_state["current_active_node"] = None
+        state.dag_state["current_active_group"] = None
         state.save_persisted_state()
 
     # Broadcast project deletion and state synchronization to all connected clients
