@@ -26,6 +26,7 @@ import { CapturedFramesReportModal } from './components/frames/CapturedFramesRep
 import { OcrDiagnosticsReportModal } from './components/ocr/OcrDiagnosticsReportModal';
 import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
 import { discernNodePerformance } from './utils/dagDiagnostics';
+import { Dag4OcrFullInspectorModal } from './components/dag/Dag4OcrFullInspectorModal';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -212,7 +213,26 @@ function AppContent() {
     } catch {}
     setStreamKey(Date.now());
   };
-  const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced'>('live');
+  const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced' | 'ocr_inspect'>('live');
+  const [ocrInspectImageId, setOcrInspectImageId] = useState<string>('dag_node3_capture_temp');
+
+  const handleOpenInlineOcrInspector = (imageId?: string) => {
+    if (imageId) {
+      setOcrInspectImageId(imageId);
+      if (frames.some(f => f.frame_id === imageId)) {
+        setSelectedFrameId(imageId);
+      }
+    } else if (selectedFrameId) {
+      setOcrInspectImageId(selectedFrameId);
+    }
+    setInspectorMode('ocr_inspect');
+    setInspectorMaximized(true);
+  };
+
+  const handleCloseInlineOcrInspector = () => {
+    setInspectorMode(selectedFrameId ? 'single' : 'live');
+    setInspectorMaximized(false);
+  };
   const [splicedScale, setSplicedScale] = useState<number>(100);
   const [splicedFitMode, setSplicedFitMode] = useState<'width' | 'fit'>('width');
   const [splicedRefreshKey, setSplicedRefreshKey] = useState<number>(() => Date.now());
@@ -2587,7 +2607,16 @@ function AppContent() {
                       return (
                         <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
-                          <div className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${isSelected ? 'selected-for-edit' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`} onClick={() => setSelectedFrameId(f.frame_id)}>
+                          <div
+                            className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${isSelected ? 'selected-for-edit' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
+                            onClick={() => setSelectedFrameId(f.frame_id)}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenInlineOcrInspector(f.frame_id);
+                            }}
+                            style={{ cursor: 'pointer' }}
+                            title="Click to select frame • Double-click to open OCR Full Inspector inline"
+                          >
                             <div className="frame-card-preview">
                               <input
                                 type="checkbox"
@@ -2669,6 +2698,15 @@ function AppContent() {
                   <button className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`} onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} style={{ fontSize: '11px', padding: '3px 8px' }}><Monitor size={11} style={{ marginRight: '4px' }} /><span>Live Desktop</span></button>
                   <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
                   <button className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('spliced')} style={{ fontSize: '11px', padding: '3px 8px' }}>Spliced ({frames.length})</button>
+                  <button
+                    className={`btn btn-sm ${inspectorMode === 'ocr_inspect' ? 'btn-primary' : ''}`}
+                    onClick={() => handleOpenInlineOcrInspector(selectedFrameId || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
+                    style={{ fontSize: '11px', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    title="Open OCR Full Inspector inline (Double-click any captured frame to inspect directly)"
+                  >
+                    <FileText size={11} />
+                    <span>OCR Inspector</span>
+                  </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {inspectorMode === 'live' && (
@@ -2787,7 +2825,10 @@ function AppContent() {
                 </div>
               </div>
 
-              <div className="inspector-view-container">
+              <div
+                className={`inspector-view-container ${inspectorMode === 'live' ? 'live-mode' : ''} ${inspectorMode === 'ocr_inspect' ? 'ocr-inspect-mode' : ''}`}
+                style={inspectorMode === 'ocr_inspect' ? { padding: 0, alignItems: 'stretch', justifyContent: 'stretch' } : undefined}
+              >
                 {inspectorMode === 'live' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d', gap: '8px', flexWrap: 'wrap' }}>
@@ -3031,6 +3072,8 @@ function AppContent() {
                     {/* Scrollable container displaying full-width spliced image with natural aspect ratio */}
                     <div
                       className="spliced-canvas-scroll-container"
+                      onDoubleClick={() => handleOpenInlineOcrInspector(activeFrame?.frame_id || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
+                      title="Double-click canvas to open OCR Full Inspector inline"
                       style={{
                         flex: 1,
                         width: '100%',
@@ -3061,10 +3104,32 @@ function AppContent() {
                       />
                     </div>
                   </div>
+                ) : inspectorMode === 'ocr_inspect' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
+                    <Dag4OcrFullInspectorModal
+                      isOpen={true}
+                      inline={true}
+                      onClose={handleCloseInlineOcrInspector}
+                      apiBase={API_BASE}
+                      initialImageId={ocrInspectImageId}
+                      nodeExtractedText=""
+                      nodeModelUsed="MiniCPM-V (Ollama)"
+                      nodeLinesCount={0}
+                      onRefresh={() => {
+                        apiJson<any>('/api/document').then(d => { if (d) setDocumentData(d); });
+                        apiJson<any>('/api/frames').then(d => { if (d?.frames) setFrames(d.frames); });
+                      }}
+                    />
+                  </div>
                 ) : activeFrame ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
                     <div className="gutter-line-callout top"><span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">TOP GUTTER:</span><span className="gutter-callout-value">{activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Detecting...'}</span></div>
-                    <div className="source-image-wrapper fit">
+                    <div
+                      className="source-image-wrapper fit"
+                      onDoubleClick={() => handleOpenInlineOcrInspector(activeFrame.frame_id)}
+                      style={{ cursor: 'pointer' }}
+                      title="Double-click frame to open OCR Full Inspector inline"
+                    >
                       <img src={`${API_BASE}/api/frames/${activeFrame.frame_id}/image?t=${encodeURIComponent(activeFrame.created_at || '')}`} alt={activeFrame.frame_id} />
                       {frameBoundingBoxes[activeFrame.frame_id] && (
                         <svg className="bbox-svg-overlay" viewBox="0 0 1920 1080" preserveAspectRatio="none">

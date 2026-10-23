@@ -77,7 +77,7 @@ def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
 
     raise HTTPException(status_code=404, detail=f"Frame image file '{frame_id}' not found")
 
-def _get_available_ocr_images() -> List[Dict[str, Any]]:
+def _get_available_ocr_images(project_id: Optional[str] = None) -> List[Dict[str, Any]]:
     images = []
     seen_paths = set()
 
@@ -89,7 +89,7 @@ def _get_available_ocr_images() -> List[Dict[str, Any]]:
         images.append({
             "id": "dag_node3_capture_temp",
             "name": "dag_node3_capture_temp.png",
-            "label": "Latest Capture (DAG 3/4 Temp)",
+            "label": "Latest Active Capture (Live Buffer)",
             "category": "latest",
             "size": latest_temp.stat().st_size,
             "created_at": mtime,
@@ -97,52 +97,70 @@ def _get_available_ocr_images() -> List[Dict[str, Any]]:
             "is_latest": True
         })
 
-    # 2. Registered frames from state
-    for fid, finfo in state.captured_frames.items():
+    # 2. Registered frames from state (sorted in natural document page order: Pg 1, Pg 2...)
+    sorted_frames = sorted(
+        state.captured_frames.values(),
+        key=lambda x: (x.get("page_index", 0) or 0, x.get("top_line", 0) or 0, x.get("created_at", "") or "")
+    )
+
+    for finfo in sorted_frames:
+        fid = finfo.get("frame_id")
+        if not fid:
+            continue
         try:
             p = _get_frame_path(fid, finfo.get("filename"))
             if p.exists() and p.resolve() not in seen_paths:
                 seen_paths.add(p.resolve())
+                pg = finfo.get("page_index") or "?"
+                top_l = finfo.get("top_line")
+                bot_l = finfo.get("bottom_line")
+                if top_l is not None and bot_l is not None and top_l > 0:
+                    lbl = f"Page {pg} (Lines {top_l}-{bot_l}) • {fid[:28]}"
+                else:
+                    lbl = f"Page {pg} • {fid[:28]}"
+
                 images.append({
                     "id": fid,
                     "name": p.name,
-                    "label": f"Page {finfo.get('page_index', '?')} ({fid[:14]})",
+                    "label": lbl,
                     "category": "frames",
                     "size": p.stat().st_size,
                     "created_at": finfo.get("created_at") or datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
                     "url": f"/api/frames/{fid}/image",
                     "top_line": finfo.get("top_line"),
                     "bottom_line": finfo.get("bottom_line"),
+                    "page_index": finfo.get("page_index"),
                     "lines_count": finfo.get("extracted_line_count", 0),
                     "model_used": finfo.get("model_used")
                 })
         except Exception:
             continue
 
-    # 3. Any other png files in FRAMES_DIR
-    all_pngs = sorted(
-        [p for p in state.FRAMES_DIR.glob("*.png") if p.stat().st_size >= 2000 and p.resolve() not in seen_paths and not p.name.startswith("temp_")],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True
-    )
-    for p in all_pngs:
-        seen_paths.add(p.resolve())
-        images.append({
-            "id": p.stem,
-            "name": p.name,
-            "label": p.name,
-            "category": "storage",
-            "size": p.stat().st_size,
-            "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
-            "url": f"/api/frames/{p.stem}/image"
-        })
+    # 3. Fallback ONLY when state has no registered frames: discover authentic frame_*.png
+    if not state.captured_frames:
+        all_pngs = sorted(
+            [p for p in state.FRAMES_DIR.glob("frame_*.png") if p.stat().st_size >= 2000 and p.resolve() not in seen_paths and not p.name.startswith(("test_", "raw_", "temp_", "crop_", "scratch_"))],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True
+        )
+        for p in all_pngs:
+            seen_paths.add(p.resolve())
+            images.append({
+                "id": p.stem,
+                "name": p.name,
+                "label": p.name,
+                "category": "storage",
+                "size": p.stat().st_size,
+                "created_at": datetime.fromtimestamp(p.stat().st_mtime).isoformat(),
+                "url": f"/api/frames/{p.stem}/image"
+            })
 
     return images
 
 @router.get("/api/ocr/images")
-async def get_ocr_images():
-    """List all available images for OCR full inspection."""
-    return {"status": "success", "images": _get_available_ocr_images()}
+async def get_ocr_images(project_id: Optional[str] = Query(None)):
+    """List all available project images for OCR full inspection."""
+    return {"status": "success", "images": _get_available_ocr_images(project_id=project_id)}
 
 _ocr_inspect_cache: Dict[str, Dict[str, Any]] = {}
 

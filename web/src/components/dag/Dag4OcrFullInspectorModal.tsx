@@ -78,7 +78,10 @@ export interface Dag4OcrFullInspectorModalProps {
   nodeModelUsed?: string;
   nodeLinesCount?: number;
   onRefresh?: () => void;
+  inline?: boolean;
 }
+
+export type OcrModalMode = 'inline' | 'fullscreen' | 'standard' | 'reduced';
 
 interface ConnectorPath {
   lineNumber: number;
@@ -100,10 +103,18 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   nodeExtractedText = '',
   nodeModelUsed = 'MiniCPM-V (Ollama)',
   nodeLinesCount = 0,
-  onRefresh
+  onRefresh,
+  inline = false
 }) => {
-  // Window display modes: 'fullscreen' (100vw x 100vh), 'standard' (wide floating), 'reduced' (compact floating)
-  const [modalMode, setModalMode] = useState<'fullscreen' | 'standard' | 'reduced'>('fullscreen');
+  // Window display modes: 'fullscreen' (100vw x 100vh), 'standard' (wide floating), 'reduced' (compact floating), 'inline' (docked in container)
+  const [modalMode, setModalMode] = useState<OcrModalMode>(inline ? 'inline' : 'fullscreen');
+
+  // Keep modalMode synced if inline prop changes
+  useEffect(() => {
+    if (inline) {
+      setModalMode('inline');
+    }
+  }, [inline]);
 
   const [selectedImageId, setSelectedImageId] = useState<string>(initialImageId);
   const [availableImages, setAvailableImages] = useState<AvailableOcrImage[]>([]);
@@ -458,7 +469,22 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   const activeCount = inspectData?.lines_count ?? nodeLinesCount;
 
   // Window container styles depending on mode
-  const modalContainerStyle: React.CSSProperties = modalMode === 'fullscreen' ? {
+  const modalContainerStyle: React.CSSProperties = modalMode === 'inline' ? {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    minHeight: 0,
+    flex: 1,
+    margin: 0,
+    borderRadius: 0,
+    border: 'none',
+    boxShadow: 'none',
+    zIndex: 10,
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#090d13',
+    overflow: 'hidden'
+  } : modalMode === 'fullscreen' ? {
     position: 'fixed',
     top: 0,
     left: 0,
@@ -517,23 +543,25 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
 
   return (
     <>
-      {/* High z-index backdrop overlay */}
-      <div
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(4, 7, 12, 0.88)',
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          zIndex: 2999,
-          animation: 'modalOverlayFadeIn 0.16s ease-out'
-        }}
-        onClick={(e) => {
-          if (modalMode !== 'fullscreen' && e.target === e.currentTarget) {
-            onClose();
-          }
-        }}
-      />
+      {/* High z-index backdrop overlay (omitted in inline mode) */}
+      {modalMode !== 'inline' && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(4, 7, 12, 0.88)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            zIndex: 2999,
+            animation: 'modalOverlayFadeIn 0.16s ease-out'
+          }}
+          onClick={(e) => {
+            if (modalMode !== 'fullscreen' && e.target === e.currentTarget) {
+              onClose();
+            }
+          }}
+        />
+      )}
 
       {/* Main Window Card */}
       <div style={modalContainerStyle} role="dialog" aria-modal="true">
@@ -580,7 +608,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 gap: '8px',
                 flexWrap: 'wrap'
               }}>
-                <span>DAG 4: LOCAL AI OCR FULL INSPECTOR</span>
+                <span>{inline && modalMode === 'inline' ? 'OCR FULL INSPECTOR' : 'DAG 4: LOCAL AI OCR FULL INSPECTOR'}</span>
                 <span style={{
                   background: 'rgba(56, 189, 248, 0.15)',
                   border: '1px solid rgba(56, 189, 248, 0.45)',
@@ -624,53 +652,80 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
 
           {/* Right: Window Controls [ Reduced | Fullscreen | Close ] */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {/* Reduced Window Size Toggle */}
-            <button
-              type="button"
-              onClick={() => setModalMode(m => m === 'reduced' ? 'standard' : 'reduced')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '5px 10px',
-                background: modalMode === 'reduced' ? 'rgba(56, 189, 248, 0.25)' : '#161b22',
-                border: `1px solid ${modalMode === 'reduced' ? '#38bdf8' : '#30363d'}`,
-                color: modalMode === 'reduced' ? '#38bdf8' : '#c9d1d9',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              title={modalMode === 'reduced' ? "Restore to standard window size" : "Reduce window size to compact floating view"}
-            >
-              <Minimize2 size={13} />
-              <span>{modalMode === 'reduced' ? 'Standard Size' : 'Reduced Size'}</span>
-            </button>
+            {inline ? (
+              <button
+                type="button"
+                onClick={() => setModalMode(m => m === 'fullscreen' ? 'inline' : 'fullscreen')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '5px 10px',
+                  background: modalMode === 'fullscreen' ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
+                  border: `1px solid ${modalMode === 'fullscreen' ? '#00ff9d' : '#30363d'}`,
+                  color: modalMode === 'fullscreen' ? '#00ff9d' : '#c9d1d9',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title={modalMode === 'fullscreen' ? "Dock inspector inline into center panel" : "Expand to Full Screen View (100% viewport)"}
+              >
+                {modalMode === 'fullscreen' ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                <span>{modalMode === 'fullscreen' ? 'Dock Inline' : 'Fullscreen'}</span>
+              </button>
+            ) : (
+              <>
+                {/* Reduced Window Size Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setModalMode(m => m === 'reduced' ? 'standard' : 'reduced')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '5px 10px',
+                    background: modalMode === 'reduced' ? 'rgba(56, 189, 248, 0.25)' : '#161b22',
+                    border: `1px solid ${modalMode === 'reduced' ? '#38bdf8' : '#30363d'}`,
+                    color: modalMode === 'reduced' ? '#38bdf8' : '#c9d1d9',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title={modalMode === 'reduced' ? "Restore to standard window size" : "Reduce window size to compact floating view"}
+                >
+                  <Minimize2 size={13} />
+                  <span>{modalMode === 'reduced' ? 'Standard Size' : 'Reduced Size'}</span>
+                </button>
 
-            {/* Fullscreen Toggle */}
-            <button
-              type="button"
-              onClick={() => setModalMode(m => m === 'fullscreen' ? 'standard' : 'fullscreen')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '5px 10px',
-                background: modalMode === 'fullscreen' ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
-                border: `1px solid ${modalMode === 'fullscreen' ? '#00ff9d' : '#30363d'}`,
-                color: modalMode === 'fullscreen' ? '#00ff9d' : '#c9d1d9',
-                borderRadius: '6px',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-              title={modalMode === 'fullscreen' ? "Restore to standard window size" : "Expand to Full Screen Mode (100% viewport)"}
-            >
-              <Maximize2 size={13} />
-              <span>{modalMode === 'fullscreen' ? 'Restore Window' : 'Fullscreen'}</span>
-            </button>
+                {/* Fullscreen Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setModalMode(m => m === 'fullscreen' ? 'standard' : 'fullscreen')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '5px 10px',
+                    background: modalMode === 'fullscreen' ? 'rgba(0, 255, 157, 0.2)' : '#161b22',
+                    border: `1px solid ${modalMode === 'fullscreen' ? '#00ff9d' : '#30363d'}`,
+                    color: modalMode === 'fullscreen' ? '#00ff9d' : '#c9d1d9',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title={modalMode === 'fullscreen' ? "Restore to standard window size" : "Expand to Full Screen Mode (100% viewport)"}
+                >
+                  <Maximize2 size={13} />
+                  <span>{modalMode === 'fullscreen' ? 'Restore Window' : 'Fullscreen'}</span>
+                </button>
+              </>
+            )}
 
             {/* Completely Closed (X) */}
             <button
@@ -700,7 +755,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 e.currentTarget.style.color = '#8b949e';
                 e.currentTarget.style.borderColor = '#30363d';
               }}
-              title="Completely close OCR Full Inspector (Esc)"
+              title="Close OCR Inspector (Esc)"
               aria-label="Close modal"
             >
               <X size={16} />
@@ -743,7 +798,8 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 borderRadius: '6px',
                 outline: 'none',
                 cursor: 'pointer',
-                maxWidth: '260px'
+                minWidth: '220px',
+                maxWidth: '420px'
               }}
             >
               {availableImages.map(img => (
@@ -953,8 +1009,10 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
           style={{
             position: 'relative',
             display: 'grid',
-            gridTemplateColumns: modalMode === 'reduced' ? 'minmax(340px, 1fr) minmax(320px, 1fr)' : 'minmax(460px, 1.15fr) minmax(380px, 1fr)',
+            gridTemplateColumns: modalMode === 'reduced' ? 'minmax(280px, 1fr) minmax(260px, 1fr)' : modalMode === 'inline' ? 'minmax(300px, 1.1fr) minmax(260px, 1fr)' : 'minmax(460px, 1.15fr) minmax(380px, 1fr)',
             flex: 1,
+            height: '100%',
+            minHeight: 0,
             overflow: 'hidden',
             background: '#090d13'
           }}
