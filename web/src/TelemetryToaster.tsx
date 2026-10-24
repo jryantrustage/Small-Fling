@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Activity, ChevronUp, Radio, Coins, Terminal, Copy, Check,
   AlertTriangle, Play, Camera, ArrowDownCircle, Minus, X,
@@ -297,9 +297,18 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     logContainerRef.current?.scrollTo({ top: logContainerRef.current.scrollHeight, behavior: 'smooth' });
   };
 
-  const filteredEventsLog = (selectedNodeId && isNodeTracingActive)
-    ? eventsLog.filter(ev => isEventForNode(ev, selectedNodeId))
-    : eventsLog.filter(ev => isEventForDag(ev, currentDag));
+  const filteredEventsLog = useMemo(() => {
+    const raw = (selectedNodeId && isNodeTracingActive)
+      ? eventsLog.filter(ev => isEventForNode(ev, selectedNodeId))
+      : eventsLog.filter(ev => isEventForDag(ev, currentDag));
+    const seen = new Set<string>();
+    return raw.filter((ev, idx) => {
+      const k = ev.id || `ev-${ev.timestamp}-${ev.category}-${idx}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [eventsLog, selectedNodeId, isNodeTracingActive, currentDag]);
 
   const toggleExpanded = () => {
     const next = !isExpanded;
@@ -831,9 +840,9 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
                     <div className="events-empty">
                       {currentDag !== 'all' ? `No telemetry events for ${currentDag === 'initialize' ? 'DAG 1 (Initialize)' : 'DAG 2 (Capture)'} yet.` : 'No telemetry events recorded yet.'}
                     </div>
-                  ) : filteredEventsLog.map((ev) => (
+                  ) : filteredEventsLog.map((ev, index) => (
                     <StructuredLogEntry
-                      key={ev.id}
+                      key={ev.id || `ev-${index}`}
                       ev={ev}
                       deviceModel={deviceModel}
                       onOpenPromptModal={onOpenPromptModal}

@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 import time
 import random
+import uuid
 from services import state
 from services.adb_service import current_device_model
 
@@ -52,7 +53,7 @@ async def emit_dag_telemetry_event(
 ) -> None:
     """Unified telemetry event generator with friendly device prefixing."""
     dev_name = resolve_friendly_device_name(serial)
-    event_id = f"{int(time.time() * 1000)}-{random.randint(100, 999)}"
+    event_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
     timestamp = datetime.now().strftime("%I:%M:%S %p").lstrip("0")
 
     formatted_msg = message

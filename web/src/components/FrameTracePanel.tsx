@@ -193,13 +193,20 @@ export const FrameTracePanel: React.FC<Props> = ({ frame, eventsLog, onClose }) 
             </div>
           ) : filtered.length === 0 ? (
             <div style={{ padding: '24px', textAlign: 'center', color: '#8b949e' }}>No events match the current filters.</div>
-          ) : filtered.map(ev => {
-            const k = ev.data?.key_event;
-            const cat = catOf(ev);
-            const isOpen = expanded.has(ev.id);
-            const hasDetail = !!ev.data;
-            return (
-              <div key={ev.id} style={{ borderLeft: `2px solid ${catColor[cat] || '#30363d'}`, margin: '3px 0', padding: '3px 8px', background: cat === 'ERROR' ? 'rgba(248,81,73,.1)' : 'rgba(255,255,255,.02)', borderRadius: '4px' }}>
+          ) : (() => {
+            const seen = new Set<string>();
+            return filtered.filter((ev, idx) => {
+              const k = ev.id || `trace-${idx}`;
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            }).map((ev, idx) => {
+              const k = ev.data?.key_event;
+              const cat = catOf(ev);
+              const isOpen = expanded.has(ev.id);
+              const hasDetail = !!ev.data;
+              return (
+                <div key={ev.id || `trace-ev-${idx}`} style={{ borderLeft: `2px solid ${catColor[cat] || '#30363d'}`, margin: '3px 0', padding: '3px 8px', background: cat === 'ERROR' ? 'rgba(248,81,73,.1)' : 'rgba(255,255,255,.02)', borderRadius: '4px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: hasDetail ? 'pointer' : 'default' }} onClick={() => hasDetail && toggleExpand(ev.id)}>
                   {hasDetail ? (isOpen ? <ChevronDown size={11} color="#8b949e" /> : <ChevronRight size={11} color="#8b949e" />) : <span style={{ width: 11 }} />}
                   <span style={{ color: '#8b949e', fontSize: '9px' }}>{ev.timestamp}</span>
@@ -218,7 +225,8 @@ export const FrameTracePanel: React.FC<Props> = ({ frame, eventsLog, onClose }) 
                 )}
               </div>
             );
-          })}
+          });
+        })()}
         </div>
       </div>
     </div>

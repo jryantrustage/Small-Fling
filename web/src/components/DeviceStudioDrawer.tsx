@@ -1798,9 +1798,17 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                       onScroll={handleStudioLogScroll}
                       style={{ position: 'relative' }}
                     >
-                      {eventsLog.length > 0 ? eventsLog.slice(-35).map((evt) => (
-                        <StructuredLogEntry key={evt.id} ev={evt} compact />
-                      )) : (
+                      {eventsLog.length > 0 ? (() => {
+                        const seen = new Set<string>();
+                        return eventsLog.slice(-35).filter((evt, idx) => {
+                          const k = evt.id || `evt-${idx}`;
+                          if (seen.has(k)) return false;
+                          seen.add(k);
+                          return true;
+                        }).map((evt, idx) => (
+                          <StructuredLogEntry key={evt.id || `studio-evt-${idx}`} ev={evt} compact />
+                        ));
+                      })() : (
                         <div style={{ padding: '16px', color: '#8b949e', fontSize: '11px', textAlign: 'center' }}>
                           No recent telemetry events logged.
                         </div>

@@ -1,6 +1,7 @@
 import asyncio
 import time
 import json
+import uuid
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
@@ -96,7 +97,7 @@ async def emit_dag_telemetry_event(
     status_code: Optional[int] = None
 ):
     dev_name = resolve_friendly_device_name(serial)
-    event_id = f"{int(time.time() * 1000)}-{random.randint(100, 999)}"
+    event_id = f"{int(time.time() * 1000)}-{uuid.uuid4().hex[:6]}"
     timestamp = datetime.now().strftime("%I:%M:%S %p").lstrip("0")
 
     formatted_msg = message

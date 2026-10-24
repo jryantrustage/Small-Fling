@@ -553,9 +553,15 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
               <div style={{ color: '#6e7681', fontSize: '10px', padding: '8px', textAlign: 'center' }}>
                 No telemetry trace events for Node {selectedNodeMeta.step} yet.
               </div>
-            ) : (
-              nodeTelemetryEvents.slice(-12).map(ev => (
-                <div key={ev.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
+            ) : (() => {
+              const seen = new Set<string>();
+              return nodeTelemetryEvents.slice(-12).filter((ev, idx) => {
+                const k = ev.id || `insp-${idx}`;
+                if (seen.has(k)) return false;
+                seen.add(k);
+                return true;
+              }).map((ev, idx) => (
+                <div key={ev.id || `inspector-ev-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', lineHeight: 1.3 }}>
                   <span style={{ color: '#6e7681', fontSize: '9px', flexShrink: 0 }}>{ev.timestamp}</span>
                   <span style={{
                     fontSize: '8.5px', fontWeight: 700, padding: '1px 4px', borderRadius: '3px',
@@ -569,8 +575,8 @@ export const DagInspectorModal: React.FC<DagInspectorModalProps> = ({
                     {ev.message}
                   </span>
                 </div>
-              ))
-            )}
+              ));
+            })()}
           </div>
         </div>
       </div>

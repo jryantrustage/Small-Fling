@@ -485,6 +485,10 @@ function AppContent() {
   const isFetchingRef = useRef(false);
   const activeProjectRef = useRef(activeProject);
   useEffect(() => { activeProjectRef.current = activeProject; }, [activeProject]);
+  const deviceInfoRef = useRef(deviceInfo);
+  useEffect(() => { deviceInfoRef.current = deviceInfo; }, [deviceInfo]);
+  const deviceModelRef = useRef(deviceModel);
+  useEffect(() => { deviceModelRef.current = deviceModel; }, [deviceModel]);
   const lineListRef = useRef<HTMLDivElement>(null);
 
   const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'system' | 'all') => {
@@ -1381,14 +1385,30 @@ function AppContent() {
   // WebSocket handling
   useEffect(() => {
     let ws: WebSocket | null = null, timer: any = null;
+    let isDisposed = false;
+
     const connect = () => {
+      if (isDisposed) return;
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const base = API_BASE.startsWith('http') ? API_BASE.replace(/^http/, 'ws') : `${proto}//${window.location.host}`;
       ws = new WebSocket(`${base}/ws`);
-      ws.onopen = () => { setWsConnected(true); setBackendConnected(true); addTelemetryEvent('WS', 'Connected to telemetry stream'); };
-      ws.onclose = () => { setWsConnected(false); timer = setTimeout(connect, 3000); };
-      ws.onerror = () => ws?.close();
+      ws.onopen = () => {
+        if (isDisposed) { ws?.close(); return; }
+        setWsConnected(true);
+        setBackendConnected(true);
+        addTelemetryEvent('WS', 'Connected to telemetry stream');
+      };
+      ws.onclose = () => {
+        if (isDisposed) return;
+        setWsConnected(false);
+        timer = setTimeout(connect, 3000);
+      };
+      ws.onerror = () => {
+        if (isDisposed) return;
+        ws?.close();
+      };
       ws.onmessage = (e) => {
+        if (isDisposed) return;
         try {
           const msg = JSON.parse(e.data);
           const newF = msg.data?.frame_id ? msg.data : (msg.frame?.frame_id ? msg.frame : null);
@@ -1489,7 +1509,14 @@ function AppContent() {
               fetchData();
             }
           } else if (msg.type === 'dag_telemetry_event' && msg.event) {
-            setEventsLog(prev => [...prev.slice(-499), { ...msg.event, ts: Date.now() }]);
+            const ev = msg.event;
+            setEventsLog(prev => {
+              const eventId = ev.id || `${Date.now()}-${Math.random()}`;
+              if (prev.some(e => e.id === eventId)) {
+                return prev;
+              }
+              return [...prev.slice(-499), { ...ev, id: eventId, ts: Date.now() }];
+            });
           } else if (msg.type === 'key_event_telemetry' && msg.event) {
             const k = msg.event;
             const codes: number[] = Array.isArray(k.keycodes) ? k.keycodes : [];
@@ -1510,7 +1537,7 @@ function AppContent() {
             }]);
           } else if (msg.type === 'dag_updated') {
             const dagNodeId = msg.node_id || msg.dag?.current_active_node || 'init_end';
-            const devName = deviceInfo?.active_model || (deviceModel === 'pixel_10' ? 'Pixel 10 Pro XL' : 'Pixel 8 Pro');
+            const devName = deviceInfoRef.current?.active_model || (deviceModelRef.current === 'pixel_10' ? 'Pixel 10 Pro XL' : 'Pixel 8 Pro');
             if (msg.status === 'error' || msg.error) {
               const errText = typeof msg.error === 'string' ? msg.error : (msg.error?.message || 'Node execution failed');
               setEventsLog(prev => [
@@ -1565,8 +1592,22 @@ function AppContent() {
       };
     };
     connect();
-    return () => { ws?.close(); clearTimeout(timer); };
-  }, [addTelemetryEvent, fetchData, deviceInfo?.active_model, deviceModel]);
+    return () => {
+      isDisposed = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (ws) {
+        ws.onopen = null;
+        ws.onclose = null;
+        ws.onerror = null;
+        ws.onmessage = null;
+        ws.close();
+        ws = null;
+      }
+    };
+  }, [addTelemetryEvent, fetchData]);
 
   const handleTogglePipelineMode = async (mode: 'cloud' | 'local') => {
     if (mode === 'cloud' && !apiKeyConfigured) {
