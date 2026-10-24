@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, MoveVertical, Camera, Cloud, Zap, Smartphone, Key, Cpu,
+  ChevronLeft, ChevronRight, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  ZoomIn, ZoomOut, Check, ListTree, FileText,
-  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard, ArrowDown
+  Check, FileText,
+  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard,
+  Upload, Download
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
 import { FlowDag } from './FlowDag';
@@ -27,6 +28,7 @@ import { OcrDiagnosticsReportModal } from './components/ocr/OcrDiagnosticsReport
 import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
 import { discernNodePerformance } from './utils/dagDiagnostics';
 import { Dag4OcrFullInspectorModal } from './components/dag/Dag4OcrFullInspectorModal';
+import { LazyFrameCard } from './components/frames/LazyFrameCard';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -213,7 +215,7 @@ function AppContent() {
     } catch {}
     setStreamKey(Date.now());
   };
-  const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'spliced' | 'ocr_inspect'>('live');
+  const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'ocr_inspect'>('live');
   const [ocrInspectImageId, setOcrInspectImageId] = useState<string>('dag_node3_capture_temp');
 
   const handleOpenInlineOcrInspector = (imageId?: string) => {
@@ -228,6 +230,10 @@ function AppContent() {
     setInspectorMode('ocr_inspect');
     setInspectorMaximized(false);
     setFramesMinimized(false);
+    // Auto-close Android device drawer and minimize lines panel so OCR inspector coordinates overlay has full width
+    setShowStudioDrawer(false);
+    setLinesMinimized(true);
+    setDagMinimized(true);
   };
 
   const handleCloseInlineOcrInspector = () => {
@@ -240,9 +246,11 @@ function AppContent() {
     apiJson<any>('/api/document').then(d => { if (d) setDocumentData(d); });
     apiJson<any>('/api/frames').then(d => { if (d?.frames) setFrames(d.frames); });
   }, []);
-  const [splicedScale, setSplicedScale] = useState<number>(100);
-  const [splicedFitMode, setSplicedFitMode] = useState<'width' | 'fit'>('width');
-  const [splicedRefreshKey, setSplicedRefreshKey] = useState<number>(() => Date.now());
+  const [isExportingMarkdown, setIsExportingMarkdown] = useState(false);
+  const [isExportingProject, setIsExportingProject] = useState(false);
+  const [isImportingProject, setIsImportingProject] = useState(false);
+  const projectImportInputRef = useRef<HTMLInputElement>(null);
+  const sidebarImportInputRef = useRef<HTMLInputElement>(null);
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
   const [isInfoHovered, setIsInfoHovered] = useState(false);
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
@@ -1345,6 +1353,100 @@ function AppContent() {
     }
   };
 
+  const handleExportMarkdown = async () => {
+    setIsExportingMarkdown(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/document/export-markdown`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to export markdown file');
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = `${activeProject?.name || 'document'}.md`;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      addTelemetryEvent('SYSTEM', `Verified lines saved as markdown: ${filename} ✔`, undefined, 'system');
+    } catch (e: any) {
+      console.error('[App] handleExportMarkdown error:', e);
+      await showAlert({ title: 'Export Failed', message: e.message || 'Could not export markdown file.', variant: 'danger' });
+    } finally {
+      setIsExportingMarkdown(false);
+    }
+  };
+
+  const handleExportProject = async (projectId: string, projectName?: string) => {
+    setIsExportingProject(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/export`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to export project archive');
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = `${projectName || projectId}.zip`;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      addTelemetryEvent('SYSTEM', `Project archive exported: ${filename} ✔`, undefined, 'system');
+    } catch (e: any) {
+      console.error('[App] handleExportProject error:', e);
+      await showAlert({ title: 'Export Failed', message: e.message || 'Could not export project archive.', variant: 'danger' });
+    } finally {
+      setIsExportingProject(false);
+    }
+  };
+
+  const handleImportProject = async (file: File) => {
+    if (!file.name.endsWith('.zip')) {
+      await showAlert({ title: 'Invalid File', message: 'Please select a .zip project archive.', variant: 'warning' });
+      return;
+    }
+    setIsImportingProject(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(`${API_BASE}/api/projects/import`, {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addTelemetryEvent('SYSTEM', `Project imported successfully: ${data.project?.name} (${data.frames_imported} frames, ${data.lines_imported} lines) ✔`, undefined, 'system');
+        await fetchData();
+      } else {
+        await showAlert({ title: 'Import Failed', message: data.detail || 'Failed to import project archive.', variant: 'danger' });
+      }
+    } catch (e: any) {
+      console.error('[App] handleImportProject error:', e);
+      await showAlert({ title: 'Import Error', message: e.message || 'Network error importing project.', variant: 'danger' });
+    } finally {
+      setIsImportingProject(false);
+      if (projectImportInputRef.current) projectImportInputRef.current.value = '';
+      if (sidebarImportInputRef.current) sidebarImportInputRef.current.value = '';
+    }
+  };
+
   const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
     e?.stopPropagation();
     const ok = await confirm({ title: 'Delete Frame', message: 'Delete this frame from the document? Line bounds will re-index.', variant: 'danger', confirmText: 'Delete Frame' });
@@ -1993,17 +2095,52 @@ function AppContent() {
             <ChevronDown size={11} />
           </div>
           {activeProject && (
-            <button
-              type="button"
-              className="btn-text-danger"
-              onClick={e => { e.stopPropagation(); handleDeleteProject(activeProject.id, activeProject.name); }}
-              title={`Delete active project "${activeProject.name}"`}
-              aria-label={`Delete active project ${activeProject.name}`}
-              style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
-            >
-              <Trash2 size={12} />
-            </button>
+            <>
+              <button
+                type="button"
+                className="btn-text-secondary"
+                onClick={e => { e.stopPropagation(); handleExportProject(activeProject.id, activeProject.name); }}
+                disabled={isExportingProject}
+                title={`Export complete project "${activeProject.name}" as .zip`}
+                aria-label={`Export project ${activeProject.name}`}
+                style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#58a6ff' }}
+              >
+                <Download size={12} />
+              </button>
+              <button
+                type="button"
+                className="btn-text-danger"
+                onClick={e => { e.stopPropagation(); handleDeleteProject(activeProject.id, activeProject.name); }}
+                title={`Delete active project "${activeProject.name}"`}
+                aria-label={`Delete active project ${activeProject.name}`}
+                style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </>
           )}
+          <input
+            type="file"
+            ref={projectImportInputRef}
+            accept=".zip"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleImportProject(file);
+            }}
+          />
+          <button
+            type="button"
+            className="btn-text-secondary"
+            onClick={e => { e.stopPropagation(); projectImportInputRef.current?.click(); }}
+            disabled={isImportingProject}
+            title="Import complete project (.zip archive)"
+            aria-label="Import complete project archive"
+            style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#38bdf8' }}
+          >
+            <Upload size={12} />
+            <span>{isImportingProject ? '...' : 'Import'}</span>
+          </button>
         </div>
 
         <div className="header-center">
@@ -2536,6 +2673,25 @@ function AppContent() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><FolderKanban size={16} color="#00ff9d" /><span style={{ fontWeight: 600, fontSize: '13px', color: '#e6edf3' }}>Projects</span></div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <button className="btn btn-sm btn-outline" onClick={() => setShowNewProjectModal(true)} style={{ padding: '3px 8px', fontSize: '11px' }}><Plus size={12} /> New</button>
+                  <input
+                    type="file"
+                    ref={sidebarImportInputRef}
+                    accept=".zip"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImportProject(file);
+                    }}
+                  />
+                  <button
+                    className="btn btn-sm btn-outline"
+                    onClick={() => sidebarImportInputRef.current?.click()}
+                    disabled={isImportingProject}
+                    style={{ padding: '3px 8px', fontSize: '11px', color: '#38bdf8', borderColor: '#38bdf866' }}
+                    title="Import Project Archive (.zip)"
+                  >
+                    <Upload size={12} /> {isImportingProject ? '...' : 'Import'}
+                  </button>
                   <button className="sidebar-toggle-btn" onClick={() => setIsSidebarOpen(false)}><ChevronLeft size={14} /></button>
                 </div>
               </div>
@@ -2548,15 +2704,28 @@ function AppContent() {
                         <span className="project-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                         {p.id === activeProject?.id && <span className="active-badge">ACTIVE</span>}
                       </div>
-                      <button
-                        type="button"
-                        className="btn-text-danger"
-                        onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
-                        title={`Delete project "${p.name}"`}
-                        aria-label={`Delete project ${p.name}`}
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn-text-secondary"
+                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
+                          title={`Export project "${p.name}" (.zip)`}
+                          aria-label={`Export project ${p.name}`}
+                          style={{ padding: '2px', color: '#58a6ff' }}
+                        >
+                          <Download size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-text-danger"
+                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                          title={`Delete project "${p.name}"`}
+                          aria-label={`Delete project ${p.name}`}
+                          style={{ padding: '2px' }}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </div>
                     {p.description && (
                       <div style={{ fontSize: '11px', color: '#58a6ff', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.description}>
@@ -2675,11 +2844,21 @@ function AppContent() {
                       return (
                         <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
-                          <div
-                            className={`frame-card ${selectedFrameId === f.frame_id ? 'active' : ''} ${isSelected ? 'selected-for-edit' : ''} ${f.status.startsWith('error') ? 'frame-error' : ''}`}
+                          <LazyFrameCard
+                            frame={f}
+                            isSelected={isSelected}
+                            isActive={selectedFrameId === f.frame_id}
+                            displayPageNum={displayPageNum}
+                            apiBase={API_BASE}
+                            reprocessingFrameId={reprocessingFrameId}
+                            deletingFrameId={deletingFrameId}
                             onClick={() => {
                               setSelectedFrameId(f.frame_id);
-                              setInspectorMode('single');
+                              if (inspectorMode === 'ocr_inspect') {
+                                setOcrInspectImageId(f.frame_id);
+                              } else if (inspectorMode === 'live') {
+                                setInspectorMode('single');
+                              }
                               setInspectorMaximized(false);
                               setFramesMinimized(false);
                             }}
@@ -2687,83 +2866,19 @@ function AppContent() {
                               e.stopPropagation();
                               handleOpenInlineOcrInspector(f.frame_id);
                             }}
-                            style={{ cursor: 'pointer' }}
-                            title="Click to select & view frame • Double-click to open OCR Full Inspector inline"
-                          >
-                            <div className="frame-card-preview">
-                              <input
-                                type="checkbox"
-                                className="frame-card-checkbox"
-                                checked={isSelected}
-                                onChange={(e) => handleToggleSelectFrame(f.frame_id, e)}
-                                onClick={(e) => e.stopPropagation()}
-                                title="Select frame for group operations"
-                              />
-                              <img key={`thumb_${f.frame_id}`} src={`${API_BASE}/api/frames/${f.frame_id}/image?t=${encodeURIComponent(f.created_at || '')}`} alt={f.frame_id} />
-                              <span className="frame-badge">Pg {displayPageNum}</span>
-                              {f.token_usage && f.token_usage.total_tokens > 0 && <span className="frame-token-badge"><Coins size={9} /> {f.token_usage.total_tokens}</span>}
-                            </div>
-                            <div className="frame-card-info">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                <span className="frame-lines-badge">Ln {f.top_line} → {f.bottom_line}</span>
-                                {displayPageNum > 1 && (
-                                  <span
-                                    className="frame-arrows-badge"
-                                    style={{
-                                      fontSize: '10px',
-                                      color: '#00ff9d',
-                                      background: 'rgba(0, 255, 157, 0.12)',
-                                      border: '1px solid rgba(0, 255, 157, 0.25)',
-                                      padding: '1px 5px',
-                                      borderRadius: '4px',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '2px',
-                                      fontWeight: 600
-                                    }}
-                                    title={`${f.arrow_count ?? 0} down-arrow key presses to reach page`}
-                                  >
-                                    <ArrowDown size={10} color="#00ff9d" /> {f.arrow_count ?? 0}
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span className={`frame-status-dot ${f.status === 'processed' ? 'processed' : (f.status === 'queued' ? 'queued' : 'error')}`} />
-                                <span className="frame-status-text" title={f.status}>{f.extracted_line_count > 0 ? `${f.extracted_line_count} ln` : (f.status.startsWith('error') ? 'Error' : f.status)}</span>
-                                {(f.status.startsWith('error') || (f.status !== 'queued' && f.extracted_line_count === 0)) && (
-                                  <button className="frame-retry-btn" onClick={(e) => handleReprocessFrame(f.frame_id, e)} disabled={reprocessingFrameId === f.frame_id || f.status === 'queued'}>
-                                    <RotateCw size={11} className={reprocessingFrameId === f.frame_id ? 'spinning' : ''} />
-                                  </button>
-                                )}
-                              </div>
-                              <div className="frame-card-actions-group" onClick={e => e.stopPropagation()}>
-                                <div className="frame-position-controls" style={{ margin: 0 }} title="Nudge offset (px)">
-                                  <MoveVertical size={10} color="#8b949e" />
-                                  <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, -1)}>▲</button>
-                                  <span className="nudge-val">{f.custom_offset_y || 0}px</span>
-                                  <button className="nudge-btn" onClick={() => handleUpdateFramePosition(f.frame_id, 1)}>▼</button>
-                                </div>
-                                <button
-                                  type="button"
-                                  id={`frame-trace-btn-${f.frame_id.slice(0, 8)}`}
-                                  className="frame-card-action-btn frame-card-trace-btn"
-                                  onClick={(e) => { e.stopPropagation(); setSelectedFrameId(f.frame_id); setTraceFrameId(f.frame_id); }}
-                                  title="View detailed event trace (key presses, DAG events) for this capture"
-                                >
-                                  <ListTree size={12} />
-                                </button>
-                                <button
-                                  type="button"
-                                  className="frame-card-action-btn frame-card-delete-btn"
-                                  onClick={(e) => { e.stopPropagation(); handleDeleteFrame(f.frame_id, e); }}
-                                  disabled={deletingFrameId === f.frame_id}
-                                  title="Delete frame"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </div>
-                          </div>
+                            onToggleSelect={(e) => handleToggleSelectFrame(f.frame_id, e)}
+                            onReprocess={(e) => handleReprocessFrame(f.frame_id, e)}
+                            onUpdatePosition={(delta) => handleUpdateFramePosition(f.frame_id, delta)}
+                            onOpenTrace={(e) => {
+                              e.stopPropagation();
+                              setSelectedFrameId(f.frame_id);
+                              setTraceFrameId(f.frame_id);
+                            }}
+                            onDelete={(e) => {
+                              e.stopPropagation();
+                              handleDeleteFrame(f.frame_id, e);
+                            }}
+                          />
                         </div>
                       );
                     })}
@@ -2781,7 +2896,6 @@ function AppContent() {
                 <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
                   <button className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`} onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} style={{ fontSize: '11px', padding: '3px 8px' }}><Monitor size={11} style={{ marginRight: '4px' }} /><span>Live Desktop</span></button>
                   <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
-                  <button className={`btn btn-sm ${inspectorMode === 'spliced' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('spliced')} style={{ fontSize: '11px', padding: '3px 8px' }}>Spliced ({frames.length})</button>
                   <button
                     className={`btn btn-sm ${inspectorMode === 'ocr_inspect' ? 'btn-primary' : ''}`}
                     onClick={() => handleOpenInlineOcrInspector(selectedFrameId || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
@@ -3072,122 +3186,6 @@ function AppContent() {
                       />
                     </div>
                   </div>
-                ) : inspectorMode === 'spliced' ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 14px', background: '#161b22', borderBottom: '1px solid #30363d', zIndex: 10 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <Layers size={14} color="#00ff9d" />
-                        <span style={{ fontSize: '11px', color: '#00ff9d', fontFamily: 'monospace', fontWeight: 700 }}>
-                          SPLICED CANVAS · {frames.length} FRAMES
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {/* View Mode: Fit Width vs Fit Page */}
-                        <div style={{ display: 'inline-flex', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', overflow: 'hidden' }}>
-                          <button
-                            type="button"
-                            onClick={() => { setSplicedFitMode('width'); setSplicedScale(100); }}
-                            className={`btn btn-xs ${splicedFitMode === 'width' ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ fontSize: '10px', padding: '2px 8px', borderRadius: 0, fontWeight: 600 }}
-                            title="Scale to full container width preserving aspect ratio (Vertical scroll)"
-                          >
-                            FIT WIDTH
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setSplicedFitMode('fit')}
-                            className={`btn btn-xs ${splicedFitMode === 'fit' ? 'btn-primary' : 'btn-ghost'}`}
-                            style={{ fontSize: '10px', padding: '2px 8px', borderRadius: 0, fontWeight: 600 }}
-                            title="Fit full document height into window"
-                          >
-                            FIT PAGE
-                          </button>
-                        </div>
-
-                        {/* Zoom Out */}
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline"
-                          onClick={() => setSplicedScale(prev => Math.max(50, prev - 15))}
-                          disabled={splicedFitMode === 'fit'}
-                          title="Zoom Out"
-                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <ZoomOut size={11} />
-                        </button>
-
-                        {/* Zoom Indicator / Reset to 100% */}
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline"
-                          onClick={() => setSplicedScale(100)}
-                          disabled={splicedFitMode === 'fit'}
-                          title="Reset zoom to 100%"
-                          style={{ height: '22px', fontSize: '10px', padding: '0 6px', fontFamily: 'monospace', minWidth: '42px', textAlign: 'center' }}
-                        >
-                          {splicedFitMode === 'fit' ? 'AUTO' : `${splicedScale}%`}
-                        </button>
-
-                        {/* Zoom In */}
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline"
-                          onClick={() => setSplicedScale(prev => Math.min(250, prev + 15))}
-                          disabled={splicedFitMode === 'fit'}
-                          title="Zoom In"
-                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <ZoomIn size={11} />
-                        </button>
-
-                        {/* Refresh Spliced Document Image */}
-                        <button
-                          type="button"
-                          className="btn btn-xs btn-outline"
-                          onClick={() => setSplicedRefreshKey(Date.now())}
-                          title="Refresh Spliced Document View"
-                          style={{ height: '22px', width: '24px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <RefreshCw size={11} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Scrollable container displaying full-width spliced image with natural aspect ratio */}
-                    <div
-                      className="spliced-canvas-scroll-container"
-                      onDoubleClick={() => handleOpenInlineOcrInspector(activeFrame?.frame_id || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
-                      title="Double-click canvas to open OCR Full Inspector inline"
-                      style={{
-                        flex: 1,
-                        width: '100%',
-                        height: 'calc(100% - 35px)',
-                        overflowY: 'auto',
-                        overflowX: splicedScale > 100 ? 'auto' : 'hidden',
-                        background: '#0d1117',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: splicedFitMode === 'fit' ? 'center' : 'flex-start',
-                        padding: 0
-                      }}
-                    >
-                      <img
-                        src={`${API_BASE}/api/spliced-document-image?t=${splicedRefreshKey}_${frames.length}_${frames[frames.length - 1]?.created_at || ''}`}
-                        alt="Spliced Document Canvas"
-                        style={{
-                          width: splicedFitMode === 'width' ? `${splicedScale}%` : 'auto',
-                          maxWidth: splicedFitMode === 'fit' ? '100%' : 'none',
-                          maxHeight: splicedFitMode === 'fit' ? 'calc(100vh - 180px)' : 'none',
-                          height: 'auto',
-                          display: 'block',
-                          objectFit: 'contain',
-                          boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
-                          transition: 'width 0.12s ease'
-                        }}
-                      />
-                    </div>
-                  </div>
                 ) : inspectorMode === 'ocr_inspect' ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
                     <Dag4OcrFullInspectorModal
@@ -3201,6 +3199,20 @@ function AppContent() {
                       nodeModelUsed="MiniCPM-V (Ollama)"
                       nodeLinesCount={0}
                       onRefresh={handleOcrInspectorRefresh}
+                      hasFramesPanel={!!activeProject}
+                      isFramesMinimized={framesMinimized || inspectorMaximized}
+                      onToggleFramesPanel={handleToggleFrames}
+                      hasLinesPanel={!!activeProject}
+                      isLinesPanelMinimized={linesMinimized || inspectorMaximized}
+                      onToggleLinesPanel={handleToggleLines}
+                      hasStudioPanel={true}
+                      isStudioPanelOpen={showStudioDrawer && !studioMinimized}
+                      onToggleStudioPanel={() => handleToggleStudio()}
+                      onFocusInspector={() => {
+                        setFramesMinimized(true);
+                        setLinesMinimized(true);
+                        setInspectorMaximized(true);
+                      }}
                     />
                   </div>
                 ) : activeFrame ? (
@@ -3275,6 +3287,17 @@ function AppContent() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')}>All ({documentData.total_lines})</button>
                         <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={handleExportMarkdown}
+                          disabled={isExportingMarkdown || filteredLines.length === 0}
+                          title="Save entire contents of verified lines as Markdown (.md) file"
+                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
+                        >
+                          <Download size={11} color="#00ff9d" />
+                          <span>{isExportingMarkdown ? 'Saving...' : 'Save as MD'}</span>
+                        </button>
                         <button
                           type="button"
                           className="btn btn-sm btn-outline"

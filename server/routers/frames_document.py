@@ -772,6 +772,47 @@ async def get_frames():
 async def get_frame_image(frame_id: str):
     return FileResponse(_get_frame_path(frame_id), media_type="image/png", headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0", "Pragma": "no-cache", "Expires": "0"})
 
+THUMBNAILS_DIR = Path(__file__).parent.parent / "data" / "thumbnails"
+
+@router.get("/api/frames/{frame_id}/thumbnail")
+async def get_frame_thumbnail(frame_id: str):
+    """
+    Returns an optimized, cached 384x216 JPEG thumbnail for fast lazy loading
+    with a dramatically smaller memory footprint.
+    """
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
+    thumb_path = THUMBNAILS_DIR / f"{clean_id}.jpg"
+
+    if thumb_path.exists() and thumb_path.stat().st_size > 500:
+        return FileResponse(
+            thumb_path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
+
+    try:
+        source_path = _get_frame_path(frame_id)
+        if not source_path.exists():
+            raise HTTPException(status_code=404, detail="Frame not found")
+
+        with Image.open(source_path) as im:
+            im = im.convert("RGB")
+            im.thumbnail((384, 216), Image.Resampling.LANCZOS)
+            im.save(thumb_path, format="JPEG", quality=80, optimize=True)
+
+        return FileResponse(
+            thumb_path,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=86400"}
+        )
+    except Exception as e:
+        try:
+            return FileResponse(_get_frame_path(frame_id), media_type="image/png")
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"Failed to generate thumbnail: {e}")
+
+
 @router.post("/api/frames/{frame_id}/reprocess")
 async def reprocess_frame(frame_id: str, background_tasks: BackgroundTasks, model_target: Optional[str] = Query(None), payload: Optional[ReprocessRequest] = None):
     if frame_id not in state.captured_frames:

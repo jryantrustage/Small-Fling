@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   FileText, Check, Copy, RotateCw, Eye, EyeOff, ZoomIn, ZoomOut,
   Maximize2, Minimize2, Search, Link2, AlertCircle, Image as ImageIcon,
@@ -79,6 +79,17 @@ export interface Dag4OcrFullInspectorModalProps {
   nodeLinesCount?: number;
   onRefresh?: () => void;
   inline?: boolean;
+  // External panel status & toggles for aspect ratio adaptation
+  hasFramesPanel?: boolean;
+  isFramesMinimized?: boolean;
+  onToggleFramesPanel?: () => void;
+  hasLinesPanel?: boolean;
+  isLinesPanelMinimized?: boolean;
+  onToggleLinesPanel?: () => void;
+  hasStudioPanel?: boolean;
+  isStudioPanelOpen?: boolean;
+  onToggleStudioPanel?: () => void;
+  onFocusInspector?: () => void;
 }
 
 export type OcrModalMode = 'inline' | 'fullscreen' | 'standard' | 'reduced';
@@ -86,10 +97,27 @@ export type OcrModalMode = 'inline' | 'fullscreen' | 'standard' | 'reduced';
 interface ConnectorPath {
   lineNumber: number;
   d: string;
+  ribbonD?: string;
   x1: number;
   y1: number;
   x2: number;
   y2: number;
+  gutterBox: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
+  rowBox: {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+    width: number;
+    height: number;
+  };
   isHovered: boolean;
   isSelected: boolean;
   isFlagged: boolean;
@@ -104,7 +132,17 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   nodeModelUsed = 'MiniCPM-V (Ollama)',
   nodeLinesCount = 0,
   onRefresh,
-  inline = false
+  inline = false,
+  hasFramesPanel,
+  isFramesMinimized,
+  onToggleFramesPanel,
+  hasLinesPanel,
+  isLinesPanelMinimized,
+  onToggleLinesPanel,
+  hasStudioPanel,
+  isStudioPanelOpen,
+  onToggleStudioPanel,
+  onFocusInspector
 }) => {
   // Window display modes: 'fullscreen' (100vw x 100vh), 'standard' (wide floating), 'reduced' (compact floating), 'inline' (docked in container)
   const [modalMode, setModalMode] = useState<OcrModalMode>(inline ? 'inline' : 'fullscreen');
@@ -117,7 +155,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   }, [inline]);
 
   const [selectedImageId, setSelectedImageId] = useState<string>(initialImageId || '');
-  const [availableImages, setAvailableImages] = useState<AvailableOcrImage[]>([]);
+  const [_availableImages, setAvailableImages] = useState<AvailableOcrImage[]>([]);
   const [inspectData, setInspectData] = useState<OcrInspectionData | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRescanningAll, setIsRescanningAll] = useState<boolean>(false);
@@ -161,6 +199,42 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   const textPanelRef = useRef<HTMLDivElement>(null);
   const lineRowRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const boxAnchorRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  // Track viewport size to adapt dynamically to panel resizing, aspect ratios, and full screen toggling
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain');
+
+  const imgNaturalWidth = inspectData?.image_width || 1920;
+  const imgNaturalHeight = inspectData?.image_height || 1080;
+
+  // Compute fitScale so the entire image fits within the viewport while preserving its exact aspect ratio
+  const fitScale = useMemo(() => {
+    if (!viewportSize.width || !viewportSize.height || !imgNaturalWidth || !imgNaturalHeight) {
+      return 1.0;
+    }
+    const pad = 24; // 12px padding on each side
+    const availW = Math.max(100, viewportSize.width - pad);
+    const availH = Math.max(100, viewportSize.height - pad);
+    const scaleW = availW / imgNaturalWidth;
+    const scaleH = availH / imgNaturalHeight;
+
+    if (fitMode === 'width') {
+      return scaleW;
+    }
+    return Math.min(scaleW, scaleH);
+  }, [viewportSize, imgNaturalWidth, imgNaturalHeight, fitMode]);
+
+  const effectiveScale = fitScale * zoom;
+
+  // Split ratio between Left Image pane and Right Code Text panel (percentage of width)
+  const [splitPercent, setSplitPercent] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem('mc_ocr_split_percent')) || 52;
+    } catch {
+      return 52;
+    }
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState<boolean>(false);
 
   // Dynamic connector paths
   const [connectorPaths, setConnectorPaths] = useState<ConnectorPath[]>([]);
@@ -367,6 +441,8 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
     }
 
     const containerRect = modalBodyRef.current.getBoundingClientRect();
+    const vpRect = imageViewportRef.current?.getBoundingClientRect();
+    const tpRect = textPanelRef.current?.getBoundingClientRect();
     const paths: ConnectorPath[] = [];
 
     const effectiveHovered = hoveredLineNumber !== null ? hoveredLineNumber : selectedLineNumber;
@@ -389,21 +465,99 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
         const aRect = anchorEl.getBoundingClientRect();
         const rRect = rowEl.getBoundingClientRect();
 
-        const x1 = aRect.right - containerRect.left;
-        const y1 = aRect.top + aRect.height / 2 - containerRect.top;
-        const x2 = rRect.left - containerRect.left;
-        const y2 = rRect.top + rRect.height / 2 - containerRect.top;
+        // Check vertical visibility if not highlighted to avoid drawing off-screen stray lines
+        const anchorVisible = !vpRect || (aRect.bottom >= vpRect.top && aRect.top <= vpRect.bottom);
+        const rowVisible = !tpRect || (rRect.bottom >= tpRect.top && rRect.top <= tpRect.bottom);
+
+        if (!isHovered && !isSelected && !isFlagged) {
+          if (!anchorVisible || !rowVisible) {
+            return;
+          }
+        }
+
+        // Bounding area coordinates relative to modal body container
+        const gLeft = aRect.left - containerRect.left;
+        const gTop = aRect.top - containerRect.top;
+        const gRight = aRect.right - containerRect.left;
+        const gBottom = aRect.bottom - containerRect.top;
+        const gWidth = aRect.width;
+        const gHeight = aRect.height;
+        const gMidY = gTop + gHeight / 2;
+
+        const rLeft = rRect.left - containerRect.left;
+        const rTop = rRect.top - containerRect.top;
+        const rRight = rRect.right - containerRect.left;
+        const rBottom = rRect.bottom - containerRect.top;
+        const rHeight = rRect.height;
+        const rMidY = rTop + rHeight / 2;
+
+        let x1 = gRight;
+        let y1 = gMidY;
+        let x2 = rLeft;
+        let y2 = rMidY;
+
+        // If active line (hovered/selected/flagged) is scrolled out of view, clamp Y to viewport edge so connector stays visible
+        if (vpRect && (isHovered || isSelected || isFlagged)) {
+          const minY1 = vpRect.top - containerRect.top + 8;
+          const maxY1 = vpRect.bottom - containerRect.top - 8;
+          y1 = Math.max(minY1, Math.min(maxY1, y1));
+        }
+        if (tpRect && (isHovered || isSelected || isFlagged)) {
+          const minY2 = tpRect.top - containerRect.top + 8;
+          const maxY2 = tpRect.bottom - containerRect.top - 8;
+          y2 = Math.max(minY2, Math.min(maxY2, y2));
+        }
+
+        // Boundary constraint: x1 must not cross into the text panel
+        if (vpRect) {
+          const maxLeftPaneX = vpRect.right - containerRect.left;
+          if (x1 > maxLeftPaneX) {
+            x1 = maxLeftPaneX;
+          }
+        }
 
         if (Number.isFinite(x1) && Number.isFinite(y1) && Number.isFinite(x2) && Number.isFinite(y2)) {
-          const dx = Math.max(35, Math.abs(x2 - x1) * 0.45);
+          if (x1 >= x2) {
+            x1 = x2 - 15;
+          }
+          const dx = Math.max(25, (x2 - x1) * 0.45);
           const d = `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+
+          // Translucent ribbon band polygon connecting full height of gutter bounding box to text row
+          let ribbonD: string | undefined;
+          if (isHovered || isSelected || isFlagged) {
+            const topY1 = Math.max(gTop, (vpRect?.top ?? containerRect.top) - containerRect.top);
+            const botY1 = Math.min(gBottom, (vpRect?.bottom ?? containerRect.bottom) - containerRect.top);
+            const topY2 = Math.max(rTop, (tpRect?.top ?? containerRect.top) - containerRect.top);
+            const botY2 = Math.min(rBottom, (tpRect?.bottom ?? containerRect.bottom) - containerRect.top);
+
+            ribbonD = `M ${x1} ${topY1} C ${x1 + dx} ${topY1}, ${x2 - dx} ${topY2}, ${x2} ${topY2} L ${x2} ${botY2} C ${x2 - dx} ${botY2}, ${x1 + dx} ${botY1}, ${x1} ${botY1} Z`;
+          }
+
           paths.push({
             lineNumber: ln,
             d,
+            ribbonD,
             x1,
             y1,
             x2,
             y2,
+            gutterBox: {
+              left: gLeft,
+              top: gTop,
+              right: gRight,
+              bottom: gBottom,
+              width: gWidth,
+              height: gHeight
+            },
+            rowBox: {
+              left: rLeft,
+              top: rTop,
+              right: rRight,
+              bottom: rBottom,
+              width: rRect.width,
+              height: rHeight
+            },
             isHovered,
             isSelected,
             isFlagged
@@ -415,34 +569,70 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
     setConnectorPaths(paths);
   }, [isOpen, inspectData, hoveredLineNumber, selectedLineNumber, showAllConnectors, selectedLinesToOverwrite]);
 
-  // Attach ResizeObserver and scroll listeners to recompute connectors smoothly
+  // Measure viewport size and attach active ResizeObserver + scroll listeners
   useEffect(() => {
     if (!isOpen) return;
 
-    const timer = setTimeout(updateConnectors, 60);
+    const vpEl = imageViewportRef.current;
+    const bodyEl = modalBodyRef.current;
+    const textEl = textPanelRef.current;
+
+    const updateMeasurements = () => {
+      if (vpEl) {
+        const rect = vpEl.getBoundingClientRect();
+        setViewportSize(prev => {
+          if (Math.abs(prev.width - rect.width) > 1 || Math.abs(prev.height - rect.height) > 1) {
+            return { width: rect.width, height: rect.height };
+          }
+          return prev;
+        });
+      }
+      updateConnectors();
+    };
+
+    // Initial measurement
+    updateMeasurements();
+
+    // ResizeObserver detects all panel changes (scan file panel, determined lines panel, phone panel, full screen)
+    const resizeObserver = new ResizeObserver(() => {
+      requestAnimationFrame(updateMeasurements);
+    });
+
+    if (bodyEl) resizeObserver.observe(bodyEl);
+    if (vpEl) resizeObserver.observe(vpEl);
+    if (textEl) resizeObserver.observe(textEl);
 
     const handleScrollOrResize = () => {
       requestAnimationFrame(updateConnectors);
     };
 
     window.addEventListener('resize', handleScrollOrResize);
-    const textPanel = textPanelRef.current;
-    const imgVp = imageViewportRef.current;
-
-    if (textPanel) textPanel.addEventListener('scroll', handleScrollOrResize, { passive: true });
-    if (imgVp) imgVp.addEventListener('scroll', handleScrollOrResize, { passive: true });
+    if (textEl) textEl.addEventListener('scroll', handleScrollOrResize, { passive: true });
+    if (vpEl) vpEl.addEventListener('scroll', handleScrollOrResize, { passive: true });
 
     return () => {
-      clearTimeout(timer);
+      resizeObserver.disconnect();
       window.removeEventListener('resize', handleScrollOrResize);
-      if (textPanel) textPanel.removeEventListener('scroll', handleScrollOrResize);
-      if (imgVp) imgVp.removeEventListener('scroll', handleScrollOrResize);
+      if (textEl) textEl.removeEventListener('scroll', handleScrollOrResize);
+      if (vpEl) vpEl.removeEventListener('scroll', handleScrollOrResize);
     };
-  }, [isOpen, updateConnectors, zoom, pan, inspectData]);
+  }, [isOpen, updateConnectors, modalMode]);
+
+  // Sync connector positions whenever effective scale or pan changes
+  useEffect(() => {
+    if (isOpen) {
+      const raf = requestAnimationFrame(updateConnectors);
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [isOpen, effectiveScale, pan, updateConnectors]);
 
   // Image pan handling
   const handleMouseDownImage = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('button') || target.closest('input')) {
+      return;
+    }
     setIsPanning(true);
     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
@@ -460,10 +650,52 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
     setIsPanning(false);
   };
 
+  const handleWheelImage = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.15 : -0.15;
+      setZoom(z => Math.max(0.3, Math.min(3.5, Number((z + delta).toFixed(2)))));
+    }
+  };
+
   const handleResetZoom = () => {
     setZoom(1.0);
     setPan({ x: 0, y: 0 });
     requestAnimationFrame(updateConnectors);
+  };
+
+  // Draggable split resizer between left image pane and right OCR text panel
+  const handleSplitterMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSplitter(true);
+    const startX = e.clientX;
+    const bodyEl = modalBodyRef.current;
+    if (!bodyEl) return;
+    const initialRect = bodyEl.getBoundingClientRect();
+    const initialSplit = splitPercent;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const newWidthPct = ((initialRect.width * (initialSplit / 100) + deltaX) / initialRect.width) * 100;
+      const clamped = Math.max(20, Math.min(80, Math.round(newWidthPct)));
+      setSplitPercent(clamped);
+      try {
+        localStorage.setItem('mc_ocr_split_percent', String(clamped));
+      } catch {
+        // ignore
+      }
+      requestAnimationFrame(updateConnectors);
+    };
+
+    const onMouseUp = () => {
+      setIsDraggingSplitter(false);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      requestAnimationFrame(updateConnectors);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
   };
 
   // Auto-scroll row in text panel when bounding box clicked
@@ -516,8 +748,6 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
     );
   });
 
-  const imgNaturalWidth = inspectData?.image_width || 1920;
-  const imgNaturalHeight = inspectData?.image_height || 1080;
   const activeModel = inspectData?.model_used || nodeModelUsed;
   const activeCount = inspectData?.lines_count ?? nodeLinesCount;
 
@@ -828,39 +1058,49 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
           borderBottom: '1px solid #30363d',
           zIndex: 20
         }}>
-          {/* Left: Image selector & Full Rescan */}
+          {/* Left: Active Image Title Badge & Full Rescan */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '11px', fontWeight: 800, color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <ImageIcon size={13} color="#58a6ff" />
-              <span>IMAGE:</span>
-            </label>
-            <select
-              value={selectedImageId}
-              onChange={(e) => {
-                const nextId = e.target.value;
-                setSelectedImageId(nextId);
-                fetchInspectData(nextId);
-              }}
+            <div
               style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
                 background: '#161b22',
                 border: '1px solid #30363d',
-                color: '#e6edf3',
+                padding: '4px 10px',
+                borderRadius: '6px',
                 fontSize: '11px',
                 fontWeight: 600,
-                padding: '4px 8px',
-                borderRadius: '6px',
-                outline: 'none',
-                cursor: 'pointer',
-                minWidth: '220px',
-                maxWidth: '420px'
+                color: '#e6edf3'
               }}
+              title="Currently inspected image (Click any frame in the Captured Frames pane on the left to inspect that frame)"
             >
-              {availableImages.map(img => (
-                <option key={img.id} value={img.id}>
-                  {img.label} {img.size ? `(${(img.size / 1024).toFixed(0)} KB)` : ''}
-                </option>
-              ))}
-            </select>
+              <ImageIcon size={13} color="#58a6ff" />
+              <span style={{ color: '#58a6ff', fontWeight: 800 }}>IMAGE:</span>
+              <span style={{ color: '#f0f6fc', fontWeight: 700 }}>
+                {inspectData?.image_name || selectedImageId}
+              </span>
+              {inspectData?.top_line && inspectData?.bottom_line ? (
+                <span
+                  style={{
+                    color: '#00ff9d',
+                    fontSize: '10px',
+                    background: 'rgba(0, 255, 157, 0.12)',
+                    border: '1px solid rgba(0, 255, 157, 0.25)',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    fontWeight: 700
+                  }}
+                >
+                  Ln {inspectData.top_line} → {inspectData.bottom_line}
+                </span>
+              ) : null}
+              {inspectData?.image_width && inspectData?.image_height ? (
+                <span style={{ color: '#8b949e', fontSize: '10px' }}>
+                  {inspectData.image_width}×{inspectData.image_height}
+                </span>
+              ) : null}
+            </div>
 
             <button
               type="button"
@@ -1006,24 +1246,206 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
               <span>{showAllConnectors ? 'Connectors: All' : 'Connectors: Focus'}</span>
             </button>
 
+            {/* Split Presets */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', padding: '1px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 800, color: '#8b949e', padding: '0 5px', textTransform: 'uppercase' }}>Split</span>
+              <button
+                type="button"
+                onClick={() => { setSplitPercent(50); try { localStorage.setItem('mc_ocr_split_percent', '50'); } catch {} requestAnimationFrame(updateConnectors); }}
+                style={{
+                  background: splitPercent === 50 ? 'rgba(56, 189, 248, 0.25)' : 'none',
+                  border: 'none',
+                  color: splitPercent === 50 ? '#38bdf8' : '#8b949e',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  padding: '3px 6px',
+                  borderRadius: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="50% Image / 50% Text split"
+              >
+                50/50
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSplitPercent(65); try { localStorage.setItem('mc_ocr_split_percent', '65'); } catch {} requestAnimationFrame(updateConnectors); }}
+                style={{
+                  background: splitPercent === 65 ? 'rgba(56, 189, 248, 0.25)' : 'none',
+                  border: 'none',
+                  color: splitPercent === 65 ? '#38bdf8' : '#8b949e',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  padding: '3px 6px',
+                  borderRadius: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Image Focus: 65% Image / 35% Text"
+              >
+                Img 65%
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSplitPercent(35); try { localStorage.setItem('mc_ocr_split_percent', '35'); } catch {} requestAnimationFrame(updateConnectors); }}
+                style={{
+                  background: splitPercent === 35 ? 'rgba(56, 189, 248, 0.25)' : 'none',
+                  border: 'none',
+                  color: splitPercent === 35 ? '#38bdf8' : '#8b949e',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  padding: '3px 6px',
+                  borderRadius: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Text Focus: 35% Image / 65% Text"
+              >
+                Txt 65%
+              </button>
+            </div>
+
+            {/* Quick External Panel Adaptation Toggles (Frames, Lines, Phone, Focus) */}
+            {(onToggleFramesPanel || onToggleLinesPanel || onToggleStudioPanel || onFocusInspector) && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', padding: '2px 4px' }}>
+                <span style={{ fontSize: '9px', fontWeight: 800, color: '#8b949e', padding: '0 3px', textTransform: 'uppercase' }}>Panels:</span>
+                {hasFramesPanel !== false && onToggleFramesPanel && (
+                  <button
+                    type="button"
+                    onClick={onToggleFramesPanel}
+                    style={{
+                      background: !isFramesMinimized ? 'rgba(0, 255, 157, 0.18)' : '#21262d',
+                      border: `1px solid ${!isFramesMinimized ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`,
+                      color: !isFramesMinimized ? '#00ff9d' : '#8b949e',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: '3px'
+                    }}
+                    title={!isFramesMinimized ? "Minimize Captured Frames sidebar" : "Restore Captured Frames sidebar"}
+                  >
+                    Frames
+                  </button>
+                )}
+                {hasLinesPanel !== false && onToggleLinesPanel && (
+                  <button
+                    type="button"
+                    onClick={onToggleLinesPanel}
+                    style={{
+                      background: !isLinesPanelMinimized ? 'rgba(0, 255, 157, 0.18)' : '#21262d',
+                      border: `1px solid ${!isLinesPanelMinimized ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`,
+                      color: !isLinesPanelMinimized ? '#00ff9d' : '#8b949e',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: '3px'
+                    }}
+                    title={!isLinesPanelMinimized ? "Minimize Determined Lines panel" : "Restore Determined Lines panel"}
+                  >
+                    Lines
+                  </button>
+                )}
+                {hasStudioPanel !== false && onToggleStudioPanel && (
+                  <button
+                    type="button"
+                    onClick={onToggleStudioPanel}
+                    style={{
+                      background: isStudioPanelOpen ? 'rgba(56, 189, 248, 0.2)' : '#21262d',
+                      border: `1px solid ${isStudioPanelOpen ? 'rgba(56, 189, 248, 0.4)' : '#30363d'}`,
+                      color: isStudioPanelOpen ? '#38bdf8' : '#8b949e',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: '3px'
+                    }}
+                    title={isStudioPanelOpen ? "Close Phone Studio drawer" : "Open Phone Studio drawer"}
+                  >
+                    Phone
+                  </button>
+                )}
+                {onFocusInspector && (
+                  <button
+                    type="button"
+                    onClick={onFocusInspector}
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.5)',
+                      color: '#38bdf8',
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      padding: '2px 6px',
+                      borderRadius: '3px'
+                    }}
+                    title="Maximize OCR Inspector aspect ratio by auto-collapsing outer sidebars"
+                  >
+                    Focus View
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* View Mode Toggle: Fit Page / Fit Width */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', padding: '1px' }}>
+              <button
+                type="button"
+                onClick={() => { setFitMode('contain'); setZoom(1.0); }}
+                style={{
+                  background: fitMode === 'contain' && zoom === 1.0 ? 'rgba(56, 189, 248, 0.25)' : 'none',
+                  border: 'none',
+                  color: fitMode === 'contain' && zoom === 1.0 ? '#38bdf8' : '#8b949e',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  padding: '3px 7px',
+                  borderRadius: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Fit entire image in view (no scrolling)"
+              >
+                Fit Page
+              </button>
+              <button
+                type="button"
+                onClick={() => { setFitMode('width'); setZoom(1.0); }}
+                style={{
+                  background: fitMode === 'width' && zoom === 1.0 ? 'rgba(56, 189, 248, 0.25)' : 'none',
+                  border: 'none',
+                  color: fitMode === 'width' && zoom === 1.0 ? '#38bdf8' : '#8b949e',
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  padding: '3px 7px',
+                  borderRadius: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Fit width of pane (readable code, scroll vertically)"
+              >
+                Fit Width
+              </button>
+            </div>
+
             {/* Zoom Controls */}
             <div style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', padding: '1px' }}>
               <button
                 type="button"
-                onClick={() => setZoom(z => Math.max(0.4, Number((z - 0.15).toFixed(2))))}
+                onClick={() => setZoom(z => Math.max(0.3, Number((z - 0.15).toFixed(2))))}
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '3px 6px' }}
-                title="Zoom Out Image"
+                title="Zoom Out Image (Ctrl+Scroll also supported)"
               >
                 <ZoomOut size={12} />
               </button>
-              <span style={{ fontSize: '10px', color: '#58a6ff', fontWeight: 800, padding: '0 4px', minWidth: '32px', textAlign: 'center' }}>
-                {(zoom * 100).toFixed(0)}%
+              <span style={{ fontSize: '10px', color: '#58a6ff', fontWeight: 800, padding: '0 4px', minWidth: '36px', textAlign: 'center' }}>
+                {zoom === 1.0 ? (fitMode === 'contain' ? 'Fit' : 'Width') : `${(zoom * 100).toFixed(0)}%`}
               </span>
               <button
                 type="button"
-                onClick={() => setZoom(z => Math.min(3.0, Number((z + 0.15).toFixed(2))))}
+                onClick={() => setZoom(z => Math.min(3.5, Number((z + 0.15).toFixed(2))))}
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '3px 6px' }}
-                title="Zoom In Image"
+                title="Zoom In Image (Ctrl+Scroll also supported)"
               >
                 <ZoomIn size={12} />
               </button>
@@ -1031,7 +1453,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 type="button"
                 onClick={handleResetZoom}
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '3px 6px', borderLeft: '1px solid #30363d' }}
-                title="Reset View (1:1 / Fit)"
+                title="Reset View to Fit Container Aspect Ratio"
               >
                 <Maximize2 size={11} />
               </button>
@@ -1062,7 +1484,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
           style={{
             position: 'relative',
             display: 'grid',
-            gridTemplateColumns: modalMode === 'reduced' ? 'minmax(280px, 1fr) minmax(260px, 1fr)' : modalMode === 'inline' ? 'minmax(300px, 1.1fr) minmax(260px, 1fr)' : 'minmax(460px, 1.15fr) minmax(380px, 1fr)',
+            gridTemplateColumns: `${splitPercent}% 6px calc(${100 - splitPercent}% - 6px)`,
             flex: 1,
             height: '100%',
             minHeight: 0,
@@ -1076,6 +1498,8 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
             onMouseDown={handleMouseDownImage}
             onMouseMove={handleMouseMoveImage}
             onMouseUp={handleMouseUpImage}
+            onMouseLeave={handleMouseUpImage}
+            onWheel={handleWheelImage}
             style={{
               position: 'relative',
               overflow: 'auto',
@@ -1085,7 +1509,6 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
               cursor: isPanning ? 'grabbing' : 'grab',
               display: 'flex',
               alignItems: 'flex-start',
-              justifyContent: 'center',
               padding: '16px'
             }}
           >
@@ -1121,30 +1544,43 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
               <div
                 style={{
                   position: 'relative',
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  transformOrigin: 'top left',
-                  transition: isPanning ? 'none' : 'transform 0.1s ease',
+                  width: `${Math.round(imgNaturalWidth * effectiveScale)}px`,
+                  height: `${Math.round(imgNaturalHeight * effectiveScale)}px`,
+                  flexShrink: 0,
+                  margin: '0 auto',
+                  transform: `translate(${pan.x}px, ${pan.y}px)`,
+                  transition: isPanning ? 'none' : 'transform 0.1s ease, width 0.15s ease, height 0.15s ease',
                   boxShadow: '0 8px 30px rgba(0, 0, 0, 0.6)',
                   borderRadius: '6px',
-                  display: 'inline-block'
+                  userSelect: 'none'
                 }}
               >
-                {/* Source Image */}
-                <img
-                  ref={imageElementRef}
-                  src={inspectData?.image_url || `${apiBase}/api/frames/${selectedImageId}/image`}
-                  alt="Source OCR Frame"
-                  draggable={false}
-                  onLoad={() => requestAnimationFrame(updateConnectors)}
+                <div
                   style={{
-                    display: 'block',
-                    maxWidth: '100%',
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
                     width: `${imgNaturalWidth}px`,
                     height: `${imgNaturalHeight}px`,
-                    borderRadius: '6px',
-                    pointerEvents: 'none'
+                    transform: `scale(${effectiveScale})`,
+                    transformOrigin: 'top left'
                   }}
-                />
+                >
+                  {/* Source Image */}
+                  <img
+                    ref={imageElementRef}
+                    src={inspectData?.image_url || `${apiBase}/api/frames/${selectedImageId}/image`}
+                    alt="Source OCR Frame"
+                    draggable={false}
+                    onLoad={() => requestAnimationFrame(updateConnectors)}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: '6px',
+                      pointerEvents: 'none'
+                    }}
+                  />
 
                 {/* Overlaid SVG Bounding Boxes Layer (Gutter Boxes & Content Boxes) */}
                 <svg
@@ -1187,6 +1623,9 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                       ? 'rgba(255, 166, 87, 0.24)'
                       : (isSelected ? 'rgba(0, 255, 157, 0.22)' : (isHovered ? 'rgba(56, 189, 248, 0.16)' : 'rgba(13, 17, 23, 0.45)'));
 
+                    const pillWidth = Math.max(gBox.width, 36);
+                    const pillHeight = Math.max(gBox.height, 22);
+
                     return (
                       <g
                         key={`svg_gutter_box_${ln}`}
@@ -1198,8 +1637,8 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                         <rect
                           x={gBox.x}
                           y={gBox.y}
-                          width={gBox.width}
-                          height={gBox.height}
+                          width={pillWidth}
+                          height={pillHeight}
                           rx={3}
                           fill={fillColor}
                           stroke={strokeColor}
@@ -1324,9 +1763,11 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                             justifyContent: 'center',
                             gap: '3px',
                             background: isFlagged
-                              ? 'rgba(255, 166, 87, 0.45)'
-                              : (isHovered ? 'rgba(56, 189, 248, 0.35)' : 'rgba(9, 13, 19, 0.72)'),
-                            border: `1px solid ${isFlagged ? '#ffa657' : (isHovered ? '#38bdf8' : 'rgba(48, 54, 61, 0.85)')}`,
+                              ? 'rgba(255, 166, 87, 0.38)'
+                              : (isHovered ? 'rgba(56, 189, 248, 0.28)' : 'rgba(9, 13, 19, 0.22)'),
+                            border: `1px solid ${isFlagged ? '#ffa657' : (isHovered ? '#38bdf8' : 'rgba(56, 189, 248, 0.35)')}`,
+                            backdropFilter: 'blur(2px)',
+                            WebkitBackdropFilter: 'blur(2px)',
                             borderRadius: '4px',
                             cursor: 'pointer',
                             boxShadow: isFlagged
@@ -1369,32 +1810,74 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                   </div>
                 )}
 
-                {/* Right Anchor Nodes for Connector Lines (HTML Div Elements tracked in DOM) */}
-                {inspectData?.lines.map(line => {
-                  const ln = line.line_number;
-                  const box = line.bbox || inspectData.bounding_boxes?.line_boxes?.[ln];
-                  if (!box) return null;
+                  {/* Gutter Bounding Area Nodes for Connector Lines (Illustrates the 2D bounding area around the line number gutter) */}
+                  {inspectData?.lines.map(line => {
+                    const ln = line.line_number;
+                    const gBox = line.gutter_bbox || inspectData.bounding_boxes?.gutter_boxes?.[ln];
+                    const cBox = line.bbox || inspectData.bounding_boxes?.line_boxes?.[ln];
 
-                  return (
-                    <div
-                      key={`box_anchor_${ln}`}
-                      ref={(el) => {
-                        if (el) boxAnchorRefs.current.set(ln, el);
-                        else boxAnchorRefs.current.delete(ln);
-                      }}
-                      style={{
-                        position: 'absolute',
-                        left: `${box.x + box.width}px`,
-                        top: `${box.y + box.height / 2}px`,
-                        width: '1px',
-                        height: '1px',
-                        pointerEvents: 'none'
-                      }}
-                    />
-                  );
-                })}
+                    const pillWidth = gBox ? Math.max(gBox.width, 36) : 36;
+                    const pillHeight = gBox ? Math.max(gBox.height, 22) : 22;
+                    const anchorX = gBox ? gBox.x : (cBox ? Math.max(0, cBox.x - pillWidth - 10) : 10);
+                    const anchorY = gBox ? gBox.y : (cBox ? cBox.y : 40);
+
+                    return (
+                      <div
+                        key={`gutter_anchor_${ln}`}
+                        ref={(el) => {
+                          if (el) boxAnchorRefs.current.set(ln, el);
+                          else boxAnchorRefs.current.delete(ln);
+                        }}
+                        style={{
+                          position: 'absolute',
+                          left: `${anchorX}px`,
+                          top: `${anchorY}px`,
+                          width: `${pillWidth}px`,
+                          height: `${pillHeight}px`,
+                          pointerEvents: 'none'
+                        }}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             )}
+          </div>
+
+          {/* DRAGGABLE VERTICAL COLUMN SPLITTER */}
+          <div
+            onMouseDown={handleSplitterMouseDown}
+            style={{
+              width: '6px',
+              height: '100%',
+              cursor: 'col-resize',
+              background: isDraggingSplitter
+                ? '#38bdf8'
+                : 'linear-gradient(180deg, #161b22 0%, #21262d 50%, #161b22 100%)',
+              borderLeft: '1px solid #30363d',
+              borderRight: '1px solid #30363d',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              zIndex: 16,
+              userSelect: 'none',
+              transition: isDraggingSplitter ? 'none' : 'background 0.15s ease'
+            }}
+            title="Drag to adjust Image vs OCR text pane width (Double-click to reset 50/50)"
+            onDoubleClick={() => {
+              setSplitPercent(50);
+              try { localStorage.setItem('mc_ocr_split_percent', '50'); } catch {}
+              requestAnimationFrame(updateConnectors);
+            }}
+          >
+            <div style={{
+              width: '2px',
+              height: '24px',
+              borderRadius: '2px',
+              background: isDraggingSplitter ? '#ffffff' : '#8b949e',
+              opacity: 0.8
+            }} />
           </div>
 
           {/* DYNAMIC CONNECTOR SVG LAYER (Overlay between Left Image & Right Text Panel) */}
@@ -1427,7 +1910,40 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
 
               return (
                 <g key={`conn_${conn.lineNumber}`}>
-                  {/* Bezier connecting curve */}
+                  {/* Translucent ribbon connecting full gutter bounding area to code row */}
+                  {conn.ribbonD && (
+                    <path
+                      d={conn.ribbonD}
+                      fill={conn.isFlagged ? 'rgba(255, 166, 87, 0.12)' : (conn.isSelected ? 'rgba(0, 255, 157, 0.14)' : 'rgba(56, 189, 248, 0.14)')}
+                      style={{ pointerEvents: 'none' }}
+                    />
+                  )}
+
+                  {/* Illustrate Bounding Area around the Line Number Gutter */}
+                  {(conn.isHovered || conn.isSelected || conn.isFlagged) && conn.gutterBox.width > 0 && (
+                    <>
+                      <rect
+                        x={conn.gutterBox.left}
+                        y={conn.gutterBox.top}
+                        width={conn.gutterBox.width}
+                        height={conn.gutterBox.height}
+                        rx="4"
+                        fill={conn.isFlagged ? 'rgba(255, 166, 87, 0.12)' : (conn.isSelected ? 'rgba(0, 255, 157, 0.12)' : 'rgba(56, 189, 248, 0.1)')}
+                        stroke={strokeColor}
+                        strokeWidth={1.5}
+                        filter={filterId}
+                      />
+                      {/* Right-bracket accent on the gutter bounding area exit boundary */}
+                      <path
+                        d={`M ${conn.gutterBox.right - 4} ${conn.gutterBox.top} L ${conn.gutterBox.right} ${conn.gutterBox.top} L ${conn.gutterBox.right} ${conn.gutterBox.bottom} L ${conn.gutterBox.right - 4} ${conn.gutterBox.bottom}`}
+                        fill="none"
+                        stroke={strokeColor}
+                        strokeWidth={2}
+                      />
+                    </>
+                  )}
+
+                  {/* Connecting spine bezier curve from gutter box right edge to text row left edge */}
                   <path
                     d={conn.d}
                     fill="none"
@@ -1437,7 +1953,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                     filter={filterId}
                   />
 
-                  {/* Start dot on Image Bounding Box */}
+                  {/* Anchor dot on right edge of gutter bounding area */}
                   <circle
                     cx={conn.x1}
                     cy={conn.y1}
@@ -1445,13 +1961,23 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                     fill={strokeColor}
                   />
 
-                  {/* End dot on Acquired Text Row */}
+                  {/* Anchor dot on left edge of OCR transcribed text row */}
                   <circle
                     cx={conn.x2}
                     cy={conn.y2}
                     r={conn.isFlagged || conn.isHovered || conn.isSelected ? 4 : 2}
                     fill={strokeColor}
                   />
+
+                  {/* Left accent bracket on text row entry boundary for highlighted rows */}
+                  {(conn.isHovered || conn.isSelected || conn.isFlagged) && conn.rowBox.height > 0 && (
+                    <path
+                      d={`M ${conn.rowBox.left + 4} ${conn.rowBox.top} L ${conn.rowBox.left} ${conn.rowBox.top} L ${conn.rowBox.left} ${conn.rowBox.bottom} L ${conn.rowBox.left + 4} ${conn.rowBox.bottom}`}
+                      fill="none"
+                      stroke={strokeColor}
+                      strokeWidth={2}
+                    />
+                  )}
                 </g>
               );
             })}

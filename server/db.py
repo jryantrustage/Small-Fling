@@ -391,7 +391,8 @@ def activate_project(project_id: str) -> bool:
         conn.commit(); return True
 
 STORAGE_FRAMES_DIR = Path(__file__).parent / "storage" / "frames"
-ALL_FRAMES_DIRS = [FRAMES_DIR, STORAGE_FRAMES_DIR]
+THUMBNAILS_DIR = Path(__file__).parent / "data" / "thumbnails"
+ALL_FRAMES_DIRS = [FRAMES_DIR, STORAGE_FRAMES_DIR, THUMBNAILS_DIR]
 
 def _remove_frame_files(filenames: List[str], project_id: Optional[str] = None):
     for fdir in ALL_FRAMES_DIRS:
@@ -563,3 +564,127 @@ def get_project_telemetry(project_id: Optional[str]) -> Dict[str, Any]:
 
 def save_project_telemetry(project_id: str, telemetry: Dict[str, Any], token_stats: Dict[str, Any]):
     _execute("INSERT OR REPLACE INTO project_telemetry VALUES (?, ?, ?, ?);", (project_id, json.dumps(telemetry or {}), json.dumps(token_stats or {}), datetime.now().isoformat()))
+
+def import_project_data(
+    project_row: Dict[str, Any],
+    frames: List[Dict[str, Any]],
+    document_lines: List[Dict[str, Any]],
+    telemetry: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Inserts a complete imported project with its frames, document lines,
+    and telemetry into the database and marks it active.
+    """
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        existing = c.execute("SELECT id FROM projects WHERE id = ?;", (project_row.get("id"),)).fetchone()
+        if existing:
+            orig_id = project_row.get("id", "proj")
+            new_id = f"{orig_id}_imp_{int(datetime.now().timestamp())}"
+            new_name = f"{project_row.get('name', 'Imported Project')} (Imported)"
+        else:
+            new_id = project_row.get("id") or f"proj_{int(datetime.now().timestamp())}_{abs(hash(project_row.get('name', 'imp'))) % 10000}"
+            new_name = project_row.get("name", "Imported Project")
+
+        # Deactivate all projects and make this one active
+        c.execute("UPDATE projects SET is_active = 0;")
+
+        c.execute("""
+            INSERT INTO projects (
+                id, name, description, target_total_lines, status, is_active, created_at, updated_at,
+                device_model, device_name, device_serial, target_dpi, display_width, display_height, display_id,
+                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """, (
+            new_id,
+            new_name,
+            project_row.get("description", ""),
+            int(project_row.get("target_total_lines", 0)),
+            project_row.get("status", "active"),
+            project_row.get("created_at", now),
+            now,
+            project_row.get("device_model", "pixel_8"),
+            project_row.get("device_name", ""),
+            project_row.get("device_serial", ""),
+            int(project_row.get("target_dpi", 220)),
+            int(project_row.get("display_width", 1920)),
+            int(project_row.get("display_height", 1080)),
+            int(project_row.get("display_id", 0)),
+            int(project_row.get("lines_per_page", 49)),
+            int(project_row.get("step_size", 48)),
+            int(project_row.get("scroll_padding_lines", 4)),
+            int(project_row.get("arrow_count_init", 56)),
+            int(project_row.get("arrow_count_step", 28)),
+            int(project_row.get("settle_delay_ms", 50)),
+            1 if project_row.get("lock_device") else 0,
+            project_row.get("hid_config_json", "{}")
+        ))
+
+        # Insert frames
+        for f in frames:
+            fid = f.get("frame_id")
+            if not fid:
+                continue
+            tok_json = json.dumps(f.get("token_usage", {})) if isinstance(f.get("token_usage"), dict) else (f.get("token_usage_json") or "{}")
+            bbox_json = json.dumps(f.get("bounding_boxes", {})) if isinstance(f.get("bounding_boxes"), dict) else (f.get("bounding_boxes_json") or "{}")
+            c.execute("""
+                INSERT OR REPLACE INTO frames (
+                    frame_id, project_id, filename, top_line, bottom_line, page_index,
+                    file_size, status, extracted_line_count, custom_offset_y,
+                    token_usage_json, bounding_boxes_json, model_used, created_at, arrow_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """, (
+                fid,
+                new_id,
+                f.get("filename", f"{fid}.png"),
+                int(f.get("top_line", 0)),
+                int(f.get("bottom_line", 0)),
+                int(f.get("page_index", 0)),
+                int(f.get("file_size", 0)),
+                f.get("status", "processed"),
+                int(f.get("extracted_line_count", 0)),
+                float(f.get("custom_offset_y", 0.0)),
+                tok_json,
+                bbox_json,
+                f.get("model_used", ""),
+                f.get("created_at", now),
+                int(f.get("arrow_count", 0))
+            ))
+
+        # Insert document_lines
+        for dl in document_lines:
+            lnum = dl.get("line_number")
+            if lnum is None:
+                continue
+            c.execute("""
+                INSERT OR REPLACE INTO document_lines (
+                    project_id, line_number, line_text, confidence, frame_id, is_verified, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?);
+            """, (
+                new_id,
+                int(lnum),
+                dl.get("text", dl.get("line_text", "")),
+                float(dl.get("confidence", 1.0)),
+                dl.get("frame_id", ""),
+                1 if (dl.get("verified") or dl.get("is_verified")) else 0,
+                dl.get("updated_at", now)
+            ))
+
+        # Insert telemetry
+        tel_data = telemetry.get("telemetry", {}) if isinstance(telemetry, dict) else {}
+        tok_data = telemetry.get("token_stats", {}) if isinstance(telemetry, dict) else {}
+        c.execute("""
+            INSERT OR REPLACE INTO project_telemetry (
+                project_id, telemetry_json, token_stats_json, updated_at
+            ) VALUES (?, ?, ?, ?);
+        """, (
+            new_id,
+            json.dumps(tel_data),
+            json.dumps(tok_data),
+            now
+        ))
+        conn.commit()
+
+    return get_project(new_id) or {}
+
