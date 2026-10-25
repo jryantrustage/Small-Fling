@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, Camera, Cloud, Zap, Smartphone, Key, Cpu,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
+  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
   Check, FileText, X,
   Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard,
   Upload, Download
@@ -30,6 +30,7 @@ import { discernNodePerformance } from './utils/dagDiagnostics';
 import { Dag4OcrFullInspectorModal } from './components/dag/Dag4OcrFullInspectorModal';
 import { LazyFrameCard } from './components/frames/LazyFrameCard';
 import { HeadlessTelemetryModal, type HeadlessTelemetryData } from './components/HeadlessTelemetryModal';
+import { WindowControls } from './components/common/WindowControls';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -326,7 +327,10 @@ function AppContent() {
   const [dagMinimized, setDagMinimized] = useState(false);
   const [studioMinimized, setStudioMinimized] = useState(false);
   const [framesMinimized, setFramesMinimized] = useState(false);
+  const [framesMaximized, setFramesMaximized] = useState(false);
   const [linesMinimized, setLinesMinimized] = useState(false);
+  const [linesMaximized, setLinesMaximized] = useState(false);
+  const [inspectorMinimized, setInspectorMinimized] = useState(false);
   const [inspectorMaximized, setInspectorMaximized] = useState(false);
   const [studioPanelWidth, setStudioPanelWidth] = useState(() => {
     try { return Number(localStorage.getItem('mc_studio_panel_width')) || 460; } catch { return 460; }
@@ -351,17 +355,26 @@ function AppContent() {
 
   const handleTogglePhone = useCallback(() => {
     setInspectorMaximized(false);
-    if (inspectorMode !== 'live') {
+    setFramesMaximized(false);
+    setLinesMaximized(false);
+    if (inspectorMinimized) {
+      setInspectorMinimized(false);
+      setInspectorMode('live');
+      setLiveMode('desktop');
+      setStreamKey(Date.now());
+    } else if (inspectorMode !== 'live') {
       setInspectorMode('live');
       setLiveMode('desktop');
       setStreamKey(Date.now());
     } else {
       setInspectorMode('single');
     }
-  }, [inspectorMode]);
+  }, [inspectorMinimized, inspectorMode]);
 
   const handleToggleStudio = useCallback((tab?: 'kiosk' | 'device' | 'processes' | 'telemetry') => {
     setInspectorMaximized(false);
+    setFramesMaximized(false);
+    setLinesMaximized(false);
     if (!showStudioDrawer) {
       if (tab) setStudioInitialTab(tab);
       setShowStudioDrawer(true);
@@ -391,22 +404,39 @@ function AppContent() {
 
   const handleToggleFrames = useCallback(() => {
     setInspectorMaximized(false);
-    setFramesMinimized(p => !p);
-  }, []);
+    setLinesMaximized(false);
+    if (framesMaximized) {
+      setFramesMaximized(false);
+    } else if (framesMinimized) {
+      setFramesMinimized(false);
+    } else {
+      setFramesMinimized(true);
+    }
+  }, [framesMaximized, framesMinimized]);
 
   const handleToggleLines = useCallback(() => {
     setInspectorMaximized(false);
-    setLinesMinimized(p => !p);
-  }, []);
+    setFramesMaximized(false);
+    if (linesMaximized) {
+      setLinesMaximized(false);
+    } else if (linesMinimized) {
+      setLinesMinimized(false);
+    } else {
+      setLinesMinimized(true);
+    }
+  }, [linesMaximized, linesMinimized]);
 
-  const handleApplyLayoutPreset = useCallback((preset: 'balanced' | 'phone_focus' | 'studio_focus' | 'document_audit' | 'zen_canvas' | 'reset_all') => {
+  const handleApplyLayoutPreset = useCallback((preset: 'balanced' | 'phone_focus' | 'studio_focus' | 'document_audit' | 'zen_canvas' | 'tile_all' | 'minimize_all' | 'reset_all') => {
     setShowLayoutMenu(false);
     if (preset === 'balanced') {
       setShowDag(true);
       setDagMinimized(false);
       setInspectorMode('live');
+      setInspectorMinimized(false);
       setFramesMinimized(false);
+      setFramesMaximized(false);
       setLinesMinimized(false);
+      setLinesMaximized(false);
       setShowStudioDrawer(false);
       setIsTelemetryExpanded(false);
       setInspectorMaximized(false);
@@ -415,28 +445,37 @@ function AppContent() {
       setShowDag(true);
       setDagMinimized(false);
       setInspectorMode('live');
+      setInspectorMinimized(false);
       setFramesMinimized(true);
+      setFramesMaximized(false);
       setLinesMinimized(true);
+      setLinesMaximized(false);
       setShowStudioDrawer(false);
       setIsTelemetryExpanded(false);
-      setInspectorMaximized(false);
+      setInspectorMaximized(true);
     } else if (preset === 'studio_focus') {
       setShowDag(true);
       setDagMinimized(false);
       setInspectorMode('live');
+      setInspectorMinimized(false);
       setShowStudioDrawer(true);
       setStudioMinimized(false);
       setStudioInitialTab('device');
       setFramesMinimized(true);
+      setFramesMaximized(false);
       setLinesMinimized(true);
+      setLinesMaximized(false);
       setIsTelemetryExpanded(false);
       setInspectorMaximized(false);
     } else if (preset === 'document_audit') {
       setShowDag(true);
       setDagMinimized(true);
       setInspectorMode('single');
+      setInspectorMinimized(false);
       setFramesMinimized(false);
+      setFramesMaximized(false);
       setLinesMinimized(false);
+      setLinesMaximized(false);
       setShowStudioDrawer(false);
       setIsTelemetryExpanded(false);
       setInspectorMaximized(false);
@@ -444,18 +483,55 @@ function AppContent() {
     } else if (preset === 'zen_canvas') {
       setShowDag(true);
       setDagMinimized(true);
+      setInspectorMinimized(false);
       setInspectorMaximized(true);
+      setFramesMinimized(true);
+      setFramesMaximized(false);
+      setLinesMinimized(true);
+      setLinesMaximized(false);
       setShowStudioDrawer(false);
       setIsTelemetryExpanded(false);
+    } else if (preset === 'tile_all') {
+      setShowDag(true);
+      setDagMinimized(false);
+      setInspectorMode('live');
+      setInspectorMinimized(false);
+      setInspectorMaximized(false);
+      setFramesMinimized(false);
+      setFramesMaximized(false);
+      setLinesMinimized(false);
+      setLinesMaximized(false);
+      setShowStudioDrawer(true);
+      setStudioMinimized(false);
+      setIsTelemetryExpanded(true);
+      setInspectorPercent(45);
+      setFramesPanelWidth(220);
+      setStudioPanelWidth(420);
+    } else if (preset === 'minimize_all') {
+      setShowDag(true);
+      setDagMinimized(true);
+      setFramesMinimized(true);
+      setFramesMaximized(false);
+      setLinesMinimized(true);
+      setLinesMaximized(false);
+      setShowStudioDrawer(true);
+      setStudioMinimized(true);
+      setIsTelemetryExpanded(false);
+      setInspectorMinimized(false);
+      setInspectorMaximized(false);
+      setInspectorPercent(50);
     } else if (preset === 'reset_all') {
       setShowDag(true);
       setDagMinimized(false);
       setShowStudioDrawer(true);
       setStudioMinimized(false);
       setFramesMinimized(false);
+      setFramesMaximized(false);
       setLinesMinimized(false);
-      setIsTelemetryExpanded(false);
+      setLinesMaximized(false);
+      setInspectorMinimized(false);
       setInspectorMaximized(false);
+      setIsTelemetryExpanded(false);
       setInspectorPercent(50);
       setFramesPanelWidth(240);
       setStudioPanelWidth(460);
@@ -2367,14 +2443,14 @@ function AppContent() {
             {/* Phone Stream Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${inspectorMode === 'live' ? 'active' : ''}`}
+              className={`window-dock-pill ${inspectorMode === 'live' && !inspectorMinimized && !framesMaximized && !linesMaximized ? 'active' : ''} ${inspectorMinimized || framesMaximized || linesMaximized ? 'minimized' : ''}`}
               onClick={handleTogglePhone}
-              title={`Toggle Live Phone Display Viewport (Currently ${inspectorMode === 'live' ? 'Live Stream Active' : 'Single Frame Mode'})`}
+              title={`Toggle Live Phone Display Viewport (${inspectorMinimized || framesMaximized || linesMaximized ? 'Minimized' : (inspectorMode === 'live' ? 'Live Stream Active' : 'Single Frame Mode')})`}
             >
-              <span className={`pill-indicator ${inspectorMode === 'live' ? 'on' : 'off'}`} />
+              <span className={`pill-indicator ${inspectorMinimized || framesMaximized || linesMaximized ? 'min' : (inspectorMode === 'live' ? 'on' : 'off')}`} />
               <Smartphone size={11} />
               <span>Phone</span>
-              <span className="pill-badge">{inspectorMode === 'live' ? 'LIVE' : 'FRAME'}</span>
+              <span className="pill-badge">{inspectorMinimized || framesMaximized || linesMaximized ? 'MIN' : (inspectorMaximized ? 'MAX' : (inspectorMode === 'live' ? 'LIVE' : 'FRAME'))}</span>
             </button>
 
             {/* Studio Pill */}
@@ -2408,27 +2484,27 @@ function AppContent() {
             {/* Frames Feed Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${!framesMinimized && !inspectorMaximized ? 'active' : 'minimized'}`}
+              className={`window-dock-pill ${!framesMinimized && !inspectorMaximized && !linesMaximized ? 'active' : 'minimized'}`}
               onClick={handleToggleFrames}
               title={`Toggle Captured Frames Feed (${frames.length} frames)`}
             >
-              <span className={`pill-indicator ${!framesMinimized && !inspectorMaximized ? 'on' : 'min'}`} />
+              <span className={`pill-indicator ${!framesMinimized && !inspectorMaximized && !linesMaximized ? 'on' : 'min'}`} />
               <Camera size={11} />
               <span>Frames</span>
-              <span className="pill-count">{frames.length}</span>
+              <span className="pill-count">{framesMaximized ? 'MAX' : frames.length}</span>
             </button>
 
             {/* Lines Panel Pill */}
             <button
               type="button"
-              className={`window-dock-pill ${!linesMinimized && !inspectorMaximized ? 'active' : 'minimized'}`}
+              className={`window-dock-pill ${!linesMinimized && !inspectorMaximized && !framesMaximized ? 'active' : 'minimized'}`}
               onClick={handleToggleLines}
               title={`Toggle Verified Lines Panel (${filteredLines.length} lines)`}
             >
-              <span className={`pill-indicator ${!linesMinimized && !inspectorMaximized ? 'on' : 'min'}`} />
+              <span className={`pill-indicator ${!linesMinimized && !inspectorMaximized && !framesMaximized ? 'on' : 'min'}`} />
               <Search size={11} />
               <span>Lines</span>
-              <span className="pill-count">{filteredLines.length}</span>
+              <span className="pill-count">{linesMaximized ? 'MAX' : filteredLines.length}</span>
             </button>
 
             <div className="dock-separator" />
@@ -2751,6 +2827,20 @@ function AppContent() {
                       <small>Maximize viewport canvas across screen</small>
                     </div>
                   </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('tile_all')}>
+                    <span className="preset-icon">🔲</span>
+                    <div className="preset-text">
+                      <strong>Tile All Windows</strong>
+                      <small>Open DAG, Studio, Frames, Phone &amp; Lines</small>
+                    </div>
+                  </button>
+                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('minimize_all')}>
+                    <span className="preset-icon">🗕</span>
+                    <div className="preset-text">
+                      <strong>Minimize All Sidebars</strong>
+                      <small>Park panels into rails to maximize workspace</small>
+                    </div>
+                  </button>
                   <div className="layout-dropdown-divider" />
                   <button type="button" className="layout-dropdown-item reset" onClick={() => handleApplyLayoutPreset('reset_all')}>
                     <span className="preset-icon">🔄</span>
@@ -2947,10 +3037,10 @@ function AppContent() {
 
         {activeProject ? (
           <>
-            {framesMinimized || inspectorMaximized ? (
+            {framesMinimized || inspectorMaximized || linesMaximized ? (
               <aside
                 className="window-minimized-rail"
-                onClick={() => { setFramesMinimized(false); setInspectorMaximized(false); }}
+                onClick={() => { setFramesMinimized(false); setInspectorMaximized(false); setLinesMaximized(false); setFramesMaximized(false); }}
                 title={`Click to restore Captured Frames panel (${frames.length} frames)`}
               >
                 <Camera size={15} color="#00ff9d" />
@@ -2963,11 +3053,12 @@ function AppContent() {
                     {frames.length}
                   </span>
                 )}
+                <span className="window-minimized-label">CAPTURED FRAMES</span>
                 <Maximize2 size={12} style={{ marginTop: 'auto' }} />
               </aside>
             ) : (
               <>
-                <aside className="frames-feed-panel" style={{ width: `${framesPanelWidth}px`, flexShrink: 0 }}>
+                <aside className="frames-feed-panel" style={{ width: framesMaximized ? '100%' : `${framesPanelWidth}px`, flex: framesMaximized ? '1 1 100%' : 'none', flexShrink: framesMaximized ? 1 : 0 }}>
                   <div className="panel-header">
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <input
@@ -2991,106 +3082,110 @@ function AppContent() {
                         </button>
                       )}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <WindowControls
+                      windowName="Captured Frames Feed"
+                      onMinimize={() => { setFramesMinimized(true); setFramesMaximized(false); }}
+                      onMaximize={() => {
+                        setFramesMaximized(m => {
+                          const next = !m;
+                          if (next) { setInspectorMaximized(false); setLinesMaximized(false); setInspectorMinimized(false); }
+                          return next;
+                        });
+                      }}
+                      isMaximized={framesMaximized}
+                      onClose={() => { setFramesMinimized(true); setFramesMaximized(false); }}
+                    />
+                  </div>
+
+                  <div className="panel-sub-bar">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={handleStartSequentialRescanAllFrames}
+                      disabled={sequentialRescanStatus.is_running}
+                      title="Sequentially rescan every captured frame from top to bottom with RapidOCR to align line numbers and reconstruct the master document"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '4px',
+                        padding: '3px 8px', fontSize: '10.5px',
+                        color: '#00ff9d', borderColor: '#00ff9d55',
+                        background: sequentialRescanStatus.is_running ? 'rgba(0, 255, 157, 0.15)' : undefined
+                      }}
+                    >
+                      <Layers size={11} color="#00ff9d" className={sequentialRescanStatus.is_running ? 'spin' : ''} />
+                      <span>
+                        {sequentialRescanStatus.is_running
+                          ? `Rescanning ${sequentialRescanStatus.current_index}/${sequentialRescanStatus.total_frames}...`
+                          : (selectedFrameIds.size > 0 ? `Rescan (${selectedFrameIds.size})` : 'Rescan All Frames')}
+                      </span>
+                    </button>
+                    {/* Headless Loop Mode Toggle Button */}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={handleToggleHeadlessMode}
+                      title={headlessMode
+                        ? "Headless Mode ACTIVE: Live image loading is bypassed & Node 4 uses RapidOCR Inspector Rescan engine. Click to switch to visual mode."
+                        : "Visual Mode ACTIVE: Click to enable ultra-fast Headless Loop Mode (RapidOCR Inspector engine without image loading)."}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '4px',
+                        padding: '3px 8px', fontSize: '10.5px',
+                        color: headlessMode ? '#c084fc' : '#94a3b8',
+                        borderColor: headlessMode ? 'rgba(167, 139, 250, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+                        background: headlessMode ? 'rgba(167, 139, 250, 0.15)' : undefined
+                      }}
+                    >
+                      <Cpu size={11} color={headlessMode ? '#c084fc' : '#94a3b8'} />
+                      <span>{headlessMode ? 'Headless: ON' : 'Headless: OFF'}</span>
+                    </button>
+                    {/* Headless Telemetry Progress & Summary Modal Button */}
+                    {(headlessMode || headlessTelemetry?.status === 'RUNNING' || headlessTelemetry?.total_lines_reached) && (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline"
-                        onClick={handleStartSequentialRescanAllFrames}
-                        disabled={sequentialRescanStatus.is_running}
-                        title="Sequentially rescan every captured frame from top to bottom with RapidOCR to align line numbers and reconstruct the master document"
+                        onClick={() => setIsHeadlessTelemetryOpen(true)}
+                        title="Open Headless Telemetry & Document Coverage Summary Modal"
                         style={{
                           display: 'flex', alignItems: 'center', gap: '4px',
-                          padding: '3px 8px', fontSize: '11px',
-                          color: '#00ff9d', borderColor: '#00ff9d55',
-                          background: sequentialRescanStatus.is_running ? 'rgba(0, 255, 157, 0.15)' : undefined
+                          padding: '3px 8px', fontSize: '10.5px',
+                          color: headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc',
+                          borderColor: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.4)' : 'rgba(192, 132, 252, 0.4)',
+                          background: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.12)' : 'rgba(192, 132, 252, 0.12)'
                         }}
                       >
-                        <Layers size={11} color="#00ff9d" className={sequentialRescanStatus.is_running ? 'spin' : ''} />
+                        <Activity size={11} color={headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc'} />
                         <span>
-                          {sequentialRescanStatus.is_running
-                            ? `Rescanning ${sequentialRescanStatus.current_index}/${sequentialRescanStatus.total_frames}...`
-                            : (selectedFrameIds.size > 0 ? `Rescan (${selectedFrameIds.size})` : 'Rescan All Frames')}
+                          {headlessTelemetry?.total_lines_reached
+                            ? 'Summary (100% ✔)'
+                            : `Telemetry ${headlessTelemetry?.completion_percent ? `(${headlessTelemetry.completion_percent}%)` : ''}`}
                         </span>
                       </button>
-                      {/* Headless Loop Mode Toggle Button */}
+                    )}
+                    {sequentialRescanStatus.is_running && (
                       <button
                         type="button"
                         className="btn btn-sm btn-outline"
-                        onClick={handleToggleHeadlessMode}
-                        title={headlessMode
-                          ? "Headless Mode ACTIVE: Live image loading is bypassed & Node 4 uses RapidOCR Inspector Rescan engine. Click to switch to visual mode."
-                          : "Visual Mode ACTIVE: Click to enable ultra-fast Headless Loop Mode (RapidOCR Inspector engine without image loading)."}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '4px',
-                          padding: '3px 8px', fontSize: '11px',
-                          color: headlessMode ? '#c084fc' : '#94a3b8',
-                          borderColor: headlessMode ? 'rgba(167, 139, 250, 0.6)' : 'rgba(255, 255, 255, 0.15)',
-                          background: headlessMode ? 'rgba(167, 139, 250, 0.15)' : undefined
-                        }}
+                        onClick={handleCancelSequentialRescan}
+                        title="Cancel sequential rescan"
+                        style={{ padding: '3px 6px', fontSize: '10px', color: '#f85149', borderColor: '#f8514955' }}
                       >
-                        <Cpu size={11} color={headlessMode ? '#c084fc' : '#94a3b8'} />
-                        <span>{headlessMode ? 'Headless: ON' : 'Headless: OFF'}</span>
+                        <X size={10} />
                       </button>
-                      {/* Headless Telemetry Progress & Summary Modal Button */}
-                      {(headlessMode || headlessTelemetry?.status === 'RUNNING' || headlessTelemetry?.total_lines_reached) && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => setIsHeadlessTelemetryOpen(true)}
-                          title="Open Headless Telemetry & Document Coverage Summary Modal"
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: '4px',
-                            padding: '3px 8px', fontSize: '11px',
-                            color: headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc',
-                            borderColor: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.4)' : 'rgba(192, 132, 252, 0.4)',
-                            background: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.12)' : 'rgba(192, 132, 252, 0.12)'
-                          }}
-                        >
-                          <Activity size={11} color={headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc'} />
-                          <span>
-                            {headlessTelemetry?.total_lines_reached
-                              ? 'Summary (100% ✔)'
-                              : `Telemetry ${headlessTelemetry?.completion_percent ? `(${headlessTelemetry.completion_percent}%)` : ''}`}
-                          </span>
-                        </button>
-                      )}
-                      {sequentialRescanStatus.is_running && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={handleCancelSequentialRescan}
-                          title="Cancel sequential rescan"
-                          style={{ padding: '3px 6px', fontSize: '10px', color: '#f85149', borderColor: '#f8514955' }}
-                        >
-                          <X size={10} />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline"
-                        onClick={() => setIsFramesReportOpen(true)}
-                        title="Open Captured Frames & Viewport Coverage Report Modal"
-                        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
-                      >
-                        <Camera size={11} color="#00ff9d" />
-                        <span>Frames Report</span>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline"
+                      onClick={() => setIsFramesReportOpen(true)}
+                      title="Open Captured Frames & Viewport Coverage Report Modal"
+                      style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '10.5px', color: '#00ff9d', borderColor: '#00ff9d55' }}
+                    >
+                      <Camera size={11} color="#00ff9d" />
+                      <span>Report</span>
+                    </button>
+                    {frames.some(f => f.status.startsWith('error')) && (
+                      <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
+                        <RotateCw size={11} /> Retry Failed
                       </button>
-                      {frames.some(f => f.status.startsWith('error')) && (
-                        <button className="btn btn-sm btn-outline btn-warning-outline" onClick={handleReprocessAllFailed}>
-                          <RotateCw size={11} /> Retry Failed
-                        </button>
-                      )}
-                      <div className="window-controls">
-                        <button
-                          type="button"
-                          className="win-btn"
-                          onClick={() => setFramesMinimized(true)}
-                          title="Minimize frames panel"
-                        >
-                          <Minus size={11} />
-                        </button>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {sequentialRescanStatus.is_running && (
@@ -3177,13 +3272,26 @@ function AppContent() {
                   </div>
                 </aside>
 
-                <div className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`} onMouseDown={handleFramesResizer} onDoubleClick={() => setFramesPanelWidth(280)} role="separator">
-                  <div className="panel-resizer-line" />
-                </div>
+                {!framesMaximized && !linesMaximized && !inspectorMinimized && (
+                  <div className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`} onMouseDown={handleFramesResizer} onDoubleClick={() => setFramesPanelWidth(280)} role="separator">
+                    <div className="panel-resizer-line" />
+                  </div>
+                )}
               </>
             )}
 
-            <main className="frame-inspector-panel" style={{ flex: inspectorMaximized ? '1 1 100%' : `${inspectorPercent} 1 0`, minWidth: '220px' }}>
+            {inspectorMinimized || framesMaximized || linesMaximized ? (
+              <aside
+                className="window-minimized-rail"
+                onClick={() => { setInspectorMinimized(false); setFramesMaximized(false); setLinesMaximized(false); }}
+                title="Click to restore Live Viewport / Inspector"
+              >
+                <Monitor size={15} color="#00ff9d" />
+                <span className="window-minimized-label">LIVE VIEWPORT</span>
+                <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+              </aside>
+            ) : (
+              <main className="frame-inspector-panel" style={{ flex: inspectorMaximized ? '1 1 100%' : `${inspectorPercent} 1 0`, minWidth: '220px' }}>
               <div className="panel-header">
                 <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
                   <button className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`} onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} style={{ fontSize: '11px', padding: '3px 8px' }}><Monitor size={11} style={{ marginRight: '4px' }} /><span>Live Desktop</span></button>
@@ -3302,16 +3410,20 @@ function AppContent() {
                     <button className="btn-scan-ocr" onClick={handleScanFrameOcr} disabled={isScanningOcr}><Scan size={13} className={isScanningOcr ? 'spinning' : ''} /><span>{isScanningOcr ? 'Scanning...' : 'OCR Scan'}</span></button>
                   )}
                   {scanStatusMsg && <span className="scan-status-pill">{scanStatusMsg}</span>}
-                  <div className="window-controls">
-                    <button
-                      type="button"
-                      className="win-btn"
-                      onClick={() => setInspectorMaximized(p => !p)}
-                      title={inspectorMaximized ? "Restore view layout" : "Maximize live desktop view"}
-                    >
-                      {inspectorMaximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
-                    </button>
-                  </div>
+                  <WindowControls
+                    windowName="Live Viewport & Inspector"
+                    onMinimize={() => { setInspectorMinimized(true); setInspectorMaximized(false); }}
+                    isMinimized={inspectorMinimized}
+                    onMaximize={() => {
+                      setInspectorMaximized(m => {
+                        const next = !m;
+                        if (next) { setFramesMaximized(false); setLinesMaximized(false); setInspectorMinimized(false); }
+                        return next;
+                      });
+                    }}
+                    isMaximized={inspectorMaximized}
+                    onClose={handleTogglePhone}
+                  />
                 </div>
               </div>
 
@@ -3494,10 +3606,10 @@ function AppContent() {
                       nodeLinesCount={0}
                       onRefresh={handleOcrInspectorRefresh}
                       hasFramesPanel={!!activeProject}
-                      isFramesMinimized={framesMinimized || inspectorMaximized}
+                      isFramesMinimized={framesMinimized || inspectorMaximized || linesMaximized}
                       onToggleFramesPanel={handleToggleFrames}
                       hasLinesPanel={!!activeProject}
-                      isLinesPanelMinimized={linesMinimized || inspectorMaximized}
+                      isLinesPanelMinimized={linesMinimized || inspectorMaximized || framesMaximized}
                       onToggleLinesPanel={handleToggleLines}
                       hasStudioPanel={true}
                       isStudioPanelOpen={showStudioDrawer && !studioMinimized}
@@ -3505,6 +3617,9 @@ function AppContent() {
                       onFocusInspector={() => {
                         setFramesMinimized(true);
                         setLinesMinimized(true);
+                        setFramesMaximized(false);
+                        setLinesMaximized(false);
+                        setInspectorMinimized(false);
                         setInspectorMaximized(true);
                       }}
                     />
@@ -3538,82 +3653,87 @@ function AppContent() {
                 )}
               </div>
             </main>
+          )}
 
-            {!inspectorMaximized && (
-              <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
-            )}
+          {!inspectorMaximized && !framesMaximized && !linesMaximized && !inspectorMinimized && !linesMinimized && (
+            <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
+          )}
 
-            {linesMinimized || inspectorMaximized ? (
-              <aside
-                className="window-minimized-rail"
-                onClick={() => { setLinesMinimized(false); setInspectorMaximized(false); }}
-                title="Click to restore Verified Lines panel"
-              >
-                <Search size={14} color="#00ff9d" />
-                <span className="minimized-rail-label">VERIFIED LINES ({filteredLines.length})</span>
-                <Maximize2 size={12} style={{ marginTop: 'auto' }} />
-              </aside>
-            ) : (
-              <section className="line-inspector-panel" style={{ flex: `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
-                    <div className="panel-header">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="checkbox"
-                          checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
-                          onChange={handleToggleSelectAllLines}
-                          title="Select or deselect all lines in current window"
-                          style={{ cursor: 'pointer' }}
-                        />
-                        <span>Verified Lines ({filteredLines.length} / {documentData.total_lines})</span>
-                        {selectedLineNumbers.size > 0 && (
-                          <button
-                            type="button"
-                            className="btn btn-danger-group"
-                            onClick={handleDeleteSelectedLines}
-                            disabled={isBatchDeletingLines}
-                            title="Delete selected lines"
-                          >
-                            <Trash2 size={10} />
-                            <span>Delete ({selectedLineNumbers.size})</span>
-                          </button>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')}>All ({documentData.total_lines})</button>
-                        <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')}>Issues ({documentData.issue_count})</button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={handleExportMarkdown}
-                          disabled={isExportingMarkdown || documentData.total_lines === 0}
-                          title="Save entire contents of verified lines as Markdown (.md) file"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
-                        >
-                          <Download size={11} color="#00ff9d" />
-                          <span>{isExportingMarkdown ? 'Saving...' : 'Save as MD'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => setIsOcrReportOpen(true)}
-                          title="Open OCR Verified Lines & Precision Diagnostics Report Modal"
-                          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#58a6ff', borderColor: '#58a6ff55' }}
-                        >
-                          <FileText size={11} color="#58a6ff" />
-                          <span>OCR Report</span>
-                        </button>
-                        <div className="window-controls">
-                          <button
-                            type="button"
-                            className="win-btn"
-                            onClick={() => setLinesMinimized(true)}
-                            title="Minimize lines panel"
-                          >
-                            <Minus size={11} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+          {linesMinimized || inspectorMaximized || framesMaximized ? (
+            <aside
+              className="window-minimized-rail"
+              onClick={() => { setLinesMinimized(false); setInspectorMaximized(false); setFramesMaximized(false); setLinesMaximized(false); }}
+              title="Click to restore Verified Lines panel"
+            >
+              <Search size={14} color="#00ff9d" />
+              <span className="minimized-rail-label">VERIFIED LINES ({filteredLines.length})</span>
+              <Maximize2 size={12} style={{ marginTop: 'auto' }} />
+            </aside>
+          ) : (
+            <section className="line-inspector-panel" style={{ flex: linesMaximized ? '1 1 100%' : `${100 - inspectorPercent} 1 0`, minWidth: '240px' }}>
+              <div className="panel-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
+                    onChange={handleToggleSelectAllLines}
+                    title="Select or deselect all lines in current window"
+                    style={{ cursor: 'pointer' }}
+                  />
+                  <span>Verified Lines ({filteredLines.length} / {documentData.total_lines})</span>
+                  {selectedLineNumbers.size > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-danger-group"
+                      onClick={handleDeleteSelectedLines}
+                      disabled={isBatchDeletingLines}
+                      title="Delete selected lines"
+                    >
+                      <Trash2 size={10} />
+                      <span>Delete ({selectedLineNumbers.size})</span>
+                    </button>
+                  )}
+                </div>
+                <WindowControls
+                  windowName="Verified Lines Panel"
+                  onMinimize={() => { setLinesMinimized(true); setLinesMaximized(false); }}
+                  onMaximize={() => {
+                    setLinesMaximized(m => {
+                      const next = !m;
+                      if (next) { setInspectorMaximized(false); setFramesMaximized(false); setInspectorMinimized(false); }
+                      return next;
+                    });
+                  }}
+                  isMaximized={linesMaximized}
+                  onClose={() => { setLinesMinimized(true); setLinesMaximized(false); }}
+                />
+              </div>
+
+              <div className="panel-sub-bar">
+                <button className={`btn btn-sm ${filterMode === 'all' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('all')} style={{ padding: '2px 8px', fontSize: '10.5px' }}>All ({documentData.total_lines})</button>
+                <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')} style={{ padding: '2px 8px', fontSize: '10.5px' }}>Issues ({documentData.issue_count})</button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={handleExportMarkdown}
+                  disabled={isExportingMarkdown || documentData.total_lines === 0}
+                  title="Save entire contents of verified lines as Markdown (.md) file"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '10.5px', color: '#00ff9d', borderColor: '#00ff9d55' }}
+                >
+                  <Download size={11} color="#00ff9d" />
+                  <span>{isExportingMarkdown ? 'Saving...' : 'Save MD'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => setIsOcrReportOpen(true)}
+                  title="Open OCR Verified Lines & Precision Diagnostics Report Modal"
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '10.5px', color: '#58a6ff', borderColor: '#58a6ff55' }}
+                >
+                  <FileText size={11} color="#58a6ff" />
+                  <span>OCR Report</span>
+                </button>
+              </div>
 
                     {/* Lazy Loaded Lines Window Bar */}
                     <div style={{

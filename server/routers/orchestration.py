@@ -501,6 +501,26 @@ async def update_node_canvas_position(node_id: str, payload: Dict[str, Any]):
 
     return {"status": "success", "node_id": target_key, "position": node["position"]}
 
+@router.post("/api/dag/nodes/positions/batch")
+async def update_batch_node_canvas_positions(payload: Dict[str, Any]):
+    """Updates 2D canvas coordinates (x, y) for multiple DAG nodes in one operation."""
+    items = payload.get("positions", payload) if isinstance(payload.get("positions"), dict) else payload
+    updated = {}
+    for node_id, pos in items.items():
+        if not isinstance(pos, dict):
+            continue
+        target_key = NODE_ALIAS_MAP.get(node_id, node_id)
+        node = state.dag_state["nodes"].get(target_key)
+        if node:
+            x = float(pos.get("x", 0.0))
+            y = float(pos.get("y", 0.0))
+            node["position"] = {"x": x, "y": y}
+            backend_node = dag_node_registry.get_node(target_key)
+            if backend_node:
+                backend_node.set_position(x, y)
+            updated[target_key] = node["position"]
+    return {"status": "success", "positions": updated}
+
 @router.post("/api/dag/layout/clean")
 async def snap_to_clean_layout():
     """Snaps all DAG nodes to an aesthetically aligned topological/horizontal 2D canvas layout."""
@@ -513,6 +533,7 @@ async def snap_to_clean_layout():
         "arrow_down": {"x": 1160.0, "y": 140.0},
         "verification_trigger": {"x": 1380.0, "y": 140.0},
         "document_assemble": {"x": 1600.0, "y": 140.0},
+        "batch_frames_ocr": {"x": 1820.0, "y": 140.0},
     }
     for nid, pos in clean_coords.items():
         if nid in state.dag_state.get("nodes", {}):

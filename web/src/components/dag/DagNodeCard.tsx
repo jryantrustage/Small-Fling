@@ -1,16 +1,20 @@
 import React from 'react';
 import { RefreshCw, Check, Copy, Sparkles, Settings } from 'lucide-react';
-import type { NodeMeta, NodeLiveStatus } from '../../types/dag';
+import type { NodeMeta, NodeLiveStatus, DagGroup } from '../../types/dag';
 
 export interface DagNodeCardProps {
   node: NodeMeta;
   status: NodeLiveStatus;
   isSelected: boolean;
+  isMultiSelected?: boolean;
+  selectedCount?: number;
   isPinned: boolean;
   isPulsingSwirl: boolean;
   copiedNodeId: string | null;
   attachedActionsCount?: number;
-  onSelect: () => void;
+  isPositionsLocked?: boolean;
+  onSelect: (e?: React.MouseEvent) => void;
+  onSelectGroup?: (groupId: DagGroup, e?: React.MouseEvent) => void;
   onDoubleClick: () => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
@@ -31,11 +35,15 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
   node,
   status,
   isSelected,
+  isMultiSelected = false,
+  selectedCount = 0,
   isPinned,
   isPulsingSwirl,
   copiedNodeId,
   attachedActionsCount = 0,
+  isPositionsLocked = false,
   onSelect,
+  onSelectGroup,
   onDoubleClick,
   onMouseEnter,
   onMouseLeave,
@@ -64,8 +72,8 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
   return (
     <div
       key={node.id}
-      className={`dag-mini-node-compact ${isSelected ? 'selected' : ''} ${isPinned ? 'pinned-active' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
-      onClick={onSelect}
+      className={`dag-mini-node-compact ${isSelected ? 'selected' : ''} ${isMultiSelected ? 'multi-selected' : ''} ${isPinned ? 'pinned-active' : ''} ${isPulsingSwirl ? 'heat-lamp-active running-swirl' : ''}`}
+      onClick={(e) => onSelect(e)}
       onDoubleClick={(e) => {
         e.stopPropagation();
         onDoubleClick();
@@ -77,14 +85,16 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
       style={{
         width: '185px',
         height: '62px',
-        background: isSelected ? '#161b22' : 'rgba(13, 17, 23, 0.88)',
+        background: isSelected ? (isMultiSelected ? 'rgba(0, 255, 157, 0.08)' : '#161b22') : 'rgba(13, 17, 23, 0.88)',
         backdropFilter: 'blur(12px)',
         borderRadius: '8px',
-        border: `1px solid ${
+        border: `1.5px solid ${
           isWiringTargetCandidate
             ? '#00ff9d'
             : isPinned
             ? '#388bfd'
+            : isMultiSelected
+            ? '#00ff9d'
             : isSelected
             ? node.accentColor
             : status.isRunning
@@ -93,8 +103,10 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
             ? '#f85149'
             : 'rgba(255, 255, 255, 0.08)'
         }`,
-        boxShadow: isPinned
-          ? `0 0 16px rgba(56, 139, 253, 0.4), 0 4px 12px rgba(0,0,0,0.6)`
+        boxShadow: isMultiSelected
+          ? '0 0 16px rgba(0, 255, 157, 0.45), 0 4px 14px rgba(0, 0, 0, 0.7)'
+          : isPinned
+          ? '0 0 16px rgba(56, 139, 253, 0.4), 0 4px 12px rgba(0,0,0,0.6)'
           : isSelected
           ? `0 0 14px ${node.accentColor}33, 0 4px 12px rgba(0,0,0,0.5)`
           : status.isRunning
@@ -104,14 +116,14 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        cursor: 'grab',
+        cursor: isPositionsLocked ? 'pointer' : 'grab',
         position: 'relative',
         transition: 'border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease',
         boxSizing: 'border-box',
         userSelect: 'none',
         ...style
       }}
-      title={`Node ${node.step}: ${node.fullName}\n• Evaluator: ${status.evaluator || 'Standard Gutter'}\n${status.healingStep ? `• Healing Action: ${status.healingStep}\n` : ''}${status.telemetryInsight ? `• Insight: ${status.telemetryInsight}\n` : ''}• Drag card to reposition\n• Connect wire via right port\n• Gear icon for configs & actions`}
+      title={`Node ${node.step}: ${node.fullName}\n• Evaluator: ${status.evaluator || 'Standard Gutter'}\n${status.healingStep ? `• Healing Action: ${status.healingStep}\n` : ''}${status.telemetryInsight ? `• Insight: ${status.telemetryInsight}\n` : ''}${isPositionsLocked ? '• Node positions locked (click Unlock to reposition)\n' : '• Drag card to reposition\n'}• Connect wire via right port\n• Gear icon for configs & actions`}
     >
       {/* Interactive Input Port Socket (Left edge) */}
       <div
@@ -167,7 +179,7 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
         }}
       />
 
-      {/* Top Header: Step badge + Node short name + Actions count + Status dot */}
+      {/* Top Header: Step badge + Group tag + Node short name + Actions count + Status dot */}
       <div
         className="dag-node-header"
         onPointerDown={onPointerDownHeader}
@@ -176,15 +188,15 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
           justifyContent: 'space-between',
           alignItems: 'center',
           gap: '4px',
-          cursor: 'grab'
+          cursor: isPositionsLocked ? 'pointer' : 'grab'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, overflow: 'hidden' }}>
           <span
             style={{
               fontSize: '8px',
               fontWeight: 700,
-              padding: '1px 4px',
+              padding: '1px 3px',
               borderRadius: '3px',
               background: 'rgba(255, 255, 255, 0.05)',
               color: node.accentColor,
@@ -195,11 +207,38 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
           >
             {node.step}
           </span>
+          {onSelectGroup && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectGroup(node.group, e);
+              }}
+              title={`Group: ${node.group.replace(/_/g, ' ')} • Left-click to select all nodes in this group (or Shift+click card)`}
+              style={{
+                fontSize: '7.5px',
+                fontWeight: 800,
+                padding: '1px 3px',
+                borderRadius: '3px',
+                background: isMultiSelected ? 'rgba(0, 255, 157, 0.2)' : 'rgba(255, 255, 255, 0.06)',
+                color: isMultiSelected ? '#00ff9d' : '#8b949e',
+                border: `1px solid ${isMultiSelected ? 'rgba(0, 255, 157, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
+                cursor: 'pointer',
+                lineHeight: 1,
+                fontFamily: 'monospace',
+                display: 'inline-flex',
+                alignItems: 'center',
+                letterSpacing: '0.2px'
+              }}
+            >
+              {node.group === 'initialize' ? 'G1' : (node.group === 'capture_entire_markdown' ? 'G2' : (node.group === 'position_navigation' ? 'G3' : 'G4'))}
+            </button>
+          )}
           <span
             style={{
               fontSize: '10px',
               fontWeight: 600,
-              color: '#f0f6fc',
+              color: isMultiSelected ? '#00ff9d' : '#f0f6fc',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -226,20 +265,39 @@ export const DagNodeCard: React.FC<DagNodeCardProps> = ({
           )}
         </div>
 
-        {status.isRunning ? (
-          <RefreshCw size={10} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} style={{ flexShrink: 0 }} />
-        ) : (
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: status.color,
-              boxShadow: status.isRunning ? `0 0 6px ${status.color}` : 'none',
-              flexShrink: 0
-            }}
-          />
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+          {isMultiSelected && (
+            <span
+              style={{
+                fontSize: '8px',
+                fontWeight: 800,
+                color: '#00ff9d',
+                background: 'rgba(0, 255, 157, 0.18)',
+                border: '1px solid rgba(0, 255, 157, 0.4)',
+                borderRadius: '3px',
+                padding: '0 3px',
+                lineHeight: '12px'
+              }}
+              title={`Part of grouped multi-selection (${selectedCount} nodes). Drag any selected node to move all together.`}
+            >
+              ✓
+            </span>
+          )}
+          {status.isRunning ? (
+            <RefreshCw size={10} className="spin" color={isPulsingSwirl ? '#ff6b25' : node.accentColor} style={{ flexShrink: 0 }} />
+          ) : (
+            <span
+              style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: status.color,
+                boxShadow: status.isRunning ? `0 0 6px ${status.color}` : 'none',
+                flexShrink: 0
+              }}
+            />
+          )}
+        </div>
       </div>
 
       {/* Middle: Subtle status/metric summary */}

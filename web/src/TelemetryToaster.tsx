@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Activity, ChevronUp, Radio, Coins, Terminal, Copy, Check,
-  AlertTriangle, Play, Camera, ArrowDownCircle, Minus, X,
-  Maximize2, Minimize2
+  AlertTriangle, Play, Camera, ArrowDownCircle, Maximize2
 } from 'lucide-react';
 import { StructuredLogEntry } from './components/StructuredLogEntry';
+import { WindowControls } from './components/common/WindowControls';
 
 export interface TelemetryEvent {
   id: string;
@@ -448,45 +448,29 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
             </div>
 
             <div className="toaster-header-actions">
-              {onOpenStudio && (
-                <button
-                  type="button"
-                  className="toaster-btn-icon"
-                  onClick={() => { toggleExpanded(); onOpenStudio(); }}
-                  title="Open in Full Studio Drawer"
-                  style={{ color: '#00ff9d', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px' }}
-                >
-                  <span>STUDIO ↗</span>
+              <WindowControls
+                windowName="Telemetry Monitor"
+                onMinimize={toggleExpanded}
+                onMaximize={toggleMaximized}
+                isMaximized={isMaximized}
+                onClose={toggleExpanded}
+              >
+                {onOpenStudio && (
+                  <button
+                    type="button"
+                    className="toaster-btn-icon"
+                    onClick={() => { toggleExpanded(); onOpenStudio(); }}
+                    title="Open in Full Studio Drawer"
+                    style={{ color: '#00ff9d', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                  >
+                    <span>STUDIO ↗</span>
+                  </button>
+                )}
+                <span className="toaster-latency-pill">{latencyMs > 0 ? `${latencyMs}ms RTT` : 'synced'}</span>
+                <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">
+                  {copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}
                 </button>
-              )}
-              <span className="toaster-latency-pill">{latencyMs > 0 ? `${latencyMs}ms RTT` : 'synced'}</span>
-              <button className="toaster-btn-icon" onClick={handleCopySnapshot} title="Copy Snapshot">
-                {copied ? <Check size={13} color="var(--color-primary)" /> : <Copy size={13} />}
-              </button>
-              <button
-                type="button"
-                className="toaster-win-btn"
-                onClick={toggleExpanded}
-                title="Minimize to bottom bar"
-              >
-                <Minus size={12} />
-              </button>
-              <button
-                type="button"
-                className="toaster-win-btn"
-                onClick={toggleMaximized}
-                title={isMaximized ? "Restore window size" : "Maximize to full-fledged window"}
-              >
-                {isMaximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
-              </button>
-              <button
-                type="button"
-                className="toaster-win-btn close"
-                onClick={toggleExpanded}
-                title="Close Telemetry Monitor"
-              >
-                <X size={13} />
-              </button>
+              </WindowControls>
             </div>
           </div>
 

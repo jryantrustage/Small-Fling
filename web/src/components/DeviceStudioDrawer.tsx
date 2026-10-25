@@ -3,7 +3,7 @@ import {
   Monitor, Shield, ShieldAlert, ShieldCheck, Lock, Unlock, AlertTriangle,
   RefreshCw, Check, Loader2, X, Laptop, Smartphone, Eye, EyeOff, Sliders,
   Key, Cpu, Zap, Activity, Clock, Layers, Keyboard, CheckCircle2, Copy, Trash2,
-  Maximize2, Minimize2, Minus, ArrowDownCircle, FileText, Layout
+  Maximize2, ArrowDownCircle, FileText, Layout
 } from 'lucide-react';
 import type {
   ConnectedDisplay, KioskTelemetry, DeviceInfoData, AlignmentData,
@@ -13,6 +13,7 @@ import type { TelemetryData, TelemetryEvent } from '../TelemetryToaster';
 import { useAgoTimer } from '../hooks/useAgoTimer';
 import { LiveResponsiveViewport } from './LiveResponsiveViewport';
 import { StructuredLogEntry } from './StructuredLogEntry';
+import { WindowControls } from './common/WindowControls';
 
 export interface DeviceStudioDrawerProps {
   isOpen: boolean;
@@ -481,44 +482,30 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
               </div>
             </div>
 
-            <div className="studio-header-window-actions">
+            <div className="studio-header-window-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <div className="live-refreshed-badge">
                 <span className="dot" />
                 <span>{streamSecondsAgo <= 1 ? 'LIVE' : `${streamSecondsAgo}s ago`}</span>
               </div>
-              <button
-                type="button"
-                className="studio-action-icon-btn"
-                onClick={() => { onRefreshStream(); fetchKioskStatus(); fetchLiveMeta(); }}
-                title="Refresh Stream & Telemetry"
-                disabled={kioskLoading || metaLoading}
+              <WindowControls
+                windowName="Device Studio"
+                onMinimize={onToggleMinimize}
+                isMinimized={isMinimized}
+                onMaximize={toggleMaximize}
+                isMaximized={isMaximized}
+                onClose={onClose}
               >
-                <RefreshCw size={13} className={kioskLoading || metaLoading ? 'spin' : ''} />
-              </button>
-              <button
-                type="button"
-                className="studio-action-icon-btn"
-                onClick={onToggleMinimize}
-                title={isMinimized ? 'Restore Drawer' : 'Minimize Drawer'}
-              >
-                <Minus size={13} />
-              </button>
-              <button
-                type="button"
-                className="studio-action-icon-btn"
-                onClick={toggleMaximize}
-                title={isMaximized ? 'Restore View' : 'Maximize Studio'}
-              >
-                {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-              </button>
-              <button
-                type="button"
-                className="studio-action-icon-btn studio-close-btn"
-                onClick={onClose}
-                title="Close Studio"
-              >
-                <X size={15} />
-              </button>
+                <button
+                  type="button"
+                  className="win-btn"
+                  onClick={() => { onRefreshStream(); fetchKioskStatus(); fetchLiveMeta(); }}
+                  title="Refresh Stream & Telemetry"
+                  disabled={kioskLoading || metaLoading}
+                  style={{ width: '22px', height: '22px' }}
+                >
+                  <RefreshCw size={11} className={kioskLoading || metaLoading ? 'spin' : ''} />
+                </button>
+              </WindowControls>
             </div>
           </div>
 

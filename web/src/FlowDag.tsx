@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
-  Maximize2, Minimize2, Square, Minus, Lock, Sliders,
-  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Shrink, Expand, GripHorizontal,
-  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap, Cpu, Activity
+  Maximize2, Square, Lock, Sliders,
+  RotateCcw, LayoutGrid, ZoomIn, ZoomOut, GripHorizontal,
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap, Cpu, Activity,
+  Save
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
 import type {
-  DagStatusData, Node5ConfigState, TriggerDecisionState, PerformanceDiagnosis
+  DagStatusData, Node5ConfigState, TriggerDecisionState, PerformanceDiagnosis, DagGroup
 } from './types/dag';
 import { NODES_METADATA } from './types/dag';
 import {
@@ -23,6 +24,7 @@ import { Dag2PerformanceReportModal } from './components/dag/Dag2PerformanceRepo
 import {
   UniversalNodeConfigModal
 } from './components/dag/DagConfigModals';
+import { WindowControls } from './components/common/WindowControls';
 
 const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = {
   init_end: { x: 50, y: 140 },
@@ -36,8 +38,18 @@ const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = {
   batch_frames_ocr: { x: 1480, y: 140 }
 };
 
-const getStoredPositions = (): Record<string, { x: number; y: number }> => {
+const getStoredPositions = (projectId?: string | null): Record<string, { x: number; y: number }> => {
   try {
+    if (projectId) {
+      const projRaw = localStorage.getItem(`dag_positions_${projectId}`);
+      if (projRaw) {
+        return { ...DEFAULT_NODE_POSITIONS, ...JSON.parse(projRaw) };
+      }
+    }
+    const savedCustom = localStorage.getItem('dag_saved_custom_positions');
+    if (savedCustom) {
+      return { ...DEFAULT_NODE_POSITIONS, ...JSON.parse(savedCustom) };
+    }
     const raw = localStorage.getItem('dag_node_positions');
     if (raw) {
       const parsed = JSON.parse(raw);
@@ -45,6 +57,15 @@ const getStoredPositions = (): Record<string, { x: number; y: number }> => {
     }
   } catch {}
   return DEFAULT_NODE_POSITIONS;
+};
+
+const calculateOptimalPan = (targetHeight: number, positions: Record<string, { x: number; y: number }>) => {
+  const nodes = Object.entries(positions);
+  if (nodes.length === 0) return { x: 20, y: Math.round((targetHeight - 62) / 2) - 140 };
+  const avgY = nodes.reduce((acc, [, p]) => acc + (p?.y ?? 140), 0) / nodes.length;
+  // Node card height is 62px, vertical center is at y + 31
+  const targetPanY = Math.round((targetHeight / 2) - avgY - 31);
+  return { x: 20, y: targetPanY };
 };
 
 export interface FlowDagProps {
@@ -154,29 +175,80 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   };
 
   const handleSetHeightPreset = (targetH: number) => {
+    const oldH = canvasHeight;
     setCanvasHeight(targetH);
-    if (targetH <= 180) {
-      setPan(p => ({ x: p.x, y: -90 }));
-    } else if (canvasHeight <= 180) {
-      setPan(p => ({ x: p.x, y: 0 }));
-    }
     try {
       localStorage.setItem('dag_canvas_height', String(targetH));
     } catch {}
+    // Maintain vertical center of current nodes when changing canvas height
+    const deltaY = Math.round((targetH - oldH) / 2);
+    setPan(p => ({ x: p.x, y: p.y + deltaY }));
   };
 
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
-  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => {
-    if (onSelectDag) onSelectDag(dag);
-    else setInternalSelectedDag(dag);
-  };
 
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>('init_end');
   const activeSelectedNodeId = selectedNodeId !== undefined ? selectedNodeId : internalSelectedNodeId;
+
+  // Multi-node selection state for grouping & batch repositioning
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(['init_end']);
+  const selectedNodeIdsRef = useRef<string[]>(selectedNodeIds);
+  useEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds]);
+
   const handleSelectNode = (id: string | null) => {
     if (onSelectNodeId) onSelectNodeId(id);
     else setInternalSelectedNodeId(id || 'init_end');
+  };
+
+  // Synchronize when external selectedNodeId changes
+  useEffect(() => {
+    if (selectedNodeId) {
+      setSelectedNodeIds(prev => prev.includes(selectedNodeId) ? prev : [selectedNodeId]);
+    }
+  }, [selectedNodeId]);
+
+  // Select all nodes belonging to a DAG group (invoked by group badge pill [G1] or Shift+click)
+  const handleSelectGroup = (groupId: DagGroup, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const groupNodeIds = NODES_METADATA.filter(n => n.group === groupId).map(n => n.id);
+    if (groupNodeIds.length === 0) return;
+
+    if (e && (e.ctrlKey || e.metaKey)) {
+      const allIn = groupNodeIds.every(id => selectedNodeIdsRef.current.includes(id));
+      if (allIn) {
+        const remaining = selectedNodeIdsRef.current.filter(id => !groupNodeIds.includes(id));
+        const next = remaining.length > 0 ? remaining : [groupNodeIds[0]];
+        setSelectedNodeIds(next);
+        handleSelectNode(next[0]);
+      } else {
+        const merged = Array.from(new Set([...selectedNodeIdsRef.current, ...groupNodeIds]));
+        setSelectedNodeIds(merged);
+        handleSelectNode(groupNodeIds[0]);
+      }
+    } else {
+      setSelectedNodeIds(groupNodeIds);
+      handleSelectNode(groupNodeIds[0]);
+    }
+  };
+
+  const handleDagSelect = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => {
+    if (onSelectDag) onSelectDag(dag);
+    else setInternalSelectedDag(dag);
+
+    if (dag === 'all') {
+      const allIds = NODES_METADATA.map(n => n.id);
+      setSelectedNodeIds(allIds);
+      handleSelectNode(allIds[0]);
+    } else {
+      const groupNodeIds = NODES_METADATA.filter(n => n.group === dag).map(n => n.id);
+      if (groupNodeIds.length > 0) {
+        setSelectedNodeIds(groupNodeIds);
+        handleSelectNode(groupNodeIds[0]);
+      }
+    }
   };
 
   const [pinnedHoverNodeId, setPinnedHoverNodeId] = useState<string | null>(null);
@@ -243,12 +315,55 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   // 2D Pan/Zoom Interactive Canvas & Node Wiring State
   const canvasRef = useRef<HTMLDivElement>(null);
-  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>(getStoredPositions);
-  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isPositionsLocked, setIsPositionsLocked] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('dag_positions_locked') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [savePositionsStatus, setSavePositionsStatus] = useState<'idle' | 'saved'>('idle');
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>(() => getStoredPositions(activeProjectId));
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => {
+    try {
+      const savedHeight = parseInt(localStorage.getItem('dag_canvas_height') || '320', 10);
+      const h = (!isNaN(savedHeight) && savedHeight >= 110 && savedHeight <= 850) ? savedHeight : 320;
+      const positions = getStoredPositions(activeProjectId);
+      return calculateOptimalPan(h, positions);
+    } catch {
+      return { x: 20, y: 0 };
+    }
+  });
   const [zoom, setZoom] = useState<number>(1.0);
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const [panStart, setPanStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [draggingNode, setDraggingNode] = useState<{ id: string; startCardX: number; startCardY: number; startClientX: number; startClientY: number } | null>(null);
+  const nodePositionsRef = useRef<Record<string, { x: number; y: number }>>(nodePositions);
+  useEffect(() => {
+    nodePositionsRef.current = nodePositions;
+  }, [nodePositions]);
+
+  // Reload project-scoped node positions when activeProjectId changes
+  useEffect(() => {
+    if (!activeProjectId) return;
+    try {
+      const projRaw = localStorage.getItem(`dag_positions_${activeProjectId}`);
+      if (projRaw) {
+        const parsed = JSON.parse(projRaw);
+        const merged = { ...DEFAULT_NODE_POSITIONS, ...parsed };
+        setNodePositions(merged);
+        nodePositionsRef.current = merged;
+      }
+    } catch {}
+  }, [activeProjectId]);
+
+  const [draggingGroup, setDraggingGroup] = useState<{
+    originNodeId: string;
+    targetIds: string[];
+    startClientX: number;
+    startClientY: number;
+    initialPositions: Record<string, { x: number; y: number }>;
+  } | null>(null);
+  const justFinishedDraggingRef = useRef<boolean>(false);
   const [wiringState, setWiringState] = useState<{ active: boolean; fromNodeId: string; mouseX: number; mouseY: number } | null>(null);
   const [universalConfigNodeId, setUniversalConfigNodeId] = useState<string | null>(null);
 
@@ -380,7 +495,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         const updated = { ...prev };
         for (const [nodeId, nData] of Object.entries(dagStatus.dag?.nodes || {})) {
           if (nData && (nData as any).position && typeof (nData as any).position.x === 'number' && typeof (nData as any).position.y === 'number') {
-            if (!draggingNode || draggingNode.id !== nodeId) {
+            if (!draggingGroup || !draggingGroup.targetIds.includes(nodeId)) {
               const serverX = (nData as any).position.x;
               const serverY = (nData as any).position.y;
               if (!updated[nodeId] || Math.abs(updated[nodeId].x - serverX) > 1 || Math.abs(updated[nodeId].y - serverY) > 1) {
@@ -393,22 +508,49 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         return hasUpdates ? updated : prev;
       });
     }
-  }, [dagStatus.dag?.nodes, draggingNode]);
+  }, [dagStatus.dag?.nodes, draggingGroup]);
 
-  // Window listeners for mouse & pointer interactions (pan canvas, drag cards, draw wires)
+  // Window listeners for mouse & pointer interactions (pan canvas, drag grouped cards, draw wires)
   useEffect(() => {
     const handleMove = (e: MouseEvent | PointerEvent) => {
       if (isPanning) {
         setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
-      } else if (draggingNode) {
-        const dx = (e.clientX - draggingNode.startClientX) / zoom;
-        const dy = (e.clientY - draggingNode.startClientY) / zoom;
-        const newX = Math.max(10, Math.round(draggingNode.startCardX + dx));
-        const newY = Math.max(10, Math.round(draggingNode.startCardY + dy));
-        setNodePositions(prev => ({
-          ...prev,
-          [draggingNode.id]: { x: newX, y: newY }
-        }));
+      } else if (draggingGroup) {
+        const rawDx = (e.clientX - draggingGroup.startClientX) / zoom;
+        const rawDy = (e.clientY - draggingGroup.startClientY) / zoom;
+
+        if (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3) {
+          justFinishedDraggingRef.current = true;
+        }
+
+        // Clamp so no selected node goes off the canvas boundaries (< 10px)
+        let minAllowedDx = -Infinity;
+        let minAllowedDy = -Infinity;
+        for (const id of draggingGroup.targetIds) {
+          const initPos = draggingGroup.initialPositions[id];
+          if (initPos) {
+            const reqDx = 10 - initPos.x;
+            if (reqDx > minAllowedDx) minAllowedDx = reqDx;
+            const reqDy = 10 - initPos.y;
+            if (reqDy > minAllowedDy) minAllowedDy = reqDy;
+          }
+        }
+        const dx = Math.max(minAllowedDx, rawDx);
+        const dy = Math.max(minAllowedDy, rawDy);
+
+        setNodePositions(prev => {
+          const next = { ...prev };
+          for (const id of draggingGroup.targetIds) {
+            const initPos = draggingGroup.initialPositions[id];
+            if (initPos) {
+              next[id] = {
+                x: Math.round(initPos.x + dx),
+                y: Math.round(initPos.y + dy)
+              };
+            }
+          }
+          return next;
+        });
       } else if (wiringState?.active && canvasRef.current) {
         const rect = canvasRef.current.getBoundingClientRect();
         const mouseX = (e.clientX - rect.left - pan.x) / zoom;
@@ -421,27 +563,50 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       if (isPanning) {
         setIsPanning(false);
       }
-      if (draggingNode) {
-        const finalPos = nodePositions[draggingNode.id];
-        if (finalPos) {
-          try {
-            const current = { ...nodePositions, [draggingNode.id]: finalPos };
-            localStorage.setItem('dag_node_positions', JSON.stringify(current));
-          } catch {}
-          fetch(`${apiBase}/api/dag/nodes/${draggingNode.id}/position`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(finalPos)
-          }).catch(() => {});
+      if (draggingGroup) {
+        const currentPositions = nodePositionsRef.current;
+        const updatedBatch: Record<string, { x: number; y: number }> = {};
+        for (const id of draggingGroup.targetIds) {
+          if (currentPositions[id]) {
+            updatedBatch[id] = currentPositions[id];
+          }
         }
-        setDraggingNode(null);
+
+        try {
+          const merged = { ...getStoredPositions(activeProjectId), ...currentPositions };
+          localStorage.setItem('dag_node_positions', JSON.stringify(merged));
+          if (activeProjectId) {
+            localStorage.setItem(`dag_positions_${activeProjectId}`, JSON.stringify(merged));
+          }
+        } catch {}
+
+        if (Object.keys(updatedBatch).length > 0) {
+          fetch(`${apiBase}/api/dag/nodes/positions/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedBatch)
+          }).catch(() => {
+            for (const [id, pos] of Object.entries(updatedBatch)) {
+              fetch(`${apiBase}/api/dag/nodes/${id}/position`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(pos)
+              }).catch(() => {});
+            }
+          });
+        }
+
+        setDraggingGroup(null);
+        setTimeout(() => {
+          justFinishedDraggingRef.current = false;
+        }, 120);
       }
       if (wiringState) {
         setWiringState(null);
       }
     };
 
-    if (isPanning || draggingNode || wiringState) {
+    if (isPanning || draggingGroup || wiringState) {
       window.addEventListener('mousemove', handleMove);
       window.addEventListener('mouseup', handleUp);
       window.addEventListener('pointermove', handleMove);
@@ -453,28 +618,107 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         window.removeEventListener('pointerup', handleUp);
       };
     }
-  }, [isPanning, panStart, draggingNode, wiringState, zoom, pan, nodePositions, apiBase]);
+  }, [isPanning, panStart, draggingGroup, wiringState, zoom, pan, apiBase, activeProjectId]);
 
   // Canvas interaction handlers
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.dag-mini-node-compact') || (e.target as HTMLElement).closest('.dag-port-socket')) {
       return;
     }
+    // Clicking on canvas background clears multi-selection back to active node
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      if (selectedNodeIdsRef.current.length > 1) {
+        setSelectedNodeIds(activeSelectedNodeId ? [activeSelectedNodeId] : ['init_end']);
+      }
+    }
     setIsPanning(true);
     setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
   };
 
   const handleMouseDownCard = (e: React.MouseEvent | React.PointerEvent, nodeId: string) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
-    const pos = nodePositions[nodeId] || DEFAULT_NODE_POSITIONS[nodeId] || { x: 0, y: 0 };
-    setDraggingNode({
-      id: nodeId,
-      startCardX: pos.x,
-      startCardY: pos.y,
+
+    let targetIds: string[] = [];
+
+    if (e.ctrlKey || e.metaKey) {
+      // Toggle or include node
+      if (selectedNodeIdsRef.current.includes(nodeId)) {
+        targetIds = selectedNodeIdsRef.current;
+      } else {
+        targetIds = [...selectedNodeIdsRef.current, nodeId];
+        setSelectedNodeIds(targetIds);
+        handleSelectNode(nodeId);
+      }
+    } else if (e.shiftKey) {
+      // Shift-click selects group
+      const nodeObj = NODES_METADATA.find(n => n.id === nodeId);
+      if (nodeObj) {
+        const groupIds = NODES_METADATA.filter(n => n.group === nodeObj.group).map(n => n.id);
+        targetIds = groupIds;
+        setSelectedNodeIds(groupIds);
+        handleSelectNode(nodeId);
+      } else {
+        targetIds = [nodeId];
+        setSelectedNodeIds(targetIds);
+        handleSelectNode(nodeId);
+      }
+    } else {
+      // Normal left mouse click down
+      if (selectedNodeIdsRef.current.includes(nodeId)) {
+        // Critical: User has grouped/multi-selected nodes, and is left-click-holding over one of them to reposition!
+        targetIds = selectedNodeIdsRef.current;
+      } else {
+        targetIds = [nodeId];
+        setSelectedNodeIds(targetIds);
+        handleSelectNode(nodeId);
+      }
+    }
+
+    if (isPositionsLocked) {
+      // Locking prevents repositioning dragging while still permitting selection & inspection
+      return;
+    }
+
+    const initialPositions: Record<string, { x: number; y: number }> = {};
+    for (const id of targetIds) {
+      const pos = nodePositionsRef.current[id] || DEFAULT_NODE_POSITIONS[id] || { x: 50, y: 140 };
+      initialPositions[id] = { ...pos };
+    }
+
+    justFinishedDraggingRef.current = false;
+    setDraggingGroup({
+      originNodeId: nodeId,
+      targetIds,
       startClientX: e.clientX,
-      startClientY: e.clientY
+      startClientY: e.clientY,
+      initialPositions
     });
-    handleSelectNode(nodeId);
+  };
+
+  const handleNodeCardClick = (nodeId: string, e?: React.MouseEvent) => {
+    // If the mouse was dragged, do not collapse the selection
+    if (justFinishedDraggingRef.current) return;
+
+    if (e && (e.ctrlKey || e.metaKey)) {
+      setSelectedNodeIds(prev => {
+        if (prev.includes(nodeId)) {
+          const next = prev.filter(id => id !== nodeId);
+          return next.length > 0 ? next : [nodeId];
+        } else {
+          return [...prev, nodeId];
+        }
+      });
+      handleSelectNode(nodeId);
+    } else if (e && e.shiftKey) {
+      const nodeObj = NODES_METADATA.find(n => n.id === nodeId);
+      if (nodeObj) {
+        handleSelectGroup(nodeObj.group, e);
+      }
+    } else {
+      setSelectedNodeIds([nodeId]);
+      handleSelectNode(nodeId);
+    }
   };
 
   const handleStartWiring = (e: React.MouseEvent, fromNodeId: string) => {
@@ -538,18 +782,198 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  const handleFitView = useCallback(() => {
+    if (!canvasRef.current) return;
+    const containerW = canvasRef.current.clientWidth || 1000;
+    const containerH = canvasHeight;
+
+    const nodes = NODES_METADATA.map(n => nodePositions[n.id] || DEFAULT_NODE_POSITIONS[n.id] || { x: 50, y: 140 });
+    if (nodes.length === 0) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(pos => {
+      if (pos.x < minX) minX = pos.x;
+      if (pos.x + 185 > maxX) maxX = pos.x + 185;
+      if (pos.y < minY) minY = pos.y;
+      if (pos.y + 62 > maxY) maxY = pos.y + 62;
+    });
+
+    const contentW = maxX - minX + 50;
+    const contentH = maxY - minY + 30;
+
+    const zoomX = containerW / contentW;
+    const zoomY = containerH / contentH;
+    const optimalZoom = Math.min(1.0, Math.max(0.45, Math.min(zoomX, zoomY) * 0.95));
+
+    const targetPanX = Math.round((containerW - (contentW * optimalZoom)) / 2 - (minX * optimalZoom) + (25 * optimalZoom));
+    const targetPanY = Math.round((containerH - (contentH * optimalZoom)) / 2 - (minY * optimalZoom) + (15 * optimalZoom));
+
+    setZoom(Number(optimalZoom.toFixed(2)));
+    setPan({ x: targetPanX, y: targetPanY });
+    setNodeFeedback({
+      id: 'fit_view',
+      message: `DAG view fitted: ${Math.round(optimalZoom * 100)}% scale centered ✔`,
+      isError: false
+    });
+  }, [canvasHeight, nodePositions]);
+
+  const handleResetZoomPan = () => {
+    setZoom(1.0);
+    const optimal = calculateOptimalPan(canvasHeight, nodePositions);
+    setPan(optimal);
+  };
+
+  // Auto-recovery: If all nodes are scrolled completely offscreen vertically, bring them back into view
+  useEffect(() => {
+    const nodes = NODES_METADATA.map(n => nodePositions[n.id] || DEFAULT_NODE_POSITIONS[n.id] || { x: 50, y: 140 });
+    if (nodes.length === 0) return;
+
+    let minY = Infinity, maxY = -Infinity;
+    nodes.forEach(p => {
+      if (p.y < minY) minY = p.y;
+      if (p.y + 62 > maxY) maxY = p.y + 62;
+    });
+
+    const topScreenY = minY * zoom + pan.y;
+    const bottomScreenY = maxY * zoom + pan.y;
+
+    const isCompletelyBelow = topScreenY >= canvasHeight - 20;
+    const isCompletelyAbove = bottomScreenY <= 20;
+
+    if (isCompletelyBelow || isCompletelyAbove) {
+      const optimal = calculateOptimalPan(canvasHeight, nodePositions);
+      setPan(prev => ({ ...prev, y: optimal.y }));
+    }
+  }, [canvasHeight, zoom, pan.y, nodePositions]);
+
+  const handleToggleLockPositions = () => {
+    setIsPositionsLocked(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('dag_positions_locked', String(next));
+      } catch {}
+      setNodeFeedback({
+        id: 'lock_positions',
+        message: next ? 'DAG node positions locked 🔒 (dragging disabled)' : 'DAG node positions unlocked 🔓 (free repositioning)',
+        isError: false
+      });
+      return next;
+    });
+  };
+
+  const handleSavePositions = async () => {
+    const currentPositions = nodePositionsRef.current;
+    try {
+      localStorage.setItem('dag_node_positions', JSON.stringify(currentPositions));
+      localStorage.setItem('dag_saved_custom_positions', JSON.stringify(currentPositions));
+      if (activeProjectId) {
+        localStorage.setItem(`dag_positions_${activeProjectId}`, JSON.stringify(currentPositions));
+      }
+    } catch {}
+
+    try {
+      await fetch(`${apiBase}/api/dag/nodes/positions/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentPositions)
+      });
+    } catch {}
+
+    setSavePositionsStatus('saved');
+    setTimeout(() => {
+      setSavePositionsStatus('idle');
+    }, 2500);
+
+    setNodeFeedback({
+      id: 'save_positions',
+      message: 'DAG node positions saved ✔',
+      isError: false
+    });
+  };
+
+  const handleReloadPositions = async () => {
+    try {
+      let loadedPositions: Record<string, { x: number; y: number }> | null = null;
+      if (activeProjectId) {
+        const projRaw = localStorage.getItem(`dag_positions_${activeProjectId}`);
+        if (projRaw) {
+          try { loadedPositions = JSON.parse(projRaw); } catch {}
+        }
+      }
+      if (!loadedPositions) {
+        const customRaw = localStorage.getItem('dag_saved_custom_positions');
+        if (customRaw) {
+          try { loadedPositions = JSON.parse(customRaw); } catch {}
+        }
+      }
+      if (!loadedPositions) {
+        const storedRaw = localStorage.getItem('dag_node_positions');
+        if (storedRaw) {
+          try { loadedPositions = JSON.parse(storedRaw); } catch {}
+        }
+      }
+
+      if (!loadedPositions) {
+        try {
+          const res = await fetch(`${apiBase}/api/dag/status`);
+          if (res.ok) {
+            const d = await res.json();
+            if (d?.dag?.nodes) {
+              const backendPositions: Record<string, { x: number; y: number }> = {};
+              for (const [nid, nodeData] of Object.entries<any>(d.dag.nodes)) {
+                if (nodeData?.position?.x !== undefined && nodeData?.position?.y !== undefined) {
+                  backendPositions[nid] = { x: Number(nodeData.position.x), y: Number(nodeData.position.y) };
+                }
+              }
+              if (Object.keys(backendPositions).length > 0) {
+                loadedPositions = backendPositions;
+              }
+            }
+          }
+        } catch {}
+      }
+
+      const merged = { ...DEFAULT_NODE_POSITIONS, ...(loadedPositions || {}) };
+      setNodePositions(merged);
+      nodePositionsRef.current = merged;
+
+      const optimal = calculateOptimalPan(canvasHeight, merged);
+      setPan(optimal);
+
+      try {
+        await fetch(`${apiBase}/api/dag/nodes/positions/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(merged)
+        });
+      } catch {}
+
+      setNodeFeedback({
+        id: 'reload_positions',
+        message: 'DAG node positions reloaded ✔',
+        isError: false
+      });
+    } catch (err: any) {
+      setNodeFeedback({
+        id: 'reload_positions',
+        message: `Failed to reload positions: ${err.message}`,
+        isError: true
+      });
+    }
+  };
+
   const handleSnapCleanLayout = async () => {
     try {
       const res = await fetch(`${apiBase}/api/dag/layout/clean`, { method: 'POST' });
       const { data } = await parseApiResponse(res);
-      if (data?.layout) {
-        setNodePositions(data.layout);
-        try {
-          localStorage.setItem('dag_node_positions', JSON.stringify(data.layout));
-        } catch {}
-      }
-      setPan({ x: 0, y: canvasHeight <= 180 ? -90 : 0 });
+      const layout = data?.layout || DEFAULT_NODE_POSITIONS;
+      setNodePositions(layout);
+      try {
+        localStorage.setItem('dag_node_positions', JSON.stringify(layout));
+      } catch {}
       setZoom(1.0);
+      const optimal = calculateOptimalPan(canvasHeight, layout);
+      setPan(optimal);
       setNodeFeedback({
         id: 'clean_layout',
         message: 'DAG snapped to clean topological layout ✔',
@@ -1281,6 +1705,46 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               ))}
             </div>
 
+            {/* Multi-Selection / Group Indicator Badge */}
+            {selectedNodeIds.length > 1 && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  background: 'rgba(0, 255, 157, 0.15)',
+                  border: '1px solid rgba(0, 255, 157, 0.4)',
+                  color: '#00ff9d',
+                  fontSize: '8.5px',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-mono)',
+                  height: '22px'
+                }}
+              >
+                <span>{selectedNodeIds.length} Nodes Grouped</span>
+                <span style={{ color: '#8b949e', fontSize: '8px' }}>• Drag any to move</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedNodeIds(activeSelectedNodeId ? [activeSelectedNodeId] : ['init_end'])}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#8b949e',
+                    cursor: 'pointer',
+                    padding: '0 2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    lineHeight: 1
+                  }}
+                  title="Deselect group (keep only active node)"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            )}
+
             {/* Direct Flow Connectors Bar */}
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
               <button
@@ -1428,58 +1892,20 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             )}
 
 
-            {/* Window Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '2px', marginLeft: '4px' }}>
-              <button
-                type="button"
-                className="win-btn"
-                onClick={() => {
-                  if (canvasHeight <= 180) {
-                    handleSetHeightPreset(320);
-                  } else {
-                    handleSetHeightPreset(150);
-                  }
-                }}
-                title={canvasHeight <= 180 ? 'Expand DAG Area (Standard 320px)' : 'Reduce DAG Area (Compact 150px)'}
-                style={{
-                  width: '22px', height: '22px',
-                  color: canvasHeight <= 180 ? '#00ff9d' : '#8b949e',
-                  background: canvasHeight <= 180 ? 'rgba(0, 255, 157, 0.15)' : 'transparent',
-                  border: canvasHeight <= 180 ? '1px solid rgba(0, 255, 157, 0.4)' : undefined
-                }}
-              >
-                {canvasHeight <= 180 ? <Expand size={11} /> : <Shrink size={11} />}
-              </button>
-              <button
-                type="button"
-                className="win-btn"
-                onClick={onToggleMinimize}
-                title="Minimize DAG Window"
-                style={{ width: '22px', height: '22px' }}
-              >
-                <Minus size={11} />
-              </button>
-              <button
-                type="button"
-                className="win-btn"
-                onClick={() => setIsMaximized(m => !m)}
-                title={isMaximized ? 'Restore DAG' : 'Maximize DAG'}
-                style={{ width: '22px', height: '22px' }}
-              >
-                {isMaximized ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
-              </button>
-              {onClose && (
-                <button
-                  type="button"
-                  className="win-btn win-btn-close"
-                  onClick={onClose}
-                  title="Close DAG Window"
-                  style={{ width: '22px', height: '22px' }}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
+            {/* Standardized Window Controls */}
+            <WindowControls
+              windowName="DAG"
+              onToggleCompact={() => handleSetHeightPreset(canvasHeight <= 180 ? 320 : 150)}
+              isCompact={canvasHeight <= 180}
+              compactTitle="Reduce DAG Area (Compact 150px)"
+              expandTitle="Expand DAG Area (Standard 320px)"
+              onMinimize={onToggleMinimize}
+              isMinimized={isMinimized}
+              onMaximize={() => setIsMaximized(m => !m)}
+              isMaximized={isMaximized}
+              onClose={onClose}
+              style={{ marginLeft: '4px' }}
+            />
           </div>
         </div>
 
@@ -1880,8 +2306,68 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             )}
           </div>
 
-          {/* Right: Layout Snap, Zoom & Pan Controls */}
+          {/* Right: Layout Snap, Position Controls, Area Size, Zoom & Pan Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {/* Position Management: Lock, Save, Reload */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#0d1117', border: '1px solid #30363d', borderRadius: '4px', padding: '1px', gap: '1px' }}>
+              {/* Lock Toggle */}
+              <button
+                type="button"
+                onClick={handleToggleLockPositions}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                  borderRadius: '3px',
+                  border: isPositionsLocked ? '1px solid rgba(255, 170, 0, 0.5)' : '1px solid transparent',
+                  background: isPositionsLocked ? 'rgba(255, 170, 0, 0.16)' : 'transparent',
+                  color: isPositionsLocked ? '#ffb347' : '#8b949e',
+                  fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title={isPositionsLocked ? 'Node positions are locked (click to unlock dragging)' : 'Lock node positions to prevent accidental dragging'}
+              >
+                {isPositionsLocked ? <Lock size={10} color="#ffb347" /> : <Unlock size={10} />}
+                <span>{isPositionsLocked ? 'Locked' : 'Lock'}</span>
+              </button>
+
+              {/* Save Positions */}
+              <button
+                type="button"
+                onClick={handleSavePositions}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                  borderRadius: '3px',
+                  border: savePositionsStatus === 'saved' ? '1px solid rgba(0, 255, 157, 0.4)' : '1px solid transparent',
+                  background: savePositionsStatus === 'saved' ? 'rgba(0, 255, 157, 0.16)' : 'transparent',
+                  color: savePositionsStatus === 'saved' ? '#00ff9d' : '#58a6ff',
+                  fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Save current custom node positions to persistent storage"
+              >
+                {savePositionsStatus === 'saved' ? <Check size={10} color="#00ff9d" /> : <Save size={10} />}
+                <span>{savePositionsStatus === 'saved' ? 'Saved!' : 'Save'}</span>
+              </button>
+
+              {/* Reload Positions */}
+              <button
+                type="button"
+                onClick={handleReloadPositions}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                  borderRadius: '3px',
+                  border: '1px solid transparent',
+                  background: 'transparent',
+                  color: '#c9d1d9',
+                  fontSize: '9px', fontWeight: 700, cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Reload saved custom node positions and re-center canvas"
+              >
+                <RotateCcw size={10} />
+                <span>Reload</span>
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={handleSnapCleanLayout}
@@ -1975,9 +2461,17 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => { setZoom(1.0); setPan({ x: 0, y: 0 }); }}
+                onClick={handleFitView}
                 style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px 5px', borderLeft: '1px solid #30363d' }}
-                title="Reset Zoom & Pan (1:1)"
+                title="Fit All DAG Nodes to Screen (Auto-scale & Center)"
+              >
+                <Maximize2 size={10} />
+              </button>
+              <button
+                type="button"
+                onClick={handleResetZoomPan}
+                style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', padding: '2px 5px', borderLeft: '1px solid #30363d' }}
+                title="Reset Zoom (100%) & Center Nodes"
               >
                 <RotateCcw size={10} />
               </button>
@@ -2097,6 +2591,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 const isWiringSource = Boolean(wiringState?.active && wiringState.fromNodeId === node.id);
                 const isDimmed = effectiveSelectedDag !== 'all' && node.group !== effectiveSelectedDag;
 
+                const isSelected = selectedNodeIds.includes(node.id);
+                const isMultiSelected = isSelected && selectedNodeIds.length > 1;
+
                 return (
                   <div
                     key={node.id}
@@ -2106,18 +2603,22 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                       top: `${pos.y}px`,
                       opacity: isDimmed ? 0.35 : 1.0,
                       transition: 'opacity 0.2s ease',
-                      zIndex: activeSelectedNodeId === node.id ? 20 : (pinnedHoverNodeId === node.id ? 15 : 5)
+                      zIndex: isSelected ? 20 : (pinnedHoverNodeId === node.id ? 15 : 5)
                     }}
                   >
                     <DagNodeCard
                       node={node}
                       status={status}
-                      isSelected={activeSelectedNodeId === node.id}
+                      isSelected={isSelected}
+                      isMultiSelected={isMultiSelected}
+                      selectedCount={selectedNodeIds.length}
                       isPinned={pinnedHoverNodeId === node.id}
                       isPulsingSwirl={activeRunningId === node.id}
                       copiedNodeId={copiedNodeId}
                       attachedActionsCount={attachedActions.length}
-                      onSelect={() => handleSelectNode(node.id)}
+                      isPositionsLocked={isPositionsLocked}
+                      onSelect={(e) => handleNodeCardClick(node.id, e)}
+                      onSelectGroup={(grp, e) => handleSelectGroup(grp, e)}
                       onDoubleClick={() => setPinnedHoverNodeId(prev => prev === node.id ? null : node.id)}
                       onMouseEnter={() => setHoveredNodeId(node.id)}
                       onMouseLeave={() => setHoveredNodeId(prev => prev === node.id ? null : prev)}
