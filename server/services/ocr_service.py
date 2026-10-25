@@ -891,3 +891,243 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
         }
 
 
+async def sequential_rescan_all_frames_task(
+    project_id: Optional[str] = None,
+    frame_ids: Optional[List[str]] = None,
+    clear_existing: bool = False
+) -> Dict[str, Any]:
+    """
+    Sequentially processes each captured frame from top to bottom (in natural line/page order).
+    For each frame, performs RapidOCR gutter detection and selective high-precision line cropping,
+    overwriting and aligning genuine line numbers in state.document_lines.
+    """
+    state.is_sequential_rescan_running = True
+    state.cancel_sequential_rescan = False
+
+    pid = project_id or state.get_current_project_id()
+    if not getattr(state, "_state_initialized", False):
+        state.load_persisted_state()
+
+    frames_dict: Dict[str, Dict[str, Any]] = dict(state.captured_frames)
+    if pid:
+        try:
+            for f in db.get_frames(pid):
+                fid = f.get("frame_id")
+                if fid and fid not in frames_dict:
+                    frames_dict[fid] = f
+        except Exception as e:
+            print(f"[sequential_rescan] db.get_frames note: {e}")
+
+    if frame_ids:
+        target_fids = set(str(x) for x in frame_ids)
+        frames_list = [f for fid, f in frames_dict.items() if fid in target_fids or f.get("filename") in target_fids]
+    else:
+        frames_list = list(frames_dict.values())
+
+    if not frames_list:
+        for p in sorted(state.FRAMES_DIR.glob("frame_*.png"), key=lambda x: x.stat().st_mtime):
+            if not p.name.startswith(("test_", "raw_", "temp_", "crop_", "scratch_")):
+                frames_list.append({"frame_id": p.stem, "filename": p.name})
+
+    def frame_sort_key(f):
+        pg = f.get("page_index") or 0
+        top = f.get("top_line") or 0
+        fn = f.get("filename") or f.get("frame_id") or ""
+        m = re.search(r"frame_(\d+)_(\d+)", fn)
+        fn_top = int(m.group(1)) if m else 0
+        created = f.get("created_at") or ""
+        return (pg if pg > 0 else 999999, top if top > 0 else (fn_top if fn_top > 0 else 999999), fn_top, created)
+
+    sorted_frames = sorted(frames_list, key=frame_sort_key)
+    total_frames = len(sorted_frames)
+
+    if total_frames == 0:
+        state.is_sequential_rescan_running = False
+        return {
+            "status": "error",
+            "message": "No captured frames found for sequential rescan",
+            "total_frames": 0
+        }
+
+    if clear_existing:
+        state.document_lines.clear()
+
+    state.sequential_rescan_progress = {
+        "is_running": True,
+        "current_index": 0,
+        "total_frames": total_frames,
+        "current_frame_id": None,
+        "current_top_line": 0,
+        "current_bottom_line": 0,
+        "total_verified_lines": len(state.document_lines),
+        "status_message": f"Starting sequential rescan across {total_frames} frame(s)..."
+    }
+
+    if hasattr(state, "ws_manager") and state.ws_manager:
+        await state.ws_manager.broadcast({
+            "type": "rescan_all_frames_progress",
+            **state.sequential_rescan_progress
+        })
+
+    from ocr_engine import worker_scan_image
+    from routers.frames_document import _ocr_inspect_cache, _get_frame_path, _doc_payload
+
+    processed_count = 0
+    total_lines_rescanned = 0
+
+    try:
+        for idx, finfo in enumerate(sorted_frames):
+            if getattr(state, "cancel_sequential_rescan", False):
+                state.sequential_rescan_progress["status_message"] = "Cancelled by user"
+                break
+
+            fid = finfo.get("frame_id") or finfo.get("id") or finfo.get("filename", "").replace(".png", "")
+            try:
+                ipath = _get_frame_path(fid, finfo.get("filename"))
+            except Exception:
+                continue
+
+            if not ipath or not ipath.exists():
+                continue
+
+            state.sequential_rescan_progress.update({
+                "current_index": idx + 1,
+                "current_frame_id": fid,
+                "status_message": f"Scanning Frame {idx + 1}/{total_frames}: {ipath.name}..."
+            })
+            if hasattr(state, "ws_manager") and state.ws_manager:
+                await state.ws_manager.broadcast({
+                    "type": "rescan_all_frames_progress",
+                    **state.sequential_rescan_progress
+                })
+
+            try:
+                aux = await asyncio.to_thread(worker_scan_image, str(ipath))
+            except Exception as e:
+                print(f"[sequential_rescan] worker_scan_image error on {ipath.name}: {e}")
+                continue
+
+            top_l = aux.get("top_line", 1)
+            bot_l = aux.get("bottom_line", 26)
+            lines = aux.get("lines", [])
+            bboxes = aux.get("bounding_boxes", {})
+
+            line_numbers = [l.get("line_number") for l in lines if l.get("line_number") is not None]
+            if not line_numbers and top_l and bot_l:
+                line_numbers = list(range(top_l, bot_l + 1))
+
+            try:
+                updated_lines, rescanned = await asyncio.to_thread(
+                    rescan_lines_on_image_sync,
+                    ipath,
+                    line_numbers,
+                    lines,
+                    bboxes
+                )
+            except Exception as e:
+                print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
+                continue
+
+            for l_item in updated_lines:
+                ln = l_item.get("line_number")
+                if not ln:
+                    continue
+                existing = state.document_lines.get(ln)
+                meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
+                meta.update({
+                    "line_number": ln,
+                    "gutter_number": ln,
+                    "status": "verified",
+                    "overwritten": True,
+                    "frame_id": fid,
+                    "page_index": finfo.get("page_index"),
+                    "updated_at": datetime.now().isoformat()
+                })
+                if l_item.get("confidence") is not None:
+                    meta["confidence"] = l_item.get("confidence")
+                if l_item.get("is_wrapped") is not None:
+                    meta["is_wrapped"] = l_item.get("is_wrapped")
+                state.document_lines[ln] = state.MasterLine(
+                    l_item.get("text", ""),
+                    **meta
+                )
+
+            if fid in state.captured_frames:
+                state.captured_frames[fid].update({
+                    "top_line": top_l,
+                    "bottom_line": bot_l,
+                    "extracted_line_count": len(updated_lines),
+                    "lines": updated_lines,
+                    "bounding_boxes": bboxes,
+                    "status": "processed",
+                    "rescanned_at": datetime.now().isoformat()
+                })
+
+            file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
+            cache_key = f"{str(ipath.resolve())}_{file_mtime}"
+            updated_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in updated_lines)
+            _ocr_inspect_cache[cache_key] = {
+                "lines": updated_lines,
+                "bboxes": bboxes,
+                "model_used": "OpenVINO RapidOCR (Gutter Cropped)",
+                "extracted_text": updated_text,
+                "top_ln": top_l,
+                "bot_ln": bot_l,
+                "img_w": aux.get("image_width", 1920),
+                "img_h": aux.get("image_height", 1080)
+            }
+
+            processed_count += 1
+            total_lines_rescanned += len(rescanned)
+
+            state.sequential_rescan_progress.update({
+                "current_index": idx + 1,
+                "current_top_line": top_l,
+                "current_bottom_line": bot_l,
+                "total_verified_lines": len(state.document_lines),
+                "status_message": f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l}) • Total {len(state.document_lines)} Lines"
+            })
+
+            if hasattr(state, "ws_manager") and state.ws_manager:
+                await state.ws_manager.broadcast({
+                    "type": "rescan_all_frames_progress",
+                    **state.sequential_rescan_progress
+                })
+                if (idx + 1) % 2 == 0 or (idx + 1) == total_frames:
+                    await state.ws_manager.broadcast({
+                        "type": "document_updated",
+                        "data": _doc_payload()
+                    })
+
+    finally:
+        state.is_sequential_rescan_running = False
+        state.cancel_sequential_rescan = False
+        state.sequential_rescan_progress["is_running"] = False
+        state.save_persisted_state()
+        state.assemble_and_save_reconstructed_markdown()
+
+        if hasattr(state, "ws_manager") and state.ws_manager:
+            await state.ws_manager.broadcast({
+                "type": "rescan_all_frames_complete",
+                "status": "success",
+                "total_frames_processed": processed_count,
+                "total_verified_lines": len(state.document_lines),
+                "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
+                "max_line": max(state.document_lines.keys()) if state.document_lines else 0
+            })
+            await state.ws_manager.broadcast({
+                "type": "document_updated",
+                "data": _doc_payload()
+            })
+
+    return {
+        "status": "success",
+        "message": f"Successfully completed sequential rescan on {processed_count} frame(s)",
+        "frames_processed": processed_count,
+        "total_lines_rescanned": total_lines_rescanned,
+        "total_document_lines": len(state.document_lines),
+        "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
+        "max_line": max(state.document_lines.keys()) if state.document_lines else 0
+    }
+
+

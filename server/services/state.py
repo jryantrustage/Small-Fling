@@ -204,6 +204,19 @@ token_stats: Dict[str, Any] = {
 desktop_keyboard_prohibited: bool = True
 desktop_mode_enabled: bool = True
 
+is_sequential_rescan_running: bool = False
+cancel_sequential_rescan: bool = False
+sequential_rescan_progress: Dict[str, Any] = {
+    "is_running": False,
+    "current_index": 0,
+    "total_frames": 0,
+    "current_frame_id": None,
+    "current_top_line": 0,
+    "current_bottom_line": 0,
+    "total_verified_lines": 0,
+    "status_message": "Ready"
+}
+
 latest_telemetry: Dict[str, Any] = {
     "device_id": "idle", "is_pacing": False, "current_page": 0, "current_top_line": 0, "current_bottom_line": 0,
     "target_total_lines": config.TARGET_TOTAL_LINES, "dwell_countdown_ms": 0, "phase": "IDLE", "status_message": "Matrix Capture Studio ready",
@@ -363,7 +376,7 @@ dag_state: Dict[str, Any] = {
             "id": "verify_assemble",
             "title": "Verify & Assemble",
             "description": "Recaptures frame to verify top line position, evaluates qualifiers, and reconstructs master document",
-            "nodes": ["verification_trigger", "document_assemble"],
+            "nodes": ["verification_trigger", "document_assemble", "batch_frames_ocr"],
             "status": "idle",
             "progress": None
         }
@@ -625,6 +638,30 @@ dag_state: Dict[str, Any] = {
                 "auto_save_markdown": True,
                 "output_filename": "reconstructed.md"
             }
+        },
+        "batch_frames_ocr": {
+            "id": "batch_frames_ocr",
+            "group": "verify_assemble",
+            "title": "9. Sequential Batch Frames OCR",
+            "description": "Performs full OCR rescan on all captured frames sequentially from top to bottom, perfectly aligning duplicated lines and assembling markdown.",
+            "status": "idle",
+            "total_frames": 0,
+            "processed_frames": 0,
+            "progress_percent": 0.0,
+            "evaluator": None,
+            "healing_step": None,
+            "telemetry_insight": None,
+            "timings": None,
+            "dag_context": None,
+            "trace_insights": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "auto_save_markdown": True,
+                "output_filename": "reconstructed.md"
+            }
         }
     },
     "edges": [
@@ -635,9 +672,11 @@ dag_state: Dict[str, Any] = {
         {"id": "frame_ocr->arrow_down", "from": "frame_ocr", "to": "arrow_down", "enabled": True},
         {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "has_semaphore": True},
         {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True},
-        {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True}
+        {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True},
+        {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True}
     ],
-    "current_active_node": None
+    "current_active_node": None,
+    "bypass_live_ocr": False
 }
 
 DEFAULT_DAG_EDGES = [
@@ -648,7 +687,8 @@ DEFAULT_DAG_EDGES = [
     {"id": "frame_ocr->arrow_down", "from": "frame_ocr", "to": "arrow_down", "enabled": True, "label": "Target Next Page Line"},
     {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "label": "Assert Settle & Trigger Next", "has_semaphore": True},
     {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True, "label": "Append Verified Text"},
-    {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True, "label": "Continuous Loopback Track"}
+    {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True, "label": "Continuous Loopback Track"},
+    {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True, "label": "Run Sequential Batch Rescan"}
 ]
 
 capture_loop_running: bool = False
@@ -808,6 +848,30 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
                 "updated_at": datetime.now().isoformat()
             })
     return res
+
+def assemble_and_save_reconstructed_markdown() -> str:
+    """Stitches verified master lines in numerical order and saves to reproduced markdown files."""
+    max_k = max(document_lines.keys()) if document_lines else 0
+    doc_lines = []
+    for ln in range(1, max_k + 1):
+        val = document_lines.get(ln, "")
+        if isinstance(val, dict):
+            doc_lines.append(val.get("text", ""))
+        elif hasattr(val, "text"):
+            doc_lines.append(val.text)
+        else:
+            doc_lines.append(str(val))
+    full_markdown = "\n".join(doc_lines)
+    try:
+        out_dir = Path("c:/Projects/Small-Fling/storage")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+        data_dir = out_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+    except Exception as ex:
+        print(f"[assemble_and_save_reconstructed_markdown] File save error: {ex}")
+    return full_markdown
 
 def get_document_metrics() -> Dict[str, Any]:
     sl = get_serialized_lines()

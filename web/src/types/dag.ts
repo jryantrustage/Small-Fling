@@ -110,6 +110,7 @@ export interface DagStatusData {
     semaphore_status?: 'open' | 'blocked';
     semaphore_group2_to_3_status?: 'open' | 'blocked';
     semaphore_group3_to_4_status?: 'open' | 'blocked';
+    bypass_live_ocr?: boolean;
   };
   active_node: string;
   target_total_lines: number;
@@ -119,6 +120,7 @@ export interface DagStatusData {
   is_keyboard_guarded: boolean;
   desktop_keyboard_prohibited?: boolean;
   desktop_mode_enabled?: boolean;
+  bypass_live_ocr?: boolean;
   arrow_step_count: number;
   verification_trigger_fired: boolean;
   ocr_worker_active: boolean;
@@ -211,6 +213,17 @@ export const NODES_METADATA: NodeMeta[] = [
     group: 'verify_assemble',
     accentColor: '#bc8cff',
     hasConfig: true
+  },
+  {
+    id: 'batch_frames_ocr',
+    step: '9',
+    shortName: 'Batch OCR Rescan',
+    fullName: '9. SEQUENTIAL BATCH OCR',
+    subhead: 'Sequential All-Frames Rescan',
+    desc: 'Runs full OCR rescan on each captured frame sequentially top-to-bottom, aligning duplicated line numbers and assembling markdown.',
+    group: 'verify_assemble',
+    accentColor: '#00ff9d',
+    hasConfig: false
   }
 ];
 

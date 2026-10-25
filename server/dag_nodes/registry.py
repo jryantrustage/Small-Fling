@@ -24,6 +24,9 @@ CANONICAL_ALIASES = {
     "node_6": "arrow_down",
     "node_7": "verification_trigger",
     "node_8": "document_assemble",
+    "node_9": "batch_frames_ocr",
+    "batch_frames_ocr": "batch_frames_ocr",
+    "sequential_rescan": "batch_frames_ocr",
 }
 
 

@@ -329,7 +329,8 @@ NODE_ALIAS_MAP = {
     "node_5": "frame_ocr", "frame_ocr": "frame_ocr", "ocr": "frame_ocr", "frame_ocr_extract": "frame_ocr",
     "node_6": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
     "node_7": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger",
-    "node_8": "document_assemble", "document_assemble": "document_assemble", "assemble": "document_assemble", "markdown_assemble": "document_assemble"
+    "node_8": "document_assemble", "document_assemble": "document_assemble", "assemble": "document_assemble", "markdown_assemble": "document_assemble",
+    "node_9": "batch_frames_ocr", "batch_frames_ocr": "batch_frames_ocr", "sequential_rescan": "batch_frames_ocr", "batch_ocr": "batch_frames_ocr"
 }
 
 @router.get("/api/dag/nodes/{node_id}/config")
@@ -525,6 +526,21 @@ async def snap_to_clean_layout():
         "dag": state.dag_state
     })
     return {"status": "success", "layout": clean_coords}
+
+@router.get("/api/dag/config/bypass-live-ocr")
+@router.post("/api/dag/config/bypass-live-ocr")
+async def toggle_bypass_live_ocr(req: Optional[Dict[str, Any]] = None):
+    """Toggles or sets fast capture mode by bypassing heavy live AI OCR during capture."""
+    cur = state.dag_state.get("bypass_live_ocr", False)
+    new_val = (req.get("bypass") if req and "bypass" in req else not cur)
+    state.dag_state["bypass_live_ocr"] = bool(new_val)
+    if hasattr(state, "ws_manager") and state.ws_manager:
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state
+        })
+    return {"status": "success", "bypass_live_ocr": state.dag_state["bypass_live_ocr"]}
+
 
 @router.post("/api/dag/edges")
 async def add_or_update_dag_edge(payload: Dict[str, Any]):
@@ -3049,6 +3065,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 "loop_iteration": loop_iter,
                 "message": f"Document assemble: {captured_count} lines verified" + (" (COMPLETE ✔)" if is_complete else "")
             }
+        elif target_key == "batch_frames_ocr":
+            from dag_nodes.batch_frames_ocr_node import BatchFramesOcrNode
+            from dag_nodes.base import DagBlackboard
+            bb = DagBlackboard(project_id=state.active_project_id or "", active_serial=active_serial or "")
+            batch_node = BatchFramesOcrNode()
+            batch_res = await batch_node.execute(bb)
+            return batch_res
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported node {target_key}")
     except asyncio.CancelledError:

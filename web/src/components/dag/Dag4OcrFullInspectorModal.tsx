@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   FileText, Check, Copy, RotateCw, Eye, EyeOff, ZoomIn, ZoomOut,
   Maximize2, Minimize2, Search, Link2, AlertCircle, Image as ImageIcon,
-  X, CheckSquare, Square, Zap
+  X, CheckSquare, Square, Zap, Layers
 } from 'lucide-react';
 import { copyToClipboard } from '../../utils/dagDiagnostics';
 
@@ -176,6 +176,15 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   const [hoveredLineNumber, setHoveredLineNumber] = useState<number | null>(null);
   const [selectedLineNumber, setSelectedLineNumber] = useState<number | null>(null);
   const [selectedLinesToOverwrite, setSelectedLinesToOverwrite] = useState<Set<number>>(new Set());
+  const [isRescanningSequential, setIsRescanningSequential] = useState<boolean>(false);
+  const [sequentialProgress, setSequentialProgress] = useState<{
+    current_index?: number;
+    total_frames?: number;
+    current_top_line?: number;
+    current_bottom_line?: number;
+    total_verified_lines?: number;
+    status_message?: string;
+  } | null>(null);
 
   // View toggles
   const [showContentBoxes, setShowContentBoxes] = useState<boolean>(true);
@@ -432,6 +441,82 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
       setIsRescanningSelected(false);
     }
   };
+
+  // Action: Sequentially rescan all captured frames from top to bottom
+  const handleSequentialRescanAllFrames = async () => {
+    if (isRescanningSequential) return;
+    setIsRescanningSequential(true);
+    setSequentialProgress(null);
+    setRescanSuccessMessage(null);
+    setError(null);
+
+    try {
+      const res = await fetch(`${apiBase}/api/ocr/rescan-all-frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear_existing: false })
+      });
+      if (!res.ok) {
+        throw new Error(`Sequential rescan failed with HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.status === 'started' || data.status === 'success') {
+        const intervalId = setInterval(async () => {
+          try {
+            const sRes = await fetch(`${apiBase}/api/ocr/rescan-all-frames/status`);
+            if (sRes.ok) {
+              const sData = await sRes.json();
+              if (sData.progress) {
+                setSequentialProgress(sData.progress);
+              }
+              if (!sData.is_running && sData.progress && sData.progress.current_index > 0) {
+                clearInterval(intervalId);
+                setIsRescanningSequential(false);
+                setRescanSuccessMessage(`✓ Sequential rescan complete! ${sData.progress.total_frames || 'All'} frames processed (${sData.progress.total_verified_lines || 0} lines verified)`);
+                setTimeout(() => setRescanSuccessMessage(null), 5000);
+                fetchInspectData(selectedImageId, false);
+                if (onRefresh) onRefresh();
+              }
+            }
+          } catch {
+            // Ignore poll transient error
+          }
+        }, 1200);
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to start sequential frame rescan');
+      setIsRescanningSequential(false);
+    }
+  };
+
+  const handleCancelSequentialRescan = async () => {
+    try {
+      await fetch(`${apiBase}/api/ocr/cancel-rescan-all-frames`, { method: 'POST' });
+      setRescanSuccessMessage('Sequential rescan cancellation requested');
+      setTimeout(() => setRescanSuccessMessage(null), 3000);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Listen to window event for real-time WebSocket progress updates
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      const detail = e.detail;
+      if (detail?.type === 'rescan_all_frames_progress') {
+        setIsRescanningSequential(true);
+        setSequentialProgress(detail);
+      } else if (detail?.type === 'rescan_all_frames_complete') {
+        setIsRescanningSequential(false);
+        setRescanSuccessMessage(`✓ Sequential rescan complete! ${detail.total_frames_processed} frames processed (${detail.total_verified_lines} lines verified)`);
+        setTimeout(() => setRescanSuccessMessage(null), 5000);
+        fetchInspectData(selectedImageId, false);
+        if (onRefresh) onRefresh();
+      }
+    };
+    window.addEventListener('rescan_all_frames_update', handleUpdate);
+    return () => window.removeEventListener('rescan_all_frames_update', handleUpdate);
+  }, [selectedImageId, onRefresh, fetchInspectData]);
 
   // Recompute connectors whenever scroll, pan, zoom, lines, or hover changes
   const updateConnectors = useCallback(() => {
@@ -1167,6 +1252,54 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 title="Clear selected line numbers"
               >
                 Clear
+              </button>
+            )}
+
+            {/* Sequential Rescan All Captured Frames Button */}
+            <button
+              type="button"
+              onClick={handleSequentialRescanAllFrames}
+              disabled={isRescanningSequential}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '5px 12px',
+                background: isRescanningSequential
+                  ? 'rgba(0, 255, 157, 0.2)'
+                  : 'linear-gradient(135deg, rgba(0, 255, 157, 0.15) 0%, rgba(56, 189, 248, 0.15) 100%)',
+                border: '1px solid #00ff9d88',
+                color: '#00ff9d',
+                borderRadius: '6px',
+                fontSize: '11.5px',
+                fontWeight: 800,
+                cursor: isRescanningSequential ? 'wait' : 'pointer',
+                boxShadow: isRescanningSequential ? '0 0 16px rgba(0, 255, 157, 0.4)' : '0 0 10px rgba(0, 255, 157, 0.2)',
+                transition: 'all 0.15s ease'
+              }}
+              title="Sequentially rescan every captured frame from top to bottom with RapidOCR to align line numbers and reconstruct the master document"
+            >
+              <Layers size={13} color="#00ff9d" className={isRescanningSequential ? 'spin' : ''} />
+              <span>
+                {isRescanningSequential
+                  ? (sequentialProgress?.total_frames
+                      ? `Rescanning Frame ${sequentialProgress.current_index}/${sequentialProgress.total_frames}...`
+                      : 'Rescanning Frames...')
+                  : `Sequential Rescan All Frames (${inspectData?.available_images?.length || 'All'})`}
+              </span>
+            </button>
+
+            {isRescanningSequential && (
+              <button
+                type="button"
+                onClick={handleCancelSequentialRescan}
+                style={{
+                  background: 'none', border: '1px solid #f85149', color: '#f85149',
+                  fontSize: '10.5px', padding: '4px 7px', borderRadius: '4px', cursor: 'pointer'
+                }}
+                title="Cancel sequential rescan"
+              >
+                Cancel
               </button>
             )}
 

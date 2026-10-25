@@ -25,6 +25,7 @@ from dag_nodes.frame_ocr_node import FrameOcrNode, GutterOcrNode
 from dag_nodes.arrow_down_node import ArrowDownPagerNode, ArrowDownNode
 from dag_nodes.verification_trigger_node import VerificationTriggerNode
 from dag_nodes.document_assemble_node import DocumentAssembleNode
+from dag_nodes.batch_frames_ocr_node import BatchFramesOcrNode
 
 __all__ = [
     # Base and Blackboard
@@ -53,4 +54,5 @@ __all__ = [
     "ArrowDownNode",
     "VerificationTriggerNode",
     "DocumentAssembleNode",
+    "BatchFramesOcrNode",
 ]

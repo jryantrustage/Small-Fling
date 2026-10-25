@@ -3,7 +3,7 @@ import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   ChevronLeft, ChevronRight, Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Minus, Maximize2, Minimize2, Activity,
-  Check, FileText,
+  Check, FileText, X,
   Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard,
   Upload, Download
 } from 'lucide-react';
@@ -462,6 +462,47 @@ function AppContent() {
   // Auto-Fix & Calibrate States
   const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
   const [isRunningCalibration, setIsRunningCalibration] = useState(false);
+  const [sequentialRescanStatus, setSequentialRescanStatus] = useState<{
+    is_running: boolean;
+    current_index: number;
+    total_frames: number;
+    current_frame_id?: string;
+    current_top_line?: number;
+    current_bottom_line?: number;
+    total_verified_lines?: number;
+    status_message?: string;
+  }>({
+    is_running: false,
+    current_index: 0,
+    total_frames: 0
+  });
+
+  const handleStartSequentialRescanAllFrames = async () => {
+    if (sequentialRescanStatus.is_running) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/ocr/rescan-all-frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          frame_ids: selectedFrameIds.size > 0 ? Array.from(selectedFrameIds) : undefined,
+          clear_existing: false
+        })
+      });
+      if (res.ok) {
+        setSequentialRescanStatus(p => ({ ...p, is_running: true }));
+      }
+    } catch (e) {
+      console.error('Failed to start sequential frame rescan', e);
+    }
+  };
+
+  const handleCancelSequentialRescan = async () => {
+    try {
+      await fetch(`${API_BASE}/api/ocr/cancel-rescan-all-frames`, { method: 'POST' });
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const selectedFrameIdRef = useRef<string | null>(null);
   useEffect(() => { selectedFrameIdRef.current = selectedFrameId; }, [selectedFrameId]);
@@ -1555,6 +1596,22 @@ function AppContent() {
               setDocumentData(docObj);
               if (docObj.token_stats) setTokenStats(docObj.token_stats);
             }
+          } else if (msg.type === 'rescan_all_frames_progress') {
+            setSequentialRescanStatus({
+              is_running: true,
+              current_index: msg.current_index || 0,
+              total_frames: msg.total_frames || 0,
+              current_frame_id: msg.current_frame_id,
+              current_top_line: msg.current_top_line,
+              current_bottom_line: msg.current_bottom_line,
+              total_verified_lines: msg.total_verified_lines,
+              status_message: msg.status_message
+            });
+            window.dispatchEvent(new CustomEvent('rescan_all_frames_update', { detail: msg }));
+          } else if (msg.type === 'rescan_all_frames_complete') {
+            setSequentialRescanStatus(p => ({ ...p, is_running: false }));
+            window.dispatchEvent(new CustomEvent('rescan_all_frames_update', { detail: msg }));
+            fetchData();
           } else if (msg.type === 'device_selected') {
             const newInfo = msg.device_info || msg.data;
             if (newInfo?.active_serial) {
@@ -2801,6 +2858,37 @@ function AppContent() {
                       <button
                         type="button"
                         className="btn btn-sm btn-outline"
+                        onClick={handleStartSequentialRescanAllFrames}
+                        disabled={sequentialRescanStatus.is_running}
+                        title="Sequentially rescan every captured frame from top to bottom with RapidOCR to align line numbers and reconstruct the master document"
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '3px 8px', fontSize: '11px',
+                          color: '#00ff9d', borderColor: '#00ff9d55',
+                          background: sequentialRescanStatus.is_running ? 'rgba(0, 255, 157, 0.15)' : undefined
+                        }}
+                      >
+                        <Layers size={11} color="#00ff9d" className={sequentialRescanStatus.is_running ? 'spin' : ''} />
+                        <span>
+                          {sequentialRescanStatus.is_running
+                            ? `Rescanning ${sequentialRescanStatus.current_index}/${sequentialRescanStatus.total_frames}...`
+                            : (selectedFrameIds.size > 0 ? `Rescan (${selectedFrameIds.size})` : 'Rescan All Frames')}
+                        </span>
+                      </button>
+                      {sequentialRescanStatus.is_running && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={handleCancelSequentialRescan}
+                          title="Cancel sequential rescan"
+                          style={{ padding: '3px 6px', fontSize: '10px', color: '#f85149', borderColor: '#f8514955' }}
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline"
                         onClick={() => setIsFramesReportOpen(true)}
                         title="Open Captured Frames & Viewport Coverage Report Modal"
                         style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
@@ -2825,6 +2913,31 @@ function AppContent() {
                       </div>
                     </div>
                   </div>
+
+                  {sequentialRescanStatus.is_running && (
+                    <div style={{
+                      padding: '6px 10px',
+                      background: 'rgba(0, 255, 157, 0.08)',
+                      borderBottom: '1px solid rgba(0, 255, 157, 0.2)',
+                      fontSize: '10.5px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#00ff9d', fontWeight: 600, marginBottom: '4px' }}>
+                        <span>Frame {sequentialRescanStatus.current_index} of {sequentialRescanStatus.total_frames}</span>
+                        <span>{Math.round((sequentialRescanStatus.current_index / Math.max(1, sequentialRescanStatus.total_frames)) * 100)}%</span>
+                      </div>
+                      <div style={{ width: '100%', height: '4px', background: '#21262d', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${Math.round((sequentialRescanStatus.current_index / Math.max(1, sequentialRescanStatus.total_frames)) * 100)}%`,
+                          height: '100%',
+                          background: '#00ff9d',
+                          transition: 'width 0.3s ease'
+                        }} />
+                      </div>
+                      <div style={{ color: '#8b949e', fontSize: '9.5px', marginTop: '3px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                        {sequentialRescanStatus.status_message}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="frames-list">
                     {sortedFrames.length === 0 ? (

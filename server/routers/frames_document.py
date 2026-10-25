@@ -434,6 +434,68 @@ async def rescan_ocr_lines(
         "bounding_boxes": current_bboxes
     }
 
+@router.get("/api/ocr/rescan-all-frames")
+@router.post("/api/ocr/rescan-all-frames")
+async def rescan_all_frames_endpoint(
+    background_tasks: BackgroundTasks,
+    req: Optional[Dict[str, Any]] = None,
+    wait: bool = Query(False)
+):
+    """
+    Selectively rescans every captured frame from top to bottom in sequential order,
+    re-aligning duplicate and misaligned line numbers into the master document.
+    """
+    if getattr(state, "is_sequential_rescan_running", False):
+        return {
+            "status": "already_running",
+            "message": "Sequential frame rescan is already in progress",
+            "progress": state.sequential_rescan_progress
+        }
+
+    project_id = (req.get("project_id") if req else None) or state.get_current_project_id()
+    frame_ids = req.get("frame_ids") if req else None
+    clear_existing = bool(req.get("clear_existing", False) if req else False)
+
+    from services.ocr_service import sequential_rescan_all_frames_task
+
+    if wait:
+        res = await sequential_rescan_all_frames_task(
+            project_id=project_id,
+            frame_ids=frame_ids,
+            clear_existing=clear_existing
+        )
+        return res
+    else:
+        background_tasks.add_task(
+            sequential_rescan_all_frames_task,
+            project_id,
+            frame_ids,
+            clear_existing
+        )
+        return {
+            "status": "started",
+            "message": "Sequential rescan started in background",
+            "total_frames": len(state.captured_frames)
+        }
+
+@router.get("/api/ocr/rescan-all-frames/status")
+async def rescan_all_frames_status_endpoint():
+    """Returns the current running status and progress of sequential frame rescan."""
+    return {
+        "status": "success",
+        "is_running": getattr(state, "is_sequential_rescan_running", False),
+        "progress": getattr(state, "sequential_rescan_progress", {})
+    }
+
+@router.post("/api/ocr/cancel-rescan-all-frames")
+async def cancel_rescan_all_frames_endpoint():
+    """Requests early cancellation of the active sequential frame rescan."""
+    state.cancel_sequential_rescan = True
+    return {
+        "status": "cancelled",
+        "message": "Sequential rescan cancellation requested"
+    }
+
 def _doc_payload() -> Dict[str, Any]:
     if not getattr(state, "_state_initialized", False):
         state.load_persisted_state()

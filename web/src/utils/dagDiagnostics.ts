@@ -51,7 +51,9 @@ export function filterNodeTelemetry(nodeId: string, ev: { message?: string; cate
     verification_trigger: () => msg.includes('verification_trigger') || msg.includes('qualifier') || msg.includes('trigger') ||
       msg.includes('loopback') || msg.includes('decision') || msg.includes('node 7') || msg.includes('node 6'),
     document_assemble: () => msg.includes('assemble') || msg.includes('markdown') || msg.includes('reconstruct') ||
-      msg.includes('node 8') || msg.includes('complete')
+      msg.includes('node 8') || msg.includes('complete'),
+    batch_frames_ocr: () => msg.includes('batch') || msg.includes('rescan') || msg.includes('sequential') ||
+      msg.includes('node 9') || msg.includes('reconstructed.md')
   };
 
   return matchers[nodeId] ? matchers[nodeId]() : true;
@@ -182,6 +184,16 @@ export function calculateNodeLiveStatus(
       statusLabel = isThisActive ? 'ASSEMBLING' : (isComplete ? 'COMPLETE' : (isDone ? 'ASSEMBLED' : 'READY'));
       defaultInsight = isComplete ? 'Complete markdown file assembled & saved' : `${nodeData.total_captured_lines || 0} lines stitched`;
       color = isComplete ? '#00ff9d' : (isDone ? '#388bfd' : '#8b949e');
+      break;
+    }
+    case 'batch_frames_ocr': {
+      isDone = nodeData.status === 'completed';
+      defaultEvaluator = 'Sequential Frame Align Evaluator';
+      const pct = typeof nodeData.progress_percent === 'number' ? `${Math.round(nodeData.progress_percent)}%` : '';
+      metricLabel = isThisActive ? (pct || 'Rescanning...') : (isDone ? 'Rescanned' : 'Batch Rescan');
+      statusLabel = isThisActive ? 'RESCANNING' : (isDone ? 'COMPLETE' : 'READY');
+      defaultInsight = isDone ? 'All frames rescanned sequentially top-to-bottom' : 'Sequential frame OCR alignment';
+      color = isThisActive ? '#00ff9d' : (isDone ? '#388bfd' : '#8b949e');
       break;
     }
   }

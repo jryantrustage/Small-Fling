@@ -97,6 +97,9 @@ const isEventForNode = (ev: TelemetryEvent, nodeId: string): boolean => {
     case 'document_assemble':
       return msg.includes('document_assemble') || msg.includes('assemble') || msg.includes('reconstruct') ||
              msg.includes('markdown') || msg.includes('node 8');
+    case 'batch_frames_ocr':
+      return msg.includes('batch') || msg.includes('rescan') || msg.includes('sequential') ||
+             msg.includes('node 9');
     default:
       return true;
   }
@@ -111,6 +114,7 @@ const NODE_LABELS: Record<string, { step: string; name: string }> = {
   arrow_down: { step: '6', name: 'Navigation Step' },
   verification_trigger: { step: '7', name: 'Verify Trigger' },
   document_assemble: { step: '8', name: 'Document Assemble' },
+  batch_frames_ocr: { step: '9', name: 'Batch Rescan' },
 };
 
 export interface TelemetryData {

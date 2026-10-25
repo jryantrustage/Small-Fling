@@ -188,6 +188,7 @@ async def test_all_individual_dag_node_classes_and_execute_interface():
     from dag_nodes.arrow_down_node import ArrowDownPagerNode
     from dag_nodes.verification_trigger_node import VerificationTriggerNode
     from dag_nodes.document_assemble_node import DocumentAssembleNode
+    from dag_nodes.batch_frames_ocr_node import BatchFramesOcrNode
 
     node_classes = [
         (InitEndNode, "init_end"),
@@ -198,6 +199,7 @@ async def test_all_individual_dag_node_classes_and_execute_interface():
         (ArrowDownPagerNode, "arrow_down"),
         (VerificationTriggerNode, "verification_trigger"),
         (DocumentAssembleNode, "document_assemble"),
+        (BatchFramesOcrNode, "batch_frames_ocr"),
     ]
 
     for cls, expected_id in node_classes:

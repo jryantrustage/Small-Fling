@@ -3,7 +3,7 @@ import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
   RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Shrink, Expand, GripHorizontal,
-  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -32,7 +32,8 @@ const DEFAULT_NODE_POSITIONS: Record<string, { x: number; y: number }> = {
   frame_ocr: { x: 520, y: 230 },
   arrow_down: { x: 760, y: 230 },
   verification_trigger: { x: 1000, y: 140 },
-  document_assemble: { x: 1240, y: 140 }
+  document_assemble: { x: 1240, y: 140 },
+  batch_frames_ocr: { x: 1480, y: 140 }
 };
 
 const getStoredPositions = (): Record<string, { x: number; y: number }> => {
@@ -202,6 +203,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isLoopRunning, setIsLoopRunning] = useState<boolean>(false);
   const [runningNodeId, setRunningNodeId] = useState<string | null>(null);
   const [runningGroupId, setRunningGroupId] = useState<string | null>(null);
+  const [isSequentialRescanRunning, setIsSequentialRescanRunning] = useState<boolean>(false);
+  const [sequentialRescanProgress, setSequentialRescanProgress] = useState<{
+    running: boolean;
+    total_frames: number;
+    processed_frames: number;
+    percent: number;
+    current_frame: string;
+    stage: string;
+  } | null>(null);
+  const [isTogglingBypassOcr, setIsTogglingBypassOcr] = useState<boolean>(false);
   const [serverDiagnosisCache, setServerDiagnosisCache] = useState<Record<string, PerformanceDiagnosis>>({});
 
   const [dagStatus, setDagStatus] = useState<DagStatusData>({
@@ -261,6 +272,14 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         try {
           const lRes = await fetch(`${apiBase}/api/dag/loop/status`);
           if (lRes.ok) setIsLoopRunning(Boolean((await lRes.json()).running));
+        } catch {}
+        try {
+          const rRes = await fetch(`${apiBase}/api/ocr/rescan-all-frames/status`);
+          if (rRes.ok) {
+            const rData = await rRes.json();
+            setIsSequentialRescanRunning(Boolean(rData.running));
+            setSequentialRescanProgress(rData);
+          }
         } catch {}
       } catch {}
     };
@@ -559,6 +578,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           { id: 'arrow_down->verification_trigger', from: 'arrow_down', to: 'verification_trigger', condition: 'ON_SUCCESS', enabled: true },
           { id: 'verification_trigger->document_assemble', from: 'verification_trigger', to: 'document_assemble', condition: 'ON_SUCCESS', enabled: true },
           { id: 'document_assemble->frame_acquire', from: 'document_assemble', to: 'frame_acquire', condition: 'ON_LOOP_CONTINUE', enabled: true },
+          { id: 'document_assemble->batch_frames_ocr', from: 'document_assemble', to: 'batch_frames_ocr', condition: 'ON_SUCCESS', enabled: true },
         ];
 
     return rawEdges.map((edge) => {
@@ -884,6 +904,70 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     } catch (err: any) {
       setNodeFeedback({ id: 'loop', message: `Loop control error: ${err.message}`, isError: true });
     }
+  };
+
+  const handleToggleBypassLiveOcr = async () => {
+    setIsTogglingBypassOcr(true);
+    try {
+      const curVal = Boolean(dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr);
+      const res = await fetch(`${apiBase}/api/dag/config/bypass-live-ocr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bypass: !curVal })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDagStatus(prev => ({
+          ...prev,
+          bypass_live_ocr: d.bypass_live_ocr,
+          dag: prev.dag ? { ...prev.dag, bypass_live_ocr: d.bypass_live_ocr } : undefined
+        }));
+        setNodeFeedback({
+          id: 'bypass_live_ocr',
+          message: d.bypass_live_ocr
+            ? 'Fast Capture Mode ON: Live AI OCR bypassed during screen acquisition to maximize capture speed ⚡'
+            : 'Standard Mode: Live AI OCR enabled on every acquired frame 🔍',
+          isError: false
+        });
+      }
+    } catch (err: any) {
+      setNodeFeedback({ id: 'bypass_live_ocr', message: `Failed to toggle fast capture: ${err.message}`, isError: true });
+    } finally {
+      setIsTogglingBypassOcr(false);
+    }
+  };
+
+  const handleRunSequentialRescan = async () => {
+    setIsSequentialRescanRunning(true);
+    setNodeFeedback({
+      id: 'batch_frames_ocr',
+      message: 'Starting sequential OCR rescan of all captured frames top-to-bottom...',
+      isError: false
+    });
+    try {
+      const res = await fetch(`${apiBase}/api/ocr/rescan-all-frames`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: activeProjectId })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setNodeFeedback({ id: 'batch_frames_ocr', message: data?.detail || 'Failed to start rescan', isError: true });
+        setIsSequentialRescanRunning(false);
+      } else {
+        setNodeFeedback({ id: 'batch_frames_ocr', message: data?.message || 'Sequential rescan initiated ✔', isError: false });
+      }
+    } catch (err: any) {
+      setNodeFeedback({ id: 'batch_frames_ocr', message: `Error: ${err.message}`, isError: true });
+      setIsSequentialRescanRunning(false);
+    }
+  };
+
+  const handleCancelSequentialRescan = async () => {
+    try {
+      await fetch(`${apiBase}/api/ocr/cancel-rescan-all-frames`, { method: 'POST' });
+      setNodeFeedback({ id: 'batch_frames_ocr', message: 'Cancelling sequential rescan...', isError: false });
+    } catch {}
   };
 
   const handleCopyNodeDetailsForAi = async (nodeId: string) => {
@@ -1580,6 +1664,72 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             >
               <Play size={7.5} fill="#bc8cff" />
               <span>Assemble</span>
+            </button>
+
+            {/* Sequential Batch Rescan All Frames */}
+            {isSequentialRescanRunning ? (
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 7px',
+                borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.4)',
+                background: 'rgba(0, 255, 157, 0.12)', color: '#00ff9d',
+                fontSize: '8.5px', fontWeight: 700
+              }}>
+                <RefreshCw size={8} className="spin" />
+                <span>Rescanning ({sequentialRescanProgress?.processed_frames || 0}/{sequentialRescanProgress?.total_frames || 0} - {sequentialRescanProgress?.percent || 0}%)</span>
+                <button
+                  type="button"
+                  onClick={handleCancelSequentialRescan}
+                  style={{
+                    background: 'rgba(248, 81, 73, 0.25)', border: '1px solid #f85149',
+                    borderRadius: '3px', color: '#ff7b72', cursor: 'pointer', padding: '1px 3px',
+                    display: 'inline-flex', alignItems: 'center', marginLeft: '2px'
+                  }}
+                  title="Cancel sequential rescan"
+                >
+                  <X size={8} />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleRunSequentialRescan}
+                disabled={runningGroupId !== null || runningNodeId !== null}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                  borderRadius: '4px', border: '1px solid rgba(0, 255, 157, 0.35)',
+                  background: 'rgba(0, 255, 157, 0.08)', color: '#00ff9d',
+                  fontSize: '8.5px', fontWeight: 600, cursor: 'pointer'
+                }}
+                title="Run sequential OCR rescan across all captured frames top-to-bottom to eliminate misaligned line numbers"
+              >
+                <RefreshCw size={7.5} />
+                <span>Batch Rescan</span>
+              </button>
+            )}
+
+            {/* Fast Capture Bypass Live OCR Toggle */}
+            <button
+              type="button"
+              onClick={handleToggleBypassLiveOcr}
+              disabled={isTogglingBypassOcr}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px',
+                border: dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr
+                  ? '1px solid rgba(0, 255, 157, 0.5)'
+                  : '1px solid rgba(56, 139, 253, 0.3)',
+                background: dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr
+                  ? 'rgba(0, 255, 157, 0.15)'
+                  : 'rgba(56, 139, 253, 0.08)',
+                color: dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr ? '#00ff9d' : '#58a6ff',
+                fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+              }}
+              title={dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr
+                ? "Fast Capture Mode ACTIVE: Live AI OCR is bypassed during screen acquisition to maximize capture speed. Click to re-enable live OCR."
+                : "Standard Capture Mode: Live AI OCR runs on every acquired frame. Click to bypass live OCR for high-speed screen acquisition."}
+            >
+              <Zap size={8} fill={dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr ? '#00ff9d' : 'none'} />
+              <span>{dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr ? 'FAST CAPTURE: ON' : 'LIVE OCR: ON'}</span>
             </button>
 
             <div style={{ width: '1px', height: '14px', background: '#30363d', margin: '0 3px' }} />

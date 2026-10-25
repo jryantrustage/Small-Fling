@@ -33,6 +33,19 @@ class LocalAiOcrNode(BaseDagNode):
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         cfg = blackboard.config or self.default_config
+
+        if cfg.get("bypass_live_ocr") or (blackboard.payload and blackboard.payload.get("bypass_live_ocr")) or state.dag_state.get("bypass_live_ocr"):
+            state.dag_state["nodes"].setdefault("local_ai_ocr", {}).update({
+                "status": "completed",
+                "telemetry_insight": "Live AI OCR bypassed (fast capture mode; deferred to batch sequential rescan)"
+            })
+            return NodeExecutionResult(
+                status="success",
+                node_id=self.node_id,
+                message="Live AI OCR bypassed (fast capture mode; deferred to batch sequential rescan)",
+                data={"bypassed": True, "lines_count": 0}
+            )
+
         temp_calib = blackboard.current_image_path or (state.FRAMES_DIR / "dag_node3_capture_temp.png")
 
         if not temp_calib.exists() or temp_calib.stat().st_size < 2000:
