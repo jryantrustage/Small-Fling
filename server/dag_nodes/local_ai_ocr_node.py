@@ -61,6 +61,134 @@ class LocalAiOcrNode(BaseDagNode):
 
         exp_top = blackboard.top_line or cfg.get("expected_top", 1)
 
+        is_headless = bool(
+            cfg.get("headless_mode")
+            or (blackboard.payload and blackboard.payload.get("headless_mode"))
+            or getattr(state, "headless_mode", False)
+            or state.dag_state.get("headless_mode")
+        )
+
+        if is_headless:
+            # Ultra-fast headless mode: Uses the EXACT same engine as OCR Inspector rescan page lines
+            # (RapidOCR on gutter + tight line crops with monospace indentation) without loading into MiniCPM-V vision model.
+            t0 = time.perf_counter()
+            from ocr_engine import worker_scan_image
+            from services.ocr_service import rescan_lines_on_image_sync
+
+            try:
+                quick_scan = await asyncio.to_thread(worker_scan_image, str(temp_calib))
+                raw_lines = quick_scan.get("lines", [])
+                raw_bboxes = quick_scan.get("bounding_boxes", {})
+
+                all_lns = [
+                    int(l.get("line_number"))
+                    for l in raw_lines
+                    if l.get("line_number") is not None and str(l.get("line_number")).strip().isdigit()
+                ]
+
+                if all_lns:
+                    lines_detected, rescanned = await asyncio.to_thread(
+                        rescan_lines_on_image_sync,
+                        temp_calib,
+                        all_lns,
+                        raw_lines,
+                        raw_bboxes
+                    )
+                else:
+                    lines_detected = raw_lines
+                    rescanned = []
+
+                dur_ms = round((time.perf_counter() - t0) * 1000, 1)
+                extracted_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in lines_detected)
+                lines_count = len(lines_detected)
+                char_count = len(extracted_text)
+                engine_name = "Headless RapidOCR (Inspector Rescan Engine)"
+
+                if cfg.get("save_to_document", True):
+                    for item in lines_detected:
+                        ln = item.get("line_number")
+                        if ln and ln > 0:
+                            existing = state.document_lines.get(ln)
+                            meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
+                            meta.update({
+                                "line_number": ln,
+                                "gutter_number": ln,
+                                "status": "verified",
+                                "overwritten": True,
+                                "frame_id": temp_calib.stem,
+                                "updated_at": datetime.now().isoformat(),
+                                "notes": "Headless RapidOCR (Inspector Rescan Engine)",
+                                "confidence": item.get("confidence", 0.99)
+                            })
+                            if item.get("is_wrapped") is not None:
+                                meta["is_wrapped"] = item.get("is_wrapped")
+                            state.document_lines[ln] = state.MasterLine(
+                                item.get("text", ""),
+                                **meta
+                            )
+
+                    if lines_detected:
+                        state.save_persisted_state()
+                        await state.ws_manager.broadcast({
+                            "type": "document_updated",
+                            "document": state.get_document_metrics(),
+                            "data": state.get_document_metrics()
+                        })
+
+                if temp_calib.stem in state.captured_frames:
+                    state.captured_frames[temp_calib.stem]["lines"] = lines_detected
+                    state.captured_frames[temp_calib.stem]["extracted_line_count"] = lines_count
+                    state.captured_frames[temp_calib.stem]["status"] = "rescanned"
+                    state.captured_frames[temp_calib.stem]["model_used"] = engine_name
+
+                blackboard.ai_ocr_text = extracted_text
+                blackboard.preview_text = extracted_text[:300] + ("..." if len(extracted_text) > 300 else "")
+                blackboard.lines_count = lines_count
+                blackboard.char_count = char_count
+
+                state.dag_state["nodes"]["local_ai_ocr"].update({
+                    "status": "completed",
+                    "extracted_text": extracted_text,
+                    "preview_text": blackboard.preview_text,
+                    "lines_count": lines_count,
+                    "char_count": char_count,
+                    "model_used": engine_name,
+                    "image_id": temp_calib.stem,
+                    "image_name": temp_calib.name,
+                    "image_url": f"/api/frames/{temp_calib.stem}/image",
+                    "image_width": quick_scan.get("image_width", 1920),
+                    "image_height": quick_scan.get("image_height", 1080),
+                    "lines": lines_detected,
+                    "bounding_boxes": quick_scan.get("bounding_boxes", {}),
+                    "evaluator": "Headless RapidOCR Inspector Evaluator",
+                    "telemetry_insight": f"Headless scan: {lines_count} lines ({char_count} chars) in {dur_ms}ms via {engine_name} ✔",
+                    "error": None
+                })
+
+                return NodeExecutionResult(
+                    status="success",
+                    node_id=self.node_id,
+                    message=f"Headless RapidOCR extracted {lines_count} lines ({char_count} chars in {dur_ms}ms) ✔",
+                    data={
+                        "lines_count": lines_count,
+                        "char_count": char_count,
+                        "extracted_text": extracted_text,
+                        "model_used": engine_name,
+                        "image_id": temp_calib.stem,
+                        "image_name": temp_calib.name,
+                        "image_url": f"/api/frames/{temp_calib.stem}/image",
+                        "image_width": quick_scan.get("image_width", 1920),
+                        "image_height": quick_scan.get("image_height", 1080),
+                        "lines": lines_detected,
+                        "bounding_boxes": quick_scan.get("bounding_boxes", {}),
+                        "headless": True,
+                        "duration_ms": dur_ms
+                    }
+                )
+            except Exception as h_err:
+                print(f"[LocalAiOcrNode] Headless OCR error, falling back to standard AI OCR: {h_err}")
+
+
         # Background worker mode support
         is_bg = bool(cfg.get("background_worker", False) or (blackboard.payload and blackboard.payload.get("background_worker")))
         if is_bg:

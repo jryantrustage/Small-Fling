@@ -37,16 +37,16 @@ i azure-6ddress": "F1"，
 "column": 2,
 "address": B2"
 "value": null
-counle of items and then gather vour voice signature VrinirinNew York: wyou have a right to anplv for this coverage and authorize payment in
-couple of items, and then gather your voice signature.\rinirinNew York: "You have a right to apply for this coverage and authorize payment in
+
+
+"column": 3.
+"address": c2"
+"value": "The final step will be to record your voice signature. To begin, I'll share a brief disclosure with you, ask you to confirm a
+couple of items, and then gather your voice signature. rinvrinNew York: "You have a right to apply for this coverage and authorize payment in
 writing."\rin"The final step is to record your voice signature. This includes questions regarding your desire to enter into an electronic transaction,
 the amount of Coverage, billing options, and a review of the health questions I asked earlier. After you respond I will ask you to state your full
-.. name and today's date, which is your signature and authorization to this agreement.""
+name and today's date, which is your signature and authorization to this agreement.""
 
-
-"column"..4.p
-"address":n"D2"'ner discussion with Mindy umthum (Compliance) we can remove the statement V"vou bave a right to anply for this coverage
-and authorize "value": ;"Notei;per.discussiontwith Mindytumthum.rcompliance)iewe caniremove theu statement \"you have a right to apply for this coverage
 5o and authorize payment in writing\" for all states except New York. Aaron deleted this as a result.
 
 "column": 5

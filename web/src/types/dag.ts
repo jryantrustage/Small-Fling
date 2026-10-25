@@ -111,6 +111,7 @@ export interface DagStatusData {
     semaphore_group2_to_3_status?: 'open' | 'blocked';
     semaphore_group3_to_4_status?: 'open' | 'blocked';
     bypass_live_ocr?: boolean;
+    headless_mode?: boolean;
   };
   active_node: string;
   target_total_lines: number;
@@ -121,6 +122,7 @@ export interface DagStatusData {
   desktop_keyboard_prohibited?: boolean;
   desktop_mode_enabled?: boolean;
   bypass_live_ocr?: boolean;
+  headless_mode?: boolean;
   arrow_step_count: number;
   verification_trigger_fired: boolean;
   ocr_worker_active: boolean;

@@ -3,7 +3,7 @@ import {
   Layers, RefreshCw, Check, X, Play, AlertTriangle,
   Maximize2, Minimize2, Square, Minus, Lock, Sliders,
   RotateCcw, LayoutGrid, ZoomIn, ZoomOut, Shrink, Expand, GripHorizontal,
-  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap
+  ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap, Cpu, Activity
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -90,6 +90,7 @@ export interface FlowDagProps {
   desktopModeEnabled?: boolean;
   onToggleDesktopMode?: (enable: boolean) => void;
   desktopVerification?: any;
+  onOpenHeadlessTelemetry?: () => void;
 }
 
 export const FlowDag: React.FC<FlowDagProps> = ({
@@ -100,7 +101,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   onClose, isMinimized = false, onToggleMinimize,
   desktopKeyboardProhibited = true, onToggleProhibitKeyboard,
   desktopModeEnabled = true, onToggleDesktopMode,
-  desktopVerification
+  desktopVerification,
+  onOpenHeadlessTelemetry
 }) => {
   // Navigation & selection state
   const [isMaximized, setIsMaximized] = useState(false);
@@ -213,6 +215,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     stage: string;
   } | null>(null);
   const [isTogglingBypassOcr, setIsTogglingBypassOcr] = useState<boolean>(false);
+  const [isTogglingHeadless, setIsTogglingHeadless] = useState<boolean>(false);
   const [serverDiagnosisCache, setServerDiagnosisCache] = useState<Record<string, PerformanceDiagnosis>>({});
 
   const [dagStatus, setDagStatus] = useState<DagStatusData>({
@@ -934,6 +937,38 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       setNodeFeedback({ id: 'bypass_live_ocr', message: `Failed to toggle fast capture: ${err.message}`, isError: true });
     } finally {
       setIsTogglingBypassOcr(false);
+    }
+  };
+
+  const handleToggleHeadlessMode = async () => {
+    setIsTogglingHeadless(true);
+    try {
+      const curVal = Boolean(dagStatus.dag?.headless_mode || dagStatus.headless_mode);
+      const res = await fetch(`${apiBase}/api/dag/config/headless-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headless_mode: !curVal })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setDagStatus(prev => ({
+          ...prev,
+          headless_mode: d.headless_mode,
+          dag: prev.dag ? { ...prev.dag, headless_mode: d.headless_mode } : undefined
+        }));
+        setNodeFeedback({
+          id: 'headless_mode',
+          message: d.headless_mode
+            ? 'Headless Loop Mode ON: Live image loading bypassed in UI & Node 4 uses RapidOCR Inspector Rescan engine ⚡'
+            : 'Standard Mode: Visual image display & standard Node 4 vision OCR restored 🖼️',
+          isError: false
+        });
+        onRefresh?.();
+      }
+    } catch (err: any) {
+      setNodeFeedback({ id: 'headless_mode', message: `Failed to toggle headless mode: ${err.message}`, isError: true });
+    } finally {
+      setIsTogglingHeadless(false);
     }
   };
 
@@ -1731,6 +1766,50 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <Zap size={8} fill={dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr ? '#00ff9d' : 'none'} />
               <span>{dagStatus.dag?.bypass_live_ocr || dagStatus.bypass_live_ocr ? 'FAST CAPTURE: ON' : 'LIVE OCR: ON'}</span>
             </button>
+
+            {/* Headless Loop Mode Toggle */}
+            <button
+              type="button"
+              onClick={handleToggleHeadlessMode}
+              disabled={isTogglingHeadless}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                borderRadius: '4px',
+                border: dagStatus.dag?.headless_mode || dagStatus.headless_mode
+                  ? '1px solid rgba(167, 139, 250, 0.6)'
+                  : '1px solid rgba(148, 163, 184, 0.3)',
+                background: dagStatus.dag?.headless_mode || dagStatus.headless_mode
+                  ? 'rgba(167, 139, 250, 0.18)'
+                  : 'rgba(148, 163, 184, 0.08)',
+                color: dagStatus.dag?.headless_mode || dagStatus.headless_mode ? '#c084fc' : '#94a3b8',
+                fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+              }}
+              title={dagStatus.dag?.headless_mode || dagStatus.headless_mode
+                ? "Headless Loop Mode ACTIVE: Image loading is bypassed in the UI and Node 4 uses the fast RapidOCR Inspector Rescan engine (instead of MiniCPM-V). Click to disable."
+                : "Standard Mode: Visual frame loading is enabled and Node 4 uses MiniCPM-V. Click to enable ultra-fast Headless Loop Mode."}
+            >
+              <Cpu size={8} color={dagStatus.dag?.headless_mode || dagStatus.headless_mode ? '#c084fc' : '#94a3b8'} />
+              <span>{dagStatus.dag?.headless_mode || dagStatus.headless_mode ? 'HEADLESS: ON' : 'HEADLESS: OFF'}</span>
+            </button>
+
+            {onOpenHeadlessTelemetry && (
+              <button
+                type="button"
+                onClick={onOpenHeadlessTelemetry}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 7px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(167, 139, 250, 0.5)',
+                  background: 'rgba(167, 139, 250, 0.15)',
+                  color: '#c084fc',
+                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer'
+                }}
+                title="Open Headless Telemetry & Document Coverage Summary Modal"
+              >
+                <Activity size={8} color="#c084fc" />
+                <span>STATS</span>
+              </button>
+            )}
 
             <div style={{ width: '1px', height: '14px', background: '#30363d', margin: '0 3px' }} />
 

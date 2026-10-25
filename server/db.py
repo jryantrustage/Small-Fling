@@ -496,6 +496,73 @@ def get_document_lines(project_id: Optional[str]) -> Dict[int, Dict[str, Any]]:
     rows = _execute("SELECT * FROM document_lines WHERE project_id = ? ORDER BY line_number ASC;", (project_id,), fetchall=True)
     return {r["line_number"]: {"line_number": r["line_number"], "text": r["line_text"], "confidence": r["confidence"], "frame_id": r["frame_id"], "verified": bool(r["is_verified"]), "updated_at": r["updated_at"]} for r in rows}
 
+def get_document_lines_window(
+    project_id: Optional[str],
+    from_line: Optional[int] = None,
+    to_line: Optional[int] = None,
+    limit: int = 100,
+    offset: int = 0
+) -> Dict[str, Any]:
+    """
+    Asynchronously queries a window/slice of document lines directly from SQLite DB
+    between from_line and to_line, returning only the requested range and global line metrics.
+    """
+    if not project_id:
+        return {"total_lines": 0, "lines": [], "min_line": 0, "max_line": 0, "from_line": 0, "to_line": 0, "count": 0}
+    with get_connection() as conn:
+        c = conn.cursor()
+        stats = c.execute(
+            "SELECT COUNT(*), MIN(line_number), MAX(line_number) FROM document_lines WHERE project_id = ?;",
+            (project_id,)
+        ).fetchone()
+        total_count = stats[0] or 0
+        min_line = stats[1] or 0
+        max_line = stats[2] or 0
+
+        params: List[Any] = [project_id]
+        where_clauses = ["project_id = ?"]
+        if from_line is not None and from_line > 0:
+            where_clauses.append("line_number >= ?")
+            params.append(from_line)
+        if to_line is not None and to_line > 0:
+            where_clauses.append("line_number <= ?")
+            params.append(to_line)
+
+        sql = f"SELECT * FROM document_lines WHERE {' AND '.join(where_clauses)} ORDER BY line_number ASC"
+        if from_line is None and to_line is None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([max(1, limit), max(0, offset)])
+        elif limit and (to_line is None or (from_line and to_line - from_line > limit)):
+            sql += " LIMIT ?"
+            params.append(limit)
+
+        rows = c.execute(sql, params).fetchall()
+        lines = [
+            {
+                "line_number": r["line_number"],
+                "gutter_number": r["line_number"],
+                "text": r["line_text"],
+                "confidence": r["confidence"],
+                "frame_id": r["frame_id"],
+                "verified": bool(r["is_verified"]),
+                "status": "verified" if r["is_verified"] else "unverified",
+                "updated_at": r["updated_at"]
+            }
+            for r in rows
+        ]
+        actual_from = lines[0]["line_number"] if lines else (from_line or 0)
+        actual_to = lines[-1]["line_number"] if lines else (to_line or 0)
+        return {
+            "total_lines": total_count,
+            "min_line": min_line,
+            "max_line": max_line,
+            "from_line": actual_from,
+            "to_line": actual_to,
+            "count": len(lines),
+            "lines": lines
+        }
+
+
 def save_document_lines(project_id: str, lines: Dict[int, Dict[str, Any]]):
     now = datetime.now().isoformat()
     with get_connection() as conn:

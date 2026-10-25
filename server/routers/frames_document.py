@@ -514,6 +514,26 @@ def _doc_payload() -> Dict[str, Any]:
         "lines": sl
     }
 
+def _doc_summary_payload() -> Dict[str, Any]:
+    """Lightweight document metrics summary without serializing full lines array."""
+    if not getattr(state, "_state_initialized", False):
+        state.load_persisted_state()
+    total_count = len(state.document_lines)
+    min_line = min(state.document_lines.keys()) if state.document_lines else 0
+    max_line = max(state.document_lines.keys()) if state.document_lines else 0
+    issues_count = sum(1 for ln in state.document_lines.values() if hasattr(ln, "get") and ln.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"])
+    return {
+        "total_lines": total_count,
+        "verified_lines_count": total_count,
+        "min_line": min_line,
+        "max_line": max_line,
+        "total_frames": len(state.captured_frames),
+        "issue_count": issues_count,
+        "token_stats": state.token_stats,
+        "latest_telemetry": state.get_fresh_telemetry(),
+        "lines": []
+    }
+
 @router.post("/api/upload-frame")
 async def upload_frame(request: Request, background_tasks: BackgroundTasks):
     ct = request.headers.get("content-type", "")
@@ -921,8 +941,103 @@ async def reprocess_failed(background_tasks: BackgroundTasks, model_target: Opti
     return {"status": "success", "reprocessed_frames": reprocessed, "count": len(reprocessed), "model_target": mt}
 
 @router.get("/api/document")
-async def get_document():
+async def get_document(summary_only: bool = Query(False, description="Return document metrics without transmitting full lines array")):
+    if summary_only:
+        return _doc_summary_payload()
     return _doc_payload()
+
+@router.get("/api/document/lines")
+async def get_document_lines_endpoint(
+    from_line: Optional[int] = Query(None, description="Start line number (inclusive)"),
+    to_line: Optional[int] = Query(None, description="End line number (inclusive)"),
+    around_line: Optional[int] = Query(None, description="Center window around line number"),
+    limit: int = Query(100, ge=1, le=1000, description="Max lines to return in window"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+    follow_current: bool = Query(False, description="Auto-track current capture/rescan position"),
+    source: str = Query("db", description="Source: 'db' (SQLite) or 'memory' (state.document_lines)")
+):
+    """
+    Asynchronously lazy loads a window of verified lines directly from the local DB.
+    Optimized for high-performance rendering: transfers only the requested from_line -> to_line slice.
+    """
+    pid = state.get_current_project_id()
+    if not getattr(state, "_state_initialized", False):
+        state.load_persisted_state()
+
+    # If follow_current is requested, determine window from active telemetry
+    if follow_current:
+        top_ln = state.latest_telemetry.get("current_top_line", 0)
+        bot_ln = state.latest_telemetry.get("current_bottom_line", 0)
+        if top_ln and top_ln > 0:
+            from_line = max(1, top_ln - 15)
+            to_line = (bot_ln + 15) if (bot_ln and bot_ln >= top_ln) else (from_line + limit - 1)
+        elif state.document_lines:
+            max_ln = max(state.document_lines.keys())
+            from_line = max(1, max_ln - limit + 1)
+            to_line = max_ln
+
+    # If around_line is requested, center the window around it
+    if around_line is not None and around_line > 0:
+        half = limit // 2
+        from_line = max(1, around_line - half)
+        to_line = from_line + limit - 1
+
+    # Default window if neither specified
+    if from_line is None and to_line is None and not offset:
+        if state.document_lines:
+            min_l = min(state.document_lines.keys())
+            from_line = min_l
+            to_line = min_l + limit - 1
+
+    # Query local SQLite database
+    db_res = db.get_document_lines_window(
+        project_id=pid,
+        from_line=from_line,
+        to_line=to_line,
+        limit=limit,
+        offset=offset
+    )
+
+    # In-memory overlay: if state.document_lines has fresher or uncommitted lines in this range, merge them
+    lines_map = {l["line_number"]: l for l in db_res.get("lines", [])}
+    check_min = from_line or db_res.get("min_line", 0)
+    check_max = to_line or db_res.get("max_line", 0)
+
+    if check_min > 0 and check_max >= check_min:
+        for ln in range(check_min, check_max + 1):
+            if ln in state.document_lines:
+                ml = state.document_lines[ln]
+                txt = str(ml)
+                meta = getattr(ml, "meta", {}) if hasattr(ml, "meta") else (dict(ml) if isinstance(ml, dict) else {})
+                lines_map[ln] = {
+                    "line_number": ln,
+                    "gutter_number": meta.get("gutter_number", ln),
+                    "text": txt,
+                    "confidence": meta.get("confidence", 1.0),
+                    "frame_id": meta.get("frame_id", ""),
+                    "status": meta.get("status", "verified"),
+                    "is_wrapped": meta.get("is_wrapped", False),
+                    "notes": meta.get("notes", ""),
+                    "updated_at": meta.get("updated_at", "")
+                }
+
+    sorted_lines = [lines_map[k] for k in sorted(lines_map.keys())]
+
+    mem_total = len(state.document_lines)
+    mem_min = min(state.document_lines.keys()) if state.document_lines else 0
+    mem_max = max(state.document_lines.keys()) if state.document_lines else 0
+
+    return {
+        "status": "success",
+        "total_lines": max(db_res.get("total_lines", 0), mem_total),
+        "min_line": min(db_res.get("min_line", 0), mem_min) if (db_res.get("min_line") and mem_min) else (db_res.get("min_line") or mem_min),
+        "max_line": max(db_res.get("max_line", 0), mem_max),
+        "from_line": from_line if from_line is not None else (sorted_lines[0]["line_number"] if sorted_lines else 0),
+        "to_line": to_line if to_line is not None else (sorted_lines[-1]["line_number"] if sorted_lines else 0),
+        "count": len(sorted_lines),
+        "lines": sorted_lines
+    }
+
 
 @router.post("/api/lines/{line_number}/edit")
 async def edit_line(line_number: int, req: LineEditRequest):

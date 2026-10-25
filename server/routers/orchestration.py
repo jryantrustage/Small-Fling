@@ -528,10 +528,14 @@ async def snap_to_clean_layout():
     return {"status": "success", "layout": clean_coords}
 
 @router.get("/api/dag/config/bypass-live-ocr")
+async def get_bypass_live_ocr():
+    cur = bool(state.dag_state.get("bypass_live_ocr", False))
+    return {"status": "success", "bypass_live_ocr": cur}
+
 @router.post("/api/dag/config/bypass-live-ocr")
 async def toggle_bypass_live_ocr(req: Optional[Dict[str, Any]] = None):
     """Toggles or sets fast capture mode by bypassing heavy live AI OCR during capture."""
-    cur = state.dag_state.get("bypass_live_ocr", False)
+    cur = bool(state.dag_state.get("bypass_live_ocr", False))
     new_val = (req.get("bypass") if req and "bypass" in req else not cur)
     state.dag_state["bypass_live_ocr"] = bool(new_val)
     if hasattr(state, "ws_manager") and state.ws_manager:
@@ -540,6 +544,76 @@ async def toggle_bypass_live_ocr(req: Optional[Dict[str, Any]] = None):
             "dag": state.dag_state
         })
     return {"status": "success", "bypass_live_ocr": state.dag_state["bypass_live_ocr"]}
+
+
+@router.get("/api/dag/config/headless-mode")
+async def get_headless_mode():
+    cur = bool(state.dag_state.get("headless_mode", False) or getattr(state, "headless_mode", False))
+    return {"status": "success", "headless_mode": cur}
+
+@router.post("/api/dag/config/headless-mode")
+async def toggle_headless_mode(req: Optional[Dict[str, Any]] = None):
+    """
+    Toggles or sets Headless Mode:
+    When enabled:
+      - Live UI image loading / streaming is bypassed to maximize loop speed and eliminate browser rendering overhead.
+      - Node 4 utilizes the fast local OpenVINO/RapidOCR Inspector Rescan engine on the single page lines
+        (exact same process as OCR Inspector rescan page lines) instead of loading the image into the heavy MiniCPM-V vision model.
+    """
+    cur = bool(state.dag_state.get("headless_mode", False) or getattr(state, "headless_mode", False))
+    if req and ("headless_mode" in req or "enabled" in req):
+        new_val = bool(req.get("headless_mode") if "headless_mode" in req else req.get("enabled"))
+    else:
+        new_val = not cur
+    state.headless_mode = bool(new_val)
+    state.dag_state["headless_mode"] = bool(new_val)
+    if hasattr(state, "ws_manager") and state.ws_manager:
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state
+        })
+        await state.ws_manager.broadcast({
+            "type": "headless_mode_updated",
+            "headless_mode": state.headless_mode
+        })
+    return {"status": "success", "headless_mode": state.headless_mode}
+
+
+@router.get("/api/dag/headless/telemetry")
+async def get_headless_telemetry():
+    """Returns the current active or most recent headless operation telemetry summary."""
+    return {
+        "status": "success",
+        "telemetry": state.headless_telemetry_session,
+        "is_running": bool(state.headless_telemetry_session.get("is_active", False) or getattr(state, "capture_loop_running", False))
+    }
+
+
+@router.post("/api/dag/headless/target-lines")
+async def set_headless_target_lines(req: Dict[str, Any]):
+    """Sets or updates the target total lines for document capture and headless verification."""
+    target = int(req.get("target_total_lines", 0))
+    if target > 0:
+        state.latest_telemetry["target_total_lines"] = target
+        state.dag_state["nodes"].setdefault("init_end", {})["total_lines"] = target
+        state.headless_telemetry_session["target_total_lines"] = target
+        proj = db.get_active_project()
+        if proj and proj.get("id"):
+            db.update_project_target_lines(proj["id"], target)
+        if hasattr(state, "ws_manager") and state.ws_manager:
+            await state.ws_manager.broadcast({
+                "type": "telemetry_updated",
+                "telemetry": state.latest_telemetry
+            })
+            await state.ws_manager.broadcast({
+                "type": "headless_telemetry_progress",
+                "telemetry": state.headless_telemetry_session
+            })
+    return {
+        "status": "success",
+        "target_total_lines": state.latest_telemetry.get("target_total_lines", 0),
+        "telemetry": state.headless_telemetry_session
+    }
 
 
 @router.post("/api/dag/edges")
@@ -1233,7 +1307,11 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
     payload = payload or {}
     active_serial = await get_active_adb_serial(payload.get("serial"))
-    cfg = node.get("config", {})
+    cfg = dict(node.get("config", {}))
+    if payload.get("config") and isinstance(payload["config"], dict):
+        cfg.update(payload["config"])
+    if "headless_mode" in payload:
+        cfg["headless_mode"] = payload["headless_mode"]
 
     # Check and strictly enforce device characteristics & lock constraints
     if target_key in ("init_end", "reset_home", "frame_acquire", "frame_ocr", "arrow_down", "verification_trigger"):
@@ -3067,7 +3145,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             }
         elif target_key == "batch_frames_ocr":
             from dag_nodes.batch_frames_ocr_node import BatchFramesOcrNode
-            from dag_nodes.base import DagBlackboard
             bb = DagBlackboard(project_id=state.active_project_id or "", active_serial=active_serial or "")
             batch_node = BatchFramesOcrNode()
             batch_res = await batch_node.execute(bb)
@@ -3932,15 +4009,62 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
 
 
 
+        is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
+        if is_headless:
+            session = state.start_headless_telemetry_session("continuous_capture_loop")
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="⚡ Capture loop running in HEADLESS MODE (Node 4 RapidOCR Inspector Rescan Engine Active; UI rendering bypassed)",
+                dag="capture_entire_markdown",
+                serial=active_serial
+            )
+            if hasattr(state, "ws_manager") and state.ws_manager:
+                await state.ws_manager.broadcast({
+                    "type": "headless_telemetry_started",
+                    "telemetry": session
+                })
+
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)
             if res.get("status") in ("error", "prevented"):
                 state.latest_telemetry["status_message"] = f"Loop stopped: {res.get('node_id')} ({res.get('status')})"
                 break
 
+            top_l = state.latest_telemetry.get("current_top_line", 0)
+            bot_l = state.latest_telemetry.get("current_bottom_line", 0)
+            target_lines = int(
+                state.headless_telemetry_session.get("target_total_lines", 0)
+                or state.latest_telemetry.get("target_total_lines", 0)
+                or 0
+            )
+            doc_count = len(state.document_lines)
+
+            # Update headless telemetry if headless mode is active
+            if is_headless:
+                lat = float(res.get("node4", {}).get("latency_ms") or 0.0)
+                session = state.update_headless_telemetry_session(
+                    top_line=top_l,
+                    bottom_line=bot_l,
+                    frames_inc=1,
+                    latency_ms=lat,
+                    event_msg=f"Captured frame (Lines {top_l}..{bot_l})"
+                )
+                if hasattr(state, "ws_manager") and state.ws_manager:
+                    await state.ws_manager.broadcast({
+                        "type": "headless_telemetry_progress",
+                        "telemetry": session
+                    })
+
+            # Detect when total lines of the document has been reached
+            total_reached = False
+            if target_lines > 0 and (bot_l >= target_lines or doc_count >= target_lines):
+                total_reached = True
+
             n8 = res.get("node8", {})
-            if n8.get("is_complete"):
-                state.latest_telemetry["status_message"] = "🎉 100% Markdown Captured! All lines verified."
+            if n8.get("is_complete") or total_reached:
+                state.latest_telemetry["status_message"] = f"🎉 100% Markdown Captured! Target document lines ({target_lines or doc_count}) reached."
+                if is_headless:
+                    state.headless_telemetry_session["total_lines_reached"] = True
                 break
 
             n7 = res.get("node7", {})
@@ -3968,6 +4092,19 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         state.latest_telemetry["is_pacing"] = False
         state.dag_state["current_active_node"] = None
         state.orchestration_state["status"] = "PAUSED"
+
+        if is_headless and state.headless_telemetry_session.get("is_active"):
+            status_str = "COMPLETED" if state.headless_telemetry_session.get("total_lines_reached") else "STOPPED"
+            final_summary = state.complete_headless_telemetry_session(
+                status=status_str,
+                message=state.latest_telemetry.get("status_message")
+            )
+            if hasattr(state, "ws_manager") and state.ws_manager:
+                await state.ws_manager.broadcast({
+                    "type": "headless_telemetry_complete",
+                    "telemetry": final_summary
+                })
+
         await state.ws_manager.broadcast({
             "type": "capture_loop_status",
             "running": False,
@@ -3980,6 +4117,9 @@ async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
     global capture_loop_task
     payload = payload or {}
     serial = payload.get("serial")
+    if "headless_mode" in payload:
+        state.headless_mode = bool(payload["headless_mode"])
+        state.dag_state["headless_mode"] = bool(payload["headless_mode"])
     if getattr(state, "capture_loop_running", False):
         return {"status": "already_running", "message": "Capture loop is already running"}
 
@@ -3991,7 +4131,7 @@ async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
         "dag": state.dag_state,
         "telemetry": state.latest_telemetry
     })
-    return {"status": "started", "message": "Capture loop started"}
+    return {"status": "started", "message": f"Capture loop started{' (Headless Mode)' if getattr(state, 'headless_mode', False) else ''}"}
 
 @router.post("/api/dag/loop/stop")
 async def stop_dag_loop():

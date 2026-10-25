@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import re
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -975,6 +976,13 @@ async def sequential_rescan_all_frames_task(
     processed_count = 0
     total_lines_rescanned = 0
 
+    session = state.start_headless_telemetry_session("batch_sequential_rescan", total_frames=total_frames)
+    if hasattr(state, "ws_manager") and state.ws_manager:
+        await state.ws_manager.broadcast({
+            "type": "headless_telemetry_started",
+            "telemetry": session
+        })
+
     try:
         for idx, finfo in enumerate(sorted_frames):
             if getattr(state, "cancel_sequential_rescan", False):
@@ -1001,6 +1009,7 @@ async def sequential_rescan_all_frames_task(
                     **state.sequential_rescan_progress
                 })
 
+            t_scan_start = time.perf_counter()
             try:
                 aux = await asyncio.to_thread(worker_scan_image, str(ipath))
             except Exception as e:
@@ -1027,6 +1036,8 @@ async def sequential_rescan_all_frames_task(
             except Exception as e:
                 print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
                 continue
+
+            dur_ms = round((time.perf_counter() - t_scan_start) * 1000, 1)
 
             for l_item in updated_lines:
                 ln = l_item.get("line_number")
@@ -1088,10 +1099,22 @@ async def sequential_rescan_all_frames_task(
                 "status_message": f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l}) • Total {len(state.document_lines)} Lines"
             })
 
+            state.update_headless_telemetry_session(
+                top_line=top_l,
+                bottom_line=bot_l,
+                frames_inc=1,
+                latency_ms=dur_ms,
+                event_msg=f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l})"
+            )
+
             if hasattr(state, "ws_manager") and state.ws_manager:
                 await state.ws_manager.broadcast({
                     "type": "rescan_all_frames_progress",
                     **state.sequential_rescan_progress
+                })
+                await state.ws_manager.broadcast({
+                    "type": "headless_telemetry_progress",
+                    "telemetry": state.headless_telemetry_session
                 })
                 if (idx + 1) % 2 == 0 or (idx + 1) == total_frames:
                     await state.ws_manager.broadcast({
@@ -1106,6 +1129,11 @@ async def sequential_rescan_all_frames_task(
         state.save_persisted_state()
         state.assemble_and_save_reconstructed_markdown()
 
+        summary = state.complete_headless_telemetry_session(
+            status="COMPLETED" if not getattr(state, "cancel_sequential_rescan", False) else "CANCELLED",
+            message=f"🎉 Headless Sequential Rescan Complete: {processed_count} frames processed, {len(state.document_lines)} total lines verified."
+        )
+
         if hasattr(state, "ws_manager") and state.ws_manager:
             await state.ws_manager.broadcast({
                 "type": "rescan_all_frames_complete",
@@ -1114,6 +1142,10 @@ async def sequential_rescan_all_frames_task(
                 "total_verified_lines": len(state.document_lines),
                 "min_line": min(state.document_lines.keys()) if state.document_lines else 0,
                 "max_line": max(state.document_lines.keys()) if state.document_lines else 0
+            })
+            await state.ws_manager.broadcast({
+                "type": "headless_telemetry_complete",
+                "telemetry": summary
             })
             await state.ws_manager.broadcast({
                 "type": "document_updated",

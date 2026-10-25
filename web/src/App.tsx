@@ -29,6 +29,7 @@ import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
 import { discernNodePerformance } from './utils/dagDiagnostics';
 import { Dag4OcrFullInspectorModal } from './components/dag/Dag4OcrFullInspectorModal';
 import { LazyFrameCard } from './components/frames/LazyFrameCard';
+import { HeadlessTelemetryModal, type HeadlessTelemetryData } from './components/HeadlessTelemetryModal';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -78,6 +79,14 @@ function AppContent() {
     projectName?: string;
   } | null>(null);
   const [documentData, setDocumentData] = useState<{ total_lines: number; issue_count: number; min_line: number; max_line: number; lines: LineData[] }>({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+  // Lazy-loaded verified lines state
+  const [lazyFromLine, setLazyFromLine] = useState<number>(1);
+  const [lazyToLine, setLazyToLine] = useState<number>(60);
+  const [lazyFromInput, setLazyFromInput] = useState<string>('1');
+  const [lazyToInput, setLazyToInput] = useState<string>('60');
+  const [lazyWindowSize, setLazyWindowSize] = useState<number>(50);
+  const [followCurrentProcess, setFollowCurrentProcess] = useState<boolean>(true);
+  const [isLoadingLazyLines, setIsLoadingLazyLines] = useState<boolean>(false);
   const [frames, setFrames] = useState<FrameData[]>([]);
   const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
   const [tokenStats, setTokenStats] = useState<TokenStats>({ total_prompt_tokens: 0, total_candidates_tokens: 0, total_tokens: 0, total_api_calls: 0, estimated_cost_usd: 0 });
@@ -504,6 +513,100 @@ function AppContent() {
     }
   };
 
+  const [headlessMode, setHeadlessMode] = useState<boolean>(false);
+  const [isHeadlessTelemetryOpen, setIsHeadlessTelemetryOpen] = useState<boolean>(false);
+  const [headlessTelemetry, setHeadlessTelemetry] = useState<HeadlessTelemetryData | null>(null);
+
+  const handleToggleHeadlessMode = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/dag/config/headless-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headless_mode: !headlessMode })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d && typeof d.headless_mode === 'boolean') {
+          setHeadlessMode(d.headless_mode);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to toggle headless mode', e);
+    }
+  };
+
+  useEffect(() => {
+    apiJson<any>('/api/dag/config/headless-mode').then(d => {
+      if (d && typeof d.headless_mode === 'boolean') {
+        setHeadlessMode(d.headless_mode);
+      }
+    }).catch(() => {});
+
+    apiJson<any>('/api/dag/headless/telemetry').then(d => {
+      if (d && d.telemetry) {
+        setHeadlessTelemetry(d.telemetry);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const fetchLazyLines = useCallback(async (from?: number, to?: number, follow?: boolean) => {
+    try {
+      setIsLoadingLazyLines(true);
+      const params = new URLSearchParams();
+      if (follow) {
+        params.set('follow_current', 'true');
+      } else {
+        if (from !== undefined && from > 0) params.set('from_line', String(from));
+        if (to !== undefined && to > 0) params.set('to_line', String(to));
+      }
+      params.set('limit', String(lazyWindowSize));
+
+      const res = await api(`/api/document/lines?${params.toString()}`);
+      if (res.ok) {
+        const d = await res.json();
+        if (d && Array.isArray(d.lines)) {
+          setDocumentData(prev => ({
+            ...prev,
+            total_lines: d.total_lines ?? prev.total_lines,
+            min_line: d.min_line ?? prev.min_line,
+            max_line: d.max_line ?? prev.max_line,
+            lines: d.lines
+          }));
+          if (d.from_line) {
+            setLazyFromLine(d.from_line);
+            setLazyFromInput(String(d.from_line));
+          }
+          if (d.to_line) {
+            setLazyToLine(d.to_line);
+            setLazyToInput(String(d.to_line));
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[App] fetchLazyLines error:', e);
+    } finally {
+      setIsLoadingLazyLines(false);
+    }
+  }, [lazyWindowSize]);
+
+  const currentProcessTopLine = sequentialRescanStatus.is_running
+    ? (sequentialRescanStatus.current_top_line || 0)
+    : (telemetry?.current_top_line || 0);
+
+  useEffect(() => {
+    if (followCurrentProcess && currentProcessTopLine > 0) {
+      const handler = setTimeout(() => {
+        fetchLazyLines(undefined, undefined, true);
+      }, 250);
+      return () => clearTimeout(handler);
+    }
+  }, [followCurrentProcess, currentProcessTopLine, fetchLazyLines]);
+
+  useEffect(() => {
+    fetchLazyLines(undefined, undefined, true);
+  }, [fetchLazyLines, activeProject?.id]);
+
+
   const selectedFrameIdRef = useRef<string | null>(null);
   useEffect(() => { selectedFrameIdRef.current = selectedFrameId; }, [selectedFrameId]);
   useEffect(() => {
@@ -842,7 +945,7 @@ function AppContent() {
     const t0 = performance.now();
     try {
       const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes, alignRes, deskRes] = await Promise.all([
-        api('/api/projects'), api('/api/document'), api('/api/frames'), api('/api/recapture-queue'),
+        api('/api/projects'), api('/api/document?summary_only=true'), api('/api/frames'), api('/api/recapture-queue'),
         api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry'), api('/api/device/info'), api('/api/device/alignment'),
         api('/api/device/kiosk/desktop-mode')
       ]);
@@ -862,8 +965,15 @@ function AppContent() {
       if (docRes.ok) {
         try {
           const d = await docRes.json();
-          if (d && Array.isArray(d.lines)) {
-            setDocumentData(d);
+          if (d) {
+            setDocumentData(prev => ({
+              ...prev,
+              total_lines: d.total_lines ?? prev.total_lines,
+              issue_count: d.issue_count ?? prev.issue_count,
+              min_line: d.min_line ?? prev.min_line,
+              max_line: d.max_line ?? prev.max_line,
+              lines: d.lines && d.lines.length > 0 ? d.lines : prev.lines
+            }));
             if (d.token_stats) setTokenStats(d.token_stats);
           }
         } catch {}
@@ -1593,8 +1703,18 @@ function AppContent() {
           } else if (msg.type === 'document_updated') {
             const docObj = msg.data || msg.document;
             if (docObj) {
-              setDocumentData(docObj);
+              setDocumentData(prev => ({
+                ...prev,
+                total_lines: docObj.total_lines ?? prev.total_lines,
+                issue_count: docObj.issue_count ?? prev.issue_count,
+                min_line: docObj.min_line ?? prev.min_line,
+                max_line: docObj.max_line ?? prev.max_line,
+                lines: docObj.lines && docObj.lines.length > 0 ? docObj.lines : prev.lines
+              }));
               if (docObj.token_stats) setTokenStats(docObj.token_stats);
+              if (followCurrentProcess) {
+                fetchLazyLines(undefined, undefined, true);
+              }
             }
           } else if (msg.type === 'rescan_all_frames_progress') {
             setSequentialRescanStatus({
@@ -1612,6 +1732,22 @@ function AppContent() {
             setSequentialRescanStatus(p => ({ ...p, is_running: false }));
             window.dispatchEvent(new CustomEvent('rescan_all_frames_update', { detail: msg }));
             fetchData();
+          } else if (msg.type === 'headless_telemetry_started' || msg.type === 'headless_telemetry_progress') {
+            if (msg.telemetry) {
+              setHeadlessTelemetry(msg.telemetry);
+            }
+          } else if (msg.type === 'headless_telemetry_complete') {
+            if (msg.telemetry) {
+              setHeadlessTelemetry(msg.telemetry);
+            }
+            setIsHeadlessTelemetryOpen(true);
+            fetchData();
+          } else if (msg.type === 'headless_mode_updated') {
+            if (typeof msg.headless_mode === 'boolean') {
+              setHeadlessMode(msg.headless_mode);
+            }
+          } else if (msg.type === 'dag_updated' && msg.dag && typeof msg.dag.headless_mode === 'boolean') {
+            setHeadlessMode(msg.dag.headless_mode);
           } else if (msg.type === 'device_selected') {
             const newInfo = msg.device_info || msg.data;
             if (newInfo?.active_serial) {
@@ -2711,6 +2847,7 @@ function AppContent() {
             desktopModeEnabled={desktopModeEnabled}
             onToggleDesktopMode={handleToggleDesktopMode}
             desktopVerification={desktopVerification}
+            onOpenHeadlessTelemetry={() => setIsHeadlessTelemetryOpen(true)}
           />
         </div>
       )}
@@ -2875,6 +3012,48 @@ function AppContent() {
                             : (selectedFrameIds.size > 0 ? `Rescan (${selectedFrameIds.size})` : 'Rescan All Frames')}
                         </span>
                       </button>
+                      {/* Headless Loop Mode Toggle Button */}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline"
+                        onClick={handleToggleHeadlessMode}
+                        title={headlessMode
+                          ? "Headless Mode ACTIVE: Live image loading is bypassed & Node 4 uses RapidOCR Inspector Rescan engine. Click to switch to visual mode."
+                          : "Visual Mode ACTIVE: Click to enable ultra-fast Headless Loop Mode (RapidOCR Inspector engine without image loading)."}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '4px',
+                          padding: '3px 8px', fontSize: '11px',
+                          color: headlessMode ? '#c084fc' : '#94a3b8',
+                          borderColor: headlessMode ? 'rgba(167, 139, 250, 0.6)' : 'rgba(255, 255, 255, 0.15)',
+                          background: headlessMode ? 'rgba(167, 139, 250, 0.15)' : undefined
+                        }}
+                      >
+                        <Cpu size={11} color={headlessMode ? '#c084fc' : '#94a3b8'} />
+                        <span>{headlessMode ? 'Headless: ON' : 'Headless: OFF'}</span>
+                      </button>
+                      {/* Headless Telemetry Progress & Summary Modal Button */}
+                      {(headlessMode || headlessTelemetry?.status === 'RUNNING' || headlessTelemetry?.total_lines_reached) && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => setIsHeadlessTelemetryOpen(true)}
+                          title="Open Headless Telemetry & Document Coverage Summary Modal"
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: '4px',
+                            padding: '3px 8px', fontSize: '11px',
+                            color: headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc',
+                            borderColor: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.4)' : 'rgba(192, 132, 252, 0.4)',
+                            background: headlessTelemetry?.total_lines_reached ? 'rgba(0, 255, 157, 0.12)' : 'rgba(192, 132, 252, 0.12)'
+                          }}
+                        >
+                          <Activity size={11} color={headlessTelemetry?.total_lines_reached ? '#00ff9d' : '#c084fc'} />
+                          <span>
+                            {headlessTelemetry?.total_lines_reached
+                              ? 'Summary (100% ✔)'
+                              : `Telemetry ${headlessTelemetry?.completion_percent ? `(${headlessTelemetry.completion_percent}%)` : ''}`}
+                          </span>
+                        </button>
+                      )}
                       {sequentialRescanStatus.is_running && (
                         <button
                           type="button"
@@ -3277,6 +3456,8 @@ function AppContent() {
                         showBoundingBoxes={showBoundingBoxes}
                         deviceInfo={deviceInfo}
                         metaResolution={alignmentData?.resolution}
+                        headlessMode={headlessMode}
+                        onToggleHeadlessMode={handleToggleHeadlessMode}
                         onRefreshStream={() => setStreamKey(Date.now())}
                         topCallout={
                           <div className="gutter-line-callout top">
@@ -3380,10 +3561,10 @@ function AppContent() {
                           type="checkbox"
                           checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
                           onChange={handleToggleSelectAllLines}
-                          title="Select or deselect all lines"
+                          title="Select or deselect all lines in current window"
                           style={{ cursor: 'pointer' }}
                         />
-                        <span>Verified Lines ({filteredLines.length})</span>
+                        <span>Verified Lines ({filteredLines.length} / {documentData.total_lines})</span>
                         {selectedLineNumbers.size > 0 && (
                           <button
                             type="button"
@@ -3404,7 +3585,7 @@ function AppContent() {
                           type="button"
                           className="btn btn-sm btn-outline"
                           onClick={handleExportMarkdown}
-                          disabled={isExportingMarkdown || filteredLines.length === 0}
+                          disabled={isExportingMarkdown || documentData.total_lines === 0}
                           title="Save entire contents of verified lines as Markdown (.md) file"
                           style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', fontSize: '11px', color: '#00ff9d', borderColor: '#00ff9d55' }}
                         >
@@ -3431,6 +3612,202 @@ function AppContent() {
                             <Minus size={11} />
                           </button>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Lazy Loaded Lines Window Bar */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(15, 23, 42, 0.75)',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}>
+                      {/* Left: Window Range Jump & Inputs */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ color: '#8b949e', fontWeight: 600, fontSize: '10px' }}>WINDOW:</span>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#c9d1d9' }}>
+                          <span style={{ fontSize: '10px', color: '#8b949e' }}>From</span>
+                          <input
+                            type="number"
+                            value={lazyFromInput}
+                            onChange={e => setLazyFromInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const f = parseInt(lazyFromInput);
+                                const t = parseInt(lazyToInput);
+                                if (!isNaN(f)) {
+                                  setFollowCurrentProcess(false);
+                                  fetchLazyLines(f, !isNaN(t) ? t : f + lazyWindowSize - 1, false);
+                                }
+                              }
+                            }}
+                            style={{
+                              width: '58px', height: '20px', padding: '1px 4px',
+                              background: '#0d1117', border: '1px solid #30363d',
+                              borderRadius: '3px', color: '#58a6ff', fontSize: '11px',
+                              fontFamily: 'monospace', fontWeight: 600
+                            }}
+                            title="Start line number to lazy load from local DB"
+                          />
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '2px', color: '#c9d1d9' }}>
+                          <span style={{ fontSize: '10px', color: '#8b949e' }}>To</span>
+                          <input
+                            type="number"
+                            value={lazyToInput}
+                            onChange={e => setLazyToInput(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                const f = parseInt(lazyFromInput);
+                                const t = parseInt(lazyToInput);
+                                if (!isNaN(t)) {
+                                  setFollowCurrentProcess(false);
+                                  fetchLazyLines(!isNaN(f) ? f : Math.max(1, t - lazyWindowSize + 1), t, false);
+                                }
+                              }
+                            }}
+                            style={{
+                              width: '58px', height: '20px', padding: '1px 4px',
+                              background: '#0d1117', border: '1px solid #30363d',
+                              borderRadius: '3px', color: '#3fb950', fontSize: '11px',
+                              fontFamily: 'monospace', fontWeight: 600
+                            }}
+                            title="End line number to lazy load from local DB"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => {
+                            const f = parseInt(lazyFromInput);
+                            const t = parseInt(lazyToInput);
+                            setFollowCurrentProcess(false);
+                            fetchLazyLines(!isNaN(f) ? f : 1, !isNaN(t) ? t : 50, false);
+                          }}
+                          style={{ height: '20px', padding: '0 6px', fontSize: '10px', color: '#58a6ff', borderColor: '#58a6ff44' }}
+                          title="Load lines from local database"
+                        >
+                          Go
+                        </button>
+                        <select
+                          value={lazyWindowSize}
+                          onChange={e => {
+                            const newSz = parseInt(e.target.value) || 50;
+                            setLazyWindowSize(newSz);
+                            fetchLazyLines(lazyFromLine, lazyFromLine + newSz - 1, false);
+                          }}
+                          style={{
+                            height: '20px', padding: '0 4px', fontSize: '10px',
+                            background: '#0d1117', border: '1px solid #30363d',
+                            borderRadius: '3px', color: '#8b949e', cursor: 'pointer'
+                          }}
+                          title="Number of lines per lazy window"
+                        >
+                          <option value="25">25 lines</option>
+                          <option value="50">50 lines</option>
+                          <option value="100">100 lines</option>
+                        </select>
+                      </div>
+
+                      {/* Center: Navigation Pagers */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => {
+                            setFollowCurrentProcess(false);
+                            const nextFrom = Math.max(1, lazyFromLine - lazyWindowSize);
+                            const nextTo = Math.max(lazyWindowSize, lazyToLine - lazyWindowSize);
+                            fetchLazyLines(nextFrom, nextTo, false);
+                          }}
+                          disabled={lazyFromLine <= (documentData.min_line || 1)}
+                          style={{ height: '20px', padding: '0 6px', fontSize: '10px' }}
+                          title="Previous page slice from local DB"
+                        >
+                          ◀ Prev {lazyWindowSize}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={() => {
+                            setFollowCurrentProcess(false);
+                            const nextFrom = lazyFromLine + lazyWindowSize;
+                            const nextTo = lazyToLine + lazyWindowSize;
+                            fetchLazyLines(nextFrom, nextTo, false);
+                          }}
+                          disabled={lazyToLine >= (documentData.max_line || 1)}
+                          style={{ height: '20px', padding: '0 6px', fontSize: '10px' }}
+                          title="Next page slice from local DB"
+                        >
+                          Next {lazyWindowSize} ▶
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-ghost"
+                          onClick={() => {
+                            setFollowCurrentProcess(false);
+                            const minL = documentData.min_line || 1;
+                            fetchLazyLines(minL, minL + lazyWindowSize - 1, false);
+                          }}
+                          style={{ height: '20px', padding: '0 5px', fontSize: '10px', color: '#8b949e' }}
+                          title="Jump to first line in project"
+                        >
+                          Top
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-ghost"
+                          onClick={() => {
+                            setFollowCurrentProcess(false);
+                            const maxL = documentData.max_line || 1;
+                            fetchLazyLines(Math.max(1, maxL - lazyWindowSize + 1), maxL, false);
+                          }}
+                          style={{ height: '20px', padding: '0 5px', fontSize: '10px', color: '#8b949e' }}
+                          title="Jump to latest line in project"
+                        >
+                          End
+                        </button>
+                      </div>
+
+                      {/* Right: Follow Current Capture & Loading Status */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <button
+                          type="button"
+                          className={`btn btn-xs ${followCurrentProcess ? 'btn-primary' : 'btn-outline'}`}
+                          onClick={() => {
+                            const nextFollow = !followCurrentProcess;
+                            setFollowCurrentProcess(nextFollow);
+                            if (nextFollow) fetchLazyLines(undefined, undefined, true);
+                          }}
+                          style={{
+                            height: '20px', padding: '0 7px', fontSize: '10px', fontWeight: 600,
+                            display: 'flex', alignItems: 'center', gap: '4px',
+                            background: followCurrentProcess ? 'rgba(0, 255, 157, 0.18)' : undefined,
+                            borderColor: followCurrentProcess ? '#00ff9d88' : undefined,
+                            color: followCurrentProcess ? '#00ff9d' : '#8b949e'
+                          }}
+                          title={followCurrentProcess
+                            ? "Auto-following active capture position (showing current frame's lines from local DB). Click to detach."
+                            : "Manual window viewing. Click to auto-follow active capture / rescan position."}
+                        >
+                          <span style={{
+                            width: '6px', height: '6px', borderRadius: '50%',
+                            background: followCurrentProcess ? '#00ff9d' : '#8b949e',
+                            boxShadow: followCurrentProcess ? '0 0 6px #00ff9d' : 'none'
+                          }} />
+                          <span>{followCurrentProcess ? 'FOLLOWING PROCESS' : 'FOLLOW PROCESS'}</span>
+                        </button>
+                        {isLoadingLazyLines && (
+                          <RefreshCw size={10} color="#58a6ff" className="spin" />
+                        )}
+                        <span style={{ fontSize: '10px', color: '#8b949e', fontFamily: 'monospace' }}>
+                          Ln {lazyFromLine}–{lazyToLine} of {documentData.total_lines}
+                        </span>
                       </div>
                     </div>
                     <div className="filter-bar"><Search size={14} color="#8b949e" /><input type="text" className="search-input" placeholder="Search lines..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
@@ -4870,6 +5247,19 @@ function AppContent() {
         onClose={() => setIsOcrReportOpen(false)}
         documentData={documentData}
         frames={frames}
+      />
+
+      <HeadlessTelemetryModal
+        isOpen={isHeadlessTelemetryOpen}
+        onClose={() => setIsHeadlessTelemetryOpen(false)}
+        telemetry={headlessTelemetry}
+        apiBase={API_BASE}
+        onInspectLines={() => {
+          setInspectorMode('ocr_inspect');
+        }}
+        onOpenOcrReport={() => {
+          setIsOcrReportOpen(true);
+        }}
       />
     </div>
   );

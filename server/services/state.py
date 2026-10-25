@@ -1,5 +1,7 @@
 import json
 import re
+import time
+import uuid
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 import numpy as np
@@ -676,7 +678,8 @@ dag_state: Dict[str, Any] = {
         {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True}
     ],
     "current_active_node": None,
-    "bypass_live_ocr": False
+    "bypass_live_ocr": False,
+    "headless_mode": False
 }
 
 DEFAULT_DAG_EDGES = [
@@ -692,8 +695,174 @@ DEFAULT_DAG_EDGES = [
 ]
 
 capture_loop_running: bool = False
+headless_mode: bool = False
 dag_semaphore_group2_to_3: bool = True
 dag_semaphore_group3_to_4: bool = True
+
+headless_telemetry_session: Dict[str, Any] = {
+    "session_id": "",
+    "is_active": False,
+    "start_time": 0.0,
+    "end_time": None,
+    "elapsed_seconds": 0.0,
+    "status": "IDLE",
+    "operation_type": "headless_loop",
+    "project_id": "",
+    "project_name": "",
+    "start_line": 1,
+    "current_top_line": 0,
+    "current_bottom_line": 0,
+    "target_total_lines": 0,
+    "total_lines_reached": False,
+    "total_lines_captured": 0,
+    "completion_percent": 0.0,
+    "frames_processed": 0,
+    "total_frames_target": 0,
+    "total_latency_ms": 0.0,
+    "avg_ocr_latency_ms": 0.0,
+    "lines_per_second": 0.0,
+    "issues_detected": 0,
+    "gaps_detected": 0,
+    "engine": "RapidOCR Inspector Rescan Engine (Local)",
+    "finish_status_message": "Ready",
+    "recent_events": [],
+    "reconstructed_markdown_path": None,
+    "reconstructed_markdown_size": 0
+}
+
+def start_headless_telemetry_session(operation_type: str = "headless_loop", target_total_lines: Optional[int] = None, total_frames: int = 0) -> Dict[str, Any]:
+    global headless_telemetry_session
+    now = time.time()
+    proj = db.get_active_project() or {}
+    target_lines = int(
+        target_total_lines
+        or latest_telemetry.get("target_total_lines", 0)
+        or dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
+        or proj.get("target_total_lines", 0)
+        or proj.get("total_lines", 0)
+        or 0
+    )
+    headless_telemetry_session = {
+        "session_id": str(uuid.uuid4())[:8],
+        "is_active": True,
+        "start_time": now,
+        "end_time": None,
+        "elapsed_seconds": 0.0,
+        "status": "RUNNING",
+        "operation_type": operation_type,
+        "project_id": proj.get("id", ""),
+        "project_name": proj.get("name", ""),
+        "start_line": latest_telemetry.get("current_top_line", 1) or 1,
+        "current_top_line": latest_telemetry.get("current_top_line", 1) or 1,
+        "current_bottom_line": latest_telemetry.get("current_bottom_line", 1) or 1,
+        "target_total_lines": target_lines,
+        "total_lines_reached": False,
+        "total_lines_captured": len(document_lines),
+        "completion_percent": round((len(document_lines) / max(1, target_lines)) * 100, 1) if target_lines > 0 else 0.0,
+        "frames_processed": 0,
+        "total_frames_target": total_frames,
+        "total_latency_ms": 0.0,
+        "avg_ocr_latency_ms": 0.0,
+        "lines_per_second": 0.0,
+        "issues_detected": 0,
+        "gaps_detected": 0,
+        "engine": "RapidOCR Inspector Rescan Engine (Local)",
+        "finish_status_message": f"Headless {operation_type.replace('_', ' ')} in progress...",
+        "recent_events": [f"[{time.strftime('%H:%M:%S')}] Headless {operation_type} session started"],
+        "reconstructed_markdown_path": None,
+        "reconstructed_markdown_size": 0
+    }
+    return headless_telemetry_session
+
+def update_headless_telemetry_session(
+    top_line: Optional[int] = None,
+    bottom_line: Optional[int] = None,
+    frames_inc: int = 0,
+    latency_ms: float = 0.0,
+    event_msg: Optional[str] = None
+) -> Dict[str, Any]:
+    global headless_telemetry_session
+    if not headless_telemetry_session.get("is_active"):
+        return headless_telemetry_session
+    now = time.time()
+    elapsed = max(0.1, now - headless_telemetry_session.get("start_time", now))
+    headless_telemetry_session["elapsed_seconds"] = round(elapsed, 1)
+
+    if top_line is not None and top_line > 0:
+        headless_telemetry_session["current_top_line"] = top_line
+    if bottom_line is not None and bottom_line > 0:
+        headless_telemetry_session["current_bottom_line"] = bottom_line
+
+    headless_telemetry_session["frames_processed"] += frames_inc
+    if latency_ms and latency_ms > 0:
+        headless_telemetry_session["total_latency_ms"] = headless_telemetry_session.get("total_latency_ms", 0.0) + latency_ms
+        if headless_telemetry_session["frames_processed"] > 0:
+            headless_telemetry_session["avg_ocr_latency_ms"] = round(
+                headless_telemetry_session["total_latency_ms"] / headless_telemetry_session["frames_processed"], 1
+            )
+
+    doc_len = len(document_lines)
+    headless_telemetry_session["total_lines_captured"] = doc_len
+
+    cur_b = headless_telemetry_session.get("current_bottom_line", 0)
+    start_l = headless_telemetry_session.get("start_line", 1) or 1
+    lines_advanced = max(0, cur_b - start_l + 1)
+    headless_telemetry_session["lines_per_second"] = round(lines_advanced / elapsed, 1)
+
+    target = headless_telemetry_session.get("target_total_lines", 0)
+    if target > 0:
+        pct = round(min(100.0, (cur_b / target) * 100), 1)
+        headless_telemetry_session["completion_percent"] = pct
+        if cur_b >= target or doc_len >= target:
+            headless_telemetry_session["total_lines_reached"] = True
+    elif headless_telemetry_session.get("total_frames_target", 0) > 0:
+        tot_f = headless_telemetry_session["total_frames_target"]
+        pct = round(min(100.0, (headless_telemetry_session["frames_processed"] / tot_f) * 100), 1)
+        headless_telemetry_session["completion_percent"] = pct
+
+    if event_msg:
+        events = headless_telemetry_session.setdefault("recent_events", [])
+        events.append(f"[{time.strftime('%H:%M:%S')}] {event_msg}")
+        if len(events) > 30:
+            events.pop(0)
+
+    return headless_telemetry_session
+
+def complete_headless_telemetry_session(status: str = "COMPLETED", message: Optional[str] = None) -> Dict[str, Any]:
+    global headless_telemetry_session
+    now = time.time()
+    headless_telemetry_session["is_active"] = False
+    headless_telemetry_session["end_time"] = now
+    headless_telemetry_session["status"] = status
+    start_t = headless_telemetry_session.get("start_time", now)
+    headless_telemetry_session["elapsed_seconds"] = round(max(0.1, now - start_t), 1)
+
+    target = headless_telemetry_session.get("target_total_lines", 0)
+    cur_b = headless_telemetry_session.get("current_bottom_line", 0)
+    doc_len = len(document_lines)
+
+    if (target > 0 and (cur_b >= target or doc_len >= target)) or status == "COMPLETED":
+        headless_telemetry_session["total_lines_reached"] = True
+        headless_telemetry_session["completion_percent"] = 100.0
+        headless_telemetry_session["finish_status_message"] = (
+            message or f"🎉 100% SUCCESS: Target document lines ({target or doc_len}) reached and verified!"
+        )
+    else:
+        headless_telemetry_session["finish_status_message"] = (
+            message or f"Headless operation halted: status {status}"
+        )
+
+    try:
+        from pathlib import Path
+        md_file = Path("c:/Projects/Small-Fling/storage/reproduced_Matrix_main.md")
+        if md_file.exists():
+            headless_telemetry_session["reconstructed_markdown_path"] = str(md_file)
+            headless_telemetry_session["reconstructed_markdown_size"] = md_file.stat().st_size
+    except Exception:
+        pass
+
+    return headless_telemetry_session
+
 
 def get_outgoing_edge(from_node: str) -> Optional[Dict[str, Any]]:
     for edge in dag_state.get("edges", []):

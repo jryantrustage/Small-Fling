@@ -20,6 +20,8 @@ export interface LiveResponsiveViewportProps {
   topCallout?: React.ReactNode;
   bottomCallout?: React.ReactNode;
   extraOverlay?: React.ReactNode;
+  headlessMode?: boolean;
+  onToggleHeadlessMode?: () => void;
 }
 
 export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
@@ -39,6 +41,8 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   topCallout,
   bottomCallout,
   extraOverlay,
+  headlessMode = false,
+  onToggleHeadlessMode,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -49,6 +53,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [peekScreen, setPeekScreen] = useState(false);
 
   // Synchronize internal live mode with controlled prop or allow local toggle
   const [internalLiveMode, setInternalLiveMode] = useState<'desktop' | 'phone'>(liveMode);
@@ -278,26 +283,161 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
           border: '1px solid rgba(255, 255, 255, 0.08)',
         }}
       >
-        {/* Live Video / Screen Stream Image */}
-        <img
-          ref={imgRef}
-          className="live-viewport-stream-img"
-          src={activeStreamUrl || streamUrl}
-          alt={`Live ${effectiveLiveMode} display`}
-          onLoad={handleImageLoad}
-          onError={(e) => {
-            if (activeFallbackUrl || fallbackUrl) {
-              (e.target as HTMLImageElement).src = (activeFallbackUrl || fallbackUrl)!;
-            }
-          }}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: viewMode === 'fill' ? 'cover' : 'contain',
-            display: 'block',
-            pointerEvents: 'none',
-          }}
-        />
+        {/* Live Video / Screen Stream Image OR Headless HUD */}
+        {headlessMode && !peekScreen ? (
+          <div
+            className="headless-mode-display-hud"
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'radial-gradient(ellipse at center, #0f172a 0%, #020617 100%)',
+              color: '#e2e8f0',
+              padding: '24px',
+              textAlign: 'center',
+              position: 'relative',
+              zIndex: 5,
+              userSelect: 'none'
+            }}
+          >
+            {/* Pulsing indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+              <span
+                style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  background: '#c084fc',
+                  boxShadow: '0 0 12px #c084fc',
+                  animation: 'pulse 1.5s infinite'
+                }}
+              />
+              <span style={{ fontSize: '13px', fontWeight: 800, letterSpacing: '1px', color: '#c084fc' }}>
+                HEADLESS MODE ACTIVE
+              </span>
+            </div>
+
+            <p style={{ fontSize: '12px', color: '#94a3b8', maxWidth: '420px', margin: '0 0 16px 0', lineHeight: 1.5 }}>
+              Display stream & image decoding are bypassed to maximize loop throughput. Node 4 executes the high-speed RapidOCR Inspector Rescan engine.
+            </p>
+
+            {/* Live Metrics Grid */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: '12px',
+              maxWidth: '380px',
+              width: '100%',
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(167, 139, 250, 0.25)',
+              borderRadius: '8px',
+              padding: '12px',
+              marginBottom: '18px'
+            }}>
+              <div>
+                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600 }}>TOP GUTTER</div>
+                <div style={{ fontSize: '15px', color: '#38bdf8', fontWeight: 700, fontFamily: 'monospace' }}>
+                  {alignmentData?.first_line_number ? `Line #${alignmentData.first_line_number}` : '---'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600 }}>BOTTOM GUTTER</div>
+                <div style={{ fontSize: '15px', color: '#34d399', fontWeight: 700, fontFamily: 'monospace' }}>
+                  {alignmentData?.last_line_number ? `Line #${alignmentData.last_line_number}` : '---'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '10px', color: '#64748b', fontWeight: 600 }}>OCR ENGINE</div>
+                <div style={{ fontSize: '12px', color: '#c084fc', fontWeight: 700 }}>RapidOCR</div>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setPeekScreen(true)}
+                className="btn btn-xs btn-outline"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  borderColor: 'rgba(255, 255, 255, 0.2)',
+                  color: '#f8fafc',
+                  fontSize: '11px',
+                  padding: '4px 12px',
+                  cursor: 'pointer'
+                }}
+                title="Temporarily unmask and view live screen stream"
+              >
+                Peek Screen 👁️
+              </button>
+              {onToggleHeadlessMode && (
+                <button
+                  type="button"
+                  onClick={onToggleHeadlessMode}
+                  className="btn btn-xs"
+                  style={{
+                    background: 'rgba(167, 139, 250, 0.2)',
+                    border: '1px solid rgba(167, 139, 250, 0.4)',
+                    color: '#c084fc',
+                    fontSize: '11px',
+                    padding: '4px 12px',
+                    cursor: 'pointer'
+                  }}
+                  title="Switch to full visual rendering mode"
+                >
+                  Exit Headless
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <img
+              ref={imgRef}
+              className="live-viewport-stream-img"
+              src={activeStreamUrl || streamUrl}
+              alt={`Live ${effectiveLiveMode} display`}
+              onLoad={handleImageLoad}
+              onError={(e) => {
+                if (activeFallbackUrl || fallbackUrl) {
+                  (e.target as HTMLImageElement).src = (activeFallbackUrl || fallbackUrl)!;
+                }
+              }}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: viewMode === 'fill' ? 'cover' : 'contain',
+                display: 'block',
+                pointerEvents: 'none',
+              }}
+            />
+            {headlessMode && peekScreen && (
+              <button
+                type="button"
+                onClick={() => setPeekScreen(false)}
+                style={{
+                  position: 'absolute',
+                  top: '10px',
+                  left: '120px',
+                  background: 'rgba(15, 23, 42, 0.9)',
+                  border: '1px solid #c084fc',
+                  color: '#c084fc',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  zIndex: 25
+                }}
+              >
+                Re-mask Headless
+              </button>
+            )}
+          </>
+        )}
 
         {/* Bounding Boxes SVG Overlay */}
         {showBoundingBoxes && effectiveLiveMode === 'desktop' && alignmentData && (
