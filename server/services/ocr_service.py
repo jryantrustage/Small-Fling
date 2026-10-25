@@ -651,7 +651,7 @@ def rescan_lines_on_image_sync(
 
     line_boxes = existing_bboxes.get("line_boxes", {})
     gutter_boxes = existing_bboxes.get("gutter_boxes", {})
-    lines_map = {l.get("line_number"): l for l in existing_lines if l.get("line_number") is not None}
+    lines_map = {int(l.get("line_number")): l for l in existing_lines if l.get("line_number") is not None and str(l.get("line_number")).isdigit()}
     rescanned_lns = []
 
     for ln in line_numbers:
@@ -669,8 +669,8 @@ def rescan_lines_on_image_sync(
             existing_lines.append(target_line)
             lines_map[ln] = target_line
 
-        bbox = target_line.get("bbox") or line_boxes.get(ln)
-        gbox = target_line.get("gutter_bbox") or gutter_boxes.get(ln)
+        bbox = target_line.get("bbox") or line_boxes.get(ln) or line_boxes.get(str(ln))
+        gbox = target_line.get("gutter_bbox") or gutter_boxes.get(ln) or gutter_boxes.get(str(ln))
 
         if bbox:
             y1 = max(0, int(bbox.get("y", 0)) - 6)
@@ -682,9 +682,12 @@ def rescan_lines_on_image_sync(
             y1 = max(0, int(h * 0.15 + (ln - 1) * 32))
             y2 = min(h, y1 + 38)
 
-        gx_end = int(gbox.get("x", 20) + gbox.get("width", 50)) if gbox else 75
+        gx_end = int(gbox.get("x", 20) + gbox.get("width", 50)) if gbox else (int(bbox.get("x", 75)) - 8 if bbox else 75)
         x1 = max(0, gx_end + 8)
         x2 = w
+
+        if x1 >= x2 or y1 >= y2:
+            continue
 
         crop = img[y1:y2, x1:x2]
         if crop.size == 0:
@@ -692,9 +695,14 @@ def rescan_lines_on_image_sync(
 
         res, _ = ocr(crop)
         new_text = ""
+        indent_prefix = ""
         if res:
             sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
-            new_text = " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+            first_x = float(np.min(np.array(sorted_words[0][0])[:, 0])) if sorted_words else 0
+            if first_x >= 14:
+                indent_spaces = max(0, int(round(first_x / 8.2)))
+                indent_prefix = " " * indent_spaces
+            new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
         else:
             try:
                 gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -703,16 +711,21 @@ def rescan_lines_on_image_sync(
                 res_enh, _ = ocr(enhanced)
                 if res_enh:
                     sorted_words = sorted(res_enh, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
-                    new_text = " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+                    first_x = float(np.min(np.array(sorted_words[0][0])[:, 0])) if sorted_words else 0
+                    if first_x >= 14:
+                        indent_spaces = max(0, int(round(first_x / 8.2)))
+                        indent_prefix = " " * indent_spaces
+                    new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
             except Exception:
                 pass
 
-        new_text = re.sub(rf"^{ln}\s*[:\.]?\s*", "", new_text.strip())
+        new_text = sanitize_line_text(ln, new_text)
 
         target_line["text"] = new_text
         target_line["is_blank"] = not bool(new_text.strip())
         target_line["status"] = "rescanned"
         target_line["overwritten"] = True
+        target_line["confidence"] = 0.99
         target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
         rescanned_lns.append(ln)
 

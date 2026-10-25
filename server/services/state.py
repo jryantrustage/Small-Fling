@@ -144,22 +144,31 @@ class MasterLine(str):
         return s
 
     def get(self, key, default=None):
-        if key == "text": return str(self)
+        if key == "text": return self.meta.get("text", str(self))
         if key == "line_number": return self.meta.get("line_number", 0)
         return self.meta.get(key, default)
 
     def __getitem__(self, item):
         if isinstance(item, str):
-            if item == "text": return str(self)
+            if item == "text": return self.meta.get("text", str(self))
             return self.meta.get(item)
         return super().__getitem__(item)
+
+    def __setitem__(self, item, value):
+        if isinstance(item, str):
+            self.meta[item] = value
+            return
+        raise TypeError("MasterLine item assignment only supports string metadata keys")
+
+    def __str__(self):
+        return self.meta.get("text", super().__str__())
 
     def update(self, d: dict):
         self.meta.update(d)
 
     def to_dict(self) -> dict:
         d = dict(self.meta)
-        d["text"] = str(self)
+        d["text"] = self.meta.get("text", str(self))
         d.setdefault("line_number", 0)
         d.setdefault("status", "ok")
         return d

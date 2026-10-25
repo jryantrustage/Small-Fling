@@ -390,10 +390,24 @@ async def rescan_ocr_lines(
     for ln in rescanned:
         line_item = next((l for l in updated_lines if l.get("line_number") == ln), None)
         if line_item and hasattr(state, "document_lines"):
-            if ln in state.document_lines:
-                state.document_lines[ln]["text"] = line_item.get("text", "")
-                state.document_lines[ln]["status"] = "verified"
-                state.document_lines[ln]["overwritten"] = True
+            existing = state.document_lines.get(ln)
+            meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
+            meta.update({
+                "line_number": ln,
+                "gutter_number": ln,
+                "status": "verified",
+                "overwritten": True,
+                "frame_id": target_id,
+                "updated_at": datetime.now().isoformat()
+            })
+            if line_item.get("confidence") is not None:
+                meta["confidence"] = line_item.get("confidence")
+            if line_item.get("is_wrapped") is not None:
+                meta["is_wrapped"] = line_item.get("is_wrapped")
+            state.document_lines[ln] = state.MasterLine(
+                line_item.get("text", ""),
+                **meta
+            )
     state.save_persisted_state()
 
     try:
@@ -402,6 +416,10 @@ async def rescan_ocr_lines(
                 "type": "ocr_lines_rescanned",
                 "image_id": target_id,
                 "rescanned_lines": rescanned
+            })
+            await state.ws_manager.broadcast({
+                "type": "document_updated",
+                "data": _doc_payload()
             })
     except Exception:
         pass
@@ -854,10 +872,12 @@ async def edit_line(line_number: int, req: LineEditRequest):
             "confidence": 1.0, "notes": req.notes or "Manually inserted", "updated_at": datetime.now().isoformat()
         }
     else:
-        state.document_lines[line_number]["text"] = req.text
-        state.document_lines[line_number]["status"] = req.status or "manually_edited"
-        if req.notes: state.document_lines[line_number]["notes"] = req.notes
-        state.document_lines[line_number]["updated_at"] = datetime.now().isoformat()
+        existing = state.document_lines.get(line_number)
+        meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
+        meta["status"] = req.status or "manually_edited"
+        if req.notes: meta["notes"] = req.notes
+        meta["updated_at"] = datetime.now().isoformat()
+        state.document_lines[line_number] = state.MasterLine(req.text, **meta)
     state.save_persisted_state()
     lv = state.document_lines[line_number]
     return {"status": "success", "line": lv.to_dict() if hasattr(lv, "to_dict") else lv}
