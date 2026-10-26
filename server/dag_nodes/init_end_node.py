@@ -17,6 +17,7 @@ import db
 
 
 class InitEndNode(BaseDagNode):
+    step = "1"
     id = "init_end"
     node_id = "init_end"
     title = "1. Determine Total Lines (Ctrl+End)"
@@ -30,6 +31,7 @@ class InitEndNode(BaseDagNode):
         "settle_delay_ms": 1200,
         "manual_total_lines": 0
     }
+    config = default_config.copy()
 
     def __init__(self):
         super().__init__()
@@ -41,7 +43,7 @@ class InitEndNode(BaseDagNode):
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
         calib = state.FRAMES_DIR / "dag_node1_end.png"
 
         # Auto-dismiss any lingering ANR dialogs before attempting editor calibration

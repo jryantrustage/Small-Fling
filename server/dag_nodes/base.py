@@ -131,6 +131,7 @@ class BaseDagNode(ABC):
     Defines id, title, default_position, config, attached_actions,
     and execution lifecycle.
     """
+    step: str = "0"
     id: str = "base"
     title: str = "Base Node"
     short_name: str = "Base"
@@ -175,6 +176,48 @@ class BaseDagNode(ABC):
             state.dag_state["nodes"][self.id]["attached_actions"] = list(action_ids)
         self.attached_actions = list(action_ids)
 
+    def get_config(self) -> Dict[str, Any]:
+        """Returns the uniform merged configuration for this node (defaults + active overrides)."""
+        from services import state
+        node_state = state.dag_state.get("nodes", {}).get(self.id, {})
+        merged = dict(self.default_config)
+        if isinstance(getattr(self, "config", None), dict):
+            merged.update(self.config)
+        if isinstance(node_state.get("config"), dict):
+            merged.update(node_state["config"])
+        return merged
+
+    def set_config(self, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        """Uniformly updates and persists configuration parameters for this node."""
+        from services import state
+        if not isinstance(cfg, dict):
+            return self.get_config()
+        if not hasattr(self, "config") or not isinstance(self.config, dict):
+            self.config = dict(self.default_config)
+        self.config.update(cfg)
+        if self.id in state.dag_state.get("nodes", {}):
+            state.dag_state["nodes"][self.id].setdefault("config", {}).update(cfg)
+        return self.get_config()
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Returns uniform metadata representation for this DAG node."""
+        return {
+            "id": self.id,
+            "node_id": self.id,
+            "step": getattr(self, "step", "0"),
+            "title": self.title,
+            "short_name": self.short_name,
+            "category": self.category,
+            "accent_color": self.accent_color,
+            "default_position": self.default_position,
+            "default_config": self.default_config,
+            "current_config": self.get_config(),
+            "config": self.get_config(),
+            "attached_actions": self.get_attached_actions(),
+            "position": self.get_position(),
+            "has_config": True
+        }
+
     async def _run_actions_for_phase(
         self,
         phase: str,
@@ -217,9 +260,27 @@ class BaseDagNode(ABC):
 
     async def run(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         """Runs the node through pre-actions, core execution, post-actions, and error recovery."""
+        from datetime import datetime
+        from services import state
         t0 = time.perf_counter()
         actions_run: List[str] = []
         timings: Dict[str, Any] = {}
+
+        start_dt = datetime.now()
+        start_str = start_dt.strftime("%H:%M:%S")
+
+        # Uniform active state marking
+        if self.id in state.dag_state.get("nodes", {}):
+            state.dag_state["nodes"][self.id].update({
+                "status": "active",
+                "is_active": True,
+                "started_at": start_str,
+                "started_at_iso": start_dt.isoformat(),
+                "finished_at": None,
+                "duration_ms": None,
+                "error": None
+            })
+            state.dag_state["current_active_node"] = self.id
 
         # 1. Pre-execution Phase
         t_pre = time.perf_counter()
@@ -255,11 +316,34 @@ class BaseDagNode(ABC):
                     res.actions_run = actions_run
                     res.timings = timings
                     res.duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+                    finish_dt = datetime.now()
+                    if self.id in state.dag_state.get("nodes", {}):
+                        state.dag_state["nodes"][self.id].update({
+                            "status": "completed" if res.status == "success" else res.status,
+                            "is_active": False,
+                            "finished_at": finish_dt.strftime("%H:%M:%S"),
+                            "duration_ms": res.duration_ms,
+                            "timings": timings,
+                            "actions_run": actions_run,
+                            "error": None
+                        })
                     return res
                 except Exception as retry_err:
                     e = retry_err
 
             total_ms = round((time.perf_counter() - t0) * 1000, 2)
+            finish_dt = datetime.now()
+            if self.id in state.dag_state.get("nodes", {}):
+                state.dag_state["nodes"][self.id].update({
+                    "status": "error",
+                    "is_active": False,
+                    "finished_at": finish_dt.strftime("%H:%M:%S"),
+                    "duration_ms": total_ms,
+                    "timings": timings,
+                    "actions_run": actions_run,
+                    "error": str(e)
+                })
             return NodeExecutionResult(
                 status="error",
                 node_id=self.id,
@@ -279,6 +363,18 @@ class BaseDagNode(ABC):
         res.duration_ms = total_ms
         res.actions_run.extend(actions_run)
         res.timings = timings
+
+        finish_dt = datetime.now()
+        if self.id in state.dag_state.get("nodes", {}):
+            final_status = "prevented" if res.status == "prevented" else ("completed" if res.status == "success" else res.status)
+            state.dag_state["nodes"][self.id].update({
+                "status": final_status,
+                "is_active": False,
+                "finished_at": finish_dt.strftime("%H:%M:%S"),
+                "duration_ms": total_ms,
+                "timings": timings,
+                "actions_run": actions_run
+            })
         return res
 
     async def execute(self, blackboard: DagBlackboard) -> Dict[str, Any]:

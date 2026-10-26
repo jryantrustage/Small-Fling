@@ -12,22 +12,24 @@ from services import state
 
 
 class BatchFramesOcrNode(BaseDagNode):
+    step = "9"
     id = "batch_frames_ocr"
     node_id = "batch_frames_ocr"
     title = "9. Batch Sequential Frames OCR"
-    short_name = "Sequential Rescan"
-    category = "document_assembly"
+    short_name = "Batch OCR Rescan"
+    category = "verify_assemble"
     accent_color = "#00ff9d"
-    default_position = {"x": 1800.0, "y": 140.0}
+    default_position = {"x": 1820.0, "y": 140.0}
     default_config = {
-        "clear_existing": False
+        "clear_existing": False,
+        "auto_save_markdown": True
     }
     config = default_config.copy()
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         from services.ocr_service import sequential_rescan_all_frames_task
 
-        cfg = blackboard.config or self.config or {}
+        cfg = blackboard.config or self.get_config()
         clear_existing = bool(
             cfg.get("clear_existing", False)
             or (blackboard.payload and blackboard.payload.get("clear_existing", False))

@@ -18,6 +18,7 @@ import db
 
 
 class ResetHomeNode(BaseDagNode):
+    step = "2"
     id = "reset_home"
     node_id = "reset_home"
     title = "2. Return to Line 1 (Ctrl+Home)"
@@ -31,6 +32,7 @@ class ResetHomeNode(BaseDagNode):
         "settle_delay_ms": 1000,
         "expected_line": 1
     }
+    config = default_config.copy()
 
     def __init__(self):
         super().__init__()
@@ -42,6 +44,7 @@ class ResetHomeNode(BaseDagNode):
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
+        cfg = blackboard.config or self.get_config()
         calib = state.FRAMES_DIR / "dag_node2_home.png"
 
         # Auto-dismiss any lingering ANR dialogs before attempting Line 1 return

@@ -19,6 +19,7 @@ import db
 
 
 class FrameAcquireNode(BaseDagNode):
+    step = "3"
     id = "frame_acquire"
     node_id = "frame_acquire"
     title = "3. Screen Capture & Acquisition"
@@ -33,11 +34,12 @@ class FrameAcquireNode(BaseDagNode):
         "settle_delay_ms": 40,
         "save_frame": True
     }
+    config = default_config.copy()
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
 
         # 1. Settle delay
         settle_ms = float(cfg.get("settle_delay_ms", 40)) / 1000.0

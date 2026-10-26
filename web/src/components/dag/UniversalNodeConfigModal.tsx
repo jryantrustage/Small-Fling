@@ -1188,7 +1188,7 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
               <label style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e' }}>SETTLE DELAY (MS)</label>
               <input
                 type="number"
-                value={localConfig.settle_delay_ms ?? 50}
+                value={localConfig.settle_delay_ms ?? (nodeId === 'init_end' ? 1200 : (nodeId === 'reset_home' ? 1000 : (nodeId === 'frame_acquire' ? 40 : (nodeId === 'arrow_down' ? 60 : 50))))}
                 onChange={(e) => setLocalConfig(prev => ({ ...prev, settle_delay_ms: parseInt(e.target.value) || 0 }))}
                 style={{
                   background: '#161b22', border: '1px solid #30363d', borderRadius: '6px',
@@ -1215,24 +1215,59 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
               </div>
             )}
 
+            {/* Node 2 specifics */}
+            {nodeId === 'reset_home' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e' }}>EXPECTED RESET TARGET LINE</label>
+                <input
+                  type="number"
+                  value={localConfig.expected_line ?? 1}
+                  onChange={(e) => setLocalConfig(prev => ({ ...prev, expected_line: parseInt(e.target.value) || 1 }))}
+                  style={{
+                    background: '#161b22', border: '1px solid #30363d', borderRadius: '6px',
+                    padding: '7px 10px', color: '#f0f6fc', fontSize: '12px'
+                  }}
+                />
+                <span style={{ fontSize: '10px', color: '#8b949e' }}>Target top line number expected when viewport navigation reset completes.</span>
+              </div>
+            )}
+
             {/* Node 3 specifics */}
             {nodeId === 'frame_acquire' && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
-                <div>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Guard Soft Keyboard</div>
-                  <div style={{ fontSize: '10px', color: '#8b949e' }}>Automatically suppresses soft keyboard before screen capture.</div>
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Guard Soft Keyboard</div>
+                    <div style={{ fontSize: '10px', color: '#8b949e' }}>Automatically suppresses soft keyboard before screen capture.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig(prev => ({ ...prev, guard_keyboard: !prev.guard_keyboard }))}
+                    style={{
+                      background: localConfig.guard_keyboard !== false ? '#238636' : '#21262d',
+                      color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {localConfig.guard_keyboard !== false ? 'ACTIVE' : 'OFF'}
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setLocalConfig(prev => ({ ...prev, guard_keyboard: !prev.guard_keyboard }))}
-                  style={{
-                    background: localConfig.guard_keyboard ? '#238636' : '#21262d',
-                    color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
-                  }}
-                >
-                  {localConfig.guard_keyboard ? 'ACTIVE' : 'OFF'}
-                </button>
-              </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Fast Acquisition Mode</div>
+                    <div style={{ fontSize: '10px', color: '#8b949e' }}>Optimizes screen stream buffers for low-latency capture cycles.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig(prev => ({ ...prev, fast_mode: !prev.fast_mode }))}
+                    style={{
+                      background: localConfig.fast_mode ? '#238636' : '#21262d',
+                      color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {localConfig.fast_mode ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+              </>
             )}
 
             {/* Node 4 specifics */}
@@ -1357,6 +1392,80 @@ export const UniversalNodeConfigModal: React.FC<UniversalNodeConfigModalProps> =
                   {localConfig.prevent_trigger_on_issue !== false ? 'ENABLED' : 'DISABLED'}
                 </button>
               </div>
+            )}
+
+            {/* Node 8 specifics */}
+            {nodeId === 'document_assemble' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Auto-Save Markdown</div>
+                    <div style={{ fontSize: '10px', color: '#8b949e' }}>Automatically writes compiled markdown document to workspace output.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig(prev => ({ ...prev, auto_save_markdown: !prev.auto_save_markdown }))}
+                    style={{
+                      background: localConfig.auto_save_markdown !== false ? '#238636' : '#21262d',
+                      color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {localConfig.auto_save_markdown !== false ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 700, color: '#8b949e' }}>OUTPUT FILENAME (OPTIONAL)</label>
+                  <input
+                    type="text"
+                    value={localConfig.output_filename || ''}
+                    placeholder="e.g. document_assembled.md"
+                    onChange={(e) => setLocalConfig(prev => ({ ...prev, output_filename: e.target.value }))}
+                    style={{
+                      background: '#161b22', border: '1px solid #30363d', borderRadius: '6px',
+                      padding: '7px 10px', color: '#f0f6fc', fontSize: '12px'
+                    }}
+                  />
+                  <span style={{ fontSize: '10px', color: '#8b949e' }}>Custom filename or path. Leave blank to use default timestamped name.</span>
+                </div>
+              </>
+            )}
+
+            {/* Node 9 specifics */}
+            {nodeId === 'batch_frames_ocr' && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Clear Existing Text Before Rescan</div>
+                    <div style={{ fontSize: '10px', color: '#8b949e' }}>Purges previous markdown buffer before starting batch pass.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig(prev => ({ ...prev, clear_existing: !prev.clear_existing }))}
+                    style={{
+                      background: localConfig.clear_existing ? '#238636' : '#21262d',
+                      color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {localConfig.clear_existing ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#161b22', padding: '10px', borderRadius: '6px', border: '1px solid #30363d' }}>
+                  <div>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>Auto-Save Markdown Output</div>
+                    <div style={{ fontSize: '10px', color: '#8b949e' }}>Exports final transcript once all captured frames are processed.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLocalConfig(prev => ({ ...prev, auto_save_markdown: !prev.auto_save_markdown }))}
+                    style={{
+                      background: localConfig.auto_save_markdown !== false ? '#238636' : '#21262d',
+                      color: '#fff', border: 'none', borderRadius: '16px', padding: '4px 10px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+                    }}
+                  >
+                    {localConfig.auto_save_markdown !== false ? 'ENABLED' : 'DISABLED'}
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}

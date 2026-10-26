@@ -140,7 +140,8 @@ export const NODES_METADATA: NodeMeta[] = [
     subhead: 'HID Ctrl + End & Last Line OCR',
     desc: 'Sends HID Ctrl+End keys, verifies gutter at EOF, then displays total lines by OCR of last line.',
     group: 'initialize',
-    accentColor: '#58a6ff'
+    accentColor: '#58a6ff',
+    hasConfig: true
   },
   {
     id: 'reset_home',
@@ -150,7 +151,8 @@ export const NODES_METADATA: NodeMeta[] = [
     subhead: 'HID Ctrl + Home & Verify Line 1',
     desc: 'Sends HID Ctrl+Home to return to line 1, then verifies line 1 is on top in gutter.',
     group: 'initialize',
-    accentColor: '#a371f7'
+    accentColor: '#a371f7',
+    hasConfig: true
   },
   {
     id: 'frame_acquire',
@@ -171,7 +173,8 @@ export const NODES_METADATA: NodeMeta[] = [
     subhead: 'MiniCPM-V Vision',
     desc: 'Extracts verbatim markdown & code lines using local MiniCPM-V multimodal vision model in Ollama.',
     group: 'capture_entire_markdown',
-    accentColor: '#388bfd'
+    accentColor: '#388bfd',
+    hasConfig: true
   },
   {
     id: 'frame_ocr',
@@ -192,7 +195,8 @@ export const NODES_METADATA: NodeMeta[] = [
     subhead: 'Position Target Top',
     desc: 'Positions next target top line (prev bottom + 1) onto top gutter using calculated DownArrow presses.',
     group: 'position_navigation',
-    accentColor: '#ffa657'
+    accentColor: '#ffa657',
+    hasConfig: true
   },
   {
     id: 'verification_trigger',
@@ -225,7 +229,7 @@ export const NODES_METADATA: NodeMeta[] = [
     desc: 'Runs full OCR rescan on each captured frame sequentially top-to-bottom, aligning duplicated line numbers and assembling markdown.',
     group: 'verify_assemble',
     accentColor: '#00ff9d',
-    hasConfig: false
+    hasConfig: true
   }
 ];
 

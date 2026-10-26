@@ -25,12 +25,13 @@ import db
 
 
 class ArrowDownPagerNode(BaseDagNode):
+    step = "6"
     id = "arrow_down"
     node_id = "arrow_down"
-    title = "6. Arrow Down Pager"
-    short_name = "Arrow Down"
-    category = "capture_entire_markdown"
-    accent_color = "#3b82f6"
+    title = "6. Viewport Navigation (Down Arrow)"
+    short_name = "Scroll Down"
+    category = "position_navigation"
+    accent_color = "#ffa657"
     default_position = {"x": 1160.0, "y": 140.0}
     default_config = {
         "scroll_padding_lines": 4,
@@ -42,7 +43,7 @@ class ArrowDownPagerNode(BaseDagNode):
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
         is_mock = serial and "mock" in str(serial).lower()
 
         # Resolve prior page bottom line number

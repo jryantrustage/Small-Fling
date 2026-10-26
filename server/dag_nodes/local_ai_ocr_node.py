@@ -17,12 +17,13 @@ import db
 
 
 class LocalAiOcrNode(BaseDagNode):
+    step = "4"
     id = "local_ai_ocr"
     node_id = "local_ai_ocr"
     title = "4. Local AI Model Transcription"
-    short_name = "Local AI OCR"
+    short_name = "MiniCPM-V"
     category = "capture_entire_markdown"
-    accent_color = "#38bdf8"
+    accent_color = "#388bfd"
     default_position = {"x": 720.0, "y": 140.0}
     default_config = {
         "model": "MiniCPM-V (Ollama)",
@@ -30,9 +31,10 @@ class LocalAiOcrNode(BaseDagNode):
         "background_worker": False,
         "save_to_document": True
     }
+    config = default_config.copy()
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
 
         if cfg.get("bypass_live_ocr") or (blackboard.payload and blackboard.payload.get("bypass_live_ocr")) or state.dag_state.get("bypass_live_ocr"):
             state.dag_state["nodes"].setdefault("local_ai_ocr", {}).update({

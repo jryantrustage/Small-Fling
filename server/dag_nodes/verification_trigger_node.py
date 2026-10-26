@@ -15,14 +15,16 @@ from services import state
 
 
 class VerificationTriggerNode(BaseDagNode):
+    step = "7"
     id = "verification_trigger"
     node_id = "verification_trigger"
     title = "7. Verification & Qualifier Trigger"
-    short_name = "Trigger Qualifier"
-    category = "loop_governance"
-    accent_color = "#eab308"
+    short_name = "Verify Trigger"
+    category = "verify_assemble"
+    accent_color = "#58a6ff"
     default_position = {"x": 1380.0, "y": 140.0}
     default_config = {
+        "prevent_trigger_on_issue": True,
         "strict_continuity": True,
         "auto_heal_qualifiers": True
     }
@@ -32,7 +34,7 @@ class VerificationTriggerNode(BaseDagNode):
         from routers.orchestration import evaluate_node_5_decision, auto_heal_pipeline_environment
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
 
         # 1. Guard check: arrow_down must have reached target line
         n6_info = state.dag_state["nodes"].get("arrow_down", {})

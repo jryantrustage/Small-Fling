@@ -25,12 +25,13 @@ import db
 
 
 class FrameOcrNode(BaseDagNode):
+    step = "5"
     id = "frame_ocr"
     node_id = "frame_ocr"
     title = "5. Gutter OCR & Boundary Slicer"
     short_name = "Gutter OCR"
-    category = "capture_entire_markdown"
-    accent_color = "#f59e0b"
+    category = "position_navigation"
+    accent_color = "#8957e5"
     default_position = {"x": 940.0, "y": 140.0}
     default_config = {
         "fast_loop": False,
@@ -42,7 +43,7 @@ class FrameOcrNode(BaseDagNode):
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
         serial = blackboard.active_serial or await get_active_adb_serial()
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
-        cfg = blackboard.config or self.default_config
+        cfg = blackboard.config or self.get_config()
 
         temp_calib = blackboard.current_image_path or (state.FRAMES_DIR / "dag_node3_capture_temp.png")
         snap = None

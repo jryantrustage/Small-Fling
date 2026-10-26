@@ -11,20 +11,23 @@ from services import state
 
 
 class DocumentAssembleNode(BaseDagNode):
+    step = "8"
     id = "document_assemble"
     node_id = "document_assemble"
     title = "8. Master Document Assembly & EOF"
-    short_name = "Document Assembly"
-    category = "loop_governance"
-    accent_color = "#10b981"
+    short_name = "Assemble Doc"
+    category = "verify_assemble"
+    accent_color = "#bc8cff"
     default_position = {"x": 1600.0, "y": 140.0}
     default_config = {
         "auto_save_markdown": True,
-        "completion_threshold_pct": 100.0
+        "completion_threshold_pct": 100.0,
+        "output_filename": "reconstructed.md"
     }
     config = default_config.copy()
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
+        cfg = blackboard.config or self.get_config()
         total_lines_target = (
             blackboard.total_lines
             or state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)

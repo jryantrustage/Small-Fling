@@ -333,12 +333,31 @@ NODE_ALIAS_MAP = {
     "node_9": "batch_frames_ocr", "batch_frames_ocr": "batch_frames_ocr", "sequential_rescan": "batch_frames_ocr", "batch_ocr": "batch_frames_ocr"
 }
 
+@router.get("/api/dag/nodes/metadata")
+async def get_all_dag_nodes_metadata():
+    """Returns uniform metadata definitions for all modular DAG nodes."""
+    nodes = dag_node_registry.get_all_nodes()
+    return {
+        "status": "success",
+        "nodes": [n.get_metadata() for n in nodes]
+    }
+
 @router.get("/api/dag/nodes/{node_id}/config")
 async def get_dag_node_config(node_id: str):
     target_key = NODE_ALIAS_MAP.get(node_id, node_id)
     node = state.dag_state["nodes"].get(target_key)
     if not node: raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
-    return {"status": "success", "node_id": target_key, "title": node.get("title", ""), "config": node.get("config", {}), "status_code": node.get("status", "idle"), "trigger_decision": node.get("trigger_decision", {}) if target_key == "verification_trigger" else None}
+    dag_node = dag_node_registry.get_node(target_key)
+    cfg = dag_node.get_config() if dag_node else node.get("config", {})
+    title = dag_node.title if dag_node else node.get("title", "")
+    return {
+        "status": "success",
+        "node_id": target_key,
+        "title": title,
+        "config": cfg,
+        "status_code": node.get("status", "idle"),
+        "trigger_decision": node.get("trigger_decision", {}) if target_key == "verification_trigger" else None
+    }
 
 @router.get("/api/dag/nodes/{node_id}/root-cause")
 async def get_dag_node_root_cause(node_id: str):
@@ -391,6 +410,10 @@ async def update_dag_node_config(node_id: str, payload: Dict[str, Any]):
     else:
         cfg.update(payload)
         decision = None
+
+    dag_node = dag_node_registry.get_node(target_key)
+    if dag_node:
+        dag_node.set_config(cfg)
 
     await state.ws_manager.broadcast({"type": "dag_node_configured", "node_id": target_key, "config": cfg, "trigger_decision": decision, "dag": state.dag_state})
     return {"status": "success", "node_id": target_key, "config": cfg, "trigger_decision": decision}
