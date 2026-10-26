@@ -4,7 +4,7 @@ import {
   Maximize2, Square, Lock, Sliders,
   RotateCcw, LayoutGrid, ZoomIn, ZoomOut, GripHorizontal,
   ShieldAlert, Unlock, Info, Shield, Keyboard, Monitor, Smartphone, Zap, Cpu, Activity,
-  Save
+  Save, MoreHorizontal
 } from 'lucide-react';
 import { cleanErrorMessage } from './utils/logParser';
 import type { ProjectData } from './types';
@@ -187,6 +187,29 @@ export const FlowDag: React.FC<FlowDagProps> = ({
 
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
   const effectiveSelectedDag = onSelectDag ? selectedDag : internalSelectedDag;
+
+  // Simple vs Complex view mode for DAG area (defaults to simple view)
+  const [isSimpleHeaderMode, setIsSimpleHeaderMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('flow_dag_simple_header_mode');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleSimpleHeaderMode = () => {
+    setIsSimpleHeaderMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('flow_dag_simple_header_mode', String(next));
+      } catch {}
+      if (next && (effectiveSelectedDag === 'position_navigation' || effectiveSelectedDag === 'verify_assemble')) {
+        handleDagSelect('capture_entire_markdown');
+      }
+      return next;
+    });
+  };
 
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string>('init_end');
   const activeSelectedNodeId = selectedNodeId !== undefined ? selectedNodeId : internalSelectedNodeId;
@@ -1658,37 +1681,12 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               {isCaptureGroupRunning ? 'LOOP ACTIVE' : (isInitGroupRunning ? 'INITIALIZING' : 'READY')}
             </span>
 
-            {/* Device Characteristic & Lock Badge */}
-            <button
-              type="button"
-              onClick={() => onOpenSettings?.('device')}
-              title={activeProject?.lock_device
-                ? `Locked to ${activeProject.device_name || activeProject.device_model || 'Hardware'} (${activeProject.target_dpi || 220} DPI) • Click to configure`
-                : `Hardware Dynamic (${activeProject?.target_dpi || 220} DPI) • Click to configure in Settings`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '2px 7px',
-                borderRadius: '4px',
-                background: activeProject?.lock_device ? 'rgba(210, 153, 34, 0.18)' : 'rgba(56, 139, 253, 0.12)',
-                border: `1px solid ${activeProject?.lock_device ? 'rgba(210, 153, 34, 0.45)' : 'rgba(56, 139, 253, 0.3)'}`,
-                color: activeProject?.lock_device ? '#e3b341' : '#58a6ff',
-                fontSize: '9px',
-                fontFamily: 'var(--font-mono)',
-                fontWeight: 700,
-                cursor: 'pointer',
-                height: '22px'
-              }}
-            >
-              {activeProject?.lock_device ? <Lock size={10} /> : <Sliders size={10} />}
-              <span>{activeProject?.lock_device ? (activeProject.device_name || (activeProject.device_model ? activeProject.device_model.toUpperCase() : 'LOCKED')) : 'DYNAMIC'}</span>
-              <span style={{ opacity: 0.75 }}>{activeProject?.target_dpi ? `${activeProject.target_dpi}DPI` : ''}</span>
-            </button>
-
-            {/* Filter buttons */}
+            {/* Filter buttons (Simple: All | DAG 1 | DAG 2; Complex: All | DAG 1 | DAG 2 | DAG 3 | DAG 4) */}
             <div style={{ display: 'inline-flex', background: '#161b22', padding: '2px', borderRadius: '5px', border: '1px solid #30363d', gap: '2px' }}>
-              {(['all', 'initialize', 'capture_entire_markdown', 'position_navigation', 'verify_assemble'] as const).map(dag => (
+              {(isSimpleHeaderMode
+                ? (['all', 'initialize', 'capture_entire_markdown'] as const)
+                : (['all', 'initialize', 'capture_entire_markdown', 'position_navigation', 'verify_assemble'] as const)
+              ).map(dag => (
                 <button
                   key={dag}
                   type="button"
@@ -1697,13 +1695,55 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                     padding: '2px 7px', fontSize: '9px', fontWeight: effectiveSelectedDag === dag ? 800 : 600,
                     background: effectiveSelectedDag === dag ? '#388bfd' : 'transparent',
                     color: effectiveSelectedDag === dag ? '#fff' : '#8b949e',
-                    border: 'none', borderRadius: '3px', cursor: 'pointer'
+                    border: 'none', borderRadius: '3px', cursor: 'pointer',
+                    transition: 'all 0.15s ease'
                   }}
                 >
                   {dag === 'all' ? 'All' : (dag === 'initialize' ? 'DAG 1' : (dag === 'capture_entire_markdown' ? 'DAG 2' : (dag === 'position_navigation' ? 'DAG 3' : 'DAG 4')))}
                 </button>
               ))}
             </div>
+
+            {/* Continuous Capture Loop Toggle */}
+            <button
+              type="button"
+              onClick={handleToggleLoop}
+              disabled={isInitGroupRunning}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 9px',
+                borderRadius: '4px', border: `1px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
+                background: isLoopRunning ? 'rgba(248, 81, 73, 0.15)' : 'rgba(0, 255, 157, 0.12)',
+                color: isLoopRunning ? '#ff7b72' : '#00ff9d',
+                fontSize: '9px', fontWeight: 700, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer',
+                letterSpacing: '0.2px', height: '22px'
+              }}
+              title={isLoopRunning ? 'Stop continuous capture loop' : 'Start continuous loop (Runs DAG 1 if needed, then DAG 2 continuous loop)'}
+            >
+              {isLoopRunning ? <Square size={9} fill="#ff7b72" /> : <Play size={9} fill="#00ff9d" />}
+              <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
+            </button>
+
+            {/* More '...' Toggle Button to Animate Advanced DAG Area Features */}
+            <button
+              type="button"
+              onClick={toggleSimpleHeaderMode}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                border: `1px solid ${!isSimpleHeaderMode ? '#388bfd' : '#30363d'}`,
+                background: !isSimpleHeaderMode ? 'rgba(56, 139, 253, 0.18)' : 'rgba(255, 255, 255, 0.04)',
+                color: !isSimpleHeaderMode ? '#58a6ff' : '#8b949e',
+                cursor: 'pointer',
+                height: '22px',
+                transition: 'all 0.2s ease'
+              }}
+              title={isSimpleHeaderMode ? 'Show advanced DAG controls, connectors & subgraphs (...)' : 'Switch to simplified DAG view'}
+            >
+              <MoreHorizontal size={13} />
+            </button>
 
             {/* Multi-Selection / Group Indicator Badge */}
             {selectedNodeIds.length > 1 && (
@@ -1745,151 +1785,175 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               </div>
             )}
 
-            {/* Direct Flow Connectors Bar */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-              <button
-                type="button"
-                onClick={() => handleToggleConnector('local_ai_ocr', 'frame_ocr', 'local_ai_ocr->frame_ocr')}
-                disabled={Boolean(isTogglingConnector)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
-                  borderRadius: '4px', border: `1px solid ${isConnector1Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
-                  background: isConnector1Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
-                  color: isConnector1Open ? '#3fb950' : '#ff7b72',
-                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
-                }}
-                title={isConnector1Open ? 'Connector (DAG 2➔3): Connected. Click to toggle.' : 'Connector (DAG 2➔3): Severed. Click to toggle.'}
-              >
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector1Open ? '#3fb950' : '#f85149' }} />
-                <span>C1 (2➔3)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleToggleConnector('arrow_down', 'verification_trigger', 'arrow_down->verification_trigger')}
-                disabled={Boolean(isTogglingConnector)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
-                  borderRadius: '4px', border: `1px solid ${isConnector2Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
-                  background: isConnector2Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
-                  color: isConnector2Open ? '#3fb950' : '#ff7b72',
-                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
-                }}
-                title={isConnector2Open ? 'Connector (DAG 3➔4): Connected. Click to toggle.' : 'Connector (DAG 3➔4): Severed. Click to toggle.'}
-              >
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector2Open ? '#3fb950' : '#f85149' }} />
-                <span>C2 (3➔4)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleToggleConnector('document_assemble', 'frame_acquire', 'document_assemble->frame_acquire')}
-                disabled={Boolean(isTogglingConnector)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
-                  borderRadius: '4px', border: `1px solid ${isLoopbackConnected ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
-                  background: isLoopbackConnected ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
-                  color: isLoopbackConnected ? '#3fb950' : '#ff7b72',
-                  fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
-                }}
-                title={isLoopbackConnected ? 'Loopback (8➔3): Connected. Click to toggle.' : 'Loopback (8➔3): Severed. Click to toggle.'}
-              >
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isLoopbackConnected ? '#3fb950' : '#f85149' }} />
-                <span>Loop (8➔3)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleResetDefaultFlow}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
-                  borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.08)',
-                  background: 'rgba(255, 255, 255, 0.03)', color: '#8b949e',
-                  fontSize: '8.5px', fontWeight: 600, cursor: 'pointer', height: '22px'
-                }}
-                title="Reset all node connectors back to standard sequential pipeline"
-              >
-                <RotateCcw size={9} />
-                <span>Reset</span>
-              </button>
-            </div>
-
-            {/* Continuous Capture Loop Toggle */}
-            <button
-              type="button"
-              onClick={handleToggleLoop}
-              disabled={isInitGroupRunning}
+            {/* Collapsible Advanced Header Controls Cluster */}
+            <div
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '2px 9px',
-                borderRadius: '4px', border: `1px solid ${isLoopRunning ? '#f85149' : '#00ff9d'}`,
-                background: isLoopRunning ? 'rgba(248, 81, 73, 0.15)' : 'rgba(0, 255, 157, 0.12)',
-                color: isLoopRunning ? '#ff7b72' : '#00ff9d',
-                fontSize: '9px', fontWeight: 700, cursor: isInitGroupRunning ? 'not-allowed' : 'pointer',
-                letterSpacing: '0.2px', height: '22px'
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                maxWidth: isSimpleHeaderMode ? '0px' : '850px',
+                opacity: isSimpleHeaderMode ? 0 : 1,
+                overflow: 'hidden',
+                transition: 'max-width 0.32s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.22s ease',
+                pointerEvents: isSimpleHeaderMode ? 'none' : 'auto',
+                whiteSpace: 'nowrap'
               }}
-              title={isLoopRunning ? 'Stop continuous capture loop' : 'Start continuous loop (Nodes 3→8 Repeating until 100% captured)'}
             >
-              {isLoopRunning ? <Square size={9} fill="#ff7b72" /> : <Play size={9} fill="#00ff9d" />}
-              <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
-            </button>
-
-            {/* Prohibit Desktop Keyboard Toggle Button */}
-            {onToggleProhibitKeyboard && (
+              {/* Device Characteristic & Lock Badge */}
               <button
                 type="button"
-                onClick={() => onToggleProhibitKeyboard(!desktopKeyboardProhibited)}
+                onClick={() => onOpenSettings?.('device')}
+                title={activeProject?.lock_device
+                  ? `Locked to ${activeProject.device_name || activeProject.device_model || 'Hardware'} (${activeProject.target_dpi || 220} DPI) • Click to configure`
+                  : `Hardware Dynamic (${activeProject?.target_dpi || 220} DPI) • Click to configure in Settings`}
                 style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '2px 7px',
                   borderRadius: '4px',
-                  border: `1px solid ${desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)'}`,
-                  background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.18)' : 'rgba(210, 153, 34, 0.18)',
-                  color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341',
-                  fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
+                  background: activeProject?.lock_device ? 'rgba(210, 153, 34, 0.18)' : 'rgba(56, 139, 253, 0.12)',
+                  border: `1px solid ${activeProject?.lock_device ? 'rgba(210, 153, 34, 0.45)' : 'rgba(56, 139, 253, 0.3)'}`,
+                  color: activeProject?.lock_device ? '#e3b341' : '#58a6ff',
+                  fontSize: '9px',
+                  fontFamily: 'var(--font-mono)',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  height: '22px'
                 }}
-                title={desktopKeyboardProhibited
-                  ? 'Desktop Soft Keyboard is PROHIBITED (Disabled at OS level so clicking nodes will NEVER pop open the keyboard). Click to allow.'
-                  : 'Desktop Soft Keyboard is ALLOWED. Click to completely prohibit soft keyboard on desktop screen.'}
               >
-                <Keyboard size={10} />
-                <span>{desktopKeyboardProhibited ? 'KEYBOARD: BLOCKED' : 'BLOCK KEYBOARD'}</span>
+                {activeProject?.lock_device ? <Lock size={10} /> : <Sliders size={10} />}
+                <span>{activeProject?.lock_device ? (activeProject.device_name || (activeProject.device_model ? activeProject.device_model.toUpperCase() : 'LOCKED')) : 'DYNAMIC'}</span>
+                <span style={{ opacity: 0.75 }}>{activeProject?.target_dpi ? `${activeProject.target_dpi}DPI` : ''}</span>
               </button>
-            )}
 
-            {/* Desktop Mode / Phone Screen (Mouse) Toggle Button */}
-            {onToggleDesktopMode && (
-              <button
-                type="button"
-                onClick={() => onToggleDesktopMode(!desktopModeEnabled)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
-                  borderRadius: '4px',
-                  border: `1px solid ${
-                    desktopModeEnabled
-                      ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.6)' : 'rgba(56, 139, 253, 0.6)')
-                      : 'rgba(163, 113, 247, 0.6)'
-                  }`,
-                  background: desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.18)' : 'rgba(56, 139, 253, 0.18)')
-                    : 'rgba(163, 113, 247, 0.18)',
-                  color: desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff')
-                    : '#d2a8ff',
-                  fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
-                }}
-                title={desktopModeEnabled
-                  ? (desktopVerification?.hardware_connected
-                      ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to route mouse to phone screen.`
-                      : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to route mouse to phone.')
-                  : 'Phone Screen Mode ON (Mouse routed to phone display 0, kiosk unlocked, keyboard enabled). Click to return to Desktop Mode.'}
-              >
-                {desktopModeEnabled ? <Monitor size={10} /> : <Smartphone size={10} />}
-                <span>
-                  {desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'DESKTOP ON (CONNECTED)' : 'DESKTOP (READY TO PLUG IN)')
-                    : 'PHONE SCREEN (MOUSE)'}
-                </span>
-              </button>
-            )}
+              {/* Direct Flow Connectors Bar */}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleToggleConnector('local_ai_ocr', 'frame_ocr', 'local_ai_ocr->frame_ocr')}
+                  disabled={Boolean(isTogglingConnector)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                    borderRadius: '4px', border: `1px solid ${isConnector1Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                    background: isConnector1Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
+                    color: isConnector1Open ? '#3fb950' : '#ff7b72',
+                    fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
+                  }}
+                  title={isConnector1Open ? 'Connector (DAG 2➔3): Connected. Click to toggle.' : 'Connector (DAG 2➔3): Severed. Click to toggle.'}
+                >
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector1Open ? '#3fb950' : '#f85149' }} />
+                  <span>C1 (2➔3)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleConnector('arrow_down', 'verification_trigger', 'arrow_down->verification_trigger')}
+                  disabled={Boolean(isTogglingConnector)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                    borderRadius: '4px', border: `1px solid ${isConnector2Open ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                    background: isConnector2Open ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
+                    color: isConnector2Open ? '#3fb950' : '#ff7b72',
+                    fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
+                  }}
+                  title={isConnector2Open ? 'Connector (DAG 3➔4): Connected. Click to toggle.' : 'Connector (DAG 3➔4): Severed. Click to toggle.'}
+                >
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnector2Open ? '#3fb950' : '#f85149' }} />
+                  <span>C2 (3➔4)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleToggleConnector('document_assemble', 'frame_acquire', 'document_assemble->frame_acquire')}
+                  disabled={Boolean(isTogglingConnector)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 6px',
+                    borderRadius: '4px', border: `1px solid ${isLoopbackConnected ? 'rgba(63, 185, 80, 0.4)' : 'rgba(248, 81, 73, 0.4)'}`,
+                    background: isLoopbackConnected ? 'rgba(63, 185, 80, 0.1)' : 'rgba(248, 81, 73, 0.1)',
+                    color: isLoopbackConnected ? '#3fb950' : '#ff7b72',
+                    fontSize: '8.5px', fontWeight: 700, cursor: 'pointer', height: '22px'
+                  }}
+                  title={isLoopbackConnected ? 'Loopback (8➔3): Connected. Click to toggle.' : 'Loopback (8➔3): Severed. Click to toggle.'}
+                >
+                  <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isLoopbackConnected ? '#3fb950' : '#f85149' }} />
+                  <span>Loop (8➔3)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleResetDefaultFlow}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '3px', padding: '2px 6px',
+                    borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.08)',
+                    background: 'rgba(255, 255, 255, 0.03)', color: '#8b949e',
+                    fontSize: '8.5px', fontWeight: 600, cursor: 'pointer', height: '22px'
+                  }}
+                  title="Reset all node connectors back to standard sequential pipeline"
+                >
+                  <RotateCcw size={9} />
+                  <span>Reset</span>
+                </button>
+              </div>
+
+              {/* Prohibit Desktop Keyboard Toggle Button */}
+              {onToggleProhibitKeyboard && (
+                <button
+                  type="button"
+                  onClick={() => onToggleProhibitKeyboard(!desktopKeyboardProhibited)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                    borderRadius: '4px',
+                    border: `1px solid ${desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)'}`,
+                    background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.18)' : 'rgba(210, 153, 34, 0.18)',
+                    color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341',
+                    fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
+                  }}
+                  title={desktopKeyboardProhibited
+                    ? 'Desktop Soft Keyboard is PROHIBITED (Disabled at OS level so clicking nodes will NEVER pop open the keyboard). Click to allow.'
+                    : 'Desktop Soft Keyboard is ALLOWED. Click to completely prohibit soft keyboard on desktop screen.'}
+                >
+                  <Keyboard size={10} />
+                  <span>{desktopKeyboardProhibited ? 'KEYBOARD: BLOCKED' : 'BLOCK KEYBOARD'}</span>
+                </button>
+              )}
+
+              {/* Desktop Mode / Phone Screen (Mouse) Toggle Button */}
+              {onToggleDesktopMode && (
+                <button
+                  type="button"
+                  onClick={() => onToggleDesktopMode(!desktopModeEnabled)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                    borderRadius: '4px',
+                    border: `1px solid ${
+                      desktopModeEnabled
+                        ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.6)' : 'rgba(56, 139, 253, 0.6)')
+                        : 'rgba(163, 113, 247, 0.6)'
+                    }`,
+                    background: desktopModeEnabled
+                      ? (desktopVerification?.hardware_connected ? 'rgba(63, 185, 80, 0.18)' : 'rgba(56, 139, 253, 0.18)')
+                      : 'rgba(163, 113, 247, 0.18)',
+                    color: desktopModeEnabled
+                      ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff')
+                      : '#d2a8ff',
+                    fontSize: '9px', fontWeight: 800, cursor: 'pointer', height: '22px'
+                  }}
+                  title={desktopModeEnabled
+                    ? (desktopVerification?.hardware_connected
+                        ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to route mouse to phone screen.`
+                        : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to route mouse to phone.')
+                    : 'Phone Screen Mode ON (Mouse routed to phone display 0, kiosk unlocked, keyboard enabled). Click to return to Desktop Mode.'}
+                >
+                  {desktopModeEnabled ? <Monitor size={10} /> : <Smartphone size={10} />}
+                  <span>
+                    {desktopModeEnabled
+                      ? (desktopVerification?.hardware_connected ? 'DESKTOP ON (CONNECTED)' : 'DESKTOP (READY TO PLUG IN)')
+                      : 'PHONE SCREEN (MOUSE)'}
+                  </span>
+                </button>
+              )}
+            </div>
 
 
             {/* Standardized Window Controls */}
@@ -2051,18 +2115,25 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       </div>
 
       {/* 2D PAN/ZOOM INTERACTIVE WIREABLE DAG CANVAS */}
-      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '6px' }}>
-        {/* Canvas Toolbar & Subgraph Quick Runners */}
+      <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: isSimpleHeaderMode ? '0px' : '6px', transition: 'gap 0.25s ease' }}>
+        {/* Canvas Toolbar & Subgraph Quick Runners (Animated Collapse in Simple Mode) */}
         <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '5px 10px',
-          background: '#161b22',
-          border: '1px solid #30363d',
-          borderRadius: '7px',
-          fontSize: '10px'
+          maxHeight: isSimpleHeaderMode ? '0px' : '65px',
+          opacity: isSimpleHeaderMode ? 0 : 1,
+          overflow: 'hidden',
+          transition: 'max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease',
+          pointerEvents: isSimpleHeaderMode ? 'none' : 'auto'
         }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '5px 10px',
+            background: '#161b22',
+            border: '1px solid #30363d',
+            borderRadius: '7px',
+            fontSize: '10px'
+          }}>
           {/* Left: Subgraph Quick Runners */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '8.5px', fontWeight: 700, color: '#6e7681', letterSpacing: '0.3px' }}>SUBGRAPHS:</span>
@@ -2482,6 +2553,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
             </span>
           </div>
         </div>
+      </div>
 
         {/* Interactive 2D Canvas Container */}
         <div

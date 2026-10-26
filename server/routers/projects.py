@@ -334,13 +334,13 @@ async def create_project(req: ProjectCreateRequest):
     state.save_persisted_state()
     state.load_persisted_state()
 
-    # Initialize DAG state for new project with initialize group active
+    # Initialize DAG state for new project with initialize group idle (ready to run in loop)
     target_lines = req.target_total_lines or 0
     state.dag_state.setdefault("groups", {})
     state.dag_state["groups"]["initialize"] = {
         "id": "initialize", "title": "Initialize", "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
-        "nodes": ["init_end", "reset_home"], "status": "active",
-        "progress": {"percent": 5, "stage": "Starting project initialization...", "status": "running"}
+        "nodes": ["init_end", "reset_home"], "status": "idle",
+        "progress": {"percent": 0, "stage": "Ready to run loop", "status": "idle"}
     }
     state.dag_state["groups"]["capture_entire_markdown"] = {
         "id": "capture_entire_markdown", "title": "Screen Capture & AI OCR",
@@ -366,7 +366,7 @@ async def create_project(req: ProjectCreateRequest):
     state.dag_state["semaphore_status"] = "open"
     state.dag_semaphore_group2_to_3 = True
     state.dag_semaphore_group3_to_4 = True
-    state.dag_state["nodes"]["init_end"].update({"status": "active", "total_lines": target_lines, "error": None})
+    state.dag_state["nodes"]["init_end"].update({"status": "idle", "total_lines": target_lines, "error": None})
     state.dag_state["nodes"]["reset_home"].update({"status": "idle", "verified": False})
     state.dag_state["nodes"]["frame_acquire"].update({"status": "idle", "page": 1})
     state.dag_state["nodes"]["frame_ocr"].update({"status": "idle", "top_line": 0, "bottom_line": 0, "target_top_line": 1, "extracted_line_count": 0})
@@ -375,13 +375,13 @@ async def create_project(req: ProjectCreateRequest):
     state.dag_state["nodes"]["document_assemble"].update({"status": "idle", "total_captured_lines": 0, "completion_percent": 0.0, "is_complete": False})
     state.orchestration_state["next_target_top"] = 1
     state.orchestration_state["cursor_line"] = 1
-    state.dag_state["current_active_group"] = "initialize"
-    state.dag_state["current_active_node"] = "init_end"
+    state.dag_state["current_active_group"] = None
+    state.dag_state["current_active_node"] = None
     state.latest_telemetry["target_total_lines"] = target_lines
     state.latest_telemetry["current_top_line"] = 1
     state.latest_telemetry["current_bottom_line"] = 0
-    state.latest_telemetry["phase"] = "INITIALIZING"
-    state.latest_telemetry["status_message"] = f"Project created ({model.upper()}{' LOCKED' if lock_dev else ''} @ {target_dpi} DPI). Running DAG Group: Initialize..."
+    state.latest_telemetry["phase"] = "READY"
+    state.latest_telemetry["status_message"] = f"Project created ({model.upper()}{' LOCKED' if lock_dev else ''} @ {target_dpi} DPI). Ready to run loop."
 
     await state.ws_manager.broadcast({
         "type": "project_switched",
@@ -397,9 +397,8 @@ async def create_project(req: ProjectCreateRequest):
     except Exception:
         pass
 
-    # Automatically run the initialize DAG group asynchronously
-    asyncio.create_task(execute_dag_group_initialize(project_id=new_proj["id"]))
-
+    # Project created without auto-running initialization or filename OCR.
+    # Initialization and description detection will run on first 'Run Loop'.
     return new_proj
 
 @router.get("/api/projects/{project_id}/device-settings")

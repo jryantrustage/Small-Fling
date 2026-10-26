@@ -3517,12 +3517,46 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             except Exception:
                 pass
 
+        # Determine markdown editor filename / description from Line 1 frame if not already set
+        active_pid = project_id or state.get_current_project_id()
+        detected_fn = None
+        if active_pid:
+            try:
+                home_img = state.FRAMES_DIR / "dag_node2_home.png"
+                if not home_img.exists():
+                    home_img = state.FRAMES_DIR / f"calib_home_{active_pid}.png"
+                if home_img.exists():
+                    scan_res = await state.scan_image_in_process(home_img)
+                    lines = scan_res.get("lines", [])
+                    detected_fn = scan_res.get("detected_filename")
+                    if not detected_fn:
+                        for l in lines[:6]:
+                            txt = (l.get("text") or "").strip()
+                            m = re.search(r"([A-Za-z0-9_\-.]+\.(?:md|markdown|txt|py|json|ts|js))", txt, re.IGNORECASE)
+                            if m:
+                                detected_fn = m.group(1)
+                                break
+                            if txt.startswith("#"):
+                                clean_t = txt.lstrip("#").strip()
+                                if clean_t:
+                                    detected_fn = clean_t + (".md" if not clean_t.endswith(".md") else "")
+                                    break
+                    if detected_fn:
+                        db.append_project_filename(active_pid, detected_fn)
+                        updated_p = db.get_project(active_pid)
+                        if updated_p:
+                            await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p})
+                            await state.ws_manager.broadcast({"type": "project_switched", "project": updated_p})
+            except Exception as fe:
+                print(f"[execute_dag_group_initialize] Filename scan note: {fe}")
+
         await state.ws_manager.broadcast({
             "type": "project_init_progress",
             "stage": f"Project Initialized Successfully! {total_lines:,} total lines calibrated and Line 1 verified ✔",
             "percent": 100,
             "status": "completed",
             "total_lines": total_lines,
+            "detected_filename": detected_fn,
             "dag": state.dag_state,
             "telemetry": state.latest_telemetry
         })
@@ -3538,6 +3572,7 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "status": "success",
             "group": "initialize",
             "total_lines": total_lines,
+            "detected_filename": detected_fn,
             "first_line": first_line,
             "verified": is_verified,
             "node1": node1_res,
@@ -4045,6 +4080,61 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     state.orchestration_state["status"] = "RUNNING"
 
     try:
+        # Check if DAG Group 1 (Initialize) has run for the project
+        init_group = state.dag_state.get("groups", {}).get("initialize", {})
+        node1_state = state.dag_state.get("nodes", {}).get("init_end", {})
+        node2_state = state.dag_state.get("nodes", {}).get("reset_home", {})
+        target_lines_pre = int(
+            state.headless_telemetry_session.get("target_total_lines", 0)
+            or state.latest_telemetry.get("target_total_lines", 0)
+            or node1_state.get("total_lines", 0)
+            or 0
+        )
+        is_initialized = bool(
+            init_group.get("status") == "completed"
+            and node2_state.get("verified", False)
+            and target_lines_pre > 0
+        )
+
+        if not is_initialized:
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="DAG Loop: Project not initialized yet. Executing DAG Group 1 (Determine total lines & Return to Line 1)...",
+                dag="initialize",
+                serial=active_serial
+            )
+            state.latest_telemetry["status_message"] = "Running DAG Group 1: Calibrating EOF total lines & returning to Line 1..."
+            state.latest_telemetry["phase"] = "INITIALIZING"
+            await state.ws_manager.broadcast({
+                "type": "capture_loop_status",
+                "running": True,
+                "stage": "Running DAG Group 1 (Initialize)...",
+                "dag": state.dag_state,
+                "telemetry": state.latest_telemetry
+            })
+
+            init_res = await execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id())
+            if init_res.get("status") in ("error", "failed") or not state.capture_loop_running:
+                err_msg = init_res.get("error") or "DAG Group 1 Initialization failed"
+                state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
+                state.capture_loop_running = False
+                state.orchestration_state["status"] = "ERROR"
+                await state.ws_manager.broadcast({
+                    "type": "capture_loop_status",
+                    "running": False,
+                    "error": err_msg,
+                    "dag": state.dag_state,
+                    "telemetry": state.latest_telemetry
+                })
+                return
+
+            await emit_dag_telemetry_event(
+                category="SYSTEM",
+                message="DAG Group 1 Initialization Successful ✔ Proceeding directly into DAG Group 2 Capture Loop...",
+                dag="capture_entire_markdown",
+                serial=active_serial
+            )
+
         # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
         disp_id = await detect_external_display_id(active_serial)
         is_open, _, _ = await assert_markdown_open(active_serial)

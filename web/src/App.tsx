@@ -1145,14 +1145,8 @@ function AppContent() {
     setOcrInspectImageId('');
     setShowDag(true);
     setSelectedDag('all');
-    setProjectInitProgress({
-      active: true,
-      percent: 10,
-      stage: 'Creating project and launching DAG Group: Initialize...',
-      status: 'running',
-      projectName: projName
-    });
-    addTelemetryEvent('SYSTEM', `Creating project "${projName}" and starting DAG 1 initialization`, null, 'initialize');
+    setProjectInitProgress(null);
+    addTelemetryEvent('SYSTEM', `Created project "${projName}" (Ready to run loop)`, null, 'initialize');
     setShowNewProjectModal(false);
 
     try {
