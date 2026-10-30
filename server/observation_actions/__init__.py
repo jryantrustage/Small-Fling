@@ -17,6 +17,7 @@ from .action_light_to_dark import LightToDarkAction
 from .action_close_keyboard import CloseKeyboardAction
 from .action_detect_top_line import DetectTopLineAction
 from .action_detect_bottom_line import DetectBottomLineAction
+from .action_recover_gutter_range import RecoverGutterRangeAction
 from .action_focus_editor import FocusEditorAction
 from .action_open_markdown_from_onedrive import (
     OpenMarkdownFromOneDriveAction,
@@ -41,6 +42,7 @@ class ObservationActionRegistry:
         self.register(LightToDarkAction())
         self.register(DetectTopLineAction())
         self.register(DetectBottomLineAction())
+        self.register(RecoverGutterRangeAction())
 
     def register(self, action: ObservationActionPlugin) -> None:
         self._actions[action.id] = action
@@ -96,6 +98,7 @@ __all__ = [
     "FocusEditorAction",
     "DetectTopLineAction",
     "DetectBottomLineAction",
+    "RecoverGutterRangeAction",
     "OpenMarkdownFromOneDriveAction",
     "RecoverMarkdownEditorAction",
 ]

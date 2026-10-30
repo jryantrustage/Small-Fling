@@ -4,6 +4,7 @@ Captures lossless external display PNG frame into DagBlackboard and storage.
 """
 
 import asyncio
+import hashlib
 import time
 import struct
 from datetime import datetime
@@ -12,7 +13,8 @@ from pathlib import Path
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, capture_external_screenshot,
-    dismiss_keyboard, fetch_current_display_dpi_factor, DEVICE_PROFILES, current_device_model
+    dismiss_keyboard, fetch_current_display_dpi_factor, navigate_to_target_top_line,
+    DEVICE_PROFILES, current_device_model
 )
 from services import state
 import db
@@ -72,34 +74,74 @@ class FrameAcquireNode(BaseDagNode):
 
         # 5. Determine line bounds and page index
         prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
-        lpp = prof.get("lines_per_page", 24)
-
-        target_top = (
-            blackboard.top_line
-            or (blackboard.config or {}).get("target_top")
-            or state.latest_telemetry.get("current_top_line")
-        )
+        lpp = state.orchestration_state.get("viewport_lines") or prof.get("lines_per_page", 24)
 
         pid = blackboard.project_id or state.get_current_project_id()
         existing_frames = db.get_frames(pid) if pid else list(state.captured_frames.values())
-        is_first_frame = (len(existing_frames) == 0) or (target_top == 1) or (blackboard.top_line == 1)
+        is_first_frame = (len(existing_frames) == 0)
 
-        if is_first_frame or not existing_frames:
+        prev_bot = max(((f.get("bottom_line", 0) or 0) for f in existing_frames), default=0)
+        target_top = (
+            (blackboard.config or {}).get("target_top")
+            or state.orchestration_state.get("next_target_top")
+            or state.dag_state["nodes"].get("arrow_down", {}).get("new_top_line")
+            or ((prev_bot + 1) if prev_bot > 0 else None)
+            or blackboard.top_line
+            or state.latest_telemetry.get("current_top_line")
+        )
+        expected_top = 1 if is_first_frame else ((prev_bot + 1) if prev_bot > 0 else (target_top or 0))
+
+        # Auto-recover if the gutter is not showing the expected top line range
+        is_mock = bool(serial and "mock" in str(serial).lower())
+        if (
+            not is_mock
+            and cfg.get("recover_gutter_range", True)
+            and expected_top
+            and expected_top > 0
+            and t_det > 0
+            and t_det != expected_top
+        ):
+            state.dag_state["nodes"]["frame_acquire"].update({
+                "evaluator": "Gutter Range Recovery Evaluator",
+                "telemetry_insight": f"Gutter at Ln {t_det}..{b_det} != expected Ln {expected_top} • Navigating via PageUp/PageDown + Arrows..."
+            })
+            nav_res = await navigate_to_target_top_line(
+                target_top=expected_top,
+                serial=serial,
+                display_id=disp_id,
+                current_top=t_det,
+                current_bottom=b_det,
+                lines_per_page=lpp,
+                use_page_keys=True,
+                caller_node="frame_acquire"
+            )
+            if nav_res.get("snapshot_bytes"):
+                snap = nav_res["snapshot_bytes"]
+                with open(temp_calib, "wb") as f:
+                    f.write(snap)
+            if nav_res.get("actual_top"):
+                t_det = int(nav_res["actual_top"])
+            if nav_res.get("actual_bottom"):
+                b_det = int(nav_res["actual_bottom"])
+
+        if is_first_frame:
             top_ln = 1
-            bot_ln = b_det if (b_det > 0 and b_det > 1) else (1 + lpp - 1)
+            bot_ln = b_det if (b_det > 1 and (b_det - 1) <= 75) else (1 + lpp - 1)
             page_idx = 1
         elif t_det > 0:
             top_ln = t_det
-            bot_ln = b_det if b_det > 0 else (top_ln + lpp - 1)
+            bot_ln = b_det if (b_det >= top_ln and (b_det - top_ln) <= 75) else (top_ln + lpp - 1)
             page_idx = len(existing_frames) + 1
         elif target_top and target_top > 0:
             top_ln = target_top
-            bot_ln = top_ln + lpp - 1
+            bot_ln = b_det if (b_det >= top_ln and (b_det - top_ln) <= 75) else (top_ln + lpp - 1)
             page_idx = len(existing_frames) + 1
         else:
             top_ln = 1
             bot_ln = lpp
             page_idx = len(existing_frames) + 1
+
+        content_hash = hashlib.sha256(snap).hexdigest()
 
         # Accurate arrow_count resolution for this frame
         if page_idx <= 1 or top_ln <= 1:
@@ -139,6 +181,7 @@ class FrameAcquireNode(BaseDagNode):
         blackboard.top_line = top_ln
         blackboard.bottom_line = bot_ln
         blackboard.arrow_count = arr_count
+        state.orchestration_state["last_acquired_frame_id"] = fid
         pid = blackboard.project_id or state.get_current_project_id()
 
         # 6. Save to Database
@@ -170,6 +213,7 @@ class FrameAcquireNode(BaseDagNode):
             "bottom_line": bot_ln,
             "page_index": page_idx,
             "file_size": len(snap),
+            "content_hash": content_hash,
             "status": "acquired",
             "created_at": now_dt.isoformat(),
             "extracted_line_count": 0,

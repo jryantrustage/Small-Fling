@@ -396,3 +396,133 @@ def test_dag_node_connectors_flow_orchestration():
         assert edge_23["to"] == "frame_ocr"
 
 
+def test_gutter_range_recovery_and_page_up_down_navigation(monkeypatch):
+    """
+    Verify that when the gutter is at an unexpected range (e.g. Line 12..35 or 168..191 instead of 120..143),
+    navigate_to_target_top_line deterministically uses PageDown(93) / PageUp(92) + Arrow keys (20/19)
+    to align the target top line on the first line of the page and continue the DAG flow.
+    """
+    import asyncio
+    import numpy as np
+    import cv2
+    import services.adb_service as adb_svc
+    import ocr_engine
+    from observation_actions import observation_action_registry, ObservationContext
+    from dag_nodes.base import DagBlackboard
+
+    dispatched_cmds = []
+    sim_state = {"top": 12, "span": 24}
+
+    dummy_img = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    _, dummy_png = cv2.imencode(".png", dummy_img)
+    dummy_bytes = dummy_png.tobytes()
+
+    async def fake_capture(serial=None, max_cache_age_s=0.0, bypass_lock=False):
+        return dummy_bytes
+
+    async def fake_dpi(serial=None, disp_id=None):
+        return 1.375, 220
+
+    def fake_detect_top(img, target_top=None, cursor_line=None, dpi_factor=1.0):
+        t = sim_state["top"]
+        b = t + sim_state["span"] - 1
+        return t, {"bottom_gutter_line": b}
+
+    def fake_gutter_cluster(img, dpi_factor=1.0):
+        t = sim_state["top"]
+        b = t + sim_state["span"] - 1
+        return [(303, t), (924, b)]
+
+    async def fake_adb_shell(cmd, serial=None, timeout=10.0):
+        dispatched_cmds.append(cmd)
+        # Parse keycodes after 'keyevent'
+        if "keyevent" in cmd:
+            tokens = cmd.split("keyevent", 1)[1].split(">")[0].split()
+            for tok in tokens:
+                if tok == "93":  # KEYCODE_PAGE_DOWN
+                    sim_state["top"] += sim_state["span"]
+                elif tok == "92":  # KEYCODE_PAGE_UP
+                    sim_state["top"] = max(1, sim_state["top"] - sim_state["span"])
+                elif tok == "20":  # KEYCODE_DPAD_DOWN
+                    sim_state["top"] += 1
+                elif tok == "19":  # KEYCODE_DPAD_UP
+                    sim_state["top"] = max(1, sim_state["top"] - 1)
+        return {"status": "ok", "stdout": ""}
+
+    async def fake_get_serial(preferred=None, force_refresh=False):
+        return preferred or "real_device_sim"
+
+    monkeypatch.setattr(adb_svc, "get_active_adb_serial", fake_get_serial)
+    monkeypatch.setattr(adb_svc, "capture_external_screenshot", fake_capture)
+    monkeypatch.setattr(adb_svc, "fetch_current_display_dpi_factor", fake_dpi)
+    monkeypatch.setattr(adb_svc, "run_adb_shell", fake_adb_shell)
+    monkeypatch.setattr(ocr_engine, "detect_top_line_from_image", fake_detect_top)
+    monkeypatch.setattr(ocr_engine, "find_gutter_numbers_cluster", fake_gutter_cluster)
+
+    async def run_nav_tests():
+        # Case 1: Viewport is stuck back at Line 12..35, need to reach Line 120 (diff = +108)
+        sim_state["top"] = 12
+        dispatched_cmds.clear()
+        res_fwd = await adb_svc.navigate_to_target_top_line(
+            target_top=120,
+            serial="real_device_sim",
+            display_id=4,
+            current_top=12,
+            current_bottom=35,
+            lines_per_page=24,
+            use_page_keys=True,
+        )
+        assert res_fwd["reached"] is True
+        assert res_fwd["actual_top"] == 120
+        assert res_fwd["actual_bottom"] == 143
+        assert res_fwd["page_keys_pressed"] == 4  # 4 PageDowns (96 lines) + 12 DownArrows = 108 lines!
+        assert any("93" in c for c in dispatched_cmds)
+
+        # Case 2: Viewport overshot to Line 175..198, need to return to Line 120 (diff = -55)
+        sim_state["top"] = 175
+        dispatched_cmds.clear()
+        res_bwd = await adb_svc.navigate_to_target_top_line(
+            target_top=120,
+            serial="real_device_sim",
+            display_id=4,
+            current_top=175,
+            current_bottom=198,
+            lines_per_page=24,
+            use_page_keys=True,
+        )
+        assert res_bwd["reached"] is True
+        assert res_bwd["actual_top"] == 120
+        assert res_bwd["actual_bottom"] == 143
+        assert res_bwd["page_keys_pressed"] == 2  # 2 PageUps (48 lines) + 7 UpArrows = 55 lines!
+        assert any("92" in c for c in dispatched_cmds)
+
+        # Case 3: Verify RecoverGutterRangeAction plugin in observation_action_registry
+        sim_state["top"] = 12
+        action = observation_action_registry.get_action("gutter_range_mismatch_recover")
+        assert action is not None
+        bb = DagBlackboard(active_serial="real_device_sim", display_id=4, top_line=12, bottom_line=35, target_next_top=120)
+        ctx = ObservationContext(node_id="frame_ocr", serial="real_device_sim", display_id=4, expected_top_line=120, blackboard=bb)
+        detected, reason, _ = await action.detect_by_observation(ctx)
+        assert detected is True
+        w_res = await action.execute_workaround(ctx)
+        assert w_res["success"] is True
+        assert bb.top_line == 120
+        assert bb.bottom_line == 143
+
+    asyncio.run(run_nav_tests())
+
+    # Case 4: Verify REST API endpoint /api/dag/navigate-to-line
+    with TestClient(main.app) as client:
+        api_res = client.post("/api/dag/navigate-to-line", json={
+            "serial": "mock:9999",
+            "target_top": 120,
+            "current_top": 12,
+            "current_bottom": 35
+        })
+        assert api_res.status_code == 200
+        body = api_res.json()
+        assert body["reached"] is True
+        assert body["actual_top"] == 120
+
+
+

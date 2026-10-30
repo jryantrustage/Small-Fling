@@ -20,7 +20,7 @@ from services.adb_service import (
     ensure_adb_keyboard_closed, auto_fix_viewport, check_and_update_alignment, DEVICE_PROFILES, current_device_model,
     get_active_adb_serial, send_hid_keycombination, capture_external_screenshot, run_adb_shell, detect_external_display_id,
     detect_surfaceflinger_displays, is_ime_visible, fetch_current_display_dpi_factor, sanitize_input_display_id,
-    dispatch_accelerated_viewport_step, calibrate_display_dpi, configure_display_awake_policies,
+    dispatch_accelerated_viewport_step, navigate_to_target_top_line, calibrate_display_dpi, configure_display_awake_policies,
     enforce_device_characteristics, connect_device_for_model, get_device_info, extract_device_hardware_specs,
     dismiss_keyboard
 )
@@ -959,6 +959,24 @@ async def recover_gutter_bounds_with_healing(
     lines_detected: List[Dict[str, Any]] = []
 
     if top_ln > 0 and bot_ln > top_ln:
+        if expected_top and expected_top > 0 and top_ln != expected_top and not (serial and "mock" in str(serial).lower()):
+            nav_res = await navigate_to_target_top_line(
+                target_top=expected_top,
+                serial=serial,
+                display_id=disp_id,
+                current_top=top_ln,
+                current_bottom=bot_ln,
+                use_page_keys=True,
+                caller_node=node_id
+            )
+            if nav_res.get("snapshot_bytes"):
+                with open(temp_calib, "wb") as f:
+                    f.write(nav_res["snapshot_bytes"])
+            if nav_res.get("actual_top") and nav_res.get("actual_bottom"):
+                top_ln = int(nav_res["actual_top"])
+                bot_ln = int(nav_res["actual_bottom"])
+                actions_taken.extend(nav_res.get("actions_taken", []))
+                return top_ln, bot_ln, [], {"healing_attempts": 1, "actions_taken": actions_taken}
         return top_ln, bot_ln, [], {"healing_attempts": 0, "actions_taken": []}
 
     for attempt in range(1, max_attempts + 1):
@@ -1108,6 +1126,36 @@ async def trigger_auto_heal(payload: Optional[Dict[str, Any]] = None):
     disp_id = await detect_external_display_id(ser)
     target_node = payload.get("node_id", "init_end")
     return await auto_heal_pipeline_environment(ser, disp_id, target_node)
+
+
+@router.post("/api/dag/navigate-to-line")
+@router.post("/api/device/navigate-to-line")
+async def api_navigate_to_line(payload: Optional[Dict[str, Any]] = None):
+    """
+    Deterministically navigates the markdown editor viewport from any current gutter top/bottom range
+    to place `target_top` (or `line_number`) on the very first line of the page using PageUp/PageDown (92/93)
+    and Up/Down arrows (19/20).
+    """
+    payload = payload or {}
+    target_top = int(payload.get("target_top") or payload.get("target_top_line") or payload.get("line_number") or 1)
+    ser = await get_active_adb_serial(payload.get("serial"))
+    disp_id = payload.get("display_id") or await detect_external_display_id(ser)
+    use_page_keys = bool(payload.get("use_page_keys", True))
+    max_attempts = int(payload.get("max_attempts", 12))
+
+    nav_res = await navigate_to_target_top_line(
+        target_top=target_top,
+        serial=ser,
+        display_id=disp_id,
+        current_top=payload.get("current_top"),
+        current_bottom=payload.get("current_bottom"),
+        lines_per_page=payload.get("lines_per_page"),
+        use_page_keys=use_page_keys,
+        max_attempts=max_attempts,
+        caller_node=str(payload.get("caller_node", "navigate_to_line"))
+    )
+    res_clean = {k: v for k, v in nav_res.items() if k != "snapshot_bytes"}
+    return res_clean
 
 
 def _resolve_viewport_bounds(top_ln: int, bot_ln: int, fallback_lpp: int):
@@ -1421,13 +1469,29 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
         # Delegate execution directly to the modular BaseDagNode instance
         dag_node = dag_node_registry.get_node(target_key)
         if dag_node:
+            if target_key == "frame_acquire":
+                init_top = (
+                    state.orchestration_state.get("next_target_top")
+                    or state.latest_telemetry.get("current_top_line")
+                    or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line", 0)
+                )
+            else:
+                init_top = (
+                    state.dag_state["nodes"].get("frame_ocr", {}).get("top_line", 0)
+                    or state.latest_telemetry.get("current_top_line", 0)
+                )
+            cur_fid = (
+                state.orchestration_state.get("last_acquired_frame_id")
+                or state.dag_state["nodes"].get("frame_acquire", {}).get("frame_id")
+            )
             bb = DagBlackboard(
                 active_serial=active_serial,
                 display_id=disp_id,
                 project_id=state.get_current_project_id(),
                 config=cfg,
                 payload=payload,
-                top_line=state.dag_state["nodes"].get("frame_ocr", {}).get("top_line", 0),
+                frame_id=cur_fid,
+                top_line=init_top,
                 bottom_line=state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0),
                 total_lines=state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0),
             )
@@ -2633,9 +2697,6 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     or 31
                 )
 
-            # Precisely align the prior page bottom line number + 1 to the top first line of the page
-            target_top = prev_bottom + 1
-
             # Determine starting/current top line
             cur_top = (
                 int(payload.get("cur_top")) if payload and payload.get("cur_top") is not None
@@ -2645,6 +2706,13 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     or 1
                 )
             )
+
+            # Never allow an inverted/truncated bottom line (< cur_top) to trigger a backward scroll!
+            if prev_bottom < cur_top:
+                prev_bottom = cur_top + (state.orchestration_state.get("viewport_lines") or 24) - 1
+
+            # Precisely align the prior page bottom line number + 1 to the top first line of the page
+            target_top = prev_bottom + 1
 
             # Determine cursor location (focused on Line 1 at start of new scan)
             cursor_line = (
@@ -2823,68 +2891,39 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 or hid_cfg.get("dispatch_method")
                 or "arrow_down"
             )
+            use_page_keys = bool((payload or {}).get("use_page_keys", True))
 
-            step_res = await dispatch_accelerated_viewport_step(
-                delta_lines=tracked_arrow_count,
-                serial=active_serial,
-                display_id=valid_disp_id,
-                method=dispatch_meth
-            )
-
-            total_arrows_pressed = tracked_arrow_count
+            total_arrows_pressed = 0
             start_top = cur_top
-            await asyncio.sleep(0.18)
-            await dismiss_keyboard(active_serial, valid_disp_id)
-
-            # 4. Closed-Loop Viewport Verification & Directional Adjustment Loop:
-            # Assure the last line number + 1 is the first line number on the next page.
-            # If the next page does not have target_top at the top, adjust with arrow up/down.
-            max_adjust_attempts = 7
-            matched = False
-            actual_top = None
-            meta = {}
-            from ocr_engine import find_gutter_numbers_cluster
-
-            for attempt in range(1, max_adjust_attempts + 1):
-                snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
-                if not snap:
-                    await asyncio.sleep(0.12)
-                    continue
-
-                img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
-                actual_top, meta = detect_top_line_from_image(img, target_top=target_top)
-                gutter = find_gutter_numbers_cluster(img)
-                first_gutter = gutter[0][1] if gutter else actual_top
-
-                if actual_top == target_top or first_gutter == target_top:
-                    matched = True
-                    final_top = target_top
-                    break
-
-                if actual_top is None and first_gutter is not None:
-                    actual_top = first_gutter
-
-                if actual_top is None:
-                    await asyncio.sleep(0.18)
-                    continue
-
-                diff = target_top - actual_top
-                if diff > 0:
-                    # Viewport undershot (target is further down): send DownArrows (keycode 20)
-                    adjust_step = min(diff, 25)
-                    keys = " ".join(["20"] * adjust_step)
-                    total_arrows_pressed += adjust_step
-                    await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", active_serial)
-                elif diff < 0:
-                    # Viewport overshot (target was scrolled past): send UpArrows (keycode 19)
-                    diff_up = abs(diff)
-                    adjust_step = min(diff_up, 25)
-                    keys = " ".join(["19"] * adjust_step)
-                    total_arrows_pressed += adjust_step
-                    await run_adb_shell(f"input -d {valid_disp_id} keyevent {keys}", active_serial)
-
+            if dispatch_meth.lower() not in ("page_up_down", "pagedown", "pageup"):
+                step_res = await dispatch_accelerated_viewport_step(
+                    delta_lines=tracked_arrow_count,
+                    serial=active_serial,
+                    display_id=valid_disp_id,
+                    method=dispatch_meth
+                )
+                total_arrows_pressed = tracked_arrow_count
                 await asyncio.sleep(0.18)
                 await dismiss_keyboard(active_serial, valid_disp_id)
+
+            # 4. Closed-Loop Viewport Verification & PageUp/PageDown + Arrow Alignment Loop:
+            max_adjust_attempts = 10
+            nav_res = await navigate_to_target_top_line(
+                target_top=target_top,
+                serial=active_serial,
+                display_id=valid_disp_id,
+                current_top=cur_top if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
+                current_bottom=prev_bottom if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
+                lines_per_page=visible_span,
+                use_page_keys=use_page_keys,
+                max_attempts=max_adjust_attempts,
+                caller_node="arrow_down"
+            )
+            matched = bool(nav_res.get("reached", False))
+            actual_top = nav_res.get("actual_top")
+            final_top = target_top if matched else (actual_top or start_top)
+            total_arrows_pressed += int(nav_res.get("arrows_pressed", 0))
+            meta = {"bottom_gutter_line": nav_res.get("actual_bottom")}
 
             if not matched:
                 # User constraint: If next page doesn't have prev_bottom + 1 on top, DO NOT PROCEED!

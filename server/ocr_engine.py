@@ -121,7 +121,7 @@ def get_rapid_ocr():
             print(f"[Worker] RapidOCR init error: {e}")
     return _rapid_ocr_instance
 
-def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
+def extract_numbers_from_slice(crop: np.ndarray, max_x_min: Optional[int] = None) -> List[int]:
     """Helper to extract clean gutter line numbers from a localized image slice."""
     if crop is None or crop.size == 0: return []
     ocr = get_rapid_ocr()
@@ -133,24 +133,28 @@ def extract_numbers_from_slice(crop: np.ndarray) -> List[int]:
     nums = []
     if not res: return nums
     for bbox, text, score in res:
-        clean = text.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1')
+        clean = text.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
+        clean = re.sub(r'(\d)\s+(\d)', r'\1\2', clean)
         if m := re.search(r'^(\d+)', clean):
             try:
                 n = int(m.group(1))
                 if 0 < n < 2000000:
                     pts = np.array(bbox)
+                    x_min = int(np.min(pts[:, 0])) if pts.ndim == 2 else 0
+                    if max_x_min is not None and x_min > max_x_min:
+                        continue
                     y_min = int(np.min(pts[:, 1])) if pts.ndim == 2 else 0
                     nums.append((y_min, n))
             except Exception: pass
     nums.sort(key=lambda x: x[0])
     return [n for _, n in nums]
 
-def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: int = 270) -> List[Tuple[int, int]]:
+def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: int = 295) -> List[Tuple[int, int]]:
     """
     Validates and corrects line numbers in a vertical gutter column.
-    Detects and corrects outliers (such as truncated numbers like 69 instead of 697)
+    Detects and corrects outliers (such as truncated numbers like 69 instead of 697 or 11 instead of 119)
     using sequence consensus, median line pitch, and linear projection.
-    Also back-projects missing leading lines down to 1 when near top of document.
+    Also back-projects missing leading lines down to min_content_y when top digit(s) were missed by OCR.
     """
     if not gutter_items:
         return []
@@ -165,46 +169,42 @@ def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: 
         dn = sorted_items[i+1][1] - sorted_items[i][1]
         if dn > 0 and 10 <= dy <= 35 * dn:
             pitches.append(dy / dn)
-    med_pitch = float(np.median(pitches)) if pitches else 18.0
+    med_pitch = float(np.median(pitches)) if pitches else 27.0
 
-    # 2. Find anchor/consensus index where consecutive items have dn == 1 and dy approx pitch
-    anchor_idx = None
-    for i in range(len(sorted_items) - 1):
-        dy = sorted_items[i+1][0] - sorted_items[i][0]
-        dn = sorted_items[i+1][1] - sorted_items[i][1]
-        if dn in (1, 2) and abs(dy - dn * med_pitch) <= 8:
+    # 2. Find consensus anchor that maximizes inliers across the entire vertical column
+    best_inliers = -1
+    anchor_idx = 0
+    for i, (yi, ni) in enumerate(sorted_items):
+        inliers = 0
+        for j, (yj, nj) in enumerate(sorted_items):
+            expected_n = ni + (yj - yi) / med_pitch
+            if abs(nj - expected_n) <= 1.2:
+                inliers += 1
+        if inliers > best_inliers:
+            best_inliers = inliers
             anchor_idx = i
-            break
-    if anchor_idx is None:
-        anchor_idx = len(sorted_items) - 1 if len(sorted_items) > 1 else 0
 
     anchor_y, anchor_n = sorted_items[anchor_idx]
 
     cleaned = []
     for y_pos, num in sorted_items:
-        projected = int(round(anchor_n + (y_pos - anchor_y) / med_pitch))
-        if projected < 1:
-            projected = 1
-        # If num deviates significantly from projection:
-        if abs(num - projected) > 3:
-            s_num = str(num)
-            s_proj = str(projected)
-            # Prefix truncation e.g. "69" when projected is 697
-            if s_proj.startswith(s_num) or abs(num - projected) > 12:
-                cleaned.append((y_pos, projected))
-            else:
-                cleaned.append((y_pos, num))
+        projected = max(1, int(round(anchor_n + (y_pos - anchor_y) / med_pitch)))
+        # If num deviates from linear sequence consensus by >= 2 lines, snap to consensus projection
+        if abs(num - projected) >= 2:
+            cleaned.append((y_pos, projected))
         else:
             cleaned.append((y_pos, num))
 
-    # 3. Back-project missing leading lines down to 1 if top of document is visible
-    if cleaned and 1 < cleaned[0][1] <= 12:
+    # 3. Back-project missing leading lines down to min_content_y if top row digit(s) were missed
+    if cleaned and cleaned[0][1] > 1:
         first_y, first_n = cleaned[0]
         prepended = []
         for k in range(first_n - 1, 0, -1):
             proj_y = int(round(first_y - (first_n - k) * med_pitch))
             if proj_y >= min_content_y:
                 prepended.append((proj_y, k))
+            else:
+                break
         if prepended:
             prepended.reverse()
             cleaned = prepended + cleaned
@@ -221,44 +221,54 @@ def clean_slice_numbers(nums: List[int]) -> List[int]:
         expected_first = res[1] - 1
         if str(expected_first).startswith(str(res[0])) or expected_first - res[0] > 50:
             res[0] = expected_first
+    # Check if last element is a truncated prefix of second-to-last element + 1 (e.g. 118, 11 -> 119)
+    if res[-2] > 10 and res[-1] < res[-2]:
+        expected_last = res[-2] + 1
+        if str(expected_last).startswith(str(res[-1])) or res[-2] - res[-1] >= 5:
+            res[-1] = expected_last
     return res
 
 def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[int, int]:
     """
-    Rapidly extracts top line and bottom line from targeted top/bottom gutter slices in parallel.
-    Multiplies base 1080p search bounding boxes by dpi_factor and resolution scaling factor.
-    Includes consensus validation to prevent digit truncation glitches (e.g. 69 instead of 697).
+    Rapidly extracts top line and bottom line from the editor gutter.
+    Uses full-column sequence consensus on the primary gutter strip first so right-aligned
+    multi-digit numbers (up to x=99 at 220 DPI) are never truncated at x=90 and bottom-border
+    digits have sufficient padding for detection.
     """
     if img is None: return 0, 0
+    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+    if len(gutter) >= 2:
+        t_c, b_c = gutter[0][1], gutter[-1][1]
+        if 0 < t_c <= b_c and (b_c - t_c) <= 75:
+            return t_c, b_c
+
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter (strictly within numeric gutter column x <= 90)
-    gutter_w = int(max(65.0, min(90.0, 90.0 * norm_multiplier)))
-    # Editor boundaries: strictly avoid status bar + Teams title + formatting toolbar (y < 280)
-    # and bottom Android dock / navigation bar / Teams offline status pill (y > 945)
-    top_y1 = max(280, int(h * 0.260))
+    # 1. Primary: standard fullscreen gutter with generous right padding (x <= 145) and x_min filter (x_min <= 96)
+    gutter_w = int(max(125.0, min(145.0, 115.0 * norm_multiplier)))
+    max_gutter_xmin = int(96 * scale_x)
+    top_y1 = max(275, int(h * 0.255))
     top_y2 = min(h - 150, int(h * 0.65))
     top_crop = img[top_y1:top_y2, :gutter_w]
     bot_y1 = int(h * 0.55)
-    bot_y2 = min(int(h * 0.875), h - 135)
+    bot_y2 = min(int(h * 0.898), h - 110)
     bot_crop = img[bot_y1:bot_y2, :gutter_w]
 
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-    f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled)
-    f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop)
+    f_top = _fast_ocr_executor.submit(extract_numbers_from_slice, top_scaled, int(max_gutter_xmin * 1.5))
+    f_bot = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop, max_gutter_xmin)
     top_nums = clean_slice_numbers(f_top.result())
-    bot_nums = f_bot.result()
+    bot_nums = clean_slice_numbers(f_bot.result())
 
     if top_nums and bot_nums:
         t, b = top_nums[0], bot_nums[-1]
-        # Sanity check: single screen cannot hold > 75 lines
         if b > 0 and t > 0 and (b - t) > 75:
-            # If b is large (e.g. 754) and t is small (e.g. 69), project t from b
             if str(b - 57).startswith(str(t)) or (b - t > 100):
                 t = max(1, b - 57)
-        return t, b
+        if 0 < t <= b:
+            return t, b
 
     # 2. Secondary: sidebar open (gutter around x ~ 300 scaled by norm_multiplier)
     sidebar_x1 = int(240.0 * norm_multiplier)
@@ -270,7 +280,7 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
         f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
         f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
         top_nums2 = clean_slice_numbers(f_top2.result())
-        bot_nums2 = f_bot2.result()
+        bot_nums2 = clean_slice_numbers(f_bot2.result())
         if top_nums2 and top_nums2[0] > 1 and len(top_nums2) >= 2:
             if top_nums2[0] <= 12:
                 top_nums2.insert(0, 1)
@@ -279,14 +289,17 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
             if b2 > 0 and t2 > 0 and (b2 - t2) > 75:
                 if str(b2 - 57).startswith(str(t2)) or (b2 - t2 > 100):
                     t2 = max(1, b2 - 57)
-            return t2, b2
+            if 0 < t2 <= b2:
+                return t2, b2
 
-    # Return partial if either top or bot detected
+    if gutter:
+        return gutter[0][1], gutter[-1][1]
+
+    # Return partial if either top or bot detected, ensuring bot is never an inverted truncation < top
     t = (top_nums or (top_nums2 if 'top_nums2' in locals() else []) or [0])[0]
     b = (bot_nums or (bot_nums2 if 'bot_nums2' in locals() else []) or [0])[-1]
-    if b > 0 and t > 0 and (b - t) > 75:
-        if str(b - 57).startswith(str(t)) or (b - t > 100):
-            t = max(1, b - 57)
+    if b > 0 and t > 0 and b < t:
+        b = 0
     return t, b
 
 def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bool, int]:
@@ -295,13 +308,13 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     h, w = img.shape[:2]
     scale_x = w / 1920.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
-    gutter_w = int(max(90.0, min(240.0, 110.0 * norm_multiplier)))
-    top_y1 = max(285, int(h * 0.265))
+    gutter_w = int(max(115.0, min(240.0, 125.0 * norm_multiplier)))
+    top_y1 = max(275, int(h * 0.255))
     top_y2 = min(h - 150, int(h * 0.60))
 
     top_crop = img[top_y1:top_y2, :gutter_w]
     top_scaled = cv2.resize(top_crop, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-    top_nums = extract_numbers_from_slice(top_scaled)
+    top_nums = extract_numbers_from_slice(top_scaled, int(96 * scale_x * 1.5))
     if not top_nums:
         sidebar_x1 = int(240.0 * norm_multiplier)
         sidebar_x2 = sidebar_x1 + gutter_w
@@ -322,40 +335,69 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     """
     if img is None: return []
     h, w = img.shape[:2]
-    top_y = max(280, int(h * 0.260))
-    bot_y = min(int(h * 0.875), h - 135)
     ocr = get_rapid_ocr()
     if ocr is None: return []
 
     scale_x = w / 1920.0
+    scale_y = h / 1080.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    sub_w = int(min(w, max(480, int(w * 0.45 * norm_multiplier))))
-    sub = img[top_y:bot_y, :sub_w]
-    try:
-        results, _ = ocr(sub)
-    except Exception as e:
-        print(f"[find_gutter_numbers_cluster] Error: {e}")
-        return []
+    # Crop with extra vertical margin (275..970 at 1080p) so RapidOCR detector never misses
+    # the 1st row (y~303) or 24th row (y~923..943) due to border proximity.
+    crop_top_y = max(265, int(275 * scale_y))
+    crop_bot_y = min(h - 95, int(970 * scale_y))
 
-    if not results: return []
+    # Strict valid vertical bounds for unclipped editor lines (excludes toolbar above 295 and clipped 25th row at y>=948)
+    valid_min_y = max(292, int(295 * scale_y))
+    valid_max_y = min(h - 135, int(936 * scale_y))
 
+    def _parse_ocr_candidates(ocr_results, max_x: Optional[int] = None) -> List[Tuple[int, int, int]]:
+        cands = []
+        if not ocr_results:
+            return cands
+        for bbox, text, score in ocr_results:
+            clean = text.strip()
+            pts = np.array(bbox)
+            x_min = int(np.min(pts[:, 0]))
+            y_min = crop_top_y + int(np.min(pts[:, 1]))
+            if y_min < valid_min_y or y_min > valid_max_y:
+                continue
+            if max_x is not None and x_min > max_x:
+                continue
+            clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
+            clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num)
+            if m := re.search(r'^(\d+)', clean_num):
+                try:
+                    num = int(m.group(1))
+                    if 0 < num < 500000:
+                        cands.append((x_min, y_min, num))
+                except ValueError:
+                    pass
+        return cands
+
+    # 1. Primary fast scan on the dedicated left gutter strip (x=0..145, filtering x_min <= 96)
+    primary_w = int(min(w, max(125, int(145 * scale_x))))
+    max_gutter_x = int(96 * scale_x)
     candidates = []
-    for bbox, text, score in results:
-        clean = text.strip()
-        pts = np.array(bbox)
-        x_min = int(np.min(pts[:, 0]))
-        y_min = top_y + int(np.min(pts[:, 1]))
-        clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
-        clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num)
-        if m := re.search(r'^(\d+)', clean_num):
-            try:
-                num = int(m.group(1))
-                if 0 < num < 500000:
-                    candidates.append((x_min, y_min, num))
-            except ValueError: pass
+    try:
+        res_primary, _ = ocr(img[crop_top_y:crop_bot_y, :primary_w])
+        candidates = _parse_ocr_candidates(res_primary, max_x=max_gutter_x)
+    except Exception as e:
+        print(f"[find_gutter_numbers_cluster] Primary strip error: {e}")
 
-    if not candidates: return []
+    # 2. Fallback to wider scan if fewer than 3 gutter numbers found (e.g., sidebar open)
+    if len(candidates) < 3:
+        sub_w = int(min(w, max(480, int(w * 0.45 * norm_multiplier))))
+        try:
+            res_wide, _ = ocr(img[crop_top_y:crop_bot_y, :sub_w])
+            wide_cands = _parse_ocr_candidates(res_wide, max_x=None)
+            if len(wide_cands) > len(candidates):
+                candidates = wide_cands
+        except Exception as e:
+            print(f"[find_gutter_numbers_cluster] Wide fallback error: {e}")
+
+    if not candidates:
+        return []
 
     # Cluster candidates by X-coordinate (scaled tolerance by DPI multiplier)
     x_tol = max(18, int(24.0 * norm_multiplier))
@@ -389,7 +431,7 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
 
     # Filter and correct gutter numbers using consensus sequence validation
     if best_gutter:
-        best_gutter = correct_gutter_sequence(best_gutter, min_content_y=top_y)
+        best_gutter = correct_gutter_sequence(best_gutter, min_content_y=valid_min_y)
 
     valid = []
     for y_pos, num in best_gutter:
@@ -404,14 +446,16 @@ def worker_detect_gutter_bounds(image_path: str, dpi_factor: float = 1.0) -> Tup
     """Worker function to rapidly detect both top line and last line in a single OCR pass."""
     img = cv2.imread(image_path)
     if img is None: return 0, 0
-    # Fast path: check top and bottom slices in parallel
+    # Primary path: consensus gutter bounds
     top, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
-    if top > 0 and bot > 0:
+    if top > 0 and bot >= top and (bot - top) <= 75:
         return top, bot
     # Fallback to column clustering
     gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if gutter:
         return gutter[0][1], gutter[-1][1]
+    if top > 0 and bot < top:
+        bot = 0
     return top or 0, bot or 0
 
 def worker_detect_last_line(image_path: str, dpi_factor: float = 1.0) -> int:
@@ -697,15 +741,15 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         except Exception as e: print(f"[worker_scan_image] RapidOCR error: {e}")
 
     # 1. Editor Vertical and Horizontal Boundaries:
-    # Top boundary: ignore Android status bar, Teams title header, and markdown formatting toolbar (ends at ~265).
-    ed_top = max(280, int(h * 0.260))
-    # Bottom boundary: ignore bottom Android system navigation bar / dock and Teams offline status pill (at y > 950).
-    ed_bot = min(int(h * 0.875), h - 135)
+    # Top boundary: ignore Android status bar, Teams title header, and markdown formatting toolbar (ends at ~292).
+    ed_top = max(292, int(295 * (h / 1080.0)))
+    # Bottom boundary: ignore clipped 25th row (y_min >= 948) and bottom Android dock / status pill.
+    ed_bot = min(int(943 * (h / 1080.0)), h - 135)
 
-    # Gutter horizontal bounds:
+    # Gutter horizontal bounds (gutter digits span x=[63..99], content starts at x>=102):
     gx_min = max(16, int(w * 0.015))
-    gx_max = max(70, min(90, int(w * 0.047)))
-    content_min_x = gx_max + 1
+    gx_max = max(92, min(98, int(w * 0.051)))
+    content_min_x = gx_max + 2
     content_max_x = min(w - 20, 1080)
 
     # 2. Extract genuine gutter candidate digits and content words within [ed_top, ed_bot]

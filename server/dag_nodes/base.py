@@ -25,6 +25,8 @@ class DagBlackboard:
     active_project: Optional[Dict[str, Any]] = None
 
     # In-memory frame snapshots
+    frame_id: Optional[str] = None
+    page_index: int = 0
     latest_frame_bytes: Optional[bytes] = None
     latest_frame_bgr: Optional[Any] = None
     current_image_bytes: Optional[bytes] = None

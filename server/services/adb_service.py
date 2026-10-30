@@ -2333,6 +2333,7 @@ async def dispatch_accelerated_viewport_step(
     disp_cmd = f"-d {valid_d} " if valid_d else ""
 
     # Choose method
+    from services import state
     chosen_method = method.lower()
     if chosen_method in ("auto", "arrow_down", "batched"):
         chosen_method = "arrow_down"
@@ -2342,15 +2343,23 @@ async def dispatch_accelerated_viewport_step(
     ]
 
     key_sequence = []
-    page_stride = 49  # Standard lines per page for desktop 1080p markdown editor
-    if chosen_method == "pagedown":
-        # Option A: Single PageDown command (keycode 93) + micro-adjustment (only when explicitly requested)
-        rem = delta_lines - page_stride
-        key_sequence = ["93"]  # KEYCODE_PAGE_DOWN
+    prof_lpp = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24})).get("lines_per_page", 24)
+    page_stride = int(state.orchestration_state.get("viewport_lines") or prof_lpp or 24)
+
+    if chosen_method in ("pagedown", "pageup", "page_up_down"):
+        # Deterministic PageUp (92) / PageDown (93) + arrow micro-trimming (19/20)
+        is_up = (delta_lines < 0) or (chosen_method == "pageup" and delta_lines >= 0)
+        abs_delta = abs(delta_lines) if delta_lines != 0 else page_stride
+        num_pages = max(1, min(15, abs_delta // max(1, page_stride)))
+        rem = abs_delta - (num_pages * page_stride)
+        page_key = "92" if is_up else "93"
+        key_sequence = [page_key] * num_pages
         if rem > 0:
-            key_sequence.extend(["20"] * min(rem, 20))  # KEYCODE_DPAD_DOWN
+            trim_key = "19" if is_up else "20"
+            key_sequence.extend([trim_key] * min(rem, 24))
         elif rem < 0:
-            key_sequence.extend(["19"] * min(abs(rem), 20))  # KEYCODE_DPAD_UP
+            trim_key = "20" if is_up else "19"
+            key_sequence.extend([trim_key] * min(abs(rem), 24))
         keys_str = " ".join(key_sequence)
         shell_cmds.append(f"input {disp_cmd}keyevent {keys_str} >/dev/null 2>&1")
     elif chosen_method == "swipe":
@@ -2364,10 +2373,11 @@ async def dispatch_accelerated_viewport_step(
         # Fast 120ms crisp gesture
         shell_cmds.append(f"input {disp_cmd}swipe 960 {y_from} 960 {y_to} 120 >/dev/null 2>&1")
     else:
-        # Option B: Batched ADB DownArrow keyevents (keycode 20)
+        # Option B: Batched ADB DownArrow (20) or UpArrow (19) keyevents
         # Passing keyevents in a single shell command runs in < 1s without process-spawning overhead
-        count = max(1, min(delta_lines, 200))
-        key_sequence = ["20"] * count
+        arrow_key = "19" if delta_lines < 0 else "20"
+        count = max(1, min(abs(delta_lines), 200))
+        key_sequence = [arrow_key] * count
         chunk_size = 70
         if count <= chunk_size:
             keys_str = " ".join(key_sequence)
@@ -2383,7 +2393,12 @@ async def dispatch_accelerated_viewport_step(
     res = await run_adb_shell(full_cmd, ser, timeout=10.0)
     dur_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-    ev_name = f"PageDown(93)" if chosen_method == "pagedown" else (f"DownArrow(20) x{delta_lines}" if chosen_method != "swipe" else "TouchSwipe")
+    if chosen_method in ("pagedown", "pageup", "page_up_down"):
+        ev_name = f"PageUp/Down({key_sequence[0]}) x{len(key_sequence)}"
+    elif chosen_method == "swipe":
+        ev_name = "TouchSwipe"
+    else:
+        ev_name = f"{'UpArrow(19)' if delta_lines < 0 else 'DownArrow(20)'} x{abs(delta_lines)}"
     keycodes_list = [int(k) for k in key_sequence] if key_sequence else []
 
     # Record telemetry asynchronously without stalling the main pipeline thread
@@ -2410,6 +2425,226 @@ async def dispatch_accelerated_viewport_step(
         "duration_ms": int(dur_ms),
         "output": res.get("stdout", ""),
         "command": full_cmd
+    }
+
+
+async def navigate_to_target_top_line(
+    target_top: int,
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    current_top: Optional[int] = None,
+    current_bottom: Optional[int] = None,
+    lines_per_page: Optional[int] = None,
+    use_page_keys: bool = True,
+    max_attempts: int = 12,
+    caller_node: str = "arrow_down"
+) -> Dict[str, Any]:
+    """
+    Deterministically navigates the markdown editor viewport from ANY current gutter top/bottom range
+    to place `target_top` on the very first line of the page (`actual_top == target_top`):
+      1. If `target_top <= 1`: dispatches Ctrl+Home (113 + 122) or PageUp (92) to snap to Line 1.
+      2. When far from `target_top` (`abs(diff) >= page_span` and `use_page_keys=True`):
+         dispatches coarse PageDown (keycode 93) or PageUp (keycode 92) strides + arrow remainder.
+      3. When within a page (`abs(diff) < page_span`) or refining after a coarse jump:
+         dispatches batched DPAD_DOWN (keycode 20) or DPAD_UP (keycode 19) micro-trimming,
+         automatically compensating for caret viewport traversal (`page_span - 1 + padding`) if a direction
+         change or top/bottom caret unpinning occurs.
+    """
+    from services import state
+    from ocr_engine import detect_top_line_from_image, find_gutter_numbers_cluster
+
+    target_top = max(1, int(target_top))
+    ser = await get_active_adb_serial(serial)
+    did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    valid_d = sanitize_input_display_id(did)
+    disp_pfx = f"-d {valid_d} " if valid_d else ""
+
+    prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
+    page_span = int(
+        lines_per_page
+        or state.orchestration_state.get("viewport_lines")
+        or prof.get("lines_per_page", 24)
+        or 24
+    )
+    if current_top and current_bottom and current_bottom > current_top and 10 <= (current_bottom - current_top + 1) <= 75:
+        page_span = current_bottom - current_top + 1
+
+    padding = int(state.orchestration_state.get("scroll_padding_lines", 4) or 4)
+
+    if not ser or "mock" in str(ser).lower():
+        est_arrows = abs(target_top - (current_top or 1))
+        actual_bot = target_top + page_span - 1
+        state.orchestration_state["cursor_line"] = actual_bot
+        state.orchestration_state["last_arrow_count"] = est_arrows
+        state.latest_telemetry["current_top_line"] = target_top
+        state.latest_telemetry["current_bottom_line"] = actual_bot
+        return {
+            "status": "ok",
+            "reached": True,
+            "target_top": target_top,
+            "actual_top": target_top,
+            "actual_bottom": actual_bot,
+            "arrows_pressed": est_arrows,
+            "page_keys_pressed": 0,
+            "attempts": 1,
+            "actions_taken": [f"Mock aligned viewport to top Ln {target_top} (Ln {target_top}..{actual_bot})"]
+        }
+
+    dpi_factor, _ = await fetch_current_display_dpi_factor(ser, did)
+    await dismiss_keyboard(ser, valid_d)
+
+    total_arrows = 0
+    total_page_keys = 0
+    actions_taken: List[str] = []
+    actual_top: Optional[int] = current_top if (current_top and current_top > 0) else None
+    actual_bot: Optional[int] = current_bottom if (current_bottom and current_bottom > 0) else None
+    latest_snap: Optional[bytes] = None
+    prev_top: Optional[int] = None
+    last_dir: Optional[str] = None
+    stall_count = 0
+
+    # Fast-path for target_top == 1 if currently far down the document
+    if target_top == 1 and (actual_top is None or actual_top > page_span):
+        await send_hid_keycombination(113, 122, serial=ser, caller_node=caller_node)
+        await asyncio.sleep(0.35)
+        await dismiss_keyboard(ser, valid_d)
+        actions_taken.append("Dispatched Ctrl+Home (113+122) to jump to Line 1")
+
+    for attempt in range(1, max_attempts + 1):
+        snap = await capture_external_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True)
+        if not snap:
+            await asyncio.sleep(0.12)
+            continue
+        latest_snap = snap
+        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        det_top, meta = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
+        gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+        first_g = gutter[0][1] if gutter else det_top
+        last_g = gutter[-1][1] if gutter else meta.get("bottom_gutter_line", 0)
+
+        if det_top == target_top or first_g == target_top:
+            actual_top = target_top
+            if last_g and last_g >= actual_top and (last_g - actual_top) <= 75:
+                actual_bot = last_g
+                page_span = actual_bot - actual_top + 1
+            else:
+                actual_bot = actual_top + page_span - 1
+
+            state.orchestration_state["cursor_line"] = actual_bot if last_dir != "up" else actual_top
+            if total_arrows > 0 or total_page_keys > 0:
+                state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * page_span)
+            state.latest_telemetry["current_top_line"] = actual_top
+            state.latest_telemetry["current_bottom_line"] = actual_bot
+            actions_taken.append(
+                f"Verified top Line {actual_top} (range {actual_top}..{actual_bot}) on attempt {attempt}"
+            )
+            return {
+                "status": "ok",
+                "reached": True,
+                "target_top": target_top,
+                "actual_top": actual_top,
+                "actual_bottom": actual_bot,
+                "arrows_pressed": total_arrows,
+                "page_keys_pressed": total_page_keys,
+                "attempts": attempt,
+                "snapshot_bytes": latest_snap,
+                "actions_taken": actions_taken
+            }
+
+        cur_t = first_g if (first_g and first_g > 0) else det_top
+        if not cur_t or cur_t <= 0:
+            await dismiss_keyboard(ser, valid_d)
+            await asyncio.sleep(0.18)
+            continue
+
+        actual_top = cur_t
+        if last_g and last_g >= cur_t and 10 <= (last_g - cur_t + 1) <= 75:
+            actual_bot = last_g
+            page_span = last_g - cur_t + 1
+        else:
+            actual_bot = cur_t + page_span - 1
+
+        diff = target_top - cur_t
+        cur_dir = "down" if diff > 0 else "up"
+
+        if prev_top is not None and cur_t == prev_top:
+            stall_count += 1
+        else:
+            stall_count = 0
+
+        # If stalled twice, tap safe gutter margin to ensure editor canvas has focus without opening IME
+        if stall_count >= 2:
+            await run_adb_shell(f"input {disp_pfx}tap 80 400 >/dev/null 2>&1", ser)
+            await asyncio.sleep(0.06)
+            await dismiss_keyboard(ser, valid_d)
+            actions_taken.append(f"Refocused editor gutter at (80, 400) after stall on Ln {cur_t}")
+
+        # Decide between coarse PageUp/PageDown (92/93) and fine Arrow Up/Down (19/20)
+        if use_page_keys and abs(diff) >= page_span and stall_count == 0:
+            num_pages = max(1, min(12, abs(diff) // page_span))
+            rem_lines = abs(diff) - (num_pages * page_span)
+            page_key = "93" if diff > 0 else "92"
+            trim_key = "20" if diff > 0 else "19"
+            keys = [page_key] * num_pages
+            total_page_keys += num_pages
+            if 0 < rem_lines <= 12:
+                keys.extend([trim_key] * rem_lines)
+                total_arrows += rem_lines
+            cmd_str = f"input {disp_pfx}keyevent {' '.join(keys)} >/dev/null 2>&1"
+            await run_adb_shell(cmd_str, ser)
+            actions_taken.append(
+                f"Attempt {attempt}: Coarse {'PageDown(93)' if diff > 0 else 'PageUp(92)'} x{num_pages}"
+                + (f" + {rem_lines} arrows" if 0 < rem_lines <= 12 else "")
+                + f" from Ln {cur_t} toward Ln {target_top} (diff={diff:+d})"
+            )
+        else:
+            arrow_key = "20" if diff > 0 else "19"
+            # If the viewport did not move on the previous attempt (caret traversing inside viewport)
+            # or if we are starting from Line 1 going down, include the caret-traversal span
+            if stall_count == 1:
+                adjust_step = min(70, (page_span - 1) + (padding if diff > 0 else 0))
+            elif stall_count >= 2:
+                # Fallback if arrows stalled: single PageDown/PageUp if diff >= 8 else full stride
+                if use_page_keys and abs(diff) >= 8:
+                    pkey = "93" if diff > 0 else "92"
+                    total_page_keys += 1
+                    await run_adb_shell(f"input {disp_pfx}keyevent {pkey} >/dev/null 2>&1", ser)
+                    actions_taken.append(f"Attempt {attempt}: Unstall {'PageDown(93)' if diff > 0 else 'PageUp(92)'} from Ln {cur_t}")
+                    prev_top = cur_t
+                    last_dir = cur_dir
+                    await asyncio.sleep(0.20)
+                    await dismiss_keyboard(ser, valid_d)
+                    continue
+                adjust_step = min(70, abs(diff) + page_span)
+            elif cur_t == 1 and diff > 0 and attempt == 1:
+                adjust_step = min(70, (diff + padding) * 2 if diff >= page_span else (diff + page_span - 1 + padding))
+            else:
+                adjust_step = min(50, abs(diff))
+
+            adjust_step = max(1, adjust_step)
+            keys = " ".join([arrow_key] * adjust_step)
+            total_arrows += adjust_step
+            await run_adb_shell(f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+            actions_taken.append(
+                f"Attempt {attempt}: Dispatched {adjust_step} {'Down(20)' if diff > 0 else 'Up(19)'} arrows from Ln {cur_t} toward Ln {target_top} (diff={diff:+d})"
+            )
+
+        prev_top = cur_t
+        last_dir = cur_dir
+        await asyncio.sleep(0.18)
+        await dismiss_keyboard(ser, valid_d)
+
+    return {
+        "status": "error",
+        "reached": False,
+        "target_top": target_top,
+        "actual_top": actual_top,
+        "actual_bottom": actual_bot,
+        "arrows_pressed": total_arrows,
+        "page_keys_pressed": total_page_keys,
+        "attempts": max_attempts,
+        "snapshot_bytes": latest_snap,
+        "actions_taken": actions_taken
     }
 
 

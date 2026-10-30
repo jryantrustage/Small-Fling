@@ -16,7 +16,8 @@ from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, sanitize_input_display_id,
     dismiss_keyboard, run_adb_shell, capture_external_screenshot,
-    dispatch_accelerated_viewport_step, get_display_dimensions
+    dispatch_accelerated_viewport_step, navigate_to_target_top_line,
+    get_display_dimensions, fetch_current_display_dpi_factor, DEVICE_PROFILES, current_device_model
 )
 from services import state
 from services.visual_state_service import assert_markdown_open, run_editor_recovery_node
@@ -35,8 +36,9 @@ class ArrowDownPagerNode(BaseDagNode):
     default_position = {"x": 1160.0, "y": 140.0}
     default_config = {
         "scroll_padding_lines": 4,
-        "max_adjust_attempts": 7,
-        "dispatch_method": "arrow_down"
+        "max_adjust_attempts": 10,
+        "dispatch_method": "arrow_down",
+        "use_page_keys": True
     }
     config = default_config.copy()
 
@@ -46,8 +48,18 @@ class ArrowDownPagerNode(BaseDagNode):
         cfg = blackboard.config or self.get_config()
         is_mock = serial and "mock" in str(serial).lower()
 
-        # Resolve prior page bottom line number
+        # Resolve starting/current top line and prior page bottom line number
         payload = blackboard.payload or {}
+        cur_top = (
+            int(payload.get("cur_top")) if payload.get("cur_top") is not None
+            else (
+                blackboard.top_line
+                or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line")
+                or state.latest_telemetry.get("current_top_line")
+                or 1
+            )
+        )
+
         if payload.get("prev_bottom"):
             prev_bottom = int(payload["prev_bottom"])
         elif payload.get("target_top"):
@@ -59,20 +71,16 @@ class ArrowDownPagerNode(BaseDagNode):
                 state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line")
                 or state.latest_telemetry.get("current_bottom_line")
                 or state.orchestration_state.get("bottom_line")
-                or 31
+                or 24
             )
+
+        # Never allow an inverted/truncated bottom line (< cur_top) to trigger a backward scroll!
+        if prev_bottom < cur_top:
+            prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
+            lpp = state.orchestration_state.get("viewport_lines") or prof.get("lines_per_page", 24)
+            prev_bottom = cur_top + lpp - 1
 
         target_top = prev_bottom + 1
-
-        cur_top = (
-            int(payload.get("cur_top")) if payload.get("cur_top") is not None
-            else (
-                blackboard.top_line
-                or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line")
-                or state.latest_telemetry.get("current_top_line")
-                or 1
-            )
-        )
 
         cursor_line = (
             int(payload["cursor_line"]) if payload.get("cursor_line") is not None
@@ -149,63 +157,40 @@ class ArrowDownPagerNode(BaseDagNode):
         await dismiss_keyboard(serial, valid_disp_id)
         await asyncio.sleep(0.05)
 
-        # 2. Viewport step dispatch
-        dispatch_meth = str(cfg.get("dispatch_method", "arrow_down"))
-        await dispatch_accelerated_viewport_step(
-            delta_lines=tracked_arrow_count,
-            serial=serial,
-            display_id=valid_disp_id,
-            method=dispatch_meth
-        )
+        # 2. Viewport step dispatch & closed-loop PageUp/PageDown + Arrow alignment
+        dispatch_meth = str(payload.get("dispatch_method") or cfg.get("dispatch_method", "arrow_down"))
+        use_page_keys = bool(payload.get("use_page_keys", cfg.get("use_page_keys", True)))
+        max_attempts = int(cfg.get("max_adjust_attempts", 10))
 
-        total_arrows_pressed = tracked_arrow_count
-        await asyncio.sleep(0.18)
-        await dismiss_keyboard(serial, valid_disp_id)
-
-        # 3. Closed-loop verification loop
-        max_attempts = int(cfg.get("max_adjust_attempts", 7))
-        matched = False
-        actual_top = None
-
-        for _ in range(max_attempts):
-            snap = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
-            if not snap:
-                await asyncio.sleep(0.12)
-                continue
-
-            img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
-            actual_top, meta = detect_top_line_from_image(img, target_top=target_top)
-            gutter = find_gutter_numbers_cluster(img)
-            first_gutter = gutter[0][1] if gutter else actual_top
-
-            if actual_top == target_top or first_gutter == target_top:
-                matched = True
-                break
-
-            if actual_top is None and first_gutter is not None:
-                actual_top = first_gutter
-
-            if actual_top is None:
-                # Still settling; brief wait before next attempt
-                await asyncio.sleep(0.18)
-                continue
-
-            diff = target_top - actual_top
-            disp_pfx = f"-d {valid_disp_id} " if valid_disp_id else ""
-            if diff > 0:
-                adjust_step = min(diff, 25)
-                keys = " ".join(["20"] * adjust_step)
-                total_arrows_pressed += adjust_step
-                await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
-            elif diff < 0:
-                diff_up = abs(diff)
-                adjust_step = min(diff_up, 25)
-                keys = " ".join(["19"] * adjust_step)
-                total_arrows_pressed += adjust_step
-                await run_adb_shell(f"input {disp_pfx}keyevent {keys}", serial)
-
+        total_arrows_pressed = 0
+        if dispatch_meth.lower() not in ("page_up_down", "pagedown", "pageup"):
+            await dispatch_accelerated_viewport_step(
+                delta_lines=tracked_arrow_count,
+                serial=serial,
+                display_id=valid_disp_id,
+                method=dispatch_meth
+            )
+            total_arrows_pressed = tracked_arrow_count
             await asyncio.sleep(0.18)
             await dismiss_keyboard(serial, valid_disp_id)
+
+        # 3. Closed-loop verification & deterministic PageUp/PageDown + Arrow alignment to target_top
+        nav_res = await navigate_to_target_top_line(
+            target_top=target_top,
+            serial=serial,
+            display_id=valid_disp_id,
+            current_top=cur_top if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
+            current_bottom=prev_bottom if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
+            lines_per_page=visible_span,
+            use_page_keys=use_page_keys,
+            max_attempts=max_attempts,
+            caller_node="arrow_down"
+        )
+
+        matched = bool(nav_res.get("reached", False))
+        actual_top = nav_res.get("actual_top")
+        total_arrows_pressed += int(nav_res.get("arrows_pressed", 0))
+        page_keys_pressed = int(nav_res.get("page_keys_pressed", 0))
 
         if not matched:
             error_msg = (
@@ -229,6 +214,7 @@ class ArrowDownPagerNode(BaseDagNode):
 
         state.orchestration_state["cursor_line"] = new_cursor_line
         state.orchestration_state["last_arrow_count"] = total_arrows_pressed
+        state.orchestration_state["next_target_top"] = target_top
         state.latest_telemetry["current_top_line"] = target_top
         blackboard.top_line = target_top
         blackboard.arrow_count = total_arrows_pressed
