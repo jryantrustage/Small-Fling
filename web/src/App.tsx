@@ -12,7 +12,7 @@ import { FlowDag } from './FlowDag';
 import { useConfirm, Modal } from './ConfirmModal';
 import type {
   ProjectData, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
-  DeviceProfile, DeviceHardwareSpecs, DesktopVerificationInfo
+  DeviceProfile, DeviceHardwareSpecs, DesktopVerificationInfo, MultipartBundleState
 } from './types';
 import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
@@ -590,24 +590,139 @@ function AppContent() {
   };
 
   const [headlessMode, setHeadlessMode] = useState<boolean>(false);
+  const [forceWebUiInHeadless, setForceWebUiInHeadless] = useState<boolean>(false);
   const [isHeadlessTelemetryOpen, setIsHeadlessTelemetryOpen] = useState<boolean>(false);
   const [headlessTelemetry, setHeadlessTelemetry] = useState<HeadlessTelemetryData | null>(null);
+  const [isCaptureLoopRunning, setIsCaptureLoopRunning] = useState<boolean>(false);
+
+  // Multi-Part Markdown & Screen Preparation State
+  const [multipartState, setMultipartState] = useState<MultipartBundleState>({
+    auto_chain_enabled: true,
+    is_multipart: false,
+    base_prefix: '',
+    current_part: null,
+    total_parts: null,
+    next_part_number: null,
+    next_file_name: null,
+    available_parts: [],
+    exported_parts: [],
+    transition_status: 'idle',
+    last_transition_message: '',
+    bundle_completed: false
+  });
+  const [isPreparingScreen, setIsPreparingScreen] = useState<boolean>(false);
+  const [isTransitioningNextPart, setIsTransitioningNextPart] = useState<boolean>(false);
+  const [startupProjectName, setStartupProjectName] = useState<string>('');
+  const [startupNameTouched, setStartupNameTouched] = useState<boolean>(false);
+
+  // Auto-fill startup project name when alignment detects a filename on the live mobile screen
+  useEffect(() => {
+    if (!activeProject && !startupNameTouched && alignmentData?.file_name) {
+      setStartupProjectName(alignmentData.file_name);
+    }
+  }, [activeProject, startupNameTouched, alignmentData?.file_name]);
 
   const handleToggleHeadlessMode = async () => {
     try {
+      const nextVal = !headlessMode;
       const res = await fetch(`${API_BASE}/api/dag/config/headless-mode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ headless_mode: !headlessMode })
+        body: JSON.stringify({ headless_mode: nextVal })
       });
       if (res.ok) {
         const d = await res.json();
         if (d && typeof d.headless_mode === 'boolean') {
           setHeadlessMode(d.headless_mode);
+          if (d.headless_mode) {
+            setForceWebUiInHeadless(false);
+          }
         }
       }
     } catch (e) {
       console.error('Failed to toggle headless mode', e);
+    }
+  };
+
+  const handlePrepareMarkdownEditor = async () => {
+    setIsPreparingScreen(true);
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      const res = await api('/api/device/prepare-markdown-editor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: activeSer })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.alignment) setAlignmentData(d.alignment);
+        if (d.multipart_state) setMultipartState(d.multipart_state);
+        if (d.detected_file_name && !startupNameTouched) {
+          setStartupProjectName(d.detected_file_name);
+        }
+        setStreamKey(Date.now());
+      }
+    } catch (e) {
+      console.error('Failed to prepare markdown editor', e);
+    } finally {
+      setIsPreparingScreen(false);
+    }
+  };
+
+  const handleToggleAutoChainMultipart = async (enabled: boolean) => {
+    try {
+      const res = await api('/api/dag/multipart/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_chain_enabled: enabled })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.multipart_state) setMultipartState(d.multipart_state);
+      }
+    } catch (e) {
+      console.error('Failed to update multipart config', e);
+    }
+  };
+
+  const handleTransitionNextPart = async (autoStartLoop: boolean = true) => {
+    setIsTransitioningNextPart(true);
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      const res = await api('/api/dag/multipart/transition-next', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: activeSer, auto_start_loop: autoStartLoop })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.multipart_state) setMultipartState(d.multipart_state);
+        if (d.project) setActiveProject(d.project);
+        setStreamKey(Date.now());
+      }
+    } catch (e) {
+      console.error('Failed to transition to next markdown part', e);
+    } finally {
+      setIsTransitioningNextPart(false);
+    }
+  };
+
+  const handleStartStopCaptureLoop = async (start: boolean) => {
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      if (start) {
+        const res = await api('/api/dag/loop/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serial: activeSer, headless_mode: headlessMode })
+        });
+        if (res.ok) setIsCaptureLoopRunning(true);
+      } else {
+        const res = await api('/api/dag/loop/stop', { method: 'POST' });
+        if (res.ok) setIsCaptureLoopRunning(false);
+      }
+    } catch (e) {
+      console.error('Failed to toggle capture loop', e);
     }
   };
 
@@ -621,6 +736,18 @@ function AppContent() {
     apiJson<any>('/api/dag/headless/telemetry').then(d => {
       if (d && d.telemetry) {
         setHeadlessTelemetry(d.telemetry);
+      }
+    }).catch(() => {});
+
+    apiJson<any>('/api/dag/multipart/status').then(d => {
+      if (d && d.multipart_state) {
+        setMultipartState(d.multipart_state);
+      }
+    }).catch(() => {});
+
+    apiJson<any>('/api/dag/status').then(d => {
+      if (d && typeof d.capture_loop_running === 'boolean') {
+        setIsCaptureLoopRunning(d.capture_loop_running);
       }
     }).catch(() => {});
   }, []);
@@ -1135,7 +1262,7 @@ function AppContent() {
   };
 
   const isCreatingProjectRef = useRef(false);
-  const handleCreateProject = async (overrideName?: string) => {
+  const handleCreateProject = async (overrideName?: string, autoStartLoop?: boolean) => {
     if (isCreatingProjectRef.current) return;
     const projName = (typeof overrideName === 'string' ? overrideName : newProject.name).trim();
     if (!projName) return;
@@ -1153,7 +1280,7 @@ function AppContent() {
       const selectedProf = deviceProfiles.find(p => p.id === newProject.deviceProfileId);
       const payload: any = {
         name: projName,
-        description: newProject.desc,
+        description: newProject.desc || (alignmentData?.file_name ? `File: ${alignmentData.file_name}` : ''),
         target_total_lines: newProject.target,
         lock_device: newProject.lockDevice
       };
@@ -1179,6 +1306,9 @@ function AppContent() {
       if (res.ok) {
         setNewProject({ name: '', desc: '', target: 0, deviceProfileId: 'auto', lockDevice: true });
         await fetchData();
+        if (autoStartLoop) {
+          await handleStartStopCaptureLoop(true);
+        }
       } else {
         const errData = await res.json().catch(() => ({ detail: 'Failed to create project' }));
         setProjectInitProgress(prev => prev ? ({ ...prev, status: 'error', error: errData.detail || 'Failed to create project', stage: 'Project creation failed' }) : null);
@@ -1943,6 +2073,25 @@ function AppContent() {
           } else if (msg.type === 'alignment_status') {
             const d = msg.alignment || msg.data;
             if (d) setAlignmentData(d);
+            if (msg.multipart_state) setMultipartState(msg.multipart_state);
+          } else if (msg.type === 'capture_loop_status') {
+            if (typeof msg.running === 'boolean') {
+              setIsCaptureLoopRunning(msg.running);
+            }
+            if (msg.telemetry) {
+              setTelemetry(p => ({ ...p, ...msg.telemetry }));
+            }
+          } else if (msg.type === 'multipart_transition_status' || msg.type === 'multipart_transition_completed' || msg.type === 'multipart_bundle_completed' || msg.type === 'markdown_part_exported') {
+            if (msg.multipart_state) {
+              setMultipartState(msg.multipart_state);
+            }
+            if (msg.project) {
+              setActiveProject(msg.project);
+            }
+            if (msg.type === 'multipart_transition_completed' || msg.type === 'multipart_bundle_completed') {
+              setStreamKey(Date.now());
+              fetchData();
+            }
           } else if (msg.type === 'config_updated') {
             if (typeof msg.auto_enter_pin === 'boolean') setAutoEnterPin(msg.auto_enter_pin);
             if (msg.device_pin) setDevicePinInput(msg.device_pin);
@@ -2861,10 +3010,89 @@ function AppContent() {
             </div>
           )}
 
+          {/* Multi-Part Markdown Bundle Pill */}
+          {(multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
+            <button
+              type="button"
+              onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+              title="Multi-Part Markdown Bundle Detected! Click to toggle Auto-Chain (Exit via Back Arrow -> Open Next Part -> Maximize -> Edit + Dark Mode -> New Project)"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 9px',
+                borderRadius: '14px',
+                fontSize: '10.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: multipartState.auto_chain_enabled ? 'rgba(56, 189, 248, 0.16)' : 'rgba(148, 163, 184, 0.12)',
+                border: multipartState.auto_chain_enabled ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid rgba(148, 163, 184, 0.3)',
+                color: multipartState.auto_chain_enabled ? '#38bdf8' : '#94a3b8'
+              }}
+            >
+              <span>📂 PART {multipartState.current_part || alignmentData.part_number || 1}{multipartState.total_parts || alignmentData.total_parts ? `/${multipartState.total_parts || alignmentData.total_parts}` : ''}</span>
+              <span style={{ opacity: 0.7 }}>•</span>
+              <span style={{ color: multipartState.auto_chain_enabled ? '#00ff9d' : '#94a3b8' }}>
+                AUTO-CHAIN {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          )}
+
+          {/* Prominent Headless Option & Instant Web UI View Switcher */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(15, 23, 42, 0.85)', border: `1px solid ${headlessMode ? '#a855f7' : '#30363d'}`, borderRadius: '6px', padding: '2px' }}>
+            <button
+              type="button"
+              onClick={handleToggleHeadlessMode}
+              title={headlessMode
+                ? 'Headless Mode is ON (Fast Multi-Bundle OCR with suspended UI overhead). Click to turn Headless Mode OFF.'
+                : 'Enable Headless Mode to accelerate local image acquisition, OCR, and multi-part markdown assembly'}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '3px 8px',
+                borderRadius: '4px',
+                fontSize: '10.5px',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                background: headlessMode ? 'linear-gradient(135deg, #7e22ce 0%, #6b21a8 100%)' : 'transparent',
+                color: headlessMode ? '#fff' : '#c9d1d9'
+              }}
+            >
+              <Cpu size={11} color={headlessMode ? '#e9d5ff' : '#a855f7'} />
+              <span>{headlessMode ? '⚡ HEADLESS: ON' : '⚡ HEADLESS: OFF'}</span>
+            </button>
+            {headlessMode && (
+              <button
+                type="button"
+                onClick={() => setForceWebUiInHeadless(prev => !prev)}
+                title={forceWebUiInHeadless
+                  ? 'Currently inspecting in Full Web UI View. Click to return to Fast Headless Console (suspends UI rendering for maximum local OCR speed).'
+                  : 'Switch to Full Web UI View at any time to inspect and control the quality of the overall process.'}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  fontSize: '10.5px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: 'pointer',
+                  background: forceWebUiInHeadless ? '#059669' : 'rgba(56, 189, 248, 0.2)',
+                  color: forceWebUiInHeadless ? '#fff' : '#38bdf8'
+                }}
+              >
+                <Eye size={11} />
+                <span>{forceWebUiInHeadless ? '⚡ Return to Headless Console' : '🖥️ Switch to Web UI View'}</span>
+              </button>
+            )}
+          </div>
+
           <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
             <span className="label">SOCKET:</span><span className="value" style={{ color: wsConnected ? '#00ff9d' : '#ff7b72' }}>{wsConnected ? 'LIVE' : 'OFFLINE'}</span>
           </div>
-          {recaptureQueue.length > 0 && <div className="metric-pill" style={{ borderColor: '#bc8cff44' }}><span className="label">RECAPTURE:</span><span className="value" style={{ color: '#bc8cff' }}>{recaptureQueue.length}</span></div>}
         </div>
 
         <div className="header-actions">
@@ -2872,30 +3100,70 @@ function AppContent() {
         </div>
       </header>
 
-      <AlignmentAlertBanner
-        alignmentData={alignmentData}
-        deviceInfo={deviceInfo}
-        deviceModel={deviceModel}
-        isCheckingAlignment={isCheckingAlignment}
-        onTriggerCheck={handleTriggerAlignmentCheck}
-        onOpenModal={() => setShowAlignmentModal(true)}
-        onOpenLiveScreen={() => { setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
-        onOpenDeviceDrawer={() => { setStudioInitialTab('device'); setShowStudioDrawer(true); }}
-        onConnectDevice={(ip, model) => handleConnectAdbIp(ip, model)}
-        isConnectingDevice={isConnectingIp}
-        onFixClassifier={handleFixClassifier}
-        onFixAllClassifiers={handleFixAllClassifiers}
-        fixingClassifierId={fixingClassifierId}
-        isFixingAll={isFixingAll}
-        isDismissed={isBannerDismissed}
-        onDismissBanner={() => { setIsBannerDismissed(true); localStorage.setItem('mc_banner_dismissed', 'true'); }}
-        isMinimized={isBannerMinimized}
-        onToggleMinimizeBanner={() => setIsBannerMinimized(p => !p)}
-        dismissedItems={dismissedItems}
-        onDismissItem={handleDismissItem}
-      />
+      {headlessMode && forceWebUiInHeadless && (
+        <div style={{
+          background: 'linear-gradient(90deg, rgba(88, 28, 135, 0.45) 0%, rgba(15, 23, 42, 0.95) 50%, rgba(6, 78, 59, 0.45) 100%)',
+          borderBottom: '1px solid rgba(168, 85, 247, 0.45)',
+          padding: '6px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: '12px',
+          color: '#e9d5ff'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Cpu size={14} color="#c084fc" />
+            <span>
+              <strong>Web UI Quality Inspection Active</strong> while Headless OCR Engine is enabled. You can inspect frames, lines, and live alignment here, or return to the Headless Console to maximize local OCR throughput.
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => setForceWebUiInHeadless(false)}
+              style={{ background: '#7e22ce', borderColor: '#a855f7', fontSize: '11px', padding: '3px 10px', fontWeight: 700 }}
+            >
+              ⚡ Return to Fast Headless Console
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={handleToggleHeadlessMode}
+              style={{ fontSize: '11px', padding: '3px 10px' }}
+            >
+              Turn Off Headless Mode
+            </button>
+          </div>
+        </div>
+      )}
 
-      {showDag && (
+      {!(headlessMode && !forceWebUiInHeadless) && (
+        <AlignmentAlertBanner
+          alignmentData={alignmentData}
+          deviceInfo={deviceInfo}
+          deviceModel={deviceModel}
+          isCheckingAlignment={isCheckingAlignment}
+          onTriggerCheck={handleTriggerAlignmentCheck}
+          onOpenModal={() => setShowAlignmentModal(true)}
+          onOpenLiveScreen={() => { setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
+          onOpenDeviceDrawer={() => { setStudioInitialTab('device'); setShowStudioDrawer(true); }}
+          onConnectDevice={(ip, model) => handleConnectAdbIp(ip, model)}
+          isConnectingDevice={isConnectingIp}
+          onFixClassifier={handleFixClassifier}
+          onFixAllClassifiers={handleFixAllClassifiers}
+          fixingClassifierId={fixingClassifierId}
+          isFixingAll={isFixingAll}
+          isDismissed={isBannerDismissed}
+          onDismissBanner={() => { setIsBannerDismissed(true); localStorage.setItem('mc_banner_dismissed', 'true'); }}
+          isMinimized={isBannerMinimized}
+          onToggleMinimizeBanner={() => setIsBannerMinimized(p => !p)}
+          dismissedItems={dismissedItems}
+          onDismissItem={handleDismissItem}
+        />
+      )}
+
+      {showDag && !(headlessMode && !forceWebUiInHeadless) && (
         <div style={{ padding: '0 20px 6px 20px', position: 'relative', zIndex: 100 }}>
           <FlowDag
             apiBase={API_BASE}
@@ -3029,7 +3297,245 @@ function AppContent() {
           )}
         </aside>
 
-        {activeProject ? (
+        {headlessMode && !forceWebUiInHeadless ? (
+          <main
+            className="frame-inspector-panel headless-console-workspace"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              overflowY: 'auto',
+              background: 'radial-gradient(ellipse at 50% 0%, rgba(88, 28, 135, 0.22) 0%, #090d16 70%)',
+              padding: '24px 32px',
+              gap: '20px'
+            }}
+          >
+            {/* Top Headless Command & Quality Switcher Banner */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '14px',
+              background: 'rgba(15, 23, 42, 0.9)',
+              border: '1px solid rgba(168, 85, 247, 0.45)',
+              borderRadius: '10px',
+              padding: '16px 20px',
+              boxShadow: '0 8px 28px rgba(0,0,0,0.45)'
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    background: 'rgba(168, 85, 247, 0.2)', border: '1px solid rgba(168, 85, 247, 0.5)',
+                    color: '#e9d5ff', padding: '3px 10px', borderRadius: '14px', fontSize: '11px', fontWeight: 800
+                  }}>
+                    <Cpu size={13} color="#c084fc" />
+                    <span>⚡ HEADLESS MULTI-BUNDLE ACCELERATION ACTIVE</span>
+                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#f0f6fc' }}>
+                    {activeProject ? `Active Project: ${activeProject.name}` : (alignmentData.file_name ? `Detected File: ${alignmentData.file_name}` : 'Ready to Initialize Project')}
+                  </span>
+                </div>
+                <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                  Browser live video stream, SVG canvas, and DOM line tables are suspended so 100% of local CPU/GPU accelerates image capture, OCR, and multi-part markdown assembly.
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {!activeProject ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleCreateProject(startupProjectName || alignmentData.file_name || 'Markdown_Capture_Part1.md', true)}
+                    style={{ background: '#059669', borderColor: '#10b981', padding: '8px 14px', fontSize: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    <Zap size={14} />
+                    <span>Create Project &amp; Start Headless Loop</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => handleStartStopCaptureLoop(!isCaptureLoopRunning)}
+                    style={{
+                      background: isCaptureLoopRunning ? '#dc2626' : '#059669',
+                      borderColor: isCaptureLoopRunning ? '#ef4444' : '#10b981',
+                      padding: '8px 14px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    <Zap size={14} />
+                    <span>{isCaptureLoopRunning ? '⏹ Stop Capture Loop' : '▶ Start Continuous Loop'}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => setForceWebUiInHeadless(true)}
+                  style={{
+                    background: 'rgba(56, 189, 248, 0.16)',
+                    borderColor: '#38bdf8',
+                    color: '#38bdf8',
+                    padding: '8px 14px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Eye size={14} />
+                  <span>🖥️ Switch to Full Web UI View (Inspect Quality)</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={handleToggleHeadlessMode}
+                  style={{ padding: '8px 12px', fontSize: '12px', color: '#cbd5e1' }}
+                >
+                  Turn Off Headless
+                </button>
+              </div>
+            </div>
+
+            {/* Live Progress & Multi-Part Bundle Status Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '14px' }}>
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Document Line Progress</span>
+                <div style={{ fontSize: '22px', fontWeight: 800, color: '#00ff9d', fontFamily: 'monospace' }}>
+                  Ln {telemetry.current_bottom_line || documentData.max_line || 0} / {activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 'Calibrating'}
+                </div>
+                <div style={{ width: '100%', height: '8px', background: '#1e293b', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{
+                    width: `${Math.min(100, Math.round(((telemetry.current_bottom_line || documentData.max_line || 0) / Math.max(1, activeProject?.target_total_lines || telemetry.target_total_lines || 1)) * 100))}%`,
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #10b981, #38bdf8)',
+                    transition: 'width 0.3s ease'
+                  }} />
+                </div>
+                <span style={{ fontSize: '11.5px', color: '#cbd5e1' }}>
+                  Page #{telemetry.current_page || frames.length || 1} • {documentData.total_lines} Verified Lines • {frames.length} Frames
+                </span>
+              </div>
+
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Multi-Part Markdown Bundle (`*part*.md`)</span>
+                <div style={{ fontSize: '16px', fontWeight: 800, color: '#38bdf8' }}>
+                  {multipartState.is_multipart || alignmentData.is_multipart
+                    ? `Part ${multipartState.current_part || alignmentData.part_number || 1}${multipartState.total_parts || alignmentData.total_parts ? ` of ${multipartState.total_parts || alignmentData.total_parts}` : ''} (${alignmentData.file_name || activeProject?.name || ''})`
+                    : (alignmentData.file_name || activeProject?.name || 'Single Markdown Document')}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+                    style={{
+                      borderColor: multipartState.auto_chain_enabled ? '#00ff9d' : '#475569',
+                      color: multipartState.auto_chain_enabled ? '#00ff9d' : '#94a3b8',
+                      fontSize: '11px',
+                      padding: '4px 8px'
+                    }}
+                  >
+                    Auto-Chain Next Part: {multipartState.auto_chain_enabled ? 'ON ✔' : 'OFF'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={() => handleTransitionNextPart(true)}
+                    disabled={isTransitioningNextPart}
+                    style={{ borderColor: '#38bdf8', color: '#38bdf8', fontSize: '11px', padding: '4px 8px' }}
+                    title="Click Back Arrow (<-), select next part in Teams folder, maximize window (□), enable Edit + Dark mode, create project & continue"
+                  >
+                    {isTransitioningNextPart ? 'Opening Next Part...' : '⏭ Exit (←) & Open Next Part Now'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={handlePrepareMarkdownEditor}
+                    disabled={isPreparingScreen}
+                    style={{ borderColor: '#c084fc', color: '#c084fc', fontSize: '11px', padding: '4px 8px' }}
+                  >
+                    {isPreparingScreen ? 'Preparing...' : '□ Maximize + Edit + Dark'}
+                  </button>
+                </div>
+                {multipartState.last_transition_message && (
+                  <span style={{ fontSize: '11px', color: '#a7f3d0' }}>{multipartState.last_transition_message}</span>
+                )}
+              </div>
+
+              <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' }}>Live Engine Status</span>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', lineHeight: 1.4 }}>
+                  {telemetry.status_message || headlessTelemetry?.finish_status_message || 'Ready'}
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#94a3b8', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <span>Speed: <strong style={{ color: '#e2e8f0' }}>{headlessTelemetry?.lines_per_second || 0} lines/s</strong></span>
+                  <span>Avg OCR: <strong style={{ color: '#e2e8f0' }}>{headlessTelemetry?.avg_ocr_latency_ms || telemetry.capture_telemetry?.last_latency_ms || 0}ms</strong></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Exported Markdown Parts List */}
+            <div style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: '#f0f6fc' }}>
+                  Exported Markdown Files ({multipartState.exported_parts?.length || 0})
+                </span>
+                {activeProject && (
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-outline"
+                    onClick={handleExportMarkdown}
+                    style={{ color: '#00ff9d', borderColor: '#00ff9d66', fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  >
+                    <Download size={12} />
+                    <span>Export Current Markdown (.md)</span>
+                  </button>
+                )}
+              </div>
+              {multipartState.exported_parts && multipartState.exported_parts.length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {multipartState.exported_parts.map((exp, idx) => (
+                    <a
+                      key={idx}
+                      href={`${API_BASE}/api/dag/multipart/exports/${encodeURIComponent(exp.file_name)}`}
+                      download={exp.file_name}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'rgba(16, 185, 129, 0.12)',
+                        border: '1px solid rgba(16, 185, 129, 0.4)',
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        color: '#10b981',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        textDecoration: 'none'
+                      }}
+                    >
+                      <Download size={13} />
+                      <span>{exp.file_name}</span>
+                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>({exp.line_count} lines)</span>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  Completed markdown parts are automatically exported to `storage/exports/` as each part reaches its last line.
+                </span>
+              )}
+            </div>
+          </main>
+        ) : activeProject ? (
           <>
             {framesMinimized || inspectorMaximized || linesMaximized ? (
               <aside
@@ -3503,7 +4009,28 @@ function AppContent() {
                       </div>
 
                       {/* Yellow Arrow 2 Target + Rename AI Boxes to Content Framing */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={handlePrepareMarkdownEditor}
+                          disabled={isPreparingScreen}
+                          title="Maximize floating markdown window (□), switch to Edit Mode (pencil) and Dark Mode (moon)"
+                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px', borderColor: '#c084fc', color: '#e9d5ff', background: 'rgba(168, 85, 247, 0.14)' }}
+                        >
+                          <Maximize2 size={10} />
+                          <span>{isPreparingScreen ? 'Preparing...' : '□ Maximize + Edit + Dark'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline"
+                          onClick={() => handleTransitionNextPart(true)}
+                          disabled={isTransitioningNextPart}
+                          title="Click top-left Back Arrow (<-), select next markdown part in folder, maximize (□), enable Edit + Dark mode, create next project & continue loop"
+                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px', borderColor: '#38bdf8', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)' }}
+                        >
+                          <span>{isTransitioningNextPart ? 'Opening Next Part...' : '← Exit & Next Part'}</span>
+                        </button>
                         <button
                           type="button"
                           className="btn btn-sm btn-outline btn-autofix"
@@ -3987,229 +4514,256 @@ function AppContent() {
                 )}
           </>
         ) : (
-          <main className="frame-inspector-panel standby-workspace-hub" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', background: 'radial-gradient(ellipse at 50% 20%, rgba(22, 27, 34, 0.95) 0%, #0d1117 80%)' }}>
-            <div className="standby-hub-container" style={{ maxWidth: '880px', margin: 'auto', padding: '40px 24px', display: 'flex', flexDirection: 'column', gap: '28px', width: '100%' }}>
-              
-              {/* Top Banner */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #30363d', paddingBottom: '20px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#00ff9d', boxShadow: '0 0 10px #00ff9d' }} />
-                    <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#f0f6fc', margin: 0, letterSpacing: '-0.3px' }}>
-                      Matrix Capture Studio
-                    </h2>
-                    <span style={{ fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', background: 'rgba(0, 255, 157, 0.12)', border: '1px solid rgba(0, 255, 157, 0.3)', color: '#00ff9d' }}>
-                      Device &amp; Telemetry Active
-                    </span>
-                  </div>
-                  <p style={{ fontSize: '13px', color: '#8b949e', margin: 0, lineHeight: 1.5 }}>
-                    Real-time phone inspection, external display streaming, and live pipeline telemetry are ready without needing a project.
-                  </p>
+          <main
+            className="frame-inspector-panel startup-live-mobile-workspace"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              background: '#090d16'
+            }}
+          >
+            {/* Startup Control & Initialization Bar (Before Project Creation) */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px',
+              padding: '10px 16px',
+              background: 'linear-gradient(180deg, #161b22 0%, #0d1117 100%)',
+              borderBottom: '1px solid #30363d',
+              flexShrink: 0
+            }}>
+              {/* Left: Live Mobile Screen Status & Detected File Name */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{
+                    width: '8px', height: '8px', borderRadius: '50%',
+                    background: isCurrentDeviceConnected ? '#00ff9d' : '#ef4444',
+                    boxShadow: isCurrentDeviceConnected ? '0 0 8px #00ff9d' : 'none'
+                  }} />
+                  <strong style={{ fontSize: '12.5px', color: '#f0f6fc' }}>
+                    LIVE {devDisplayName} PREVIEW
+                  </strong>
                 </div>
+
+                {/* Desktop / Phone Mode Switcher */}
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', background: '#0d1117',
+                  border: '1px solid #30363d', borderRadius: '4px', padding: '1px'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchLiveMode('desktop')}
+                    style={{
+                      padding: '2px 8px', height: '22px', fontSize: '10px',
+                      fontWeight: liveMode === 'desktop' ? 700 : 500,
+                      background: liveMode === 'desktop' ? '#2563eb' : 'transparent',
+                      color: liveMode === 'desktop' ? '#fff' : '#8b949e',
+                      display: 'flex', alignItems: 'center', gap: '4px', border: 'none', cursor: 'pointer'
+                    }}
+                  >
+                    <Monitor size={11} />
+                    <span>DESKTOP (1080p)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchLiveMode('phone')}
+                    style={{
+                      padding: '2px 8px', height: '22px', fontSize: '10px',
+                      fontWeight: liveMode === 'phone' ? 700 : 500,
+                      background: liveMode === 'phone' ? '#2563eb' : 'transparent',
+                      color: liveMode === 'phone' ? '#fff' : '#8b949e',
+                      display: 'flex', alignItems: 'center', gap: '4px', border: 'none', cursor: 'pointer'
+                    }}
+                  >
+                    <Smartphone size={11} />
+                    <span>PHONE MIRROR</span>
+                  </button>
+                </div>
+
+                {/* Detected Markdown File & Multi-Part Status */}
+                {alignmentData.file_name ? (
+                  <div style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    background: 'rgba(56, 189, 248, 0.12)', border: '1px solid rgba(56, 189, 248, 0.35)',
+                    borderRadius: '6px', padding: '3px 9px', fontSize: '11.5px', color: '#38bdf8', fontFamily: 'monospace'
+                  }}>
+                    <FileText size={12} />
+                    <strong>{alignmentData.file_name}</strong>
+                    {(alignmentData.is_multipart || multipartState.is_multipart || alignmentData.file_name.toLowerCase().includes('part')) && (
+                      <span style={{
+                        background: 'rgba(16, 185, 129, 0.2)', color: '#00ff9d',
+                        padding: '1px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 800
+                      }}>
+                        PART {alignmentData.part_number || multipartState.current_part || 1}
+                        {(alignmentData.total_parts || multipartState.total_parts) ? ` OF ${alignmentData.total_parts || multipartState.total_parts}` : ''}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: '11.5px', color: '#8b949e' }}>
+                    Verify mobile screen state below before initializing project
+                  </span>
+                )}
+              </div>
+
+              {/* Right: Screen Preparation (Maximize + Edit + Dark) & 1-Click Project Creation */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <button
-                  className="btn btn-primary"
-                  onClick={() => setShowNewProjectModal(true)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: 600 }}
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={handlePrepareMarkdownEditor}
+                  disabled={isPreparingScreen}
+                  title="Maximizes floating markdown editor window (□), switches to Edit Mode (pencil) and Dark Mode (moon)"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    padding: '5px 10px', fontSize: '11px', fontWeight: 700,
+                    borderColor: '#c084fc', color: '#e9d5ff', background: 'rgba(168, 85, 247, 0.14)'
+                  }}
                 >
-                  <Plus size={15} />
-                  <span>Create Project</span>
+                  <Maximize2 size={12} color="#c084fc" />
+                  <span>{isPreparingScreen ? 'Preparing Screen...' : '□ Maximize + Edit + Dark Mode'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline"
+                  onClick={() => handleTransitionNextPart(false)}
+                  disabled={isTransitioningNextPart}
+                  title="Clicks top-left Back Arrow (<-) to return to Teams folder list, opens the next part in sequence, and maximizes editor in Edit + Dark Mode"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    padding: '5px 10px', fontSize: '11px', fontWeight: 700,
+                    borderColor: '#38bdf8', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)'
+                  }}
+                >
+                  <span>{isTransitioningNextPart ? 'Opening Next Part...' : '← Exit & Open Next Part'}</span>
+                </button>
+
+                {/* Inline Project Name & 1-Click Create / Create & Start Loop */}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#0d1117', border: '1px solid #30363d', borderRadius: '6px', padding: '3px 6px' }}>
+                  <input
+                    type="text"
+                    value={startupProjectName}
+                    onChange={e => { setStartupProjectName(e.target.value); setStartupNameTouched(true); }}
+                    placeholder={alignmentData.file_name || 'Project Name (e.g. part1.md)...'}
+                    style={{
+                      width: '220px', background: 'transparent', border: 'none', color: '#f0f6fc',
+                      fontSize: '11.5px', fontFamily: 'monospace', outline: 'none'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    onClick={() => handleCreateProject(startupProjectName || alignmentData.file_name || 'Markdown_Capture_Part1.md', false)}
+                    style={{ padding: '4px 10px', fontSize: '11px', fontWeight: 700, color: '#58a6ff', borderColor: '#58a6ff66' }}
+                  >
+                    <Plus size={12} />
+                    <span>Create Project</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => handleCreateProject(startupProjectName || alignmentData.file_name || 'Markdown_Capture_Part1.md', true)}
+                    style={{
+                      padding: '4px 12px', fontSize: '11px', fontWeight: 700,
+                      background: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '5px'
+                    }}
+                    title="Creates project for current markdown file and immediately starts continuous capture loop (with automatic multi-part progression)"
+                  >
+                    <Zap size={12} />
+                    <span>Create &amp; Run Loop</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
+                  onClick={() => setShowBoundingBoxes(p => !p)}
+                  style={{ padding: '4px 8px', height: '26px', fontSize: '10.5px' }}
+                  title="Toggle Content Framing Overlays on Live Mobile View"
+                >
+                  {showBoundingBoxes ? <Eye size={11} /> : <EyeOff size={11} />}
+                  <span>FRAMING</span>
                 </button>
               </div>
+            </div>
 
-              {/* Status Summary Bar */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    <Smartphone size={13} color={isCurrentDeviceConnected ? '#00ff9d' : '#ff7b72'} />
-                    <span>Target Device</span>
+            {/* Existing Projects Quick Bar (if any projects exist in DB) */}
+            {projects.length > 0 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                padding: '6px 16px', background: '#0d1117', borderBottom: '1px solid #21262d', fontSize: '11px'
+              }}>
+                <span style={{ color: '#8b949e', fontWeight: 600 }}>Existing Projects:</span>
+                {projects.map(p => (
+                  <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', overflow: 'hidden' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchProject(p.id)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px',
+                        padding: '3px 9px', border: 'none', background: 'transparent', color: '#e6edf3', cursor: 'pointer'
+                      }}
+                    >
+                      <FolderKanban size={11} color="#00ff9d" />
+                      <span>{p.name}</span>
+                      <span style={{ color: '#8b949e' }}>({p.frame_count ?? 0}f)</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-text-danger"
+                      onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                      style={{ padding: '3px 6px', borderLeft: '1px solid #30363d', background: 'transparent' }}
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   </div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
-                    {devDisplayName}
-                  </div>
-                  <div style={{ fontSize: '11px', color: isCurrentDeviceConnected ? '#00ff9d' : '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isCurrentDeviceConnected ? '#00ff9d' : '#8b949e' }} />
-                    {isCurrentDeviceConnected ? (deviceInfo?.active_serial || 'Connected') : 'Offline / Disconnected'}
-                  </div>
-                </div>
-
-                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    <Monitor size={13} color="#58a6ff" />
-                    <span>Display Mode</span>
-                  </div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
-                    {liveMode === 'desktop' ? 'External Desktop (1080p)' : 'Phone Mirror'}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#8b949e' }}>
-                    SurfaceFlinger stream active
-                  </div>
-                </div>
-
-                <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b949e', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    <Activity size={13} color="#bc8cff" />
-                    <span>Telemetry Stream</span>
-                  </div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#e6edf3' }}>
-                    {wsConnected ? 'WebSocket Live' : 'HTTP Polling'}
-                  </div>
-                  <div style={{ fontSize: '11px', color: wsConnected ? '#00ff9d' : '#8b949e', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>{latencyMs}ms roundtrip</span>
-                    <span>•</span>
-                    <span>{eventsLog.length} events</span>
-                  </div>
-                </div>
+                ))}
               </div>
+            )}
 
-              {/* Quick Launch Cards into Studio Tabs */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 600, color: '#8b949e', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Quick Launch Into Studio
-                </span>
-                
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
-                  
-                  {/* Phone Screen Stream */}
-                  <div
-                    onClick={() => {
-                      setLiveMode('desktop');
-                      setStreamKey(Date.now());
-                      handleOpenStudio('kiosk');
-                    }}
-                    style={{
-                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
-                      border: '1px solid #30363d',
-                      borderRadius: '10px',
-                      padding: '18px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px',
-                    }}
-                    className="hover-card-highlight"
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(0, 255, 157, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Smartphone size={18} color="#00ff9d" />
-                      </div>
-                      <span style={{ fontSize: '11px', color: '#00ff9d', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                        Open Stream →
+            {/* Main Live View of Connected Mobile Device */}
+            <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <LiveResponsiveViewport
+                streamUrl={`${API_BASE}/api/device/stream?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
+                fallbackUrl={`${API_BASE}/api/device/screen?mode=${liveMode}&serial=${encodeURIComponent(deviceInfo?.active_serial || '')}&t=${streamKey}`}
+                liveMode={liveMode}
+                onSwitchLiveMode={handleSwitchLiveMode}
+                alignmentData={alignmentData}
+                showBoundingBoxes={showBoundingBoxes}
+                deviceInfo={deviceInfo}
+                metaResolution={alignmentData?.resolution}
+                headlessMode={false}
+                onToggleHeadlessMode={handleToggleHeadlessMode}
+                onRefreshStream={() => setStreamKey(Date.now())}
+                topCallout={
+                  <div className="gutter-line-callout top">
+                    <span className="gutter-callout-icon">▲</span>
+                    <span className="gutter-callout-label">TOP GUTTER:</span>
+                    <span className="gutter-callout-value">
+                      {alignmentData.first_line_number ? `Line #${alignmentData.first_line_number}` : 'Detecting...'}
+                    </span>
+                    {alignmentData.file_name && (
+                      <span style={{ marginLeft: '12px', color: '#38bdf8', fontWeight: 700 }}>
+                        📄 {alignmentData.file_name}
                       </span>
-                    </div>
-                    <div>
-                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
-                        Phone &amp; Desktop Live Stream
-                      </h4>
-                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
-                        View live HDMI external desktop, toggle phone mirror, and verify viewport rendering in real-time.
-                      </p>
-                    </div>
+                    )}
                   </div>
-
-                  {/* Telemetry Studio */}
-                  <div
-                    onClick={() => handleOpenStudio('telemetry')}
-                    style={{
-                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
-                      border: '1px solid #30363d',
-                      borderRadius: '10px',
-                      padding: '18px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px',
-                    }}
-                    className="hover-card-highlight"
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(188, 140, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Activity size={18} color="#bc8cff" />
-                      </div>
-                      <span style={{ fontSize: '11px', color: '#bc8cff', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                        Open Telemetry →
-                      </span>
-                    </div>
-                    <div>
-                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
-                        Telemetry &amp; Structured Logs
-                      </h4>
-                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
-                        Monitor OCR confidence metrics, pipeline latency breakdowns, and structured system events.
-                      </p>
-                    </div>
+                }
+                bottomCallout={
+                  <div className="gutter-line-callout bottom">
+                    <span className="gutter-callout-icon">▼</span>
+                    <span className="gutter-callout-label">BOTTOM GUTTER:</span>
+                    <span className="gutter-callout-value">
+                      {alignmentData.last_line_number ? `Line #${alignmentData.last_line_number}` : 'Detecting...'}
+                    </span>
                   </div>
-
-                  {/* Wireless ADB & Device Pairing */}
-                  <div
-                    onClick={() => handleOpenStudio('device')}
-                    style={{
-                      background: 'linear-gradient(145deg, #161b22 0%, #0d1117 100%)',
-                      border: '1px solid #30363d',
-                      borderRadius: '10px',
-                      padding: '18px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '12px',
-                    }}
-                    className="hover-card-highlight"
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(88, 166, 255, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Sliders size={18} color="#58a6ff" />
-                      </div>
-                      <span style={{ fontSize: '11px', color: '#58a6ff', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
-                        Device Config →
-                      </span>
-                    </div>
-                    <div>
-                      <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 600, color: '#f0f6fc' }}>
-                        Wireless ADB &amp; Density
-                      </h4>
-                      <p style={{ margin: 0, fontSize: '12px', color: '#8b949e', lineHeight: 1.4 }}>
-                        Configure IP endpoints, pair Android 11+ Wi-Fi ports, calibrate display DPI, and test input events.
-                      </p>
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* Projects List if any exist */}
-              {projects.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', borderTop: '1px solid #21262d', paddingTop: '20px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#8b949e' }}>
-                    Or select an existing document project:
-                  </span>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {projects.map(p => (
-                      <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', overflow: 'hidden' }}>
-                        <button
-                          type="button"
-                          className="btn btn-outline"
-                          onClick={() => handleSwitchProject(p.id)}
-                          style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '6px 12px', border: 'none', background: 'transparent' }}
-                        >
-                          <FolderKanban size={13} color="#00ff9d" />
-                          <span>{p.name}</span>
-                          <span style={{ fontSize: '11px', color: '#8b949e', marginLeft: '4px' }}>({p.frame_count ?? 0} frames)</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-text-danger"
-                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
-                          title={`Delete project "${p.name}"`}
-                          aria-label={`Delete project ${p.name}`}
-                          style={{ padding: '6px 8px', borderLeft: '1px solid #30363d', borderRadius: 0, background: 'rgba(248, 81, 73, 0.08)' }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+                }
+              />
             </div>
           </main>
         )}

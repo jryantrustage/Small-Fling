@@ -368,3 +368,354 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
         "target_coords": dark_mode_coords,
         "message": f"Successfully switched to Dark Mode (luminance {round(final_lum, 1)} < 55.0) ✔" if is_dark else "Theme menu tapped; verify Dark Mode is active"
     }
+
+
+async def prepare_markdown_editor_window(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Prepares a newly opened or floating Teams Markdown Editor window for OCR capture:
+    1. Maximizes the floating freeform window via its top-right '[]' Maximize control.
+    2. Enables single-pane Edit Mode via the toolbar Pencil icon and suppresses the soft keyboard.
+    3. Selects Dark Mode from the toolbar theme dropdown.
+    4. Dismisses any floating mini-modal / toast pop-ups and updates alignment status.
+    """
+    from services.adb_service import (
+        maximize_floating_markdown_window,
+        resolve_and_dismiss_mini_modals,
+        check_and_update_alignment
+    )
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"success": False, "message": "No connected ADB device", "actions": []}
+
+    disp_id = display_id or await detect_external_display_id(ser)
+    actions: List[str] = []
+
+    # 1. Maximize floating markdown editor window if in freeform mode
+    max_res = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
+    actions.extend(max_res.get("actions", []))
+
+    # 2. Switch to single-pane Edit Mode (Pencil icon)
+    edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
+    actions.extend(edit_res.get("actions", []))
+
+    # 3. Switch to Dark Mode (Moon icon)
+    dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
+    actions.extend(dark_res.get("actions", []))
+
+    # 4. Dismiss any floating mini-modals and suppress keyboard
+    modal_res = await resolve_and_dismiss_mini_modals(serial=ser, display_id=disp_id, caller_node="prepare_markdown_editor")
+    if modal_res.get("actions_taken"):
+        actions.extend(modal_res["actions_taken"])
+    await dismiss_keyboard(ser, disp_id)
+
+    # 5. Re-evaluate alignment status
+    align = await check_and_update_alignment(ser)
+    is_ready = bool(align.get("is_aligned") or (edit_res.get("success") and dark_res.get("success")))
+
+    return {
+        "success": is_ready,
+        "maximized": bool(max_res.get("maximized", True)),
+        "edit_mode": bool(edit_res.get("success", False)),
+        "dark_mode": bool(dark_res.get("success", False)),
+        "file_name": align.get("file_name", ""),
+        "alignment": align,
+        "actions": actions,
+        "message": f"Markdown editor maximized, Edit Mode & Dark Mode active ({align.get('file_name') or 'ready'}) ✔"
+    }
+
+
+def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
+    """
+    Analyzes a Teams folder files list screenshot (Attachment 2) and extracts:
+    - folder_name: Name of the folder in the top header
+    - files: Ordered list of markdown files in the folder with their part numbers and tap coordinates
+    """
+    from alignment_engine import parse_multipart_markdown_filename
+    if img is None or img.size == 0:
+        return {"is_folder_view": False, "folder_name": "", "files": [], "part_files": [], "total_parts": 0}
+
+    h, w = img.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+    ocr = get_rapid_ocr()
+    if ocr is None:
+        return {"is_folder_view": False, "folder_name": "", "files": [], "part_files": [], "total_parts": 0}
+
+    # Crop folder header + file list region (y: 110..960, x: 50..1350 in 1080p)
+    y1_c = int(110 * scale_y)
+    y2_c = int(960 * scale_y)
+    x1_c = int(50 * scale_x)
+    x2_c = int(1350 * scale_x)
+    crop = img[y1_c:y2_c, x1_c:x2_c]
+    res, _ = ocr(crop)
+
+    folder_name = ""
+    files: List[Dict[str, Any]] = []
+    has_modified_by = False
+
+    if res:
+        for box, txt, score in res:
+            pts = np.array(box)
+            bx1 = x1_c + int(pts[:, 0].min())
+            by1 = y1_c + int(pts[:, 1].min())
+            bx2 = x1_c + int(pts[:, 0].max())
+            by2 = y1_c + int(pts[:, 1].max())
+            bw, bh = bx2 - bx1, by2 - by1
+            cx, cy = (bx1 + bx2) // 2, (by1 + by2) // 2
+            clean = txt.strip()
+            if not clean:
+                continue
+
+            if "modified" in clean.lower() or "kb," in clean.lower():
+                has_modified_by = True
+                continue
+
+            # Folder title row in header (y ~ 130..185 in 1080p)
+            if by1 < int(190 * scale_y) and bx1 < int(900 * scale_x):
+                if not clean.lower().endswith(".md") and len(clean) >= 4 and "teams" not in clean.lower():
+                    folder_name = re.sub(r'CommonUl([_\-])', r'CommonUI\1', clean)
+                continue
+
+            # File rows in folder list (y >= 190 in 1080p)
+            if by1 >= int(190 * scale_y) and (
+                ".md" in clean.lower()
+                or ".markdown" in clean.lower()
+                or re.search(r'part\s*\d+', clean, re.IGNORECASE)
+            ):
+                mp = parse_multipart_markdown_filename(clean)
+                files.append({
+                    "file_name": mp.get("file_name") or clean,
+                    "raw_text": clean,
+                    "is_multipart": bool(mp.get("is_multipart")),
+                    "base_prefix": mp.get("base_prefix") or "",
+                    "part_number": mp.get("part_number"),
+                    "bbox": [bx1, by1, bw, bh],
+                    "tap_coords": [cx, cy],
+                    "score": round(float(score), 3)
+                })
+
+    files.sort(key=lambda f: f["bbox"][1])
+    part_files = [f for f in files if f.get("is_multipart") and f.get("part_number") is not None]
+    part_numbers = sorted({int(f["part_number"]) for f in part_files})
+    is_folder_view = bool(len(files) >= 1 and (has_modified_by or len(files) >= 2 or folder_name))
+
+    return {
+        "is_folder_view": is_folder_view,
+        "folder_name": folder_name,
+        "files": files,
+        "part_files": part_files,
+        "available_parts": part_numbers,
+        "total_parts": max(part_numbers) if part_numbers else len(files)
+    }
+
+
+async def exit_markdown_to_folder_list(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Clicks the Back Arrow ('<-') in the top-left of the Teams Markdown Editor (Attachment 1)
+    to exit the markdown view and return to the Teams folder files list (Attachment 2).
+    """
+    from services.adb_service import is_editor_full_screen, resolve_and_dismiss_mini_modals
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"success": False, "message": "No connected ADB device", "actions": []}
+
+    disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    actions: List[str] = []
+
+    await dismiss_keyboard(ser, disp_id)
+    await resolve_and_dismiss_mini_modals(serial=ser, display_id=disp_id, caller_node="exit_markdown_to_folder")
+
+    snap = await capture_external_screenshot(ser, bypass_lock=True)
+    if snap:
+        img0 = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        if img0 is not None:
+            initial_scan = scan_folder_markdown_files_cv(img0)
+            if initial_scan.get("is_folder_view") and len(initial_scan.get("files", [])) >= 2:
+                actions.append("Already on Teams folder files list view")
+                return {
+                    "success": True,
+                    "already_in_folder": True,
+                    "folder_scan": initial_scan,
+                    "actions": actions
+                }
+
+    # Determine Back Arrow ('<-') coordinates depending on whether editor is fullscreen or floating
+    fs_status = await is_editor_full_screen(ser, disp_id, image_bytes=snap)
+    disp_w, disp_h = await get_display_dimensions(ser, disp_id)
+    scale_x, scale_y = disp_w / 1920.0, disp_h / 1080.0
+
+    if not fs_status.get("is_fullscreen", True) and fs_status.get("bounds"):
+        bl, bt, br, bb = fs_status["bounds"]
+        back_x = int(bl + 33 * scale_x)
+        back_y = int(bt + 95 * scale_y)
+    else:
+        back_x = int(53 * scale_x)
+        back_y = int(152 * scale_y)
+
+    # Refine Back Arrow ('<-') centroid from screenshot bright glyph pixels
+    if snap:
+        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        if img is not None:
+            hi, wi = img.shape[:2]
+            rx1 = max(0, back_x - int(28 * scale_x))
+            rx2 = min(wi, back_x + int(32 * scale_x))
+            ry1 = max(0, back_y - int(26 * scale_y))
+            ry2 = min(hi, back_y + int(26 * scale_y))
+            roi = img[ry1:ry2, rx1:rx2]
+            if roi.size > 0:
+                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                ys, xs = np.where(gray > 130)
+                if len(xs) >= 8:
+                    back_x = int(np.mean(xs) + rx1)
+                    back_y = int(np.mean(ys) + ry1)
+
+    # Tap the Back Arrow ('<-') to exit markdown editor back to folder list
+    await run_adb_shell(f"input {disp_pfx}tap {back_x} {back_y}", ser, timeout=2.5)
+    actions.append(f"Tapped Back Arrow ('<-') at ({back_x}, {back_y}) on display #{disp_id} to exit markdown view")
+    await asyncio.sleep(1.25)
+
+    snap_after = await capture_external_screenshot(ser, bypass_lock=True)
+    folder_scan: Dict[str, Any] = {"is_folder_view": False, "files": []}
+    if snap_after:
+        img_after = cv2.imdecode(np.frombuffer(snap_after, np.uint8), cv2.IMREAD_COLOR)
+        if img_after is not None:
+            folder_scan = scan_folder_markdown_files_cv(img_after)
+
+    if not folder_scan.get("is_folder_view"):
+        # Retry with mouse tap on Back Arrow
+        await run_adb_shell(f"input {disp_pfx}mouse tap {back_x} {back_y}", ser, timeout=2.5)
+        actions.append(f"Retried mouse tap on Back Arrow ('<-') at ({back_x}, {back_y})")
+        await asyncio.sleep(1.25)
+        snap_retry = await capture_external_screenshot(ser, bypass_lock=True)
+        if snap_retry:
+            img_retry = cv2.imdecode(np.frombuffer(snap_retry, np.uint8), cv2.IMREAD_COLOR)
+            if img_retry is not None:
+                folder_scan = scan_folder_markdown_files_cv(img_retry)
+
+    return {
+        "success": bool(folder_scan.get("is_folder_view") or len(folder_scan.get("files", [])) > 0),
+        "back_button_clicked": [back_x, back_y],
+        "folder_scan": folder_scan,
+        "actions": actions
+    }
+
+
+async def select_and_open_next_markdown_part(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    current_file_name: Optional[str] = None,
+    target_part_number: Optional[int] = None,
+    base_prefix: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Full automated multi-part bundle transition:
+    1. Exits the completed markdown editor view by clicking the Back Arrow ('<-') (Attachment 1).
+    2. Scans the Teams folder files list (Attachment 2) to discover all part files (e.g., part1..part3).
+    3. Selects and clicks the next part file in sequence (e.g., part2.md or part3.md).
+    4. Maximizes the newly opened floating markdown editor window (Attachment 3) via its '[]' button,
+       and switches to single-pane Edit Mode (Pencil) and Dark Mode (Moon).
+    """
+    from alignment_engine import parse_multipart_markdown_filename
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "success": False, "message": "No connected ADB device", "actions": []}
+
+    disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    actions: List[str] = []
+
+    mp_info = parse_multipart_markdown_filename(current_file_name)
+    cur_part = mp_info.get("part_number") or 1
+    next_part = target_part_number if (target_part_number is not None and target_part_number > 0) else (cur_part + 1)
+    prefix = (base_prefix or mp_info.get("base_prefix") or "").lower()
+
+    # Step 1: Exit current markdown view to Teams folder files list
+    exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
+    actions.extend(exit_res.get("actions", []))
+    folder_scan = exit_res.get("folder_scan", {})
+    files = folder_scan.get("files", [])
+    available_parts = folder_scan.get("available_parts", [])
+    total_parts = folder_scan.get("total_parts", 0)
+
+    if not files:
+        return {
+            "status": "error",
+            "success": False,
+            "message": "Could not detect markdown files in Teams folder list after clicking Back Arrow",
+            "folder_scan": folder_scan,
+            "actions": actions
+        }
+
+    # Step 2: Locate the next part in sequence (e.g. part2.md or part3.md)
+    candidates = [f for f in files if f.get("part_number") == next_part]
+    if prefix and len(candidates) > 1:
+        pref_cands = [f for f in candidates if prefix[:12] in (f.get("base_prefix") or "").lower()]
+        if pref_cands:
+            candidates = pref_cands
+
+    if not candidates:
+        # Check if next_part exceeds all parts in the folder -> Multi-part bundle is 100% finished!
+        if available_parts and next_part > max(available_parts):
+            msg = f"All {len(available_parts)} markdown parts ({', '.join(f'part{p}' for p in available_parts)}) in folder have been completed!"
+            actions.append(msg)
+            return {
+                "status": "bundle_completed",
+                "success": True,
+                "bundle_completed": True,
+                "has_next_part": False,
+                "completed_part": cur_part,
+                "available_parts": available_parts,
+                "total_parts": max(available_parts),
+                "folder_scan": folder_scan,
+                "actions": actions,
+                "message": msg
+            }
+        return {
+            "status": "not_found",
+            "success": False,
+            "has_next_part": False,
+            "target_part_number": next_part,
+            "available_parts": available_parts,
+            "folder_scan": folder_scan,
+            "actions": actions,
+            "message": f"Part {next_part} not found in folder list (detected parts: {available_parts})"
+        }
+
+    target_entry = candidates[0]
+    tx, ty = target_entry["tap_coords"]
+    target_filename = target_entry["file_name"]
+
+    # Step 3: Tap the next markdown file in the folder list to open it
+    await run_adb_shell(f"input {disp_pfx}tap {tx} {ty}", ser, timeout=2.5)
+    actions.append(f"Selected and tapped '{target_filename}' at ({tx}, {ty}) in Teams folder list")
+    await asyncio.sleep(1.65)
+
+    # Step 4: Maximize the newly opened markdown editor and switch to Edit Mode + Dark Mode
+    prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+    actions.extend(prep_res.get("actions", []))
+
+    opened_name = prep_res.get("file_name") or target_filename
+    return {
+        "status": "opened_next_part",
+        "success": True,
+        "bundle_completed": False,
+        "has_next_part": True,
+        "previous_part": cur_part,
+        "part_number": next_part,
+        "total_parts": total_parts or max(available_parts) if available_parts else next_part,
+        "available_parts": available_parts,
+        "opened_file_name": opened_name,
+        "project_name": re.sub(r'\.(md|markdown)$', '', opened_name, flags=re.IGNORECASE),
+        "folder_scan": folder_scan,
+        "prepare_result": prep_res,
+        "actions": actions,
+        "message": f"Opened '{opened_name}' (Part {next_part} of {total_parts or '?'}), maximized editor, and enabled Edit + Dark Mode ✔"
+    }
+

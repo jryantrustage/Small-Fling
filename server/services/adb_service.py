@@ -1623,11 +1623,37 @@ async def is_editor_full_screen(
                 if ime_up:
                     is_vert_max = True
 
+            def _resolve_maximize_btn(bnds: list, img_b: Optional[bytes]) -> list:
+                bl, bt, br, bb = bnds
+                # Default Android 15 Desktop Mode freeform caption bar Maximize [] button offset from top-right
+                mx = max(40, int(br - 122 * (disp_w / 1920.0)))
+                my = max(15, int(bt + 32 * (disp_h / 1080.0)))
+                if img_b and len(img_b) > 2000:
+                    try:
+                        cv_im = cv2.imdecode(np.frombuffer(img_b, np.uint8), cv2.IMREAD_COLOR)
+                        if cv_im is not None:
+                            hi, wi = cv_im.shape[:2]
+                            x1 = max(0, min(wi - 10, int(br - 165 * (wi / 1920.0))))
+                            x2 = max(x1 + 10, min(wi, int(br - 80 * (wi / 1920.0))))
+                            y1 = max(0, min(hi - 10, int(bt + 8 * (hi / 1080.0))))
+                            y2 = max(y1 + 10, min(hi, int(bt + 58 * (hi / 1080.0))))
+                            roi = cv_im[y1:y2, x1:x2]
+                            if roi.size > 0:
+                                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                                ys, xs = np.where(gray > 130)
+                                if len(xs) >= 8:
+                                    mx = int(np.mean(xs) + x1)
+                                    my = int(np.mean(ys) + y1)
+                    except Exception:
+                        pass
+                return [mx, my]
+
             if mode == "freeform" and (not is_horiz_max or not is_vert_max):
                 return {
                     "is_fullscreen": False,
                     "mode": mode,
                     "bounds": bounds,
+                    "maximize_button": _resolve_maximize_btn(bounds, image_bytes),
                     "task_id": tid,
                     "display_id": did,
                     "display_dimensions": [disp_w, disp_h],
@@ -1639,6 +1665,7 @@ async def is_editor_full_screen(
                     "is_fullscreen": False,
                     "mode": mode,
                     "bounds": bounds,
+                    "maximize_button": _resolve_maximize_btn(bounds, image_bytes),
                     "task_id": tid,
                     "display_id": did,
                     "display_dimensions": [disp_w, disp_h],
@@ -1694,6 +1721,67 @@ async def is_editor_full_screen(
         "reason": "Markdown editor occupies full screen display bounds"
     }
 
+async def maximize_floating_markdown_window(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    image_bytes: Optional[bytes] = None
+) -> Dict[str, Any]:
+    """
+    Detects if the Teams Markdown Editor (FilePreviewActivity) is running in a floating
+    freeform window (as occurs when opening a file from the Teams folder list) and clicks
+    the Maximize ('[]') control in the floating window's top-right title bar to expand it
+    to full screen.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"maximized": False, "was_floating": False, "reason": "No active device connected"}
+    if "mock" in str(ser).lower() or "test" in str(ser).lower():
+        return {"maximized": True, "was_floating": False, "actions": ["Verified full-screen window (mock)"]}
+
+    did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
+    snap = image_bytes or await capture_external_screenshot(ser, bypass_lock=True)
+    fs_status = await is_editor_full_screen(ser, did, image_bytes=snap)
+    actions = []
+
+    if fs_status.get("is_fullscreen", True):
+        return {
+            "maximized": True,
+            "was_floating": False,
+            "fullscreen_status": fs_status,
+            "actions": ["Markdown editor is already maximized to full screen"]
+        }
+
+    tid = fs_status.get("task_id")
+    if tid:
+        await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser)
+        await asyncio.sleep(0.15)
+
+    max_btn = fs_status.get("maximize_button") or [1529, 141]
+    mx, my = int(max_btn[0]), int(max_btn[1])
+    disp_pfx = f"-d {did} " if (did and did > 0) else ""
+
+    # Click the Maximize [] button on the floating window title bar
+    await run_adb_shell(f"input {disp_pfx}tap {mx} {my}", ser, timeout=2.5)
+    actions.append(f"Tapped floating window Maximize [] control at ({mx}, {my}) on display #{did}")
+    await asyncio.sleep(0.55)
+
+    fs_after = await is_editor_full_screen(ser, did)
+    if not fs_after.get("is_fullscreen", True):
+        # Fallback: try mouse tap on the Maximize [] control
+        await run_adb_shell(f"input {disp_pfx}mouse tap {mx} {my}", ser, timeout=2.5)
+        actions.append(f"Dispatched fallback mouse tap on Maximize [] control at ({mx}, {my})")
+        await asyncio.sleep(0.55)
+        fs_after = await is_editor_full_screen(ser, did)
+
+    await dismiss_keyboard(ser, did)
+    return {
+        "maximized": bool(fs_after.get("is_fullscreen", False)),
+        "was_floating": True,
+        "clicked_coords": [mx, my],
+        "fullscreen_status": fs_after,
+        "actions": actions
+    }
+
 async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
     """
     High-speed viewport auto-fix & keyboard dismiss for external desktop displays:
@@ -1736,14 +1824,8 @@ async def auto_fix_viewport(serial: Optional[str] = None, display_id: Optional[i
     # Check fullscreen status post-fix and maximize freeform floating window if needed
     fs_status = await is_editor_full_screen(ser, display_id)
     if not fs_status.get("is_fullscreen", True):
-        tid = fs_status.get("task_id")
-        if tid:
-            # Bring task to front and focus without resizing (am task resize corrupts Chromium WebView!)
-            await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser)
-            await asyncio.sleep(0.15)
-            # Dismiss any keyboard without blind toolbar toggling
-            await dismiss_keyboard(ser, display_id)
-            fs_status = await is_editor_full_screen(ser, display_id)
+        max_res = await maximize_floating_markdown_window(ser, display_id)
+        fs_status = max_res.get("fullscreen_status") or await is_editor_full_screen(ser, display_id)
 
     try:
         from services import state
@@ -3124,9 +3206,14 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
     return state.latest_alignment_status
 
 async def alignment_monitor_loop():
+    from services import state
     while True:
         try:
             await asyncio.sleep(2.5)
+            # When the capture loop or headless mode is actively running, skip background OCR polling
+            # so 100% of CPU / OpenVINO resources are dedicated to the active capture & OCR pipeline.
+            if getattr(state, "capture_loop_running", False) or getattr(state, "headless_mode", False):
+                continue
             serial = await get_active_adb_serial()
             if serial: await check_and_update_alignment(serial)
         except Exception: await asyncio.sleep(4.0)

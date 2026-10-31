@@ -1685,6 +1685,156 @@ def assemble_and_save_reconstructed_markdown() -> str:
         print(f"[assemble_and_save_reconstructed_markdown] File save error: {ex}")
     return full_markdown
 
+
+multipart_bundle_state: Dict[str, Any] = {
+    "auto_chain_enabled": True,
+    "is_multipart": False,
+    "base_prefix": "",
+    "current_part": None,
+    "total_parts": None,
+    "next_part_number": None,
+    "next_file_name": None,
+    "available_parts": [],
+    "exported_parts": [],
+    "transition_status": "idle",
+    "last_transition_message": "",
+    "bundle_completed": False,
+    "updated_at": None
+}
+
+
+def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Synchronizes multipart_bundle_state with the latest alignment status and active project name.
+    """
+    global multipart_bundle_state
+    from alignment_engine import parse_multipart_markdown_filename
+
+    align = alignment_status or latest_alignment_status or {}
+    proj = db.get_active_project() or {}
+    candidate_name = align.get("file_name") or proj.get("name") or ""
+
+    mp_info = align.get("multipart_info")
+    if not mp_info or not mp_info.get("is_multipart"):
+        mp_info = parse_multipart_markdown_filename(candidate_name)
+
+    if mp_info and mp_info.get("is_multipart"):
+        multipart_bundle_state["is_multipart"] = True
+        if mp_info.get("base_prefix"):
+            multipart_bundle_state["base_prefix"] = mp_info["base_prefix"]
+        if mp_info.get("part_number") is not None:
+            multipart_bundle_state["current_part"] = mp_info["part_number"]
+        if mp_info.get("total_parts") is not None:
+            multipart_bundle_state["total_parts"] = mp_info["total_parts"]
+        if mp_info.get("next_part_number") is not None:
+            multipart_bundle_state["next_part_number"] = mp_info["next_part_number"]
+        if mp_info.get("next_file_name"):
+            multipart_bundle_state["next_file_name"] = mp_info["next_file_name"]
+    else:
+        # Check if any project in DB is part of a multipart bundle
+        if candidate_name:
+            parsed_proj = parse_multipart_markdown_filename(candidate_name)
+            if parsed_proj.get("is_multipart"):
+                multipart_bundle_state["is_multipart"] = True
+                multipart_bundle_state["base_prefix"] = parsed_proj.get("base_prefix") or multipart_bundle_state.get("base_prefix", "")
+                multipart_bundle_state["current_part"] = parsed_proj.get("part_number")
+                multipart_bundle_state["next_part_number"] = parsed_proj.get("next_part_number")
+                multipart_bundle_state["next_file_name"] = parsed_proj.get("next_file_name")
+
+    multipart_bundle_state["updated_at"] = datetime.now().isoformat()
+    return multipart_bundle_state
+
+
+def export_project_markdown_to_disk(
+    project_id: Optional[str] = None,
+    explicit_file_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Exports the reconstructed markdown for the specified (or active) project to
+    storage/exports/<file_name>.md and records it in multipart_bundle_state['exported_parts'].
+    """
+    global multipart_bundle_state
+    from alignment_engine import parse_multipart_markdown_filename
+
+    active_proj = db.get_active_project() or {}
+    target_pid = project_id or active_proj.get("id")
+    proj_info = active_proj if (target_pid == active_proj.get("id")) else None
+    if not proj_info and target_pid:
+        for p in db.get_projects():
+            if p.get("id") == target_pid:
+                proj_info = p
+                break
+    proj_info = proj_info or {}
+
+    if target_pid and target_pid != active_proj.get("id"):
+        lines_dict = db.get_document_lines(target_pid)
+    else:
+        lines_dict = document_lines
+
+    max_k = max(lines_dict.keys()) if lines_dict else 0
+    doc_lines: List[str] = []
+    for ln in range(1, max_k + 1):
+        val = lines_dict.get(ln, "")
+        if isinstance(val, dict):
+            txt = val.get("text", "")
+        elif hasattr(val, "text"):
+            txt = val.text
+        else:
+            txt = str(val)
+        doc_lines.append(sanitize_line_text(ln, txt))
+
+    full_markdown = "\n".join(doc_lines)
+
+    raw_name = (
+        explicit_file_name
+        or proj_info.get("name")
+        or latest_alignment_status.get("file_name")
+        or f"exported_project_{target_pid or 'current'}"
+    ).strip()
+    safe_base = re.sub(r'[<>:"/\\|?*]+', '_', raw_name)
+    if not safe_base.lower().endswith(".md"):
+        safe_base = f"{safe_base}.md"
+
+    exports_dir = Path("c:/Projects/Small-Fling/storage/exports")
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    export_path = exports_dir / safe_base
+    export_path.write_text(full_markdown, encoding="utf-8")
+
+    # Also keep reproduced_Matrix_main.md updated
+    try:
+        out_dir = Path("c:/Projects/Small-Fling/storage")
+        (out_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+    except Exception:
+        pass
+
+    mp_parsed = parse_multipart_markdown_filename(safe_base)
+    record = {
+        "project_id": target_pid or "",
+        "project_name": proj_info.get("name") or safe_base,
+        "file_name": safe_base,
+        "part_number": mp_parsed.get("part_number"),
+        "base_prefix": mp_parsed.get("base_prefix") or "",
+        "line_count": len(lines_dict),
+        "max_line": max_k,
+        "file_size_bytes": export_path.stat().st_size if export_path.exists() else len(full_markdown.encode("utf-8")),
+        "export_path": str(export_path),
+        "exported_at": datetime.now().isoformat()
+    }
+
+    existing = multipart_bundle_state.setdefault("exported_parts", [])
+    replaced = False
+    for idx, item in enumerate(existing):
+        if item.get("file_name") == safe_base or (target_pid and item.get("project_id") == target_pid):
+            existing[idx] = record
+            replaced = True
+            break
+    if not replaced:
+        existing.append(record)
+    existing.sort(key=lambda r: (r.get("part_number") or 999, r.get("exported_at") or ""))
+
+    return record
+
+
 def get_document_metrics() -> Dict[str, Any]:
     sl = get_serialized_lines()
     issue_lines = [ln for ln in sl if ln.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
@@ -1719,38 +1869,35 @@ def load_persisted_state():
     _state_initialized = True
     try:
         p = db.get_active_project()
-        if not p:
+        pid = p["id"] if p else None
+        if p:
+            lines_db = db.get_document_lines(pid)
+            document_lines.clear()
+            for k, v in lines_db.items(): document_lines[k] = v
+            captured_frames.clear()
+            captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
+            tel = db.get_project_telemetry(pid)
+            if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
+            if tel.get("token_stats"): token_stats.update(tel["token_stats"])
+            if p.get("target_total_lines"): latest_telemetry["target_total_lines"] = p["target_total_lines"]
+        else:
             document_lines.clear()
             captured_frames.clear()
-            recapture_queue.clear()
-            latest_telemetry["current_page"] = 0
-            latest_telemetry["current_top_line"] = 0
-            latest_telemetry["current_bottom_line"] = 0
-            return
-        pid = p["id"]
-        lines_db = db.get_document_lines(pid)
-        document_lines.clear()
-        for k, v in lines_db.items(): document_lines[k] = v
-        captured_frames.clear()
-        captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
-        tel = db.get_project_telemetry(pid)
-        if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
-        if tel.get("token_stats"): token_stats.update(tel["token_stats"])
-        if p.get("target_total_lines"): latest_telemetry["target_total_lines"] = p["target_total_lines"]
 
-        if not document_lines and DOCUMENT_FILE.exists():
+        if (not document_lines or not captured_frames) and DOCUMENT_FILE.exists():
             try:
                 with open(DOCUMENT_FILE, "r", encoding="utf-8") as f:
                     doc_data = json.load(f)
                     doc_pid = doc_data.get("project_id")
-                    # ONLY load fallback if DOCUMENT_FILE matches the current active project, or neither has an ID
-                    if (pid and doc_pid == pid) or (not pid and not doc_pid):
+                    if (pid and doc_pid == pid) or (not pid):
                         for k, v in doc_data.get("lines", {}).items():
                             document_lines[int(k)] = v
                         if not captured_frames:
                             captured_frames.update(doc_data.get("frames", {}))
                         if doc_data.get("latest_telemetry"):
                             latest_telemetry.update(doc_data["latest_telemetry"])
+                        if doc_data.get("token_stats"):
+                            token_stats.update(doc_data["token_stats"])
             except Exception as ex:
                 print(f"Fallback loading DOCUMENT_FILE error: {ex}")
     except Exception as e:

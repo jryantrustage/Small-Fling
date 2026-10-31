@@ -3484,6 +3484,25 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         disp_id = await detect_external_display_id(active_serial)
         await dismiss_keyboard(active_serial, disp_id)
 
+        # Ensure floating markdown window is maximized and Edit + Dark mode are active
+        try:
+            from services.adb_service import is_editor_full_screen, check_view_mode_and_theme
+            from services.ui_automator_service import prepare_markdown_editor_window
+            fs_check = await is_editor_full_screen(active_serial, disp_id)
+            vm_check = await check_view_mode_and_theme(active_serial)
+            if not fs_check.get("is_fullscreen", True) or vm_check.get("view_mode_issue") or vm_check.get("theme_issue"):
+                init_group["progress"] = {"percent": 12, "stage": "Maximizing Markdown Editor & enforcing Edit + Dark Mode...", "status": "running"}
+                await state.ws_manager.broadcast({
+                    "type": "project_init_progress",
+                    "stage": "Maximizing Markdown Editor & enforcing Edit + Dark Mode...",
+                    "percent": 12,
+                    "status": "running",
+                    "dag": state.dag_state
+                })
+                await prepare_markdown_editor_window(active_serial, disp_id)
+        except Exception as prep_ex:
+            print(f"[execute_dag_group_initialize] prepare_markdown_editor_window note: {prep_ex}")
+
         # Pre-check: only invoke environment healing if editor is not currently open
         is_open, _, _ = await assert_markdown_open(active_serial)
         if not is_open:
@@ -4241,285 +4260,332 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     stop_reason_logged = False
 
     try:
-        # Check if DAG Group 1 (Initialize) has run for the project
-        init_group = state.dag_state.get("groups", {}).get("initialize", {})
-        node1_state = state.dag_state.get("nodes", {}).get("init_end", {})
-        node2_state = state.dag_state.get("nodes", {}).get("reset_home", {})
-        target_lines_pre = int(
-            state.headless_telemetry_session.get("target_total_lines", 0)
-            or state.latest_telemetry.get("target_total_lines", 0)
-            or node1_state.get("total_lines", 0)
-            or 0
-        )
-        is_initialized = bool(
-            init_group.get("status") == "completed"
-            and node2_state.get("verified", False)
-            and target_lines_pre > 0
-        )
-
-        if not is_initialized:
-            await emit_dag_telemetry_event(
-                category="SYSTEM",
-                message="DAG Loop: Project not initialized yet. Executing DAG Group 1 (Determine total lines & Return to Line 1)...",
-                dag="initialize",
-                serial=active_serial
+        while state.capture_loop_running:
+            state.sync_multipart_state_from_alignment()
+            # Check if DAG Group 1 (Initialize) has run for the project
+            init_group = state.dag_state.get("groups", {}).get("initialize", {})
+            node1_state = state.dag_state.get("nodes", {}).get("init_end", {})
+            node2_state = state.dag_state.get("nodes", {}).get("reset_home", {})
+            target_lines_pre = int(
+                state.headless_telemetry_session.get("target_total_lines", 0)
+                or state.latest_telemetry.get("target_total_lines", 0)
+                or node1_state.get("total_lines", 0)
+                or 0
             )
-            state.latest_telemetry["status_message"] = "Running DAG Group 1: Calibrating EOF total lines & returning to Line 1..."
-            state.latest_telemetry["phase"] = "INITIALIZING"
-            await state.ws_manager.broadcast({
-                "type": "capture_loop_status",
-                "running": True,
-                "stage": "Running DAG Group 1 (Initialize)...",
-                "dag": state.dag_state,
-                "telemetry": state.latest_telemetry
-            })
+            is_initialized = bool(
+                init_group.get("status") == "completed"
+                and node2_state.get("verified", False)
+                and target_lines_pre > 0
+            )
 
-            init_res = await execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id())
-            if init_res.get("status") in ("error", "failed") or not state.capture_loop_running:
-                err_msg = init_res.get("error") or "DAG Group 1 Initialization failed"
-                state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
-                state.capture_loop_running = False
-                state.orchestration_state["status"] = "ERROR"
-                state.record_diagnostics_trace_event(
-                    event_type="LOOP_STOPPED",
-                    node_id="init_end",
-                    reason=f"DAG Group 1 Initialization failed: {err_msg}"
+            if not is_initialized:
+                await emit_dag_telemetry_event(
+                    category="SYSTEM",
+                    message="DAG Loop: Project not initialized yet. Executing DAG Group 1 (Determine total lines & Return to Line 1)...",
+                    dag="initialize",
+                    serial=active_serial
                 )
-                stop_reason_logged = True
+                state.latest_telemetry["status_message"] = "Running DAG Group 1: Calibrating EOF total lines & returning to Line 1..."
+                state.latest_telemetry["phase"] = "INITIALIZING"
                 await state.ws_manager.broadcast({
                     "type": "capture_loop_status",
-                    "running": False,
-                    "error": err_msg,
+                    "running": True,
+                    "stage": "Running DAG Group 1 (Initialize)...",
                     "dag": state.dag_state,
                     "telemetry": state.latest_telemetry
                 })
-                return
 
-            await emit_dag_telemetry_event(
-                category="SYSTEM",
-                message="DAG Group 1 Initialization Successful ✔ Proceeding directly into DAG Group 2 Capture Loop...",
-                dag="capture_entire_markdown",
-                serial=active_serial
-            )
-
-        # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
-        disp_id = await detect_external_display_id(active_serial)
-        is_open, _, _ = await assert_markdown_open(active_serial)
-        if not is_open:
-            await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
-
-        is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
-        if is_headless:
-            session = state.start_headless_telemetry_session("continuous_capture_loop")
-            await emit_dag_telemetry_event(
-                category="SYSTEM",
-                message="⚡ Capture loop running in HEADLESS MODE (Node 4 RapidOCR Inspector Rescan Engine Active; UI rendering bypassed)",
-                dag="capture_entire_markdown",
-                serial=active_serial
-            )
-            if hasattr(state, "ws_manager") and state.ws_manager:
-                await state.ws_manager.broadcast({
-                    "type": "headless_telemetry_started",
-                    "telemetry": session
-                })
-
-        consecutive_recovery_attempts = 0
-        max_recovery_attempts = 5
-
-        while state.capture_loop_running:
-            res = await execute_dag_group_capture_markdown(serial=active_serial)
-            if res.get("status") in ("error", "prevented"):
-                failed_node = res.get("node_id") or "arrow_down"
-                err_reason = res.get("error") or res.get("message") or f"{failed_node} returned {res.get('status')}"
-
-                if not state.capture_loop_running:
+                init_res = await execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id())
+                if init_res.get("status") in ("error", "failed") or not state.capture_loop_running:
+                    err_msg = init_res.get("error") or "DAG Group 1 Initialization failed"
+                    state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
+                    state.capture_loop_running = False
+                    state.orchestration_state["status"] = "ERROR"
                     state.record_diagnostics_trace_event(
                         event_type="LOOP_STOPPED",
-                        node_id=failed_node,
-                        reason=f"Loop stopped by user during {failed_node}: {err_reason}"
+                        node_id="init_end",
+                        reason=f"DAG Group 1 Initialization failed: {err_msg}"
                     )
                     stop_reason_logged = True
-                    break
+                    await state.ws_manager.broadcast({
+                        "type": "capture_loop_status",
+                        "running": False,
+                        "error": err_msg,
+                        "dag": state.dag_state,
+                        "telemetry": state.latest_telemetry
+                    })
+                    return
 
-                consecutive_recovery_attempts += 1
-                if consecutive_recovery_attempts > max_recovery_attempts:
-                    stop_msg = f"Loop stopped after {max_recovery_attempts} consecutive auto-recovery attempts on {failed_node}: {err_reason}"
-                    state.latest_telemetry["status_message"] = stop_msg
-                    state.record_diagnostics_trace_event(
-                        event_type="LOOP_STOPPED",
-                        node_id=failed_node,
-                        reason=stop_msg
-                    )
-                    stop_reason_logged = True
-                    break
-
-                # Trigger automated self-healing recovery so the loop continues without manual intervention!
-                state.record_diagnostics_trace_event(
-                    event_type="LOOP_AUTO_RECOVERY_STARTED",
-                    node_id=failed_node,
-                    reason=f"Auto-recovery #{consecutive_recovery_attempts}/{max_recovery_attempts} triggered for {failed_node}: {err_reason}",
-                    recovery_action="Dismissing keyboard, verifying editor focus, and re-aligning target top line"
-                )
-                state.latest_telemetry["status_message"] = (
-                    f"🔧 Auto-recovering loop ({consecutive_recovery_attempts}/{max_recovery_attempts}) on {failed_node}..."
-                )
                 await emit_dag_telemetry_event(
-                    category="PACER",
-                    message=f"🔧 Continuous Loop Auto-Recovery ({consecutive_recovery_attempts}/{max_recovery_attempts}) for {failed_node}: {err_reason}",
-                    dag="position_navigation",
-                    node_id=failed_node,
+                    category="SYSTEM",
+                    message="DAG Group 1 Initialization Successful ✔ Proceeding directly into DAG Group 2 Capture Loop...",
+                    dag="capture_entire_markdown",
                     serial=active_serial
                 )
 
-                try:
-                    await dismiss_keyboard(active_serial, disp_id)
-                    md_open, _, _ = await assert_markdown_open(active_serial)
-                    if not md_open:
-                        await auto_heal_pipeline_environment(active_serial, disp_id, failed_node)
+            # Proactively verify and auto-fix edit mode (pencil) and dark mode (moon icon) before capture begins
+            disp_id = await detect_external_display_id(active_serial)
+            is_open, _, _ = await assert_markdown_open(active_serial)
+            if not is_open:
+                await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
-                    n5_bot = state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0)
-                    n6_tgt = (
-                        state.dag_state["nodes"].get("arrow_down", {}).get("target_top")
-                        or ((n5_bot + 1) if n5_bot > 0 else 0)
-                        or state.orchestration_state.get("next_target_top")
-                        or 1
-                    )
-
-                    if failed_node in ("arrow_down", "verification_trigger", "document_assemble") and n6_tgt > 0:
-                        nav_rec = await navigate_to_target_top_line(
-                            target_top=int(n6_tgt),
-                            serial=active_serial,
-                            display_id=disp_id,
-                            use_page_keys=True,
-                            max_attempts=14,
-                            caller_node="loop_auto_recovery"
-                        )
-                        if nav_rec.get("reached"):
-                            state.dag_state["nodes"]["arrow_down"].update({
-                                "status": "completed",
-                                "target_top": int(n6_tgt),
-                                "target_top_line": int(n6_tgt),
-                                "new_top_line": int(n6_tgt),
-                                "reached": True,
-                                "advanced": True,
-                                "error": None,
-                                "telemetry_insight": f"Auto-recovered target top Line {n6_tgt} ✔"
-                            })
-                            rec_opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
-                            n7_rec = await _run_node_safe("verification_trigger", rec_opts)
-                            n8_rec = await _run_node_safe("document_assemble", rec_opts)
-                            if n7_rec.get("status") not in ("error", "prevented") and n8_rec.get("status") != "error":
-                                state.record_diagnostics_trace_event(
-                                    event_type="LOOP_AUTO_RECOVERED",
-                                    node_id=failed_node,
-                                    target_top_line=int(n6_tgt),
-                                    reason=f"Successfully recovered {failed_node} and aligned Target Line {n6_tgt}",
-                                    recovery_action=f"Aligned Line {n6_tgt} ({nav_rec.get('arrows_pressed', 0)} arrows, {nav_rec.get('page_keys_pressed', 0)} page keys) and completed DAG 4"
-                                )
-                                consecutive_recovery_attempts = 0
-                                await asyncio.sleep(0.15)
-                                continue
-                    else:
-                        # Recover before retrying full cycle from Node 3
-                        sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
-                        expected_top = (sorted_f[-1].get("bottom_line", 0) + 1) if sorted_f else 1
-                        nav_rec = await navigate_to_target_top_line(
-                            target_top=int(expected_top),
-                            serial=active_serial,
-                            display_id=disp_id,
-                            use_page_keys=True,
-                            max_attempts=12,
-                            caller_node="loop_auto_recovery"
-                        )
-                        state.record_diagnostics_trace_event(
-                            event_type="LOOP_AUTO_RECOVERED",
-                            node_id=failed_node,
-                            target_top_line=int(expected_top),
-                            reason=f"Re-verified viewport at Line {nav_rec.get('actual_top') or expected_top}; retrying capture cycle",
-                            recovery_action=f"Environment healed & viewport aligned to Line {expected_top}"
-                        )
-                        await asyncio.sleep(0.25)
-                        continue
-                except Exception as rec_ex:
-                    print(f"[CaptureLoop] Auto-recovery exception: {rec_ex}")
-
-                await asyncio.sleep(0.35)
-                continue
-
-            # Reset recovery counter on clean cycle completion
-            consecutive_recovery_attempts = 0
-
-            top_l = state.latest_telemetry.get("current_top_line", 0)
-            bot_l = state.latest_telemetry.get("current_bottom_line", 0)
-            target_lines = int(
-                state.headless_telemetry_session.get("target_total_lines", 0)
-                or state.latest_telemetry.get("target_total_lines", 0)
-                or 0
-            )
-            doc_count = len(state.document_lines)
-
-            # Update headless telemetry if headless mode is active
+            is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
             if is_headless:
-                lat = float(res.get("node4", {}).get("latency_ms") or 0.0)
-                session = state.update_headless_telemetry_session(
-                    top_line=top_l,
-                    bottom_line=bot_l,
-                    frames_inc=1,
-                    latency_ms=lat,
-                    event_msg=f"Captured frame (Lines {top_l}..{bot_l})"
+                session = state.start_headless_telemetry_session("continuous_capture_loop")
+                await emit_dag_telemetry_event(
+                    category="SYSTEM",
+                    message="⚡ Capture loop running in HEADLESS MODE (Node 4 RapidOCR Inspector Rescan Engine Active; UI rendering bypassed)",
+                    dag="capture_entire_markdown",
+                    serial=active_serial
                 )
                 if hasattr(state, "ws_manager") and state.ws_manager:
                     await state.ws_manager.broadcast({
-                        "type": "headless_telemetry_progress",
+                        "type": "headless_telemetry_started",
                         "telemetry": session
                     })
 
-            # Detect when total lines of the document has been reached
-            total_reached = False
-            if target_lines > 0 and (bot_l >= target_lines or doc_count >= target_lines):
-                total_reached = True
+            consecutive_recovery_attempts = 0
+            max_recovery_attempts = 5
+            advance_to_next_multipart = False
 
-            n8 = res.get("node8", {})
-            if n8.get("is_complete") or total_reached:
-                comp_msg = f"🎉 100% Markdown Captured! Target document lines ({target_lines or doc_count}) reached at Line {bot_l}."
-                state.latest_telemetry["status_message"] = comp_msg
-                state.record_diagnostics_trace_event(
-                    event_type="LAST_LINE_OCR_COMPLETED",
-                    top_line=top_l,
-                    bottom_line=bot_l,
-                    target_top_line=target_lines,
-                    node_id="document_assemble",
-                    reason=comp_msg
+            while state.capture_loop_running:
+                res = await execute_dag_group_capture_markdown(serial=active_serial)
+                if res.get("status") in ("error", "prevented"):
+                    failed_node = res.get("node_id") or "arrow_down"
+                    err_reason = res.get("error") or res.get("message") or f"{failed_node} returned {res.get('status')}"
+
+                    if not state.capture_loop_running:
+                        state.record_diagnostics_trace_event(
+                            event_type="LOOP_STOPPED",
+                            node_id=failed_node,
+                            reason=f"Loop stopped by user during {failed_node}: {err_reason}"
+                        )
+                        stop_reason_logged = True
+                        break
+
+                    consecutive_recovery_attempts += 1
+                    if consecutive_recovery_attempts > max_recovery_attempts:
+                        stop_msg = f"Loop stopped after {max_recovery_attempts} consecutive auto-recovery attempts on {failed_node}: {err_reason}"
+                        state.latest_telemetry["status_message"] = stop_msg
+                        state.record_diagnostics_trace_event(
+                            event_type="LOOP_STOPPED",
+                            node_id=failed_node,
+                            reason=stop_msg
+                        )
+                        stop_reason_logged = True
+                        break
+
+                    # Trigger automated self-healing recovery so the loop continues without manual intervention!
+                    state.record_diagnostics_trace_event(
+                        event_type="LOOP_AUTO_RECOVERY_STARTED",
+                        node_id=failed_node,
+                        reason=f"Auto-recovery #{consecutive_recovery_attempts}/{max_recovery_attempts} triggered for {failed_node}: {err_reason}",
+                        recovery_action="Dismissing keyboard, verifying editor focus, and re-aligning target top line"
+                    )
+                    state.latest_telemetry["status_message"] = (
+                        f"🔧 Auto-recovering loop ({consecutive_recovery_attempts}/{max_recovery_attempts}) on {failed_node}..."
+                    )
+                    await emit_dag_telemetry_event(
+                        category="PACER",
+                        message=f"🔧 Continuous Loop Auto-Recovery ({consecutive_recovery_attempts}/{max_recovery_attempts}) for {failed_node}: {err_reason}",
+                        dag="position_navigation",
+                        node_id=failed_node,
+                        serial=active_serial
+                    )
+
+                    try:
+                        await dismiss_keyboard(active_serial, disp_id)
+                        md_open, _, _ = await assert_markdown_open(active_serial)
+                        if not md_open:
+                            await auto_heal_pipeline_environment(active_serial, disp_id, failed_node)
+
+                        n5_bot = state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0)
+                        n6_tgt = (
+                            state.dag_state["nodes"].get("arrow_down", {}).get("target_top")
+                            or ((n5_bot + 1) if n5_bot > 0 else 0)
+                            or state.orchestration_state.get("next_target_top")
+                            or 1
+                        )
+
+                        if failed_node in ("arrow_down", "verification_trigger", "document_assemble") and n6_tgt > 0:
+                            nav_rec = await navigate_to_target_top_line(
+                                target_top=int(n6_tgt),
+                                serial=active_serial,
+                                display_id=disp_id,
+                                use_page_keys=True,
+                                max_attempts=14,
+                                caller_node="loop_auto_recovery"
+                            )
+                            if nav_rec.get("reached"):
+                                state.dag_state["nodes"]["arrow_down"].update({
+                                    "status": "completed",
+                                    "target_top": int(n6_tgt),
+                                    "target_top_line": int(n6_tgt),
+                                    "new_top_line": int(n6_tgt),
+                                    "reached": True,
+                                    "advanced": True,
+                                    "error": None,
+                                    "telemetry_insight": f"Auto-recovered target top Line {n6_tgt} ✔"
+                                })
+                                rec_opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
+                                n7_rec = await _run_node_safe("verification_trigger", rec_opts)
+                                n8_rec = await _run_node_safe("document_assemble", rec_opts)
+                                if n7_rec.get("status") not in ("error", "prevented") and n8_rec.get("status") != "error":
+                                    state.record_diagnostics_trace_event(
+                                        event_type="LOOP_AUTO_RECOVERED",
+                                        node_id=failed_node,
+                                        target_top_line=int(n6_tgt),
+                                        reason=f"Successfully recovered {failed_node} and aligned Target Line {n6_tgt}",
+                                        recovery_action=f"Aligned Line {n6_tgt} ({nav_rec.get('arrows_pressed', 0)} arrows, {nav_rec.get('page_keys_pressed', 0)} page keys) and completed DAG 4"
+                                    )
+                                    consecutive_recovery_attempts = 0
+                                    await asyncio.sleep(0.15)
+                                    continue
+                        else:
+                            # Recover before retrying full cycle from Node 3
+                            sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+                            expected_top = (sorted_f[-1].get("bottom_line", 0) + 1) if sorted_f else 1
+                            nav_rec = await navigate_to_target_top_line(
+                                target_top=int(expected_top),
+                                serial=active_serial,
+                                display_id=disp_id,
+                                use_page_keys=True,
+                                max_attempts=12,
+                                caller_node="loop_auto_recovery"
+                            )
+                            state.record_diagnostics_trace_event(
+                                event_type="LOOP_AUTO_RECOVERED",
+                                node_id=failed_node,
+                                target_top_line=int(expected_top),
+                                reason=f"Re-verified viewport at Line {nav_rec.get('actual_top') or expected_top}; retrying capture cycle",
+                                recovery_action=f"Environment healed & viewport aligned to Line {expected_top}"
+                            )
+                            await asyncio.sleep(0.25)
+                            continue
+                    except Exception as rec_ex:
+                        print(f"[CaptureLoop] Auto-recovery exception: {rec_ex}")
+
+                    await asyncio.sleep(0.35)
+                    continue
+
+                # Reset recovery counter on clean cycle completion
+                consecutive_recovery_attempts = 0
+
+                top_l = state.latest_telemetry.get("current_top_line", 0)
+                bot_l = state.latest_telemetry.get("current_bottom_line", 0)
+                target_lines = int(
+                    state.headless_telemetry_session.get("target_total_lines", 0)
+                    or state.latest_telemetry.get("target_total_lines", 0)
+                    or 0
                 )
-                stop_reason_logged = True
+                doc_count = len(state.document_lines)
+
+                # Update headless telemetry if headless mode is active
                 if is_headless:
-                    state.headless_telemetry_session["total_lines_reached"] = True
-                break
+                    lat = float(res.get("node4", {}).get("latency_ms") or 0.0)
+                    session = state.update_headless_telemetry_session(
+                        top_line=top_l,
+                        bottom_line=bot_l,
+                        frames_inc=1,
+                        latency_ms=lat,
+                        event_msg=f"Captured frame (Lines {top_l}..{bot_l})"
+                    )
+                    if hasattr(state, "ws_manager") and state.ws_manager:
+                        await state.ws_manager.broadcast({
+                            "type": "headless_telemetry_progress",
+                            "telemetry": session
+                        })
 
-            n7 = res.get("node7", {})
-            if not n7.get("allowed", True):
-                trig_msg = f"Trigger blocked next loop: {n7.get('message')}"
-                state.latest_telemetry["status_message"] = trig_msg
-                state.record_diagnostics_trace_event(
-                    event_type="LOOP_STOPPED",
-                    node_id="verification_trigger",
-                    reason=trig_msg
-                )
-                stop_reason_logged = True
-                break
+                # Detect when total lines of the document has been reached
+                total_reached = False
+                if target_lines > 0 and (bot_l >= target_lines or doc_count >= target_lines):
+                    total_reached = True
 
-            if not state.is_edge_connected("document_assemble", "frame_acquire"):
-                conn_msg = "Loop finished cycle: Loopback connector (Node 8 ➔ Node 3) is disconnected"
-                state.latest_telemetry["status_message"] = conn_msg
-                state.record_diagnostics_trace_event(
-                    event_type="LOOP_STOPPED",
-                    node_id="connector_8_3",
-                    reason=conn_msg
-                )
-                stop_reason_logged = True
-                break
+                n8 = res.get("node8", {})
+                if n8.get("is_complete") or total_reached:
+                    # 1. Export the completed markdown file automatically
+                    export_rec = state.export_project_markdown_to_disk()
+                    comp_msg = (
+                        f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! "
+                        f"Target document lines ({target_lines or doc_count}) reached at Line {bot_l}."
+                    )
+                    state.latest_telemetry["status_message"] = comp_msg
+                    state.record_diagnostics_trace_event(
+                        event_type="LAST_LINE_OCR_COMPLETED",
+                        top_line=top_l,
+                        bottom_line=bot_l,
+                        target_top_line=target_lines,
+                        node_id="document_assemble",
+                        reason=comp_msg,
+                        recovery_action=f"Exported markdown to {export_rec.get('export_path')}"
+                    )
+                    await state.ws_manager.broadcast({
+                        "type": "markdown_part_exported",
+                        "export": export_rec,
+                        "multipart_state": state.multipart_bundle_state
+                    })
 
-            await asyncio.sleep(0.18)
+                    # 2. Check if this file is part of a multi-part bundle (*part<N>.md) and auto-chain is enabled
+                    mp_state = state.sync_multipart_state_from_alignment()
+                    if mp_state.get("is_multipart") and mp_state.get("auto_chain_enabled", True) and state.capture_loop_running:
+                        await emit_dag_telemetry_event(
+                            category="SYSTEM",
+                            message=f"📂 Multi-Part Markdown Part {mp_state.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state.get('next_part_number')}...",
+                            dag="verify_assemble",
+                            serial=active_serial
+                        )
+                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
+                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                            advance_to_next_multipart = True
+                            break
+                        elif trans_res.get("bundle_completed"):
+                            comp_bundle_msg = (
+                                f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
+                            )
+                            state.latest_telemetry["status_message"] = comp_bundle_msg
+                            await emit_dag_telemetry_event(
+                                category="SYSTEM",
+                                message=comp_bundle_msg,
+                                dag="verify_assemble",
+                                level="success",
+                                serial=active_serial
+                            )
+
+                    stop_reason_logged = True
+                    if is_headless:
+                        state.headless_telemetry_session["total_lines_reached"] = True
+                    break
+
+                n7 = res.get("node7", {})
+                if not n7.get("allowed", True):
+                    trig_msg = f"Trigger blocked next loop: {n7.get('message')}"
+                    state.latest_telemetry["status_message"] = trig_msg
+                    state.record_diagnostics_trace_event(
+                        event_type="LOOP_STOPPED",
+                        node_id="verification_trigger",
+                        reason=trig_msg
+                    )
+                    stop_reason_logged = True
+                    break
+
+                if not state.is_edge_connected("document_assemble", "frame_acquire"):
+                    conn_msg = "Loop finished cycle: Loopback connector (Node 8 ➔ Node 3) is disconnected"
+                    state.latest_telemetry["status_message"] = conn_msg
+                    state.record_diagnostics_trace_event(
+                        event_type="LOOP_STOPPED",
+                        node_id="connector_8_3",
+                        reason=conn_msg
+                    )
+                    stop_reason_logged = True
+                    break
+
+                await asyncio.sleep(0.18)
+
+            # If we transitioned to the next part of a multi-part bundle, continue outer loop to initialize & capture next project!
+            if advance_to_next_multipart and state.capture_loop_running:
+                await asyncio.sleep(0.35)
+                continue
+            break
     except asyncio.CancelledError:
         if not stop_reason_logged:
             state.record_diagnostics_trace_event(
@@ -5233,3 +5299,243 @@ async def api_resolve_mini_modals(payload: Optional[Dict[str, Any]] = None):
         "display_id": disp_id,
         **clean_res
     }
+
+
+@router.post("/api/device/prepare-markdown-editor")
+async def api_prepare_markdown_editor(payload: Optional[Dict[str, Any]] = None):
+    """
+    Prepares the connected device's Markdown Editor window before or during a project:
+    1. Maximizes floating markdown window ('□' control) to full screen (1920x1080).
+    2. Enables Edit Mode (pencil icon) and Dark Mode (moon icon).
+    3. Dismisses any mini-modal pop-ups.
+    4. Refreshes alignment & multi-part filename detection.
+    """
+    from services.ui_automator_service import prepare_markdown_editor_window
+    payload = payload or {}
+    ser = await get_active_adb_serial(payload.get("serial"))
+    if not ser:
+        raise HTTPException(status_code=400, detail="No active Android device connected")
+    disp_id = payload.get("display_id") or await detect_external_display_id(ser)
+    res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+    mp_state = state.sync_multipart_state_from_alignment(state.latest_alignment_status)
+    await state.ws_manager.broadcast({
+        "type": "alignment_status",
+        "alignment": state.latest_alignment_status,
+        "multipart_state": mp_state
+    })
+    return {
+        **res,
+        "alignment": state.latest_alignment_status,
+        "multipart_state": mp_state
+    }
+
+
+async def transition_to_next_multipart_project(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    explicit_next_part: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Automates the full multi-part markdown transition workflow:
+    1. Exports the current project's reconstructed markdown if lines exist.
+    2. Clicks the Back Arrow ('<-') in top-left to exit the markdown view back to the Teams folder list.
+    3. Scans the folder files list and selects the next part in sequence (e.g. part2.md -> part3.md).
+    4. Maximizes the newly opened floating markdown editor window ('□'), enables Edit Mode and Dark Mode.
+    5. Creates and activates a new project for the opened markdown file so the DAG loop continues seamlessly.
+    """
+    from services.ui_automator_service import select_and_open_next_markdown_part
+    from models import ProjectCreateRequest
+    from routers.projects import create_project
+
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active Android device connected"}
+    disp_id = display_id if display_id is not None else await detect_external_display_id(ser)
+
+    # Export current project if it has lines
+    if state.document_lines:
+        try:
+            state.export_project_markdown_to_disk()
+        except Exception as exp_e:
+            print(f"[transition_to_next_multipart_project] Export note: {exp_e}")
+
+    mp_state = state.sync_multipart_state_from_alignment()
+    active_proj = db.get_active_project() or {}
+    cur_file = state.latest_alignment_status.get("file_name") or active_proj.get("name") or ""
+    cur_part = mp_state.get("current_part")
+    if explicit_next_part is not None and explicit_next_part > 1:
+        cur_part = explicit_next_part - 1
+    base_prefix = mp_state.get("base_prefix") or ""
+
+    state.multipart_bundle_state["transition_status"] = "transitioning"
+    state.multipart_bundle_state["last_transition_message"] = (
+        f"Exiting {cur_file or 'current markdown'} via Back Arrow and opening Part {(cur_part or 1) + 1}..."
+    )
+    await state.ws_manager.broadcast({
+        "type": "multipart_transition_status",
+        "multipart_state": state.multipart_bundle_state
+    })
+
+    trans_res = await select_and_open_next_markdown_part(
+        serial=ser,
+        display_id=disp_id,
+        current_file_name=cur_file,
+        current_part_number=cur_part,
+        base_prefix=base_prefix
+    )
+
+    if trans_res.get("available_parts"):
+        state.multipart_bundle_state["available_parts"] = trans_res["available_parts"]
+    if trans_res.get("total_parts"):
+        state.multipart_bundle_state["total_parts"] = trans_res["total_parts"]
+
+    if trans_res.get("bundle_completed"):
+        state.multipart_bundle_state["bundle_completed"] = True
+        state.multipart_bundle_state["transition_status"] = "completed"
+        state.multipart_bundle_state["last_transition_message"] = trans_res.get(
+            "message", "All parts in the multi-part markdown bundle have been captured and exported!"
+        )
+        await state.ws_manager.broadcast({
+            "type": "multipart_bundle_completed",
+            "multipart_state": state.multipart_bundle_state,
+            "transition": trans_res
+        })
+        return {
+            **trans_res,
+            "multipart_state": state.multipart_bundle_state
+        }
+
+    if trans_res.get("status") != "success":
+        state.multipart_bundle_state["transition_status"] = "error"
+        state.multipart_bundle_state["last_transition_message"] = trans_res.get("message", "Failed to open next markdown part")
+        await state.ws_manager.broadcast({
+            "type": "multipart_transition_status",
+            "multipart_state": state.multipart_bundle_state,
+            "transition": trans_res
+        })
+        return {
+            **trans_res,
+            "multipart_state": state.multipart_bundle_state
+        }
+
+    opened_file = (
+        trans_res.get("opened_file_name")
+        or state.latest_alignment_status.get("file_name")
+        or f"{base_prefix or 'Document'}_part{trans_res.get('next_part_number', 2)}.md"
+    )
+    next_part_num = trans_res.get("next_part_number")
+    tot_parts = trans_res.get("total_parts") or state.multipart_bundle_state.get("total_parts")
+
+    # Create and activate new project for the opened part
+    new_proj = await create_project(
+        ProjectCreateRequest(
+            name=opened_file,
+            description=f"Multi-Part Bundle Part {next_part_num}{f' of {tot_parts}' if tot_parts else ''} ({opened_file})"
+        )
+    )
+
+    state.sync_multipart_state_from_alignment()
+    state.multipart_bundle_state["current_part"] = next_part_num
+    state.multipart_bundle_state["transition_status"] = "ready"
+    state.multipart_bundle_state["bundle_completed"] = False
+    state.multipart_bundle_state["last_transition_message"] = (
+        f"Opened & maximized {opened_file} (Edit + Dark Mode) and created project '{new_proj.get('name')}' ✔"
+    )
+
+    await state.ws_manager.broadcast({
+        "type": "multipart_transition_completed",
+        "project": new_proj,
+        "transition": trans_res,
+        "multipart_state": state.multipart_bundle_state
+    })
+
+    return {
+        "status": "success",
+        "project": new_proj,
+        "transition": trans_res,
+        "multipart_state": state.multipart_bundle_state
+    }
+
+
+@router.get("/api/dag/multipart/status")
+async def api_get_multipart_status():
+    """Returns the current Multi-Part Markdown bundle status, detected parts, and exported markdown files."""
+    mp_state = state.sync_multipart_state_from_alignment()
+    return {
+        "status": "success",
+        "multipart_state": mp_state,
+        "alignment_file_name": state.latest_alignment_status.get("file_name", ""),
+        "back_button_coords": state.latest_alignment_status.get("back_button_coords")
+    }
+
+
+@router.post("/api/dag/multipart/config")
+async def api_update_multipart_config(payload: Dict[str, Any]):
+    """Updates Multi-Part Markdown automation settings (such as auto_chain_enabled)."""
+    if "auto_chain_enabled" in payload:
+        state.multipart_bundle_state["auto_chain_enabled"] = bool(payload["auto_chain_enabled"])
+    mp_state = state.sync_multipart_state_from_alignment()
+    await state.ws_manager.broadcast({
+        "type": "multipart_transition_status",
+        "multipart_state": mp_state
+    })
+    return {"status": "success", "multipart_state": mp_state}
+
+
+@router.post("/api/dag/multipart/export-current")
+async def api_export_current_markdown(payload: Optional[Dict[str, Any]] = None):
+    """Exports the active project's reconstructed markdown to storage/exports/<file_name>.md."""
+    payload = payload or {}
+    rec = state.export_project_markdown_to_disk(
+        project_id=payload.get("project_id"),
+        explicit_file_name=payload.get("file_name")
+    )
+    await state.ws_manager.broadcast({
+        "type": "markdown_part_exported",
+        "export": rec,
+        "multipart_state": state.multipart_bundle_state
+    })
+    return {"status": "success", "export": rec, "multipart_state": state.multipart_bundle_state}
+
+
+@router.get("/api/dag/multipart/exports/{file_name}")
+async def api_download_exported_markdown(file_name: str):
+    """Downloads an exported markdown part file by filename."""
+    from fastapi.responses import PlainTextResponse
+    safe_name = Path(file_name).name
+    exp_path = Path("c:/Projects/Small-Fling/storage/exports") / safe_name
+    if not exp_path.exists():
+        raise HTTPException(status_code=404, detail=f"Exported file '{safe_name}' not found")
+    content = exp_path.read_text(encoding="utf-8")
+    return PlainTextResponse(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'}
+    )
+
+
+@router.post("/api/dag/multipart/transition-next")
+async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None):
+    """
+    Manually or programmatically triggers the transition from the current markdown part to the next:
+    Exits via top-left Back Arrow ('<-'), selects next part in Teams folder list, maximizes floating window ('□'),
+    enables Edit + Dark mode, creates next project, and optionally starts the capture loop.
+    """
+    global capture_loop_task
+    payload = payload or {}
+    ser = payload.get("serial")
+    disp_id = payload.get("display_id")
+    next_part = payload.get("next_part_number")
+    auto_start_loop = bool(payload.get("auto_start_loop", False))
+
+    res = await transition_to_next_multipart_project(
+        serial=ser,
+        display_id=disp_id,
+        explicit_next_part=int(next_part) if next_part is not None else None
+    )
+    if res.get("status") == "success" and auto_start_loop and not getattr(state, "capture_loop_running", False):
+        state.capture_loop_running = True
+        capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(ser))
+        res["loop_started"] = True
+    return res
+

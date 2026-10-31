@@ -142,6 +142,35 @@ export interface ClassifierReport {
   auto_fix_enabled?: boolean;
 }
 
+export interface MultipartExportRecord {
+  project_id: string;
+  project_name: string;
+  file_name: string;
+  part_number?: number | null;
+  base_prefix?: string;
+  line_count: number;
+  max_line: number;
+  file_size_bytes: number;
+  export_path: string;
+  exported_at: string;
+}
+
+export interface MultipartBundleState {
+  auto_chain_enabled: boolean;
+  is_multipart: boolean;
+  base_prefix: string;
+  current_part?: number | null;
+  total_parts?: number | null;
+  next_part_number?: number | null;
+  next_file_name?: string | null;
+  available_parts?: number[];
+  exported_parts?: MultipartExportRecord[];
+  transition_status?: string;
+  last_transition_message?: string;
+  bundle_completed?: boolean;
+  updated_at?: string | null;
+}
+
 export interface AlignmentData {
   status: string;
   is_aligned: boolean;
@@ -151,6 +180,21 @@ export interface AlignmentData {
   first_line_number?: number;
   last_line_number?: number;
   file_name?: string;
+  is_multipart?: boolean;
+  part_number?: number | null;
+  total_parts?: number | null;
+  next_part_number?: number | null;
+  next_file_name?: string | null;
+  back_button_coords?: [number, number] | null;
+  multipart_info?: {
+    is_multipart?: boolean;
+    base_prefix?: string;
+    part_number?: number | null;
+    total_parts?: number | null;
+    next_part_number?: number | null;
+    next_file_name?: string | null;
+    extension?: string;
+  };
   boxes?: Record<string, AlignmentBox>;
   resolution?: { width: number; height: number };
   orientation?: 'landscape' | 'portrait';

@@ -19,6 +19,74 @@ import cv2
 import numpy as np
 from ocr_engine import get_rapid_ocr
 
+def parse_multipart_markdown_filename(file_name: Optional[str], top_tokens: Optional[list] = None) -> Dict[str, Any]:
+    """
+    Detects whether a markdown filename belongs to a multi-part bundle (e.g., `..._part1.md`, `..._part2.md`).
+    Extracts the base bundle prefix, current part index, next part index, and total parts (if visible in header).
+    """
+    raw_name = (file_name or "").strip()
+    if not raw_name:
+        return {
+            "is_multipart": False,
+            "file_name": "",
+            "base_prefix": "",
+            "part_number": None,
+            "next_part_number": None,
+            "next_file_name": None,
+            "total_parts": None
+        }
+
+    # Normalize common RapidOCR substitutions (e.g. 'CommonUl_' -> 'CommonUI_')
+    norm_name = re.sub(r'CommonUl([_\-])', r'CommonUI\1', raw_name)
+    # Match '..._part1.md', '...part1.md', '...-part2.md', or standalone 'part1.md'
+    m = re.match(
+        r'^(?P<prefix>.*?)(?P<sep>[_\-\s]*)part[_\-\s]*(?P<part>\d+)(?P<ext>\.md|\.markdown)?$',
+        norm_name,
+        re.IGNORECASE
+    )
+    total_parts: Optional[int] = None
+    if top_tokens:
+        for tok in top_tokens:
+            txt = tok[4] if len(tok) >= 5 else str(tok)
+            m_tot = re.search(r'part\s*[:\*]*\s*\d+\s*of\s*(\d+)', txt, re.IGNORECASE)
+            if m_tot:
+                try:
+                    total_parts = int(m_tot.group(1))
+                    break
+                except Exception:
+                    pass
+
+    if not m:
+        return {
+            "is_multipart": False,
+            "file_name": norm_name,
+            "base_prefix": re.sub(r'\.(md|markdown)$', '', norm_name, flags=re.IGNORECASE),
+            "part_number": None,
+            "next_part_number": None,
+            "next_file_name": None,
+            "total_parts": total_parts
+        }
+
+    prefix = m.group("prefix").rstrip("_- ")
+    sep = (m.group("sep") or "_") if prefix else ""
+    part_num = int(m.group("part"))
+    ext = m.group("ext") or ".md"
+    clean_file_name = f"{prefix}{sep}part{part_num}{ext}"
+    next_part_num = part_num + 1
+    next_file_name = f"{prefix}{sep}part{next_part_num}{ext}"
+    if total_parts is not None and next_part_num > total_parts:
+        next_file_name = None
+
+    return {
+        "is_multipart": True,
+        "file_name": clean_file_name,
+        "base_prefix": prefix,
+        "part_number": part_num,
+        "next_part_number": next_part_num if (total_parts is None or next_part_num <= total_parts) else None,
+        "next_file_name": next_file_name,
+        "total_parts": total_parts
+    }
+
 def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarray], expected_doc_name: Optional[str] = None, dpi_factor: float = 1.0) -> Dict[str, Any]:
     """
     Analyzes an external display capture of the Teams Markdown editor.
@@ -116,10 +184,39 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     if file_candidates:
         file_candidates.sort(key=lambda x: -x[2])
         c_text, c_box, _ = file_candidates[0]
+        # Merge adjacent horizontal tokens on the same title row if split (e.g., prefix + '_part1.md')
+        row_cy = c_box[1] + c_box[3] / 2.0
+        same_row = []
+        for bx1, by1, bw, bh, t, s in top_tokens:
+            t_cy = by1 + bh / 2.0
+            if abs(t_cy - row_cy) <= max(14, bh * 0.7) and bx1 < int(w * 0.65):
+                cl_t = re.sub(r'^[<←\- \t]+', '', t).strip()
+                if cl_t and "team" not in cl_t.lower():
+                    same_row.append((bx1, by1, bw, bh, cl_t))
+        if len(same_row) > 1:
+            same_row.sort(key=lambda x: x[0])
+            merged_text = "".join(
+                (tok[4] if i == 0 or tok[4].startswith("_") or same_row[i - 1][4].endswith("_") else f"_{tok[4]}")
+                for i, tok in enumerate(same_row)
+            )
+            mx1 = min(tok[0] for tok in same_row)
+            my1 = min(tok[1] for tok in same_row)
+            mx2 = max(tok[0] + tok[2] for tok in same_row)
+            my2 = max(tok[1] + tok[3] for tok in same_row)
+            c_text = merged_text
+            c_box = [mx1, my1, mx2 - mx1, my2 - my1]
+
         file_detected = True
         file_name = c_text
         file_box = [max(0, c_box[0] - 6), max(0, c_box[1] - 4), c_box[2] + 12, c_box[3] + 8]
         file_bottom_y = c_box[1] + c_box[3]
+
+    multipart_info = parse_multipart_markdown_filename(file_name, top_tokens)
+    if multipart_info.get("file_name"):
+        file_name = multipart_info["file_name"]
+    back_btn_cx = max(25, int(file_box[0] - 58 * (w / 1920.0))) if file_detected else int(53 * (w / 1920.0))
+    back_btn_cy = int(file_box[1] + file_box[3] // 2) if file_detected else int(152 * (h / 1080.0))
+    back_button_coords = [back_btn_cx, back_btn_cy]
 
     # ---------------------------------------------------------
     # 3. WHITE BOX 1: Edit Mode ("Pencil Icon" Active)
@@ -568,6 +665,13 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         "first_line_number": first_line_num,
         "last_line_number": last_line_num,
         "file_name": file_name,
+        "multipart_info": multipart_info,
+        "is_multipart": bool(multipart_info.get("is_multipart")),
+        "part_number": multipart_info.get("part_number"),
+        "total_parts": multipart_info.get("total_parts"),
+        "next_part_number": multipart_info.get("next_part_number"),
+        "next_file_name": multipart_info.get("next_file_name"),
+        "back_button_coords": back_button_coords,
         "boxes": boxes,
         "resolution": {"width": w, "height": h},
         "orientation": "portrait" if h > w else "landscape",
