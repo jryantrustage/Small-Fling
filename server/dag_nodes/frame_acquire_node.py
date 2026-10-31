@@ -13,7 +13,7 @@ from pathlib import Path
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
     get_active_adb_serial, detect_external_display_id, capture_external_screenshot,
-    dismiss_keyboard, fetch_current_display_dpi_factor, navigate_to_target_top_line,
+    dismiss_keyboard, fetch_current_display_dpi_factor, navigate_to_target_top_line, resolve_and_dismiss_mini_modals,
     DEVICE_PROFILES, current_device_model
 )
 from services import state
@@ -55,6 +55,20 @@ class FrameAcquireNode(BaseDagNode):
 
         if not snap or len(snap) < 2000 or not snap.startswith(b"\x89PNG\r\n\x1a\n"):
             raise RuntimeError("Screen capture failed: invalid or empty image stream received from display.")
+
+        # 2b. Pre-capture Mini-Modal / Toast Pop-Up Guard:
+        # Detect any floating mini-modal dialogs before saving or running OCR, click their X control, and re-capture clean frame
+        modal_guard = await resolve_and_dismiss_mini_modals(
+            serial=serial,
+            display_id=disp_id,
+            image_bytes=snap,
+            caller_node="frame_acquire"
+        )
+        if modal_guard.get("detected"):
+            if modal_guard.get("snapshot_bytes") and len(modal_guard["snapshot_bytes"]) > 2000:
+                snap = modal_guard["snapshot_bytes"]
+            for act_msg in modal_guard.get("actions_taken", []):
+                blackboard.actions_run.append(f"[MiniModalResolver] {act_msg}")
 
         # 3. Determine dimensions from PNG IHDR
         w_px, h_px = 1920, 1080

@@ -15,6 +15,7 @@ from .base_action import (
 from .action_view_to_edit import ViewToEditAction
 from .action_light_to_dark import LightToDarkAction
 from .action_close_keyboard import CloseKeyboardAction
+from .action_dismiss_mini_modal import DismissMiniModalPopupAction
 from .action_detect_top_line import DetectTopLineAction
 from .action_detect_bottom_line import DetectBottomLineAction
 from .action_recover_gutter_range import RecoverGutterRangeAction
@@ -37,6 +38,7 @@ class ObservationActionRegistry:
         # Register standard catalog
         self.register(OpenMarkdownFromOneDriveAction())
         self.register(CloseKeyboardAction())
+        self.register(DismissMiniModalPopupAction())
         self.register(FocusEditorAction())
         self.register(ViewToEditAction())
         self.register(LightToDarkAction())
@@ -59,6 +61,8 @@ class ObservationActionRegistry:
         "view_mode_to_edit": "view_mode_to_edit_mode",
         "light_mode_to_dark": "light_mode_to_dark_mode",
         "close_keyboard": "keyboard_detected_close",
+        "dismiss_mini_modal": "mini_modal_popup_dismiss",
+        "modal_overlay": "mini_modal_popup_dismiss",
     }
 
     def get_action(self, action_id: str) -> Optional[ObservationActionPlugin]:
@@ -95,6 +99,7 @@ __all__ = [
     "ViewToEditAction",
     "LightToDarkAction",
     "CloseKeyboardAction",
+    "DismissMiniModalPopupAction",
     "FocusEditorAction",
     "DetectTopLineAction",
     "DetectBottomLineAction",

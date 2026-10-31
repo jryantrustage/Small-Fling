@@ -22,7 +22,7 @@ from services.adb_service import (
     detect_surfaceflinger_displays, is_ime_visible, fetch_current_display_dpi_factor, sanitize_input_display_id,
     dispatch_accelerated_viewport_step, navigate_to_target_top_line, calibrate_display_dpi, configure_display_awake_policies,
     enforce_device_characteristics, connect_device_for_model, get_device_info, extract_device_hardware_specs,
-    dismiss_keyboard
+    dismiss_keyboard, detect_mini_modal_popups, resolve_and_dismiss_mini_modals
 )
 import services.ocr_service as ocr_svc
 
@@ -868,6 +868,21 @@ async def auto_heal_pipeline_environment(
                 snap = None
 
         if snap and len(snap) > 2000:
+            # 3a. Mini-Modal / Toast Pop-Up Detection & Click-X Resolver
+            try:
+                modal_res = await resolve_and_dismiss_mini_modals(
+                    serial=serial,
+                    display_id=disp_id,
+                    image_bytes=snap,
+                    caller_node=node_id
+                )
+                if modal_res.get("detected"):
+                    issues_observed.append(f"Detected {modal_res.get('popups_detected', 1)} mini-modal pop-up(s) obscuring editor")
+                    actions_taken.extend(modal_res.get("actions_taken", ["Dismissed mini-modal pop-up via X button"]))
+                    if modal_res.get("snapshot_bytes") and len(modal_res["snapshot_bytes"]) > 2000:
+                        snap = modal_res["snapshot_bytes"]
+            except Exception as me:
+                print(f"[auto_heal] Mini-modal resolver note: {me}")
             c_ctx = ClassifierContext(serial=serial, display_id=disp_id, image_bytes=snap)
 
             # Check Edit Mode (pencil icon / split-screen duplication)
@@ -2135,6 +2150,16 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             disp_map = await detect_surfaceflinger_displays(active_serial)
             known_did = disp_map.get("desktop", "default")
             disp_title = "MB16AMTR" if ("mb16amtr" in str(known_did).lower() or len(str(known_did)) > 10) else f"Display #{known_did}"
+
+            # Pre-capture Mini-Modal / Toast Pop-Up Guard:
+            modal_guard = await resolve_and_dismiss_mini_modals(
+                serial=active_serial,
+                display_id=disp_id if "disp_id" in locals() else None,
+                image_bytes=snap,
+                caller_node="frame_acquire"
+            )
+            if modal_guard.get("detected") and modal_guard.get("snapshot_bytes") and len(modal_guard["snapshot_bytes"]) > 2000:
+                snap = modal_guard["snapshot_bytes"]
 
             temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
             with open(temp_calib, "wb") as f:
@@ -5175,3 +5200,36 @@ async def clear_key_events_telemetry_endpoint():
     return {"status": "success", "message": "Key events telemetry buffer cleared"}
 
 
+
+
+@router.get("/api/dag/mini-modals/detect")
+async def api_detect_mini_modals(serial: Optional[str] = None):
+    """Detects any floating mini-modal / toast pop-ups on the active display and returns their bounding boxes and 'X' close coordinates."""
+    ser = await get_active_adb_serial(serial)
+    snap = await capture_external_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True) if ser else None
+    det = detect_mini_modal_popups(snap)
+    return {
+        "status": "success",
+        "serial": ser,
+        **det
+    }
+
+
+@router.post("/api/dag/mini-modals/resolve")
+async def api_resolve_mini_modals(payload: Optional[Dict[str, Any]] = None):
+    """Detects any floating mini-modal / toast pop-ups, fires a diagnostic event, clicks their 'X' close button, and returns the clean state."""
+    payload = payload or {}
+    ser = await get_active_adb_serial(payload.get("serial"))
+    disp_id = payload.get("display_id") or await detect_external_display_id(ser)
+    res = await resolve_and_dismiss_mini_modals(
+        serial=ser,
+        display_id=disp_id,
+        caller_node=str(payload.get("caller_node", "manual_api"))
+    )
+    clean_res = {k: v for k, v in res.items() if k != "snapshot_bytes"}
+    return {
+        "status": "success",
+        "serial": ser,
+        "display_id": disp_id,
+        **clean_res
+    }

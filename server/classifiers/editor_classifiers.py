@@ -477,25 +477,51 @@ class KeyboardOpenClassifier(BaseClassifier):
 
 class ModalOverlayClassifier(BaseClassifier):
     id = "modal_overlay"
-    issue_description = "modal appearing over teams markdown"
-    fix_description = "dismiss modal dialog"
-    severity = "warning"
+    issue_description = "modal or mini-popup appearing over teams markdown"
+    fix_description = "click X control to dismiss mini-modal pop-up dialog"
+    severity = "blocking"
 
     async def detect(self, context: ClassifierContext) -> ClassificationResult:
+        from services.adb_service import detect_mini_modal_popups
         img = _get_cv_img(context)
         if img is None:
-            return ClassificationResult(classifier_id=self.id, issue_detected=False, issue_name=self.issue_description,
-                                        fix_name=self.fix_description, details="No image available for modal check")
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=False,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                details="No image available for modal check"
+            )
 
+        # 1. Check for Teams floating mini-modal / toast pop-ups (with 'X' close button)
+        mini_res = detect_mini_modal_popups(img)
+        if mini_res.get("detected"):
+            popups = mini_res.get("popups", [])
+            first_close = tuple(popups[0]["close_button"]) if popups else None
+            coords_desc = ", ".join([f"X@({p['close_button'][0]},{p['close_button'][1]}) [bbox={p['bbox']}]" for p in popups])
+            return ClassificationResult(
+                classifier_id=self.id,
+                issue_detected=True,
+                issue_name=self.issue_description,
+                fix_name=self.fix_description,
+                severity=self.severity,
+                details=f"Detected {len(popups)} mini-modal pop-up(s) obscuring markdown text: {coords_desc}",
+                target_coordinates=first_close,
+                metadata={
+                    "mini_modals": popups,
+                    "close_targets": mini_res.get("close_targets", [])
+                }
+            )
+
+        # 2. Check for large centered modal dialogs
         h, w = img.shape[:2]
         gray = cv2.cvtColor(img[int(h * 0.20):int(h * 0.80), int(w * 0.20):int(w * 0.80)], cv2.COLOR_BGR2GRAY)
         contours, _ = cv2.findContours(cv2.Canny(gray, 50, 150), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        has_modal, details, target_coords = False, "No modal detected over teams markdown", None
+        has_modal, details, target_coords = False, "No modal or mini-popup detected over teams markdown", None
         min_area = (h * 0.25) * (w * 0.25)
         for cnt in contours:
             x, y, cw, ch = cv2.boundingRect(cnt)
-            # Ignore large rectangles corresponding to the main editor container
             if cw > w * 0.60 or ch > h * 0.60:
                 continue
             if (cw * ch) > min_area and 0.4 < (cw / max(1, ch)) < 3.0:
@@ -504,25 +530,62 @@ class ModalOverlayClassifier(BaseClassifier):
                 details = f"Modal dialog bounding box detected ({cw}x{ch} px) over editor"
                 break
 
-        return ClassificationResult(classifier_id=self.id, issue_detected=has_modal, issue_name=self.issue_description,
-                                    fix_name=self.fix_description, severity=self.severity, details=details, target_coordinates=target_coords)
+        return ClassificationResult(
+            classifier_id=self.id,
+            issue_detected=has_modal,
+            issue_name=self.issue_description,
+            fix_name=self.fix_description,
+            severity=self.severity,
+            details=details,
+            target_coordinates=target_coords
+        )
 
     async def fix(self, context: ClassifierContext) -> FixResult:
+        from services.adb_service import resolve_and_dismiss_mini_modals
         serial = await get_active_adb_serial(context.serial)
         disp_id = context.display_id or await detect_external_display_id(serial)
-        # Protect Teams FilePreviewActivity: KEYCODE_ESCAPE exits the document!
+
+        # 1. Invoke precision 'X' close button resolver for floating mini-modals / toast pop-ups
+        modal_res = await resolve_and_dismiss_mini_modals(
+            serial=serial,
+            display_id=disp_id,
+            image_bytes=context.image_bytes,
+            caller_node="modal_overlay_classifier"
+        )
+        if modal_res.get("detected"):
+            if modal_res.get("snapshot_bytes"):
+                context.image_bytes = modal_res["snapshot_bytes"]
+                context.image_cv = None
+            return FixResult(
+                classifier_id=self.id,
+                success=bool(modal_res.get("resolved")),
+                message=f"Dismissed {modal_res.get('popups_dismissed', 0)}/{modal_res.get('popups_detected', 0)} mini-modal pop-up(s) via 'X' close button ✔",
+                actions_taken=modal_res.get("actions_taken", []),
+                metadata={"clicks_dispatched": modal_res.get("clicks_dispatched", [])}
+            )
+
+        # 2. Fallback for generic system overlay without closing FilePreviewActivity
         res_win = await run_adb_shell("dumpsys window windows | grep -E 'mCurrentFocus|topApp'", serial, timeout=2.0)
         win_out = res_win.get("stdout", "")
         if "FilePreviewActivity" in win_out:
             disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
-            await run_adb_shell(f"input {disp_pfx}tap 300 300", serial)
-            return FixResult(classifier_id=self.id, success=True, message="Focused Markdown Editor to dismiss overlay",
-                             actions_taken=["Tapped editor pane to clear focus overlay without closing document"])
+            await run_adb_shell(f"input {disp_pfx}tap 80 500", serial)
+            await dismiss_keyboard(serial, disp_id)
+            return FixResult(
+                classifier_id=self.id,
+                success=True,
+                message="Focused Markdown Editor gutter to dismiss overlay",
+                actions_taken=["Tapped editor gutter at (80, 500) to clear overlay without closing document"]
+            )
         if disp_id and disp_id > 0:
             await run_adb_shell(f"input -d {disp_id} keyevent 111", serial)
         await asyncio.sleep(0.3)
-        return FixResult(classifier_id=self.id, success=True, message="Sent Escape to dismiss modal dialog",
-                         actions_taken=["Dispatched KEYCODE_ESCAPE (111) to dismiss modal"])
+        return FixResult(
+            classifier_id=self.id,
+            success=True,
+            message="Sent Escape to dismiss modal dialog",
+            actions_taken=["Dispatched KEYCODE_ESCAPE (111) to dismiss modal"]
+        )
 
 
 class MatrixAppOverlayClassifier(BaseClassifier):

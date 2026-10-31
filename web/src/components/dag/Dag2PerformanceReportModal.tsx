@@ -1113,7 +1113,7 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
               const sm = dt?.summary_metrics;
               const stopEvents = (dt?.stop_and_restart_log || []).slice().reverse().filter(ev => {
                 if (eventFilter === 'stops_only') return ev.event_type === 'LOOP_STOPPED' || ev.event_type === 'LOOP_RESTARTED';
-                if (eventFilter === 'recoveries') return ev.event_type.includes('RECOVERY') || ev.event_type === 'NODE_ERROR';
+                if (eventFilter === 'recoveries') return ev.event_type.includes('RECOVERY') || ev.event_type === 'NODE_ERROR' || ev.event_type.includes('MINI_MODAL');
                 return true;
               });
               const loopRuns = (dt?.loop_runs || []).slice().reverse();
@@ -1142,6 +1142,10 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
                     return { bg: 'rgba(248, 81, 73, 0.22)', color: '#ff7b72', border: '#f85149', label: '⛔ LOOP STOPPED' };
                   case 'LOOP_AUTO_RECOVERY_STARTED':
                     return { bg: 'rgba(163, 113, 247, 0.2)', color: '#d2a8ff', border: '#a371f7', label: '🔧 AUTO-RECOVERY' };
+                  case 'MINI_MODAL_DETECTED':
+                    return { bg: 'rgba(255, 166, 87, 0.2)', color: '#ffa657', border: '#ffa657', label: '⚠️ MINI-MODAL POPUP' };
+                  case 'MINI_MODAL_RESOLVED':
+                    return { bg: 'rgba(0, 255, 157, 0.22)', color: '#00ff9d', border: '#00ff9d', label: '✖ MINI-MODAL CLOSED' };
                   case 'LOOP_AUTO_RECOVERED':
                     return { bg: 'rgba(0, 255, 157, 0.22)', color: '#00ff9d', border: '#00ff9d', label: '✔ AUTO-RECOVERED' };
                   case 'LAST_LINE_OCR_COMPLETED':

@@ -537,7 +537,7 @@ def record_diagnostics_trace_event(
     stop_restart_types = {
         "PROJECT_INIT_START", "FIRST_LINE_OCR_ACQUIRED",
         "LOOP_STARTED", "LOOP_RESTARTED", "LOOP_STOPPED",
-        "NODE_ERROR", "LOOP_AUTO_RECOVERY_STARTED", "LOOP_AUTO_RECOVERED",
+        "NODE_ERROR", "LOOP_AUTO_RECOVERY_STARTED", "LOOP_AUTO_RECOVERED", "MINI_MODAL_DETECTED", "MINI_MODAL_RESOLVED", "MINI_MODAL_WARNING",
         "LAST_LINE_OCR_COMPLETED"
     }
     if event_type in stop_restart_types:
@@ -561,7 +561,7 @@ def record_diagnostics_trace_event(
         project_diagnostics_trace["current_status"] = "RUNNING"
     elif event_type == "LOOP_AUTO_RECOVERY_STARTED":
         project_diagnostics_trace["current_status"] = "AUTO_RECOVERING"
-    elif event_type == "LOOP_AUTO_RECOVERED":
+    elif event_type in ("LOOP_AUTO_RECOVERED", "MINI_MODAL_RESOLVED"):
         project_diagnostics_trace["current_status"] = "RUNNING"
         project_diagnostics_trace["total_auto_recoveries"] = int(project_diagnostics_trace.get("total_auto_recoveries", 0)) + 1
     elif event_type == "LAST_LINE_OCR_COMPLETED":

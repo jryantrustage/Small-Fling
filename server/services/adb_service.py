@@ -2545,6 +2545,17 @@ async def navigate_to_target_top_line(
         )
 
         if is_aligned_at_top:
+            # Ensure no mini-modal / toast popup contaminates the aligned viewport frame
+            if latest_snap:
+                modal_res = await resolve_and_dismiss_mini_modals(
+                    serial=ser,
+                    display_id=valid_d,
+                    image_bytes=latest_snap,
+                    caller_node=caller_node
+                )
+                if modal_res.get("detected") and modal_res.get("snapshot_bytes"):
+                    latest_snap = modal_res["snapshot_bytes"]
+                    actions_taken.extend(modal_res.get("actions_taken", []))
             actual_top = target_top
             if last_g and last_g >= actual_top and (last_g - actual_top) <= 75:
                 actual_bot = last_g
@@ -2720,6 +2731,315 @@ async def navigate_to_target_top_line(
         "attempts": max_attempts,
         "snapshot_bytes": latest_snap,
         "actions_taken": actions_taken
+    }
+
+
+def detect_mini_modal_popups(image_or_bytes: Any) -> Dict[str, Any]:
+    """
+    High-speed visual detector (<4ms) for Teams floating mini-modals / toast pop-ups
+    (e.g. 'Something went wrong so we couldn\'t upload...', 'Unable to auto-save. Please save manually...').
+    Identifies each floating modal bounding box (yellow box in reference) and computes the exact
+    pixel center (close_x, close_y) of its right-side 'X' close control (red circle in reference).
+    """
+    try:
+        if image_or_bytes is None:
+            return {"detected": False, "count": 0, "popups": [], "close_targets": []}
+        if isinstance(image_or_bytes, (bytes, bytearray)):
+            if len(image_or_bytes) < 1000:
+                return {"detected": False, "count": 0, "popups": [], "close_targets": []}
+            arr = np.frombuffer(image_or_bytes, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        elif isinstance(image_or_bytes, np.ndarray):
+            img = image_or_bytes
+        else:
+            return {"detected": False, "count": 0, "popups": [], "close_targets": []}
+
+        if img is None or img.size == 0:
+            return {"detected": False, "count": 0, "popups": [], "close_targets": []}
+
+        h, w = img.shape[:2]
+        sx = w / 1920.0
+        sy = h / 1080.0
+
+        # Search within editor document body (excluding top toolbar y<260 and bottom system bar y>972)
+        y1, y2 = int(round(260 * sy)), int(round(972 * sy))
+        x1, x2 = int(round(380 * sx)), int(round(1540 * sx))
+        roi = img[y1:y2, x1:x2]
+        if roi.size == 0:
+            return {"detected": False, "count": 0, "popups": [], "close_targets": []}
+
+        b = roi[:, :, 0].astype(np.int16)
+        g = roi[:, :, 1].astype(np.int16)
+        r = roi[:, :, 2].astype(np.int16)
+
+        # Teams mini-modal / toast card surface is neutral dark gray BGR ~(48, 49, 50)
+        # contrasting against the dark editor canvas BGR ~(31, 31, 31) and orange/amber syntax text.
+        card_mask = (
+            (np.abs(r - b) <= 8)
+            & (np.abs(r - g) <= 8)
+            & (g >= 42)
+            & (g <= 58)
+        ).astype(np.uint8) * 255
+
+        kw = max(15, int(round(45 * sx)))
+        kh = max(5, int(round(12 * sy)))
+        closed = cv2.morphologyEx(card_mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (kw, kh)))
+
+        ow = max(40, int(round(180 * sx)))
+        oh = max(12, int(round(32 * sy)))
+        opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (ow, oh)))
+
+        num_labels, _, stats, _ = cv2.connectedComponentsWithStats(opened)
+        popups: List[Dict[str, Any]] = []
+
+        for i in range(1, num_labels):
+            rx, ry, rw, rh, area = stats[i]
+            if rw < int(260 * sx) or rw > int(960 * sx):
+                continue
+            if rh < int(36 * sy) or rh > int(230 * sy):
+                continue
+
+            abs_x = x1 + int(rx)
+            abs_y = y1 + int(ry)
+            abs_w = int(rw)
+            abs_h = int(rh)
+
+            card_crop = img[abs_y:abs_y + abs_h, abs_x:abs_x + abs_w]
+            cb = card_crop[:, :, 0].astype(np.int16)
+            cg = card_crop[:, :, 1].astype(np.int16)
+            cr = card_crop[:, :, 2].astype(np.int16)
+
+            # Check for left red circular error/status icon
+            red_mask = ((cr - cg > 60) & (cr > 165) & (cb < 155)).astype(np.uint8)
+            red_pixels = int(np.sum(red_mask))
+            red_center = None
+            if red_pixels >= max(20, int(80 * sx * sy)):
+                rys, rxs = np.where(red_mask > 0)
+                red_center = [
+                    int(round(abs_x + float(np.mean(rxs)))),
+                    int(round(abs_y + float(np.mean(rys))))
+                ]
+
+            # Locate the 'X' close control in the right-side region of the mini-modal
+            x_search_l = max(0, abs_w - int(round(65 * sx)))
+            x_search_r = max(x_search_l + 1, abs_w - int(round(12 * sx)))
+            y_search_t = max(0, int(round(10 * sy)))
+            y_search_b = min(abs_h, int(round(60 * sy)))
+
+            x_patch = card_crop[y_search_t:y_search_b, x_search_l:x_search_r]
+            # Geometric fallback center for the 'X' button (35px from right edge, 31px from top edge at 1080p)
+            close_x = abs_x + abs_w - int(round(35 * sx))
+            close_y = abs_y + int(round(31 * sy))
+            x_glyph_pixels = 0
+
+            if x_patch.size > 0:
+                gray_patch = cv2.cvtColor(x_patch, cv2.COLOR_BGR2GRAY)
+                ys, xs = np.where(gray_patch > 110)
+                x_glyph_pixels = int(len(xs))
+                if x_glyph_pixels >= max(8, int(15 * sx * sy)):
+                    close_x = int(round(abs_x + x_search_l + float(np.mean(xs))))
+                    close_y = int(round(abs_y + y_search_t + float(np.mean(ys))))
+
+            min_red = max(35, int(110 * sx * sy))
+            min_x_glyph = max(8, int(18 * sx * sy))
+            if red_pixels >= min_red or x_glyph_pixels >= min_x_glyph:
+                conf = min(0.99, round(0.65 + (0.20 if red_pixels >= min_red else 0.0) + (0.14 if x_glyph_pixels >= min_x_glyph else 0.0), 2))
+                popups.append({
+                    "bbox": [abs_x, abs_y, abs_w, abs_h],
+                    "close_button": [close_x, close_y],
+                    "red_icon_center": red_center,
+                    "red_icon_pixels": red_pixels,
+                    "x_glyph_pixels": x_glyph_pixels,
+                    "confidence": conf
+                })
+
+        # Sort top-to-bottom by Y coordinate so closing upper toast first never shifts lower toast coordinates
+        popups.sort(key=lambda p: p["bbox"][1])
+        for idx, p_item in enumerate(popups, start=1):
+            p_item["index"] = idx
+
+        return {
+            "detected": len(popups) > 0,
+            "count": len(popups),
+            "popups": popups,
+            "close_targets": [p["close_button"] for p in popups]
+        }
+    except Exception as e:
+        print(f"[detect_mini_modal_popups] Error: {e}")
+        return {"detected": False, "count": 0, "popups": [], "close_targets": [], "error": str(e)}
+
+
+async def resolve_and_dismiss_mini_modals(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    image_bytes: Optional[bytes] = None,
+    caller_node: str = "frame_acquire",
+    max_passes: int = 4
+) -> Dict[str, Any]:
+    """
+    Detects any floating mini-modal / pop-up dialogs over the Teams Markdown editor before screen capture,
+    fires a real-time detection & diagnostic trace event, invokes a touch/mouse click resolver over each
+    mini-modal's 'X' close control, and re-acquires a clean uncontaminated screenshot.
+    """
+    from services import state
+    t0 = time.perf_counter()
+    ser = await get_active_adb_serial(serial)
+    is_mock = bool(ser and "mock" in str(ser).lower())
+
+    current_snap = image_bytes
+    if not current_snap and ser and not is_mock:
+        current_snap = await capture_external_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True)
+
+    det = detect_mini_modal_popups(current_snap)
+    if not det.get("detected"):
+        return {
+            "detected": False,
+            "resolved": True,
+            "popups_detected": 0,
+            "popups_dismissed": 0,
+            "clicks_dispatched": [],
+            "actions_taken": [],
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "snapshot_bytes": current_snap
+        }
+
+    initial_popups = det.get("popups", [])
+    initial_count = len(initial_popups)
+    disp_id = display_id if (display_id and display_id > 0) else (await detect_external_display_id(ser) if ser else 3)
+    valid_d = sanitize_input_display_id(disp_id) or (disp_id if (disp_id and disp_id > 0) else 3)
+    disp_pfx = f"-d {valid_d} " if (valid_d and valid_d > 0) else ""
+
+    coords_summary = ", ".join([f"X@({p['close_button'][0]},{p['close_button'][1]}) [box={p['bbox']}]" for p in initial_popups])
+    det_msg = f"Detected {initial_count} mini-modal pop-up(s) obscuring editor in '{caller_node}': {coords_summary}"
+    print(f"[MiniModalResolver] {det_msg}")
+
+    # 1. Fire real-time detection event over WebSocket & record in Diagnostics Trace
+    try:
+        state.record_diagnostics_trace_event(
+            event_type="MINI_MODAL_DETECTED",
+            reason=det_msg,
+            node_id=caller_node,
+            recovery_action=f"Invoking touch/click resolver on X control(s): {[p['close_button'] for p in initial_popups]}"
+        )
+        await state.ws_manager.broadcast({
+            "type": "mini_modal_detected",
+            "caller_node": caller_node,
+            "display_id": valid_d,
+            "count": initial_count,
+            "popups": initial_popups,
+            "message": det_msg,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception:
+        pass
+
+    clicks_dispatched: List[Dict[str, Any]] = []
+    actions_taken: List[str] = []
+
+    if is_mock or not ser:
+        return {
+            "detected": True,
+            "resolved": False,
+            "popups_detected": initial_count,
+            "popups_dismissed": 0,
+            "clicks_dispatched": [],
+            "actions_taken": [det_msg],
+            "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+            "snapshot_bytes": current_snap
+        }
+
+    # 2. Iteratively click the 'X' close button on each detected mini-modal (top-to-bottom) and re-verify
+    remaining_popups = initial_popups
+    for pass_idx in range(1, max_passes + 1):
+        if not remaining_popups:
+            break
+
+        # Click each detected popup's 'X' button from top to bottom so lower popups don't shift before being clicked
+        cmd_parts = []
+        for p_item in remaining_popups:
+            cx, cy = p_item["close_button"]
+            if pass_idx == 1:
+                cmd_parts.append(f"input {disp_pfx}tap {cx} {cy} >/dev/null 2>&1")
+                method_used = "touch_tap"
+            else:
+                # Fallback: dispatch both mouse click and touch tap on subsequent passes
+                cmd_parts.append(f"input mouse {disp_pfx}tap {cx} {cy} >/dev/null 2>&1; input {disp_pfx}tap {cx} {cy} >/dev/null 2>&1")
+                method_used = "mouse_and_touch_tap"
+
+            clicks_dispatched.append({
+                "pass": pass_idx,
+                "popup_index": p_item.get("index", 1),
+                "bbox": p_item["bbox"],
+                "x": cx,
+                "y": cy,
+                "method": method_used
+            })
+            actions_taken.append(
+                f"Pass {pass_idx}: Clicked mini-modal #{p_item.get('index', 1)} close 'X' at ({cx}, {cy}) [bbox={p_item['bbox']}]"
+            )
+
+        full_cmd = "; sleep 0.10; ".join(cmd_parts)
+        await run_adb_shell(full_cmd, ser, timeout=4.0)
+        await asyncio.sleep(0.22)
+
+        # Ensure clicking inside the WebView did not pop up the soft keyboard
+        await dismiss_keyboard(ser, valid_d)
+
+        # Capture a fresh uncached screenshot to verify all mini-modals are gone
+        fresh_snap = await capture_external_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True)
+        if fresh_snap and len(fresh_snap) > 2000:
+            current_snap = fresh_snap
+            _update_frame_cache(ser, "desktop", current_snap)
+
+        re_det = detect_mini_modal_popups(current_snap)
+        remaining_popups = re_det.get("popups", [])
+        if not re_det.get("detected"):
+            break
+
+    resolved = len(remaining_popups) == 0
+    dismissed_count = max(0, initial_count - len(remaining_popups))
+    dur_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    res_msg = (
+        f"Dismissed {dismissed_count}/{initial_count} mini-modal pop-up(s) via 'X' close control in {dur_ms}ms ✔"
+        if resolved else
+        f"Partially dismissed mini-modals ({len(remaining_popups)} remaining after {max_passes} passes)"
+    )
+    print(f"[MiniModalResolver] {res_msg}")
+
+    # 3. Broadcast resolution event & record in Diagnostics Trace
+    try:
+        state.record_diagnostics_trace_event(
+            event_type="MINI_MODAL_RESOLVED" if resolved else "MINI_MODAL_WARNING",
+            reason=det_msg,
+            node_id=caller_node,
+            recovery_action=f"{res_msg} • Clicks: {[(c['x'], c['y']) for c in clicks_dispatched]}"
+        )
+        await state.ws_manager.broadcast({
+            "type": "mini_modal_resolved",
+            "caller_node": caller_node,
+            "display_id": valid_d,
+            "resolved": resolved,
+            "popups_detected": initial_count,
+            "popups_dismissed": dismissed_count,
+            "clicks_dispatched": clicks_dispatched,
+            "duration_ms": dur_ms,
+            "message": res_msg,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception:
+        pass
+
+    return {
+        "detected": True,
+        "resolved": resolved,
+        "popups_detected": initial_count,
+        "popups_dismissed": dismissed_count,
+        "remaining_popups": remaining_popups,
+        "clicks_dispatched": clicks_dispatched,
+        "actions_taken": actions_taken,
+        "duration_ms": dur_ms,
+        "snapshot_bytes": current_snap
     }
 
 

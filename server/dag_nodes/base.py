@@ -146,7 +146,8 @@ class BaseDagNode(ABC):
     def __init__(self):
         # Default attached observation actions: only safe keyboard dismissal to prevent disruptive blind taps
         self.attached_actions: List[str] = [
-            "keyboard_detected_close"
+            "keyboard_detected_close",
+            "mini_modal_popup_dismiss"
         ]
 
     @property
