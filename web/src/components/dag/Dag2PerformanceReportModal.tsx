@@ -11,13 +11,15 @@ import { copyToClipboard } from '../../utils/dagDiagnostics';
 export interface Dag2PerformanceReportModalProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: 'overview' | 'lifecycle' | 'trace' | 'accuracy' | 'gemini_prompt';
 }
 
 export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProps> = ({
   isOpen,
-  onClose
+  onClose,
+  initialTab = 'overview'
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'trace' | 'accuracy' | 'gemini_prompt'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'lifecycle' | 'trace' | 'accuracy' | 'gemini_prompt'>(initialTab);
   const [report, setReport] = useState<Dag2PerformanceReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [auditingAccuracy, setAuditingAccuracy] = useState(false);
@@ -25,6 +27,13 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [expandedLoops, setExpandedLoops] = useState<Record<number, boolean>>({ 1: true });
   const [promptViewMode, setPromptViewMode] = useState<'formatted' | 'raw'>('formatted');
+  const [eventFilter, setEventFilter] = useState<'all' | 'stops_only' | 'recoveries'>('all');
+
+  useEffect(() => {
+    if (isOpen && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [isOpen, initialTab]);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -158,6 +167,29 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
             >
               <BarChart2 size={13} />
               <span>Overview & Bottlenecks</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('lifecycle')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                background: activeTab === 'lifecycle' ? 'rgba(248, 81, 73, 0.2)' : '#161b22',
+                border: `1px solid ${activeTab === 'lifecycle' ? '#ff7b72' : '#30363d'}`,
+                color: activeTab === 'lifecycle' ? '#ff7b72' : '#8b949e',
+                padding: '5px 12px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Activity size={13} color="#ff7b72" />
+              <span>Lifecycle & Stop/Restart Trace</span>
+              {report?.diagnostics_trace?.summary_metrics && (
+                <span style={{
+                  fontSize: '9.5px', padding: '1px 5px', borderRadius: '8px',
+                  background: 'rgba(248, 81, 73, 0.22)', color: '#ff7b72', fontWeight: 800, marginLeft: '2px'
+                }}>
+                  {report.diagnostics_trace.summary_metrics.total_stops} Stops / {report.diagnostics_trace.summary_metrics.total_auto_recoveries} Heals
+                </span>
+              )}
             </button>
             <button
               type="button"
@@ -1070,6 +1102,287 @@ export const Dag2PerformanceReportModal: React.FC<Dag2PerformanceReportModalProp
                 </pre>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 5: END-TO-END PROJECT LIFECYCLE & STOP/RESTART DIAGNOSTICS TRACE */}
+        {activeTab === 'lifecycle' && report && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {(() => {
+              const dt = report.diagnostics_trace;
+              const sm = dt?.summary_metrics;
+              const stopEvents = (dt?.stop_and_restart_log || []).slice().reverse().filter(ev => {
+                if (eventFilter === 'stops_only') return ev.event_type === 'LOOP_STOPPED' || ev.event_type === 'LOOP_RESTARTED';
+                if (eventFilter === 'recoveries') return ev.event_type.includes('RECOVERY') || ev.event_type === 'NODE_ERROR';
+                return true;
+              });
+              const loopRuns = (dt?.loop_runs || []).slice().reverse();
+
+              const fmtIso = (iso?: string | null) => {
+                if (!iso) return '—';
+                try {
+                  const d = new Date(iso);
+                  return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+                } catch {
+                  return iso;
+                }
+              };
+
+              const getEventBadge = (etype: string) => {
+                switch (etype) {
+                  case 'PROJECT_INIT_START':
+                    return { bg: 'rgba(88, 166, 255, 0.18)', color: '#58a6ff', border: '#58a6ff', label: '🚀 PROJECT START' };
+                  case 'FIRST_LINE_OCR_ACQUIRED':
+                    return { bg: 'rgba(0, 255, 157, 0.18)', color: '#00ff9d', border: '#00ff9d', label: '📄 LINE 1 OCR ACQUIRED' };
+                  case 'LOOP_STARTED':
+                    return { bg: 'rgba(57, 211, 83, 0.18)', color: '#39d353', border: '#39d353', label: '▶️ LOOP STARTED' };
+                  case 'LOOP_RESTARTED':
+                    return { bg: 'rgba(255, 166, 87, 0.22)', color: '#ffa657', border: '#ffa657', label: '🔄 LOOP RESTARTED' };
+                  case 'LOOP_STOPPED':
+                    return { bg: 'rgba(248, 81, 73, 0.22)', color: '#ff7b72', border: '#f85149', label: '⛔ LOOP STOPPED' };
+                  case 'LOOP_AUTO_RECOVERY_STARTED':
+                    return { bg: 'rgba(163, 113, 247, 0.2)', color: '#d2a8ff', border: '#a371f7', label: '🔧 AUTO-RECOVERY' };
+                  case 'LOOP_AUTO_RECOVERED':
+                    return { bg: 'rgba(0, 255, 157, 0.22)', color: '#00ff9d', border: '#00ff9d', label: '✔ AUTO-RECOVERED' };
+                  case 'LAST_LINE_OCR_COMPLETED':
+                    return { bg: 'rgba(0, 255, 157, 0.3)', color: '#00ff9d', border: '#00ff9d', label: '🎉 EOF COMPLETED' };
+                  default:
+                    return { bg: '#21262d', color: '#c9d1d9', border: '#30363d', label: etype };
+                }
+              };
+
+              return (
+                <>
+                  {/* Lifecycle Milestones Banner */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, rgba(22, 27, 34, 0.98), rgba(13, 17, 23, 0.98))',
+                    border: '1px solid #30363d', borderRadius: '8px', padding: '12px 14px',
+                    display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px'
+                  }}>
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
+                      <div style={{ fontSize: '9.5px', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase' }}>
+                        1. Project Start & Line 1 OCR
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color: '#58a6ff', marginTop: '4px', fontFamily: 'monospace' }}>
+                        {fmtIso(dt?.project_started_at_iso)}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#00ff9d', marginTop: '3px', fontFamily: 'monospace' }}>
+                        Ln 1 OCR: {fmtIso(dt?.first_line_acquired_at_iso)}
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
+                      <div style={{ fontSize: '9.5px', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase' }}>
+                        2. First-to-Last Line Progress
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#00ff9d', marginTop: '4px', fontFamily: 'monospace' }}>
+                        Ln 1 → Ln {dt?.highest_line_acquired?.toLocaleString() || 0}
+                        <span style={{ fontSize: '11px', color: '#8b949e', fontWeight: 600 }}>
+                          {' '}/ {(dt?.target_total_lines || 0).toLocaleString()} ({dt?.completion_percent ?? 0}%)
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#c9d1d9', marginTop: '3px' }}>
+                        Latest OCR: <span style={{ fontFamily: 'monospace', color: '#ffa657' }}>{fmtIso(dt?.last_line_acquired_at_iso)}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
+                      <div style={{ fontSize: '9.5px', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase' }}>
+                        3. Loop Runs & Timings
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#f0f6fc', marginTop: '4px', fontFamily: 'monospace' }}>
+                        {sm?.total_loop_runs ?? 0} Loops
+                        <span style={{ fontSize: '11px', color: '#58a6ff', marginLeft: '6px' }}>
+                          (Avg {sm?.avg_loop_duration_formatted || '—'}/page)
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#8b949e', marginTop: '3px' }}>
+                        Active Time: <strong style={{ color: '#39d353' }}>{sm?.total_active_formatted || '—'}</strong> • Elapsed: {sm?.total_elapsed_formatted || '—'}
+                      </div>
+                    </div>
+
+                    <div style={{ background: '#0d1117', border: '1px solid #21262d', borderRadius: '6px', padding: '8px 10px' }}>
+                      <div style={{ fontSize: '9.5px', color: '#8b949e', fontWeight: 700, textTransform: 'uppercase' }}>
+                        4. Stops, Restarts & Auto-Heals
+                      </div>
+                      <div style={{ fontSize: '15px', fontWeight: 900, color: '#ff7b72', marginTop: '4px', fontFamily: 'monospace' }}>
+                        {sm?.total_stops ?? 0} Stops / {sm?.total_manual_restarts ?? 0} Restarts
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#00ff9d', marginTop: '3px' }}>
+                        Auto-Recovered: <strong>{sm?.total_auto_recoveries ?? 0}</strong> • Stop Downtime: <span style={{ color: '#ffa657' }}>{sm?.total_downtime_formatted || '0s'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Stop, Stall, Auto-Recovery & Restart Log */}
+                  <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', overflow: 'hidden' }}>
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '8px 12px', background: '#0d1117', borderBottom: '1px solid #30363d', flexWrap: 'wrap', gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <AlertCircle size={14} color="#ff7b72" />
+                        <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#f0f6fc' }}>
+                          Chronological Loop Stops, Restarts, Auto-Recoveries & Root-Cause Reasons ({stopEvents.length})
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '4px' }}>
+                        {(['all', 'stops_only', 'recoveries'] as const).map(f => (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setEventFilter(f)}
+                            style={{
+                              padding: '3px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, cursor: 'pointer',
+                              background: eventFilter === f ? 'rgba(88, 166, 255, 0.2)' : '#161b22',
+                              border: `1px solid ${eventFilter === f ? '#58a6ff' : '#30363d'}`,
+                              color: eventFilter === f ? '#58a6ff' : '#8b949e'
+                            }}
+                          >
+                            {f === 'all' ? 'All Lifecycle Events' : f === 'stops_only' ? 'Stops & Restarts Only' : 'Auto-Recoveries'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px' }}>
+                        <thead>
+                          <tr style={{ background: '#161b22', color: '#8b949e', textAlign: 'left', borderBottom: '1px solid #30363d', position: 'sticky', top: 0 }}>
+                            <th style={{ padding: '6px 10px' }}>Timestamp</th>
+                            <th style={{ padding: '6px 10px' }}>Event Type</th>
+                            <th style={{ padding: '6px 10px' }}>Page / Loop</th>
+                            <th style={{ padding: '6px 10px' }}>Line Range & Target</th>
+                            <th style={{ padding: '6px 10px' }}>Downtime</th>
+                            <th style={{ padding: '6px 10px' }}>Root-Cause Reason & Recovery Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {stopEvents.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} style={{ padding: '16px', textAlign: 'center', color: '#8b949e' }}>
+                                No matching lifecycle or stop/restart events recorded yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            stopEvents.map((ev) => {
+                              const badge = getEventBadge(ev.event_type);
+                              return (
+                                <tr key={ev.id} style={{ borderBottom: '1px solid #21262d', background: ev.event_type === 'LOOP_STOPPED' ? 'rgba(248, 81, 73, 0.06)' : 'transparent' }}>
+                                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: '#c9d1d9', whiteSpace: 'nowrap' }}>
+                                    {fmtIso(ev.timestamp_iso)}
+                                  </td>
+                                  <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>
+                                    <span style={{
+                                      background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`,
+                                      padding: '2px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800
+                                    }}>
+                                      {badge.label}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: '#58a6ff', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                    Page #{ev.page_index || ev.loop_index}
+                                  </td>
+                                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: '#00ff9d', whiteSpace: 'nowrap' }}>
+                                    Ln {ev.top_line}..{ev.bottom_line}
+                                    {ev.target_top_line ? <span style={{ color: '#ffa657' }}> → Tgt {ev.target_top_line}</span> : null}
+                                  </td>
+                                  <td style={{ padding: '6px 10px', fontFamily: 'monospace', color: ev.downtime_ms ? '#ffa657' : '#6e7681', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                    {ev.downtime_formatted || '—'}
+                                  </td>
+                                  <td style={{ padding: '6px 10px', color: '#e6edf3', lineHeight: 1.4 }}>
+                                    <div>{ev.reason}</div>
+                                    {ev.recovery_action && (
+                                      <div style={{ fontSize: '9.5px', color: '#00ff9d', marginTop: '2px' }}>
+                                        🔧 {ev.recovery_action}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Complete End-to-End Loop Timings Matrix (Page 1 to Latest Page) */}
+                  <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', overflow: 'hidden' }}>
+                    <div style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      padding: '8px 12px', background: '#0d1117', borderBottom: '1px solid #30363d'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Clock size={14} color="#58a6ff" />
+                        <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#f0f6fc' }}>
+                          End-to-End DAG Loop Execution Timings — Line 1 to Line {dt?.highest_line_acquired || 0} ({loopRuns.length} Pages)
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '10px', color: '#8b949e' }}>
+                        Newest first • Tracks every page acquisition from start to EOF
+                      </span>
+                    </div>
+
+                    <div style={{ maxHeight: '260px', overflowY: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px' }}>
+                        <thead>
+                          <tr style={{ background: '#161b22', color: '#8b949e', textAlign: 'left', borderBottom: '1px solid #30363d', position: 'sticky', top: 0 }}>
+                            <th style={{ padding: '6px 10px' }}>Loop / Page</th>
+                            <th style={{ padding: '6px 10px' }}>Lines Captured</th>
+                            <th style={{ padding: '6px 10px' }}>Next Target</th>
+                            <th style={{ padding: '6px 10px' }}>Start → Finish</th>
+                            <th style={{ padding: '6px 10px' }}>Total Duration</th>
+                            <th style={{ padding: '6px 10px' }}>Node Breakdown (N3 / N4 / N5 / N6)</th>
+                            <th style={{ padding: '6px 10px' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {loopRuns.slice(0, 300).map((r) => {
+                            const nt = r.node_timings || {};
+                            return (
+                              <tr key={`${r.loop_id}_${r.started_at_ms}`} style={{ borderBottom: '1px solid #21262d' }}>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontWeight: 800, color: '#58a6ff' }}>
+                                  #{r.loop_index} (P{r.page_index})
+                                </td>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: '#00ff9d', fontWeight: 700 }}>
+                                  Ln {r.top_line}..{r.bottom_line}
+                                  <span style={{ color: '#8b949e', fontWeight: 400 }}> ({r.extracted_lines || (r.bottom_line - r.top_line + 1)} lines)</span>
+                                </td>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: '#ffa657' }}>
+                                  Ln {r.target_next_top}
+                                </td>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', color: '#c9d1d9', fontSize: '9.5px' }}>
+                                  {formatEpochTime(r.started_at_ms)} → {formatEpochTime(r.finished_at_ms)}
+                                </td>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontWeight: 800, color: '#f0f6fc' }}>
+                                  {r.duration_formatted} ({r.duration_ms}ms)
+                                </td>
+                                <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: '9.5px', color: '#8b949e' }}>
+                                  N3:{nt.frame_acquire ?? '—'}ms • N4:{nt.local_ai_ocr ?? '—'}ms • N5:{nt.frame_ocr ?? '—'}ms • N6:{nt.arrow_down ?? '—'}ms
+                                </td>
+                                <td style={{ padding: '5px 10px' }}>
+                                  <span style={{
+                                    padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800,
+                                    background: r.status === 'success' ? 'rgba(57, 211, 83, 0.15)' : 'rgba(248, 81, 73, 0.2)',
+                                    color: r.status === 'success' ? '#39d353' : '#ff7b72'
+                                  }}>
+                                    {r.status.toUpperCase()}
+                                  </span>
+                                  {r.error_reason && (
+                                    <div style={{ fontSize: '9px', color: '#ff7b72', marginTop: '2px' }}>{r.error_reason}</div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         )}
 

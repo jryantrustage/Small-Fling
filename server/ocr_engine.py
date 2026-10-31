@@ -151,63 +151,129 @@ def extract_numbers_from_slice(crop: np.ndarray, max_x_min: Optional[int] = None
 
 def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: int = 295) -> List[Tuple[int, int]]:
     """
-    Validates and corrects line numbers in a vertical gutter column.
-    Detects and corrects outliers (such as truncated numbers like 69 instead of 697 or 11 instead of 119)
-    using sequence consensus, median line pitch, and linear projection.
-    Also back-projects missing leading lines down to min_content_y when top digit(s) were missed by OCR.
+    Validates and corrects line numbers in a vertical gutter column while preserving
+    legitimate wrapped-line sequences (where dy between consecutive line numbers n and n+1
+    is a multiple of the visual row pitch ~27px).
+    Detects and corrects OCR outliers (such as truncated numbers like 69 instead of 697
+    or 11 instead of 119) using dynamic-programming monotonic sequence consensus.
     """
     if not gutter_items:
         return []
-    sorted_items = sorted(gutter_items, key=lambda it: it[0])
+    raw_sorted = sorted(gutter_items, key=lambda it: it[0])
+    if len(raw_sorted) <= 1:
+        return raw_sorted
+
+    # 0. Deduplicate multiple OCR boxes on the exact same visual row (abs(dy) < 14px)
+    sorted_items: List[Tuple[int, int]] = []
+    for y_pos, num in raw_sorted:
+        if sorted_items and abs(y_pos - sorted_items[-1][0]) < 14:
+            # Keep the candidate with more digits (less likely to be a truncated fragment)
+            if len(str(num)) > len(str(sorted_items[-1][1])):
+                sorted_items[-1] = (y_pos, num)
+        else:
+            sorted_items.append((y_pos, num))
+
     if len(sorted_items) <= 1:
         return sorted_items
 
-    # 1. Estimate typical line pitch (pixels per line)
-    pitches = []
+    # 1. Estimate single visual row pitch (~27px at 1080p)
+    row_pitches = []
     for i in range(len(sorted_items) - 1):
-        dy = sorted_items[i+1][0] - sorted_items[i][0]
-        dn = sorted_items[i+1][1] - sorted_items[i][1]
-        if dn > 0 and 10 <= dy <= 35 * dn:
-            pitches.append(dy / dn)
-    med_pitch = float(np.median(pitches)) if pitches else 27.0
+        dy = sorted_items[i + 1][0] - sorted_items[i][0]
+        dn = sorted_items[i + 1][1] - sorted_items[i][1]
+        if 18 <= dy <= 34:
+            row_pitches.append(float(dy))
+        elif dn > 0 and 18 <= (dy / dn) <= 32:
+            row_pitches.append(float(dy) / float(dn))
+    row_pitch = float(np.median(row_pitches)) if row_pitches else 27.0
 
-    # 2. Find consensus anchor that maximizes inliers across the entire vertical column
-    best_inliers = -1
-    anchor_idx = 0
-    for i, (yi, ni) in enumerate(sorted_items):
-        inliers = 0
-        for j, (yj, nj) in enumerate(sorted_items):
-            expected_n = ni + (yj - yi) / med_pitch
-            if abs(nj - expected_n) <= 1.2:
-                inliers += 1
-        if inliers > best_inliers:
-            best_inliers = inliers
-            anchor_idx = i
+    # 2. Find the highest-scoring chain of mutually consistent gutter numbers (handles wrapped lines!)
+    n_items = len(sorted_items)
+    dp_score = [10] * n_items
+    dp_prev = [-1] * n_items
 
-    anchor_y, anchor_n = sorted_items[anchor_idx]
+    for j in range(n_items):
+        yj, nj = sorted_items[j]
+        for i in range(j):
+            yi, ni = sorted_items[i]
+            dy = yj - yi
+            if dy < 14:
+                continue
+            visual_rows = max(1, int(round(dy / row_pitch)))
+            dn = nj - ni
+            idx_step = j - i
+            # Valid progression: line number increases by at least 1 per distinct gutter row
+            # and by at most visual_rows + 1 (since each logical line occupies >= 1 visual row).
+            if idx_step <= dn <= (visual_rows + 1):
+                if idx_step == 1 and dn == 1:
+                    bonus = 100
+                elif dn == idx_step:
+                    bonus = 85
+                elif abs(dn - visual_rows) <= 1:
+                    bonus = 65
+                else:
+                    bonus = 40
+                cand_score = dp_score[i] + bonus
+                if cand_score >= dp_score[j]:
+                    dp_score[j] = cand_score
+                    dp_prev[j] = i
 
-    cleaned = []
-    for y_pos, num in sorted_items:
-        projected = max(1, int(round(anchor_n + (y_pos - anchor_y) / med_pitch)))
-        # If num deviates from linear sequence consensus by >= 2 lines, snap to consensus projection
-        if abs(num - projected) >= 2:
-            cleaned.append((y_pos, projected))
-        else:
+    best_end = int(np.argmax(dp_score))
+    inlier_indices = []
+    curr = best_end
+    while curr != -1:
+        inlier_indices.append(curr)
+        curr = dp_prev[curr]
+    inlier_indices.reverse()
+    inlier_set = set(inlier_indices)
+
+    # 3. Preserve all inlier numbers verbatim; repair only genuine OCR outliers
+    cleaned: List[Tuple[int, int]] = []
+    first_inlier = inlier_indices[0]
+    last_inlier = inlier_indices[-1]
+
+    for idx, (y_pos, num) in enumerate(sorted_items):
+        if idx in inlier_set:
             cleaned.append((y_pos, num))
+            continue
 
-    # 3. Back-project missing leading lines down to min_content_y if top row digit(s) were missed
-    if cleaned and cleaned[0][1] > 1:
-        first_y, first_n = cleaned[0]
-        prepended = []
-        for k in range(first_n - 1, 0, -1):
-            proj_y = int(round(first_y - (first_n - k) * med_pitch))
-            if proj_y >= min_content_y:
-                prepended.append((proj_y, k))
+        if idx < first_inlier:
+            y_ref, n_ref = sorted_items[first_inlier]
+            step_rows = first_inlier - idx
+            seq_est = max(1, n_ref - step_rows)
+            pitch_est = max(1, int(round(n_ref - (y_ref - y_pos) / row_pitch)))
+            if (y_ref - y_pos) <= 3.5 * row_pitch * step_rows or str(seq_est).startswith(str(num)) or str(seq_est).endswith(str(num)):
+                cleaned.append((y_pos, seq_est))
             else:
-                break
-        if prepended:
-            prepended.reverse()
-            cleaned = prepended + cleaned
+                cleaned.append((y_pos, pitch_est))
+        elif idx > last_inlier:
+            y_ref, n_ref = sorted_items[last_inlier]
+            step_rows = idx - last_inlier
+            seq_est = n_ref + step_rows
+            pitch_est = n_ref + max(1, int(round((y_pos - y_ref) / row_pitch)))
+            # Each gutter entry is drawn on the first visual row of the next logical line
+            if (y_pos - y_ref) <= 5.5 * row_pitch * step_rows or str(seq_est).startswith(str(num)) or str(seq_est).endswith(str(num)):
+                cleaned.append((y_pos, seq_est))
+            else:
+                cleaned.append((y_pos, pitch_est))
+        else:
+            # Outlier bounded between two inliers i_prev < idx < i_next
+            i_prev = max(i for i in inlier_indices if i < idx)
+            i_next = min(i for i in inlier_indices if i > idx)
+            y_p, n_p = sorted_items[i_prev]
+            y_n, n_n = sorted_items[i_next]
+            if (n_n - n_p) == (i_next - i_prev):
+                cleaned.append((y_pos, n_p + (idx - i_prev)))
+            else:
+                interp = int(round(n_p + (n_n - n_p) * ((y_pos - y_p) / max(1.0, float(y_n - y_p)))))
+                cleaned.append((y_pos, max(n_p + 1, min(n_n - 1, interp))))
+
+    # 4. Only prepend Line 1 if Line 2 is on the 2nd visual row and narrow single-digit '1' was missed
+    if cleaned and cleaned[0][1] == 2:
+        first_y, _ = cleaned[0]
+        if (min_content_y + 18) <= first_y <= (min_content_y + 52):
+            proj_y = max(min_content_y, int(round(first_y - row_pitch)))
+            cleaned.insert(0, (proj_y, 1))
 
     return cleaned
 
@@ -663,18 +729,25 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         elif line_delta > 1 and 10 <= (y_next - y_curr) <= 35 * line_delta:
             pitches.append(float(y_next - y_curr) / float(line_delta))
 
-    avg_pitch = float(np.median(pitches)) if pitches else max(16.0, 26.0 * (h / 1080.0))
+    avg_pitch = float(np.median(pitches)) if pitches else max(16.0, 27.0 * (h / 1080.0))
 
     y_first, ln_first = gutter[0]
-    y_dist_above = max(0, y_first - doc_top_y)
-    if ln_first == 1 or y_dist_above < avg_pitch * 0.5:
+    top_row_y = 304.0 * (h / 1080.0)
+    y_dist_above = max(0.0, float(y_first) - top_row_y)
+    if ln_first == 1 or y_dist_above <= avg_pitch * 0.65:
+        first_gutter_row_offset = 0
         missing_lines_above = 0
+        effective_top = ln_first
     else:
-        missing_lines_above = int(round(y_dist_above / avg_pitch))
-
-    effective_top = max(1, ln_first - missing_lines_above)
-    if target_top and abs(effective_top - target_top) <= 0:
-        effective_top = target_top
+        # When y_first > ~321px at 1080p, the visual rows above y_first have a blank gutter because
+        # they are the wrapped continuation tail of line (ln_first - 1).
+        first_gutter_row_offset = max(1, int(round(y_dist_above / avg_pitch)))
+        missing_lines_above = 1 if ln_first > 1 else 0
+        if target_top is not None and target_top == ln_first:
+            # Target line is visible at y_first (> top row), so line (ln_first - 1)'s wrapped tail is still at the top
+            effective_top = max(1, ln_first - 1)
+        else:
+            effective_top = ln_first
 
 
     caret_info = None
@@ -703,13 +776,15 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
     return effective_top, {
         "first_gutter_line": ln_first,
         "first_gutter_y": y_first,
+        "first_gutter_row_offset": first_gutter_row_offset,
         "doc_top_y": doc_top_y,
         "missing_lines_above": missing_lines_above,
         "avg_pitch": avg_pitch,
         "effective_top": effective_top,
         "caret": caret_info,
         "gutter_count": len(gutter),
-        "bottom_gutter_line": gutter[-1][1]
+        "bottom_gutter_line": gutter[-1][1],
+        "bottom_gutter_y": gutter[-1][0]
     }
 
 def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top: Optional[int] = None) -> int:

@@ -3022,15 +3022,55 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             }
 
         elif target_key == "verification_trigger":
-            # Guard: DAG 7 should not proceed if DAG 6 didn't work!
+            # Guard: DAG 7 should not proceed if DAG 6 didn't work, but first verify against the live display!
             n6_info = state.dag_state["nodes"].get("arrow_down", {})
-            if (
+            expected_target_top = int(
+                n6_info.get("target_top")
+                or n6_info.get("target_top_line")
+                or node.get("target_top_line")
+                or ((state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0) + 1)
+                or 1
+            )
+            n6_needs_check = (
                 n6_info.get("status") in ("error", "prevented")
                 or n6_info.get("reached") is not True
                 or n6_info.get("advanced") is not True
                 or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
-            ):
-                error_msg = f"Verification trigger blocked: DAG 6 (arrow_down) failed to position target line {n6_info.get('target_top')} on top (settled at {n6_info.get('new_top_line')}). Halting loop to prevent duplicate or corrupted capture."
+            )
+            if n6_needs_check and expected_target_top > 0:
+                nav_heal = await navigate_to_target_top_line(
+                    target_top=expected_target_top,
+                    serial=active_serial,
+                    display_id=disp_id,
+                    use_page_keys=True,
+                    max_attempts=6,
+                    caller_node="verification_trigger"
+                )
+                if nav_heal.get("reached"):
+                    n6_info.update({
+                        "status": "completed",
+                        "target_top": expected_target_top,
+                        "target_top_line": expected_target_top,
+                        "new_top_line": expected_target_top,
+                        "reached": True,
+                        "advanced": True,
+                        "error": None,
+                        "telemetry_insight": f"Live display verified at target top Line {expected_target_top} ✔"
+                    })
+                    snap_healed = nav_heal.get("snapshot_bytes")
+                    if snap_healed:
+                        try:
+                            temp_c = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+                            with open(temp_c, "wb") as f:
+                                f.write(snap_healed)
+                        except Exception:
+                            pass
+                    n6_needs_check = False
+                elif nav_heal.get("actual_top"):
+                    n6_info["new_top_line"] = nav_heal.get("actual_top")
+
+            if n6_needs_check:
+                error_msg = f"Verification trigger blocked: DAG 6 (arrow_down) failed to position target line {n6_info.get('target_top') or expected_target_top} on top (settled at {n6_info.get('new_top_line')}). Halting loop to prevent duplicate or corrupted capture."
                 node.update({
                     "status": "prevented",
                     "evaluator": "Completion Qualifier Evaluator",
@@ -3555,6 +3595,11 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
                 db.clear_project_data(active_pid)
             except Exception:
                 pass
+        state.reset_project_diagnostics_trace(
+            project_id=active_pid,
+            project_name=f"Project {active_pid}" if active_pid else "Active Project",
+            target_total_lines=total_lines
+        )
 
         # Determine markdown editor filename / description from Line 1 frame if not already set
         active_pid = project_id or state.get_current_project_id()
@@ -3653,19 +3698,33 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
             "detail": err
         }
 
-def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: int, status: str, nodes: List[Dict[str, Any]], loop_id: Optional[str] = None):
+def _save_dag2_loop_record(
+    loop_idx: int,
+    start_ms: int,
+    end_ms: int,
+    dur_ms: int,
+    status: str,
+    nodes: List[Dict[str, Any]],
+    loop_id: Optional[str] = None,
+    failed_node: Optional[str] = None,
+    error_reason: Optional[str] = None,
+    recovery_applied: Optional[str] = None
+):
     from services.performance_analyzer import format_duration_min_sec
     key_evs = list(state.active_dag2_loop_key_events)
     nav_away = any(e.get("navigated_away", False) for e in key_evs)
     rec = {
         "loop_index": loop_idx,
-        "loop_id": loop_id or (state.current_dag2_loop_id or f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
+        "loop_id": loop_id or (state.current_dag2_loop_id or f"loop_{loop_idx:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"),
         "status": status,
         "started_at_ms": start_ms,
         "finished_at_ms": end_ms,
         "duration_ms": dur_ms,
         "duration_formatted": format_duration_min_sec(dur_ms),
         "nodes": nodes,
+        "failed_node": failed_node,
+        "error_reason": error_reason,
+        "recovery_applied": recovery_applied,
         "key_events": key_evs,
         "key_events_count": len(key_evs),
         "key_events_total_duration_ms": round(sum(e.get("duration_ms", 0) for e in key_evs), 2),
@@ -3675,6 +3734,18 @@ def _save_dag2_loop_record(loop_idx: int, start_ms: int, end_ms: int, dur_ms: in
     state.current_dag2_loop_id = None
     state.current_dag2_loop_index = None
     state.active_dag2_loop_key_events = []
+
+async def _run_node_safe(node_id: str, opts: Dict[str, Any]) -> Dict[str, Any]:
+    """Executes run_single_dag_node and catches HTTPException/Exception so loop telemetry is never lost."""
+    try:
+        return await run_single_dag_node(node_id, opts)
+    except HTTPException as he:
+        det = he.detail
+        err_msg = det.get("message") if isinstance(det, dict) else str(det)
+        return {"status": "error", "node_id": node_id, "error": err_msg, "message": err_msg}
+    except Exception as ex:
+        err_msg = str(ex)
+        return {"status": "error", "node_id": node_id, "error": err_msg, "message": err_msg}
 
 async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None) -> Dict[str, Any]:
     active_serial = await get_active_adb_serial(serial)
@@ -3707,8 +3778,8 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     state.dag_state["current_active_group"] = "capture_entire_markdown"
 
     from services.performance_analyzer import format_duration_min_sec
-    loop_idx = len(state.get_dag2_loop_history()) + 1
-    loop_id = f"loop_{loop_idx:03d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    loop_idx = state.next_dag2_loop_index()
+    loop_id = f"loop_{loop_idx:04d}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     state.current_dag2_loop_id = loop_id
     state.current_dag2_loop_index = loop_idx
     state.active_dag2_loop_key_events = []
@@ -3730,7 +3801,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Node 3: frame_acquire (Screen Capture)
     n3_t0 = time.perf_counter()
     n3_start_ms = int(time.time() * 1000)
-    n3_res = await run_single_dag_node("frame_acquire", opts)
+    n3_res = await _run_node_safe("frame_acquire", opts)
     n3_t1 = time.perf_counter()
     n3_end_ms = int(time.time() * 1000)
     n3_dur_ms = max(1, int((n3_t1 - n3_t0) * 1000))
@@ -3745,13 +3816,15 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             "page": n3_res.get("page", 0),
             "display_id": state.latest_telemetry.get("capture_telemetry", {}).get("display_id"),
             "latency_ms": state.latest_telemetry.get("capture_telemetry", {}).get("last_latency_ms", 0),
-            "file_size": n3_res.get("file_size", 0)
+            "file_size": n3_res.get("file_size", 0),
+            "error": n3_res.get("error") or n3_res.get("message")
         }
     })
     if n3_res.get("status") == "error":
         capture_group["status"] = "error"
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
-        return {"status": "error", "node_id": "frame_acquire", "result": n3_res}
+        err_msg = n3_res.get("error") or n3_res.get("message") or "Frame acquire failed"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes, failed_node="frame_acquire", error_reason=err_msg)
+        return {"status": "error", "node_id": "frame_acquire", "error": err_msg, "message": err_msg, "result": n3_res}
 
     # Downstream compute nodes do not need repeated ADB/screencap environment healing
     opts["skip_env_heal"] = True
@@ -3759,7 +3832,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Node 4: local_ai_ocr (MiniCPM-V Multimodal Vision Model verbatim text extraction)
     n4_t0 = time.perf_counter()
     n4_start_ms = int(time.time() * 1000)
-    n4_res = await run_single_dag_node("local_ai_ocr", opts)
+    n4_res = await _run_node_safe("local_ai_ocr", opts)
     n4_t1 = time.perf_counter()
     n4_end_ms = int(time.time() * 1000)
     n4_dur_ms = max(1, int((n4_t1 - n4_t0) * 1000))
@@ -3773,13 +3846,15 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "details": {
             "model_used": n4_res.get("model_used", "MiniCPM-V"),
             "lines_count": n4_res.get("lines_count", 0),
-            "char_count": n4_res.get("char_count", 0)
+            "char_count": n4_res.get("char_count", 0),
+            "error": n4_res.get("error") or n4_res.get("message")
         }
     })
     if n4_res.get("status") == "error":
         capture_group["status"] = "error"
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
-        return {"status": "error", "node_id": "local_ai_ocr", "result": n4_res}
+        err_msg = n4_res.get("error") or n4_res.get("message") or "Local AI OCR failed"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes, failed_node="local_ai_ocr", error_reason=err_msg)
+        return {"status": "error", "node_id": "local_ai_ocr", "error": err_msg, "message": err_msg, "result": n4_res}
 
     # --- CONNECTOR GATE BETWEEN DAG GROUP 2 (Capture/OCR) AND DAG GROUP 3 (Line Positioning) ---
     is_connector_23_open = state.is_edge_connected("local_ai_ocr", "frame_ocr") and getattr(state, "dag_semaphore_group2_to_3", True)
@@ -3809,7 +3884,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
                 await asyncio.sleep(0.25)
 
             if not getattr(state, "capture_loop_running", False):
-                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes, failed_node="connector_4_5", error_reason="Loop stopped while awaiting Connector 4->5")
                 return {"status": "paused", "message": "Loop stopped while awaiting Connector", "node_id": "connector_4_5"}
 
             await emit_dag_telemetry_event(
@@ -3820,7 +3895,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             )
         else:
             # In single cycle mode, gracefully pause at the connector boundary
-            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes, failed_node="connector_4_5", error_reason="Paused at Connector 4->5")
             return {
                 "status": "paused_at_semaphore",
                 "semaphore_id": "group2_to_3",
@@ -3839,7 +3914,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Node 5: frame_ocr (fast OpenCV gutter boundary detection)
     n5_t0 = time.perf_counter()
     n5_start_ms = int(time.time() * 1000)
-    n5_res = await run_single_dag_node("frame_ocr", opts)
+    n5_res = await _run_node_safe("frame_ocr", opts)
     n5_t1 = time.perf_counter()
     n5_end_ms = int(time.time() * 1000)
     n5_dur_ms = max(1, int((n5_t1 - n5_t0) * 1000))
@@ -3853,13 +3928,15 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "details": {
             "top_line": n5_res.get("top_line", 0),
             "bottom_line": n5_res.get("bottom_line", 0),
-            "extracted_lines": len(n5_res.get("lines", []))
+            "extracted_lines": len(n5_res.get("lines", [])),
+            "error": n5_res.get("error") or n5_res.get("message")
         }
     })
     if n5_res.get("status") == "error":
         position_group["status"] = "error"
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes)
-        return {"status": "error", "group": "position_navigation", "node_id": "frame_ocr", "result": n5_res}
+        err_msg = n5_res.get("error") or n5_res.get("message") or "Gutter boundary OCR failed"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes, failed_node="frame_ocr", error_reason=err_msg)
+        return {"status": "error", "group": "position_navigation", "node_id": "frame_ocr", "error": err_msg, "message": err_msg, "result": n5_res}
 
     bot_ln = n5_res.get("bottom_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0
     top_ln = n5_res.get("top_line") or state.dag_state["nodes"].get("frame_ocr", {}).get("top_line") or 1
@@ -3872,7 +3949,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Executed sequentially after Node 5 so line target is settled and verified!
     n6_t0 = time.perf_counter()
     n6_start_ms = int(time.time() * 1000)
-    n6_res = await run_single_dag_node("arrow_down", opts)
+    n6_res = await _run_node_safe("arrow_down", opts)
     n6_t1 = time.perf_counter()
     n6_end_ms = int(time.time() * 1000)
     n6_dur_ms = max(1, int((n6_t1 - n6_t0) * 1000))
@@ -3895,7 +3972,8 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             "positioning_method": f"Tracked DownArrow (x{arr_cnt})",
             "dwell_ms": 0,
             "settle_ms": 100,
-            "key_events": list(state.active_dag2_loop_key_events)
+            "key_events": list(state.active_dag2_loop_key_events),
+            "error": n6_res.get("error") or n6_res.get("message")
         }
     })
 
@@ -3907,9 +3985,9 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         st = "error" if n6_res.get("status") in ("error", "success") else n6_res.get("status", "error")
         position_group["status"] = st
         err_msg = n6_res.get("message") or n6_res.get("error") or "Navigation failed: arrow_down did not advance viewport."
-        state.latest_telemetry["status_message"] = f"Loop halted: {err_msg} DAG 7 blocked."
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg}
+        state.latest_telemetry["status_message"] = f"Loop issue on Node 6: {err_msg}"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes, failed_node="arrow_down", error_reason=err_msg)
+        return {"status": st, "group": "position_navigation", "node_id": "arrow_down", "result": n6_res, "error": err_msg, "message": err_msg}
 
     position_group["status"] = "completed"
 
@@ -3940,7 +4018,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
                 await asyncio.sleep(0.25)
 
             if not getattr(state, "capture_loop_running", False):
-                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+                _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes, failed_node="connector_6_7", error_reason="Loop stopped while awaiting Connector 6->7")
                 return {"status": "paused", "message": "Loop stopped while awaiting Connector between Node 6 and Node 7", "node_id": "connector_6_7"}
 
             await emit_dag_telemetry_event(
@@ -3951,7 +4029,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
             )
         else:
             # In single cycle mode, gracefully pause at the connector boundary
-            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes)
+            _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "paused", loop_nodes, failed_node="connector_6_7", error_reason="Paused at Connector 6->7")
             return {
                 "status": "paused_at_semaphore",
                 "semaphore_id": "group3_to_4",
@@ -3977,7 +4055,7 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     # Node 7: verification_trigger (Settle Assertion & Qualifier Verification)
     n7_t0 = time.perf_counter()
     n7_start_ms = int(time.time() * 1000)
-    n7_res = await run_single_dag_node("verification_trigger", opts)
+    n7_res = await _run_node_safe("verification_trigger", opts)
     n7_t1 = time.perf_counter()
     n7_end_ms = int(time.time() * 1000)
     n7_dur_ms = max(1, int((n7_t1 - n7_t0) * 1000))
@@ -3991,7 +4069,8 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "details": {
             "allowed": n7_res.get("allowed", True),
             "loop_count": n7_res.get("loop_count", loop_idx),
-            "consecutive_failures": n7_res.get("consecutive_failures", 0)
+            "consecutive_failures": n7_res.get("consecutive_failures", 0),
+            "error": n7_res.get("error") or n7_res.get("message")
         }
     })
     if (
@@ -4001,13 +4080,14 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     ):
         st = n7_res.get("status", "prevented")
         verify_group["status"] = st
-        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes)
-        return {"status": st, "group": "verify_assemble", "node_id": "verification_trigger", "result": n7_res}
+        err_msg = n7_res.get("error") or n7_res.get("message") or "Verification trigger prevented"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), st, loop_nodes, failed_node="verification_trigger", error_reason=err_msg)
+        return {"status": st, "group": "verify_assemble", "node_id": "verification_trigger", "error": err_msg, "message": err_msg, "result": n7_res}
 
     # Node 8: document_assemble
     n8_t0 = time.perf_counter()
     n8_start_ms = int(time.time() * 1000)
-    n8_res = await run_single_dag_node("document_assemble", opts)
+    n8_res = await _run_node_safe("document_assemble", opts)
     n8_t1 = time.perf_counter()
     n8_end_ms = int(time.time() * 1000)
     n8_dur_ms = max(1, int((n8_t1 - n8_t0) * 1000))
@@ -4021,11 +4101,15 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         "details": {
             "total_captured_lines": n8_res.get("total_captured_lines", 0),
             "completion_percent": n8_res.get("completion_percent", 0),
-            "is_complete": n8_res.get("is_complete", False)
+            "is_complete": n8_res.get("is_complete", False),
+            "error": n8_res.get("error") or n8_res.get("message")
         }
     })
     if n8_res.get("status") == "error":
         verify_group["status"] = "error"
+        err_msg = n8_res.get("error") or n8_res.get("message") or "Document assemble failed"
+        _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes, failed_node="document_assemble", error_reason=err_msg)
+        return {"status": "error", "group": "verify_assemble", "node_id": "document_assemble", "error": err_msg, "message": err_msg, "result": n8_res}
     else:
         verify_group["status"] = "completed"
 
@@ -4105,6 +4189,11 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         state.latest_telemetry["status_message"] = err_msg
         state.dag_state["current_active_node"] = None
         state.orchestration_state["status"] = "ERROR"
+        state.record_diagnostics_trace_event(
+            event_type="LOOP_STOPPED",
+            node_id="device_environment",
+            reason=f"Device environment validation failed: {err_msg}"
+        )
         await state.ws_manager.broadcast({
             "type": "dag2_loop_error",
             "error": err_msg,
@@ -4117,6 +4206,14 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     state.latest_telemetry["is_pacing"] = False
     state.latest_telemetry["phase"] = "DAG_CAPTURE"
     state.orchestration_state["status"] = "RUNNING"
+
+    state.ensure_diagnostics_trace_backfilled()
+    state.record_diagnostics_trace_event(
+        event_type="LOOP_STARTED",
+        reason=f"Continuous DAG capture loop started at Page {state.latest_telemetry.get('current_page') or 1} (Line {state.latest_telemetry.get('current_top_line') or 1})"
+    )
+
+    stop_reason_logged = False
 
     try:
         # Check if DAG Group 1 (Initialize) has run for the project
@@ -4158,6 +4255,12 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                 state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
                 state.capture_loop_running = False
                 state.orchestration_state["status"] = "ERROR"
+                state.record_diagnostics_trace_event(
+                    event_type="LOOP_STOPPED",
+                    node_id="init_end",
+                    reason=f"DAG Group 1 Initialization failed: {err_msg}"
+                )
+                stop_reason_logged = True
                 await state.ws_manager.broadcast({
                     "type": "capture_loop_status",
                     "running": False,
@@ -4180,8 +4283,6 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
         if not is_open:
             await auto_heal_pipeline_environment(active_serial, disp_id, "frame_acquire")
 
-
-
         is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
         if is_headless:
             session = state.start_headless_telemetry_session("continuous_capture_loop")
@@ -4197,11 +4298,131 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                     "telemetry": session
                 })
 
+        consecutive_recovery_attempts = 0
+        max_recovery_attempts = 5
+
         while state.capture_loop_running:
             res = await execute_dag_group_capture_markdown(serial=active_serial)
             if res.get("status") in ("error", "prevented"):
-                state.latest_telemetry["status_message"] = f"Loop stopped: {res.get('node_id')} ({res.get('status')})"
-                break
+                failed_node = res.get("node_id") or "arrow_down"
+                err_reason = res.get("error") or res.get("message") or f"{failed_node} returned {res.get('status')}"
+
+                if not state.capture_loop_running:
+                    state.record_diagnostics_trace_event(
+                        event_type="LOOP_STOPPED",
+                        node_id=failed_node,
+                        reason=f"Loop stopped by user during {failed_node}: {err_reason}"
+                    )
+                    stop_reason_logged = True
+                    break
+
+                consecutive_recovery_attempts += 1
+                if consecutive_recovery_attempts > max_recovery_attempts:
+                    stop_msg = f"Loop stopped after {max_recovery_attempts} consecutive auto-recovery attempts on {failed_node}: {err_reason}"
+                    state.latest_telemetry["status_message"] = stop_msg
+                    state.record_diagnostics_trace_event(
+                        event_type="LOOP_STOPPED",
+                        node_id=failed_node,
+                        reason=stop_msg
+                    )
+                    stop_reason_logged = True
+                    break
+
+                # Trigger automated self-healing recovery so the loop continues without manual intervention!
+                state.record_diagnostics_trace_event(
+                    event_type="LOOP_AUTO_RECOVERY_STARTED",
+                    node_id=failed_node,
+                    reason=f"Auto-recovery #{consecutive_recovery_attempts}/{max_recovery_attempts} triggered for {failed_node}: {err_reason}",
+                    recovery_action="Dismissing keyboard, verifying editor focus, and re-aligning target top line"
+                )
+                state.latest_telemetry["status_message"] = (
+                    f"🔧 Auto-recovering loop ({consecutive_recovery_attempts}/{max_recovery_attempts}) on {failed_node}..."
+                )
+                await emit_dag_telemetry_event(
+                    category="PACER",
+                    message=f"🔧 Continuous Loop Auto-Recovery ({consecutive_recovery_attempts}/{max_recovery_attempts}) for {failed_node}: {err_reason}",
+                    dag="position_navigation",
+                    node_id=failed_node,
+                    serial=active_serial
+                )
+
+                try:
+                    await dismiss_keyboard(active_serial, disp_id)
+                    md_open, _, _ = await assert_markdown_open(active_serial)
+                    if not md_open:
+                        await auto_heal_pipeline_environment(active_serial, disp_id, failed_node)
+
+                    n5_bot = state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0)
+                    n6_tgt = (
+                        state.dag_state["nodes"].get("arrow_down", {}).get("target_top")
+                        or ((n5_bot + 1) if n5_bot > 0 else 0)
+                        or state.orchestration_state.get("next_target_top")
+                        or 1
+                    )
+
+                    if failed_node in ("arrow_down", "verification_trigger", "document_assemble") and n6_tgt > 0:
+                        nav_rec = await navigate_to_target_top_line(
+                            target_top=int(n6_tgt),
+                            serial=active_serial,
+                            display_id=disp_id,
+                            use_page_keys=True,
+                            max_attempts=14,
+                            caller_node="loop_auto_recovery"
+                        )
+                        if nav_rec.get("reached"):
+                            state.dag_state["nodes"]["arrow_down"].update({
+                                "status": "completed",
+                                "target_top": int(n6_tgt),
+                                "target_top_line": int(n6_tgt),
+                                "new_top_line": int(n6_tgt),
+                                "reached": True,
+                                "advanced": True,
+                                "error": None,
+                                "telemetry_insight": f"Auto-recovered target top Line {n6_tgt} ✔"
+                            })
+                            rec_opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
+                            n7_rec = await _run_node_safe("verification_trigger", rec_opts)
+                            n8_rec = await _run_node_safe("document_assemble", rec_opts)
+                            if n7_rec.get("status") not in ("error", "prevented") and n8_rec.get("status") != "error":
+                                state.record_diagnostics_trace_event(
+                                    event_type="LOOP_AUTO_RECOVERED",
+                                    node_id=failed_node,
+                                    target_top_line=int(n6_tgt),
+                                    reason=f"Successfully recovered {failed_node} and aligned Target Line {n6_tgt}",
+                                    recovery_action=f"Aligned Line {n6_tgt} ({nav_rec.get('arrows_pressed', 0)} arrows, {nav_rec.get('page_keys_pressed', 0)} page keys) and completed DAG 4"
+                                )
+                                consecutive_recovery_attempts = 0
+                                await asyncio.sleep(0.15)
+                                continue
+                    else:
+                        # Recover before retrying full cycle from Node 3
+                        sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
+                        expected_top = (sorted_f[-1].get("bottom_line", 0) + 1) if sorted_f else 1
+                        nav_rec = await navigate_to_target_top_line(
+                            target_top=int(expected_top),
+                            serial=active_serial,
+                            display_id=disp_id,
+                            use_page_keys=True,
+                            max_attempts=12,
+                            caller_node="loop_auto_recovery"
+                        )
+                        state.record_diagnostics_trace_event(
+                            event_type="LOOP_AUTO_RECOVERED",
+                            node_id=failed_node,
+                            target_top_line=int(expected_top),
+                            reason=f"Re-verified viewport at Line {nav_rec.get('actual_top') or expected_top}; retrying capture cycle",
+                            recovery_action=f"Environment healed & viewport aligned to Line {expected_top}"
+                        )
+                        await asyncio.sleep(0.25)
+                        continue
+                except Exception as rec_ex:
+                    print(f"[CaptureLoop] Auto-recovery exception: {rec_ex}")
+
+                await asyncio.sleep(0.35)
+                continue
+
+            # Reset recovery counter on clean cycle completion
+            consecutive_recovery_attempts = 0
 
             top_l = state.latest_telemetry.get("current_top_line", 0)
             bot_l = state.latest_telemetry.get("current_bottom_line", 0)
@@ -4235,36 +4456,82 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
 
             n8 = res.get("node8", {})
             if n8.get("is_complete") or total_reached:
-                state.latest_telemetry["status_message"] = f"🎉 100% Markdown Captured! Target document lines ({target_lines or doc_count}) reached."
+                comp_msg = f"🎉 100% Markdown Captured! Target document lines ({target_lines or doc_count}) reached at Line {bot_l}."
+                state.latest_telemetry["status_message"] = comp_msg
+                state.record_diagnostics_trace_event(
+                    event_type="LAST_LINE_OCR_COMPLETED",
+                    top_line=top_l,
+                    bottom_line=bot_l,
+                    target_top_line=target_lines,
+                    node_id="document_assemble",
+                    reason=comp_msg
+                )
+                stop_reason_logged = True
                 if is_headless:
                     state.headless_telemetry_session["total_lines_reached"] = True
                 break
 
             n7 = res.get("node7", {})
             if not n7.get("allowed", True):
-                state.latest_telemetry["status_message"] = f"Trigger blocked next loop: {n7.get('message')}"
+                trig_msg = f"Trigger blocked next loop: {n7.get('message')}"
+                state.latest_telemetry["status_message"] = trig_msg
+                state.record_diagnostics_trace_event(
+                    event_type="LOOP_STOPPED",
+                    node_id="verification_trigger",
+                    reason=trig_msg
+                )
+                stop_reason_logged = True
                 break
 
             if not state.is_edge_connected("document_assemble", "frame_acquire"):
-                state.latest_telemetry["status_message"] = "Loop finished cycle: Loopback connector (Node 8 ➔ Node 3) is disconnected"
+                conn_msg = "Loop finished cycle: Loopback connector (Node 8 ➔ Node 3) is disconnected"
+                state.latest_telemetry["status_message"] = conn_msg
+                state.record_diagnostics_trace_event(
+                    event_type="LOOP_STOPPED",
+                    node_id="connector_8_3",
+                    reason=conn_msg
+                )
+                stop_reason_logged = True
                 break
 
             await asyncio.sleep(0.18)
     except asyncio.CancelledError:
-        pass
+        if not stop_reason_logged:
+            state.record_diagnostics_trace_event(
+                event_type="LOOP_STOPPED",
+                reason="Loop stopped manually by user (task cancelled)"
+            )
+            stop_reason_logged = True
     except HTTPException as he:
         det = he.detail
         err_msg = det.get("message") if isinstance(det, dict) else str(det)
         print(f"[CaptureLoop] Unresolved error in loop: {err_msg}")
         state.latest_telemetry["status_message"] = f"Capture loop halted: {err_msg}"
+        if not stop_reason_logged:
+            state.record_diagnostics_trace_event(
+                event_type="LOOP_STOPPED",
+                reason=f"Unhandled HTTPException in loop: {err_msg}"
+            )
+            stop_reason_logged = True
     except Exception as e:
         print(f"[CaptureLoop] Exception: {e}")
         state.latest_telemetry["status_message"] = f"Capture loop halted: {e}"
+        if not stop_reason_logged:
+            state.record_diagnostics_trace_event(
+                event_type="LOOP_STOPPED",
+                reason=f"Unhandled exception in loop: {e}"
+            )
+            stop_reason_logged = True
     finally:
+        if not stop_reason_logged and not state.project_diagnostics_trace.get("is_completed"):
+            state.record_diagnostics_trace_event(
+                event_type="LOOP_STOPPED",
+                reason=state.latest_telemetry.get("status_message") or "Capture loop stopped"
+            )
         state.capture_loop_running = False
         state.latest_telemetry["is_pacing"] = False
         state.dag_state["current_active_node"] = None
-        state.orchestration_state["status"] = "PAUSED"
+        state.orchestration_state["status"] = "COMPLETED" if state.project_diagnostics_trace.get("is_completed") else "PAUSED"
 
         if is_headless and state.headless_telemetry_session.get("is_active"):
             status_str = "COMPLETED" if state.headless_telemetry_session.get("total_lines_reached") else "STOPPED"
@@ -4309,7 +4576,13 @@ async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
 @router.post("/api/dag/loop/stop")
 async def stop_dag_loop():
     global capture_loop_task
+    was_running = bool(getattr(state, "capture_loop_running", False))
     state.capture_loop_running = False
+    if was_running:
+        state.record_diagnostics_trace_event(
+            event_type="LOOP_STOPPED",
+            reason="Stopped manually by user via Stop Loop button"
+        )
     if capture_loop_task and not capture_loop_task.done():
         capture_loop_task.cancel()
     state.latest_telemetry["is_pacing"] = False
@@ -4817,13 +5090,39 @@ async def scan_direct(request: Request, file: UploadFile = File(...), engine: Op
 async def get_dag2_performance_report():
     """
     Returns granular millisecond tracking of each loop and each node across DAG 2 execution,
-    along with bottleneck analytics on positioning (bottom + 1 -> top of next page)
+    along with bottleneck analytics on positioning (bottom + 1 -> top of next page),
+    end-to-end project lifecycle diagnostics trace (start time, loop timings, stops/restarts & reasons),
     and an AI prompt ready for export to Gemini 3.8.
     """
     from services.performance_analyzer import analyze_dag2_performance_report
     history = state.get_dag2_loop_history()
     report = analyze_dag2_performance_report(history, state.latest_telemetry)
+    report["diagnostics_trace"] = state.get_project_diagnostics_trace()
     return report
+
+
+@router.get("/api/dag/diagnostics-trace")
+async def get_dag_diagnostics_trace_endpoint():
+    """
+    Returns the complete End-to-End Project Lifecycle & DAG Loop Stop/Restart Diagnostics Trace,
+    tracking project start timestamp, first-to-last line OCR acquisition, per-loop timings,
+    and every stop, auto-recovery, and restart with root-cause reasons.
+    """
+    return {
+        "status": "success",
+        "diagnostics_trace": state.get_project_diagnostics_trace()
+    }
+
+
+@router.post("/api/dag/diagnostics-trace/rebuild")
+async def rebuild_dag_diagnostics_trace_endpoint():
+    """Re-evaluates and backfills the project diagnostics trace from all captured frames."""
+    state.project_diagnostics_trace["backfilled_up_to_frame_count"] = 0
+    trace = state.get_project_diagnostics_trace()
+    return {
+        "status": "success",
+        "diagnostics_trace": trace
+    }
 
 
 @router.post("/api/dag/report/dag2/clear")

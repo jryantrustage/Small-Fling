@@ -2500,29 +2500,51 @@ async def navigate_to_target_top_line(
     actual_bot: Optional[int] = current_bottom if (current_bottom and current_bottom > 0) else None
     latest_snap: Optional[bytes] = None
     prev_top: Optional[int] = None
-    last_dir: Optional[str] = None
+    prev_first_y: Optional[int] = None
+    last_dir: Optional[str] = "down" if (actual_top is None or target_top >= actual_top) else "up"
+    caret_pos: str = "top" if (target_top == 1 or actual_top == 1) else "bottom"
     stall_count = 0
+    caret_span = 23  # The 1080p editor viewport always contains 24 visual rows (0..23 -> 23 row traversal)
 
     # Fast-path for target_top == 1 if currently far down the document
     if target_top == 1 and (actual_top is None or actual_top > page_span):
         await send_hid_keycombination(113, 122, serial=ser, caller_node=caller_node)
         await asyncio.sleep(0.35)
         await dismiss_keyboard(ser, valid_d)
+        caret_pos = "top"
         actions_taken.append("Dispatched Ctrl+Home (113+122) to jump to Line 1")
 
-    for attempt in range(1, max_attempts + 1):
+    # Run up to max_attempts + 1 so that after attempt max_attempts dispatches keys,
+    # one final post-keystroke verification screenshot is ALWAYS evaluated.
+    for attempt in range(1, max_attempts + 2):
         snap = await capture_external_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True)
         if not snap:
             await asyncio.sleep(0.12)
             continue
         latest_snap = snap
         img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            await asyncio.sleep(0.12)
+            continue
+        h_img = img.shape[0]
+        scale_y = h_img / 1080.0
+        top_row_y = 304.0 * scale_y
+        max_top_row_y = int(322 * scale_y)
+
         det_top, meta = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
         gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+        row_pitch = float(meta.get("avg_pitch") or (27.0 * scale_y))
         first_g = gutter[0][1] if gutter else det_top
+        first_y = gutter[0][0] if gutter else int(top_row_y)
         last_g = gutter[-1][1] if gutter else meta.get("bottom_gutter_line", 0)
+        last_y = gutter[-1][0] if gutter else int(923 * scale_y)
 
-        if det_top == target_top or first_g == target_top:
+        is_aligned_at_top = (
+            (bool(gutter) and first_g == target_top and first_y <= max_top_row_y)
+            or (not gutter and det_top == target_top)
+        )
+
+        if is_aligned_at_top:
             actual_top = target_top
             if last_g and last_g >= actual_top and (last_g - actual_top) <= 75:
                 actual_bot = last_g
@@ -2530,13 +2552,13 @@ async def navigate_to_target_top_line(
             else:
                 actual_bot = actual_top + page_span - 1
 
-            state.orchestration_state["cursor_line"] = actual_bot if last_dir != "up" else actual_top
+            state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
             if total_arrows > 0 or total_page_keys > 0:
-                state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * page_span)
+                state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * caret_span)
             state.latest_telemetry["current_top_line"] = actual_top
             state.latest_telemetry["current_bottom_line"] = actual_bot
             actions_taken.append(
-                f"Verified top Line {actual_top} (range {actual_top}..{actual_bot}) on attempt {attempt}"
+                f"Verified top Line {actual_top} at y={first_y}px (range {actual_top}..{actual_bot}) on check {attempt}"
             )
             return {
                 "status": "ok",
@@ -2546,7 +2568,7 @@ async def navigate_to_target_top_line(
                 "actual_bottom": actual_bot,
                 "arrows_pressed": total_arrows,
                 "page_keys_pressed": total_page_keys,
-                "attempts": attempt,
+                "attempts": min(attempt, max_attempts),
                 "snapshot_bytes": latest_snap,
                 "actions_taken": actions_taken
             }
@@ -2558,78 +2580,131 @@ async def navigate_to_target_top_line(
             continue
 
         actual_top = cur_t
-        if last_g and last_g >= cur_t and 10 <= (last_g - cur_t + 1) <= 75:
+        if last_g and last_g >= cur_t and 4 <= (last_g - cur_t + 1) <= 75:
             actual_bot = last_g
             page_span = last_g - cur_t + 1
         else:
             actual_bot = cur_t + page_span - 1
 
-        diff = target_top - cur_t
-        cur_dir = "down" if diff > 0 else "up"
+        # If this was the final post-keystroke verification check, break out
+        if attempt > max_attempts:
+            break
 
-        if prev_top is not None and cur_t == prev_top:
-            stall_count += 1
+        # Determine exact visual row delta and scroll direction using visible gutter Y-coordinates
+        target_in_gutter = [y for (y, n) in gutter if n == target_top] if gutter else []
+        rows_span_visible = max(1, int(round((last_y - first_y) / row_pitch))) if (gutter and len(gutter) >= 2) else caret_span
+        avg_rows_per_line = (
+            max(1.0, min(4.0, float(rows_span_visible) / float(max(1, last_g - first_g))))
+            if (gutter and last_g > first_g)
+            else 1.0
+        )
+
+        if target_in_gutter:
+            y_t = target_in_gutter[0]
+            cur_dir = "down"
+            visual_rows_diff = max(1, int(round((y_t - top_row_y) / row_pitch)))
+            diff = max(1, target_top - cur_t)
+        elif gutter and last_g and target_top > last_g:
+            cur_dir = "down"
+            diff = target_top - cur_t
+            rows_to_last = max(1, int(round((last_y - top_row_y) / row_pitch)))
+            rem_lines = target_top - last_g
+            if rem_lines == 1 and last_y >= int(830 * scale_y):
+                visual_rows_diff = max(23, min(26, int(round(rows_to_last + avg_rows_per_line))))
+            else:
+                visual_rows_diff = rows_to_last + max(rem_lines, int(round(rem_lines * avg_rows_per_line)))
+        elif target_top > cur_t:
+            cur_dir = "down"
+            diff = target_top - cur_t
+            visual_rows_diff = max(diff, int(round(diff * avg_rows_per_line)))
         else:
-            stall_count = 0
+            # target_top < first_g (overshot downward; need to scroll UP)
+            cur_dir = "up"
+            lines_above = max(1, cur_t - target_top)
+            diff = -lines_above
+            if lines_above == 1 and first_y > max_top_row_y:
+                # Only the top visual row(s) of target_top scrolled above y=304 while its wrapped tail is still visible
+                visual_rows_diff = 1
+            else:
+                visual_rows_diff = max(lines_above, int(round(lines_above * avg_rows_per_line)))
 
-        # If stalled twice, tap safe gutter margin to ensure editor canvas has focus without opening IME
+        # Check whether the viewport actually moved on the previous attempt
+        viewport_moved = (
+            prev_top is not None
+            and (cur_t != prev_top or (prev_first_y is not None and abs(first_y - prev_first_y) >= 14))
+        )
+        if prev_top is not None:
+            if viewport_moved:
+                stall_count = 0
+                caret_pos = "bottom" if last_dir == "down" else "top"
+            else:
+                stall_count += 1
+
+        # If stalled twice, tap top/bottom gutter margin to focus editor & pin caret directly to the target edge
         if stall_count >= 2:
-            await run_adb_shell(f"input {disp_pfx}tap 80 400 >/dev/null 2>&1", ser)
+            tap_y = int(305 * scale_y) if cur_dir == "up" else int(920 * scale_y)
+            await run_adb_shell(f"input {disp_pfx}tap 80 {tap_y} >/dev/null 2>&1", ser)
             await asyncio.sleep(0.06)
             await dismiss_keyboard(ser, valid_d)
-            actions_taken.append(f"Refocused editor gutter at (80, 400) after stall on Ln {cur_t}")
+            caret_pos = "top" if cur_dir == "up" else "bottom"
+            actions_taken.append(f"Refocused editor gutter at (80, {tap_y}) [{caret_pos}] after stall on Ln {cur_t}")
 
         # Decide between coarse PageUp/PageDown (92/93) and fine Arrow Up/Down (19/20)
-        if use_page_keys and abs(diff) >= page_span and stall_count == 0:
-            num_pages = max(1, min(12, abs(diff) // page_span))
-            rem_lines = abs(diff) - (num_pages * page_span)
-            page_key = "93" if diff > 0 else "92"
-            trim_key = "20" if diff > 0 else "19"
+        if use_page_keys and visual_rows_diff >= 36 and abs(diff) >= page_span and stall_count == 0 and not target_in_gutter:
+            num_pages = max(1, min(12, visual_rows_diff // 24))
+            rem_rows = visual_rows_diff - (num_pages * 24)
+            page_key = "93" if cur_dir == "down" else "92"
+            trim_key = "20" if cur_dir == "down" else "19"
             keys = [page_key] * num_pages
             total_page_keys += num_pages
-            if 0 < rem_lines <= 12:
-                keys.extend([trim_key] * rem_lines)
-                total_arrows += rem_lines
+            if 0 < rem_rows <= 12:
+                keys.extend([trim_key] * rem_rows)
+                total_arrows += rem_rows
             cmd_str = f"input {disp_pfx}keyevent {' '.join(keys)} >/dev/null 2>&1"
             await run_adb_shell(cmd_str, ser)
+            caret_pos = "bottom" if cur_dir == "down" else "top"
             actions_taken.append(
-                f"Attempt {attempt}: Coarse {'PageDown(93)' if diff > 0 else 'PageUp(92)'} x{num_pages}"
-                + (f" + {rem_lines} arrows" if 0 < rem_lines <= 12 else "")
-                + f" from Ln {cur_t} toward Ln {target_top} (diff={diff:+d})"
+                f"Attempt {attempt}: Coarse {'PageDown(93)' if cur_dir == 'down' else 'PageUp(92)'} x{num_pages}"
+                + (f" + {rem_rows} arrows" if 0 < rem_rows <= 12 else "")
+                + f" from Ln {cur_t} toward Ln {target_top} (rows={visual_rows_diff})"
             )
         else:
-            arrow_key = "20" if diff > 0 else "19"
-            # If the viewport did not move on the previous attempt (caret traversing inside viewport)
-            # or if we are starting from Line 1 going down, include the caret-traversal span
-            if stall_count == 1:
-                adjust_step = min(70, (page_span - 1) + (padding if diff > 0 else 0))
-            elif stall_count >= 2:
-                # Fallback if arrows stalled: single PageDown/PageUp if diff >= 8 else full stride
-                if use_page_keys and abs(diff) >= 8:
-                    pkey = "93" if diff > 0 else "92"
-                    total_page_keys += 1
-                    await run_adb_shell(f"input {disp_pfx}keyevent {pkey} >/dev/null 2>&1", ser)
-                    actions_taken.append(f"Attempt {attempt}: Unstall {'PageDown(93)' if diff > 0 else 'PageUp(92)'} from Ln {cur_t}")
-                    prev_top = cur_t
-                    last_dir = cur_dir
-                    await asyncio.sleep(0.20)
-                    await dismiss_keyboard(ser, valid_d)
-                    continue
-                adjust_step = min(70, abs(diff) + page_span)
-            elif cur_t == 1 and diff > 0 and attempt == 1:
-                adjust_step = min(70, (diff + padding) * 2 if diff >= page_span else (diff + page_span - 1 + padding))
+            arrow_key = "20" if cur_dir == "down" else "19"
+            needs_caret_traverse = (
+                (cur_dir == "up" and caret_pos == "bottom")
+                or (cur_dir == "down" and caret_pos == "top")
+                or stall_count == 1
+            )
+            if stall_count >= 2 and use_page_keys and visual_rows_diff >= 12:
+                pkey = "93" if cur_dir == "down" else "92"
+                total_page_keys += 1
+                await run_adb_shell(f"input {disp_pfx}keyevent {pkey} >/dev/null 2>&1", ser)
+                actions_taken.append(f"Attempt {attempt}: Unstall {'PageDown(93)' if cur_dir == 'down' else 'PageUp(92)'} from Ln {cur_t}")
+                prev_top = cur_t
+                prev_first_y = first_y
+                last_dir = cur_dir
+                caret_pos = "bottom" if cur_dir == "down" else "top"
+                await asyncio.sleep(0.20)
+                await dismiss_keyboard(ser, valid_d)
+                continue
+            elif cur_t == 1 and cur_dir == "down" and attempt == 1:
+                adjust_step = min(70, caret_span + visual_rows_diff + padding)
+            elif needs_caret_traverse:
+                adjust_step = min(70, caret_span + visual_rows_diff)
             else:
-                adjust_step = min(50, abs(diff))
+                adjust_step = min(55, visual_rows_diff)
 
             adjust_step = max(1, adjust_step)
             keys = " ".join([arrow_key] * adjust_step)
             total_arrows += adjust_step
-            await run_adb_shell(f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+            await run_adb_shell(cmd_str := f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+            caret_pos = "bottom" if cur_dir == "down" else "top"
             actions_taken.append(
-                f"Attempt {attempt}: Dispatched {adjust_step} {'Down(20)' if diff > 0 else 'Up(19)'} arrows from Ln {cur_t} toward Ln {target_top} (diff={diff:+d})"
+                f"Attempt {attempt}: Dispatched {adjust_step} {'Down(20)' if cur_dir == 'down' else 'Up(19)'} arrows from Ln {cur_t} (y={first_y}) toward Ln {target_top} (visual_rows={visual_rows_diff}, traverse={needs_caret_traverse})"
             )
 
         prev_top = cur_t
+        prev_first_y = first_y
         last_dir = cur_dir
         await asyncio.sleep(0.18)
         await dismiss_keyboard(ser, valid_d)

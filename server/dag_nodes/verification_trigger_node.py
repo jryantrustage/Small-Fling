@@ -9,7 +9,8 @@ from typing import Dict, Any, Optional
 
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services.adb_service import (
-    get_active_adb_serial, detect_external_display_id, capture_external_screenshot
+    get_active_adb_serial, detect_external_display_id, capture_external_screenshot,
+    navigate_to_target_top_line
 )
 from services import state
 
@@ -36,17 +37,63 @@ class VerificationTriggerNode(BaseDagNode):
         disp_id = blackboard.display_id or await detect_external_display_id(serial)
         cfg = blackboard.config or self.get_config()
 
-        # 1. Guard check: arrow_down must have reached target line
+        # 1. Guard check: arrow_down must have reached target line.
+        # If n6_info has stale error state (e.g. after manual recovery or last-attempt arrival),
+        # inspect and self-heal against the live display before blocking!
         n6_info = state.dag_state["nodes"].get("arrow_down", {})
-        if (
+        expected_target_top = int(
+            n6_info.get("target_top")
+            or n6_info.get("target_top_line")
+            or state.dag_state["nodes"].get("verification_trigger", {}).get("target_top_line")
+            or ((state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0) + 1)
+            or 1
+        )
+        n6_needs_check = (
             n6_info.get("status") in ("error", "prevented")
             or n6_info.get("reached") is not True
             or n6_info.get("advanced") is not True
             or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
-        ):
+        )
+
+        if n6_needs_check and expected_target_top > 0:
+            nav_heal = await navigate_to_target_top_line(
+                target_top=expected_target_top,
+                serial=serial,
+                display_id=disp_id,
+                use_page_keys=True,
+                max_attempts=6,
+                caller_node="verification_trigger"
+            )
+            if nav_heal.get("reached"):
+                n6_info.update({
+                    "status": "completed",
+                    "target_top": expected_target_top,
+                    "target_top_line": expected_target_top,
+                    "new_top_line": expected_target_top,
+                    "reached": True,
+                    "advanced": True,
+                    "error": None,
+                    "telemetry_insight": f"Live display verified at target top Line {expected_target_top} ✔"
+                })
+                snap_healed = nav_heal.get("snapshot_bytes")
+                if snap_healed:
+                    blackboard.current_image_bytes = snap_healed
+                    blackboard.latest_frame_bytes = snap_healed
+                    try:
+                        temp_c = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+                        with open(temp_c, "wb") as f:
+                            f.write(snap_healed)
+                    except Exception:
+                        pass
+                n6_needs_check = False
+            else:
+                if nav_heal.get("actual_top"):
+                    n6_info["new_top_line"] = nav_heal.get("actual_top")
+
+        if n6_needs_check:
             err_msg = (
                 f"Verification trigger blocked: Node 6 (arrow_down) failed to position target line "
-                f"{n6_info.get('target_top')} on top (settled at {n6_info.get('new_top_line')}). "
+                f"{n6_info.get('target_top') or expected_target_top} on top (settled at {n6_info.get('new_top_line')}). "
                 f"Halting loop to prevent duplicate or corrupted capture."
             )
             state.dag_state["nodes"]["verification_trigger"].update({

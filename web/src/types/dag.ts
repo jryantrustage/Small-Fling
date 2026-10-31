@@ -317,6 +317,92 @@ export interface Dag2AccuracyAudit {
   system_recommendations?: Dag2SystemRecommendations;
 }
 
+export interface DiagnosticsStopRestartEvent {
+  id: string;
+  timestamp_iso: string;
+  timestamp_ms: number;
+  event_type: string;
+  loop_index: number;
+  page_index: number;
+  top_line: number;
+  bottom_line: number;
+  target_top_line: number;
+  node_id?: string | null;
+  reason: string;
+  recovery_action?: string | null;
+  downtime_ms?: number;
+  downtime_formatted?: string | null;
+}
+
+export interface DiagnosticsLoopRunRecord {
+  loop_index: number;
+  loop_id: string;
+  page_index: number;
+  frame_id?: string | null;
+  top_line: number;
+  bottom_line: number;
+  target_next_top: number;
+  extracted_lines: number;
+  started_at_iso: string;
+  started_at_ms: number;
+  finished_at_iso: string;
+  finished_at_ms: number;
+  duration_ms: number;
+  duration_formatted: string;
+  status: string;
+  failed_node?: string | null;
+  error_reason?: string | null;
+  recovery_applied?: string | null;
+  arrows_pressed?: number;
+  node_timings?: Record<string, number>;
+}
+
+export interface ProjectDiagnosticsTrace {
+  project_id?: string | null;
+  project_name?: string | null;
+  target_total_lines: number;
+  project_started_at_iso?: string | null;
+  project_started_at_ms?: number | null;
+  first_line_acquired_at_iso?: string | null;
+  first_line_acquired_at_ms?: number | null;
+  first_frame_id?: string | null;
+  last_line_acquired_at_iso?: string | null;
+  last_line_acquired_at_ms?: number | null;
+  last_frame_id?: string | null;
+  highest_line_acquired: number;
+  completed_at_iso?: string | null;
+  completed_at_ms?: number | null;
+  is_completed: boolean;
+  current_status: string;
+  last_stop_at_iso?: string | null;
+  last_stop_at_ms?: number | null;
+  last_stop_reason?: string | null;
+  total_captured_frames?: number;
+  total_assembled_lines?: number;
+  completion_percent?: number;
+  loop_running?: boolean;
+  summary_metrics?: {
+    total_loop_runs: number;
+    successful_runs: number;
+    failed_runs: number;
+    auto_recovered_runs: number;
+    total_stops: number;
+    total_manual_restarts: number;
+    total_auto_recoveries: number;
+    total_elapsed_ms: number;
+    total_elapsed_formatted: string;
+    total_active_ms: number;
+    total_active_formatted: string;
+    total_downtime_ms: number;
+    total_downtime_formatted: string;
+    avg_loop_duration_ms: number;
+    avg_loop_duration_formatted: string;
+  };
+  stop_and_restart_log: DiagnosticsStopRestartEvent[];
+  loop_runs: DiagnosticsLoopRunRecord[];
+  lifecycle_events: DiagnosticsStopRestartEvent[];
+}
+
 export interface Dag2PerformanceReport {
   status: string;
   generated_at?: string;
@@ -336,5 +422,6 @@ export interface Dag2PerformanceReport {
   node_statistics: Dag2NodeStatistic[];
   bottlenecks: Dag2Bottleneck[];
   accuracy_audit?: Dag2AccuracyAudit;
+  diagnostics_trace?: ProjectDiagnosticsTrace;
   ai_optimization_prompt: string;
 }

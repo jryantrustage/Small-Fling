@@ -283,6 +283,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [promptModalNodeId, setPromptModalNodeId] = useState<string>('init_end');
   const [isDag2ReportModalOpen, setIsDag2ReportModalOpen] = useState(false);
+  const [dag2ReportInitialTab, setDag2ReportInitialTab] = useState<'overview' | 'lifecycle' | 'trace' | 'accuracy' | 'gemini_prompt'>('lifecycle');
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isFixingQualifier, setIsFixingQualifier] = useState(false);
   const [nodeFeedback, setNodeFeedback] = useState<{
@@ -1723,6 +1724,27 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>{isLoopRunning ? 'Stop Loop' : 'Run Loop'}</span>
             </button>
 
+            {/* Project Diagnostics Trace & Loop Lifecycle Button */}
+            <button
+              type="button"
+              onClick={() => {
+                setDag2ReportInitialTab('lifecycle');
+                setIsDag2ReportModalOpen(true);
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                borderRadius: '4px', border: '1px solid rgba(56, 189, 248, 0.45)',
+                background: 'rgba(56, 189, 248, 0.12)',
+                color: '#38bdf8',
+                fontSize: '9px', fontWeight: 800, cursor: 'pointer',
+                letterSpacing: '0.2px', height: '22px'
+              }}
+              title="Open End-to-End Project Diagnostics Trace (Start time, Line 1 to EOF loop timings, stop/restart timestamps & reasons, auto-recovery log)"
+            >
+              <Activity size={10} color="#38bdf8" />
+              <span>Diagnostics Trace</span>
+            </button>
+
             {/* More '...' Toggle Button to Animate Advanced DAG Area Features */}
             <button
               type="button"
@@ -2836,6 +2858,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
       <Dag2PerformanceReportModal
         isOpen={isDag2ReportModalOpen}
         onClose={() => setIsDag2ReportModalOpen(false)}
+        initialTab={dag2ReportInitialTab}
       />
 
       {/* MODAL 7: Universal Modular Node Configurator & Decoupled Observation Actions */}

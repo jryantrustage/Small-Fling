@@ -90,15 +90,19 @@ class ArrowDownPagerNode(BaseDagNode):
             cursor_line = 1 if cur_top == 1 else cur_top
 
         visible_span = max(1, prev_bottom - cur_top + 1)
-        needed_scroll = max(1, target_top - cur_top)
+        # Note: each DPAD_DOWN key scrolls 1 visual row (~27px), and the 1080p viewport holds 24 visual rows.
+        # Even when lines wrap (so prev_bottom - cur_top + 1 < 24 logical lines), advancing prev_bottom + 1
+        # from the bottom of the viewport to the top requires ~23..24 visual rows.
+        visual_page_rows = 24
+        needed_scroll = max(visual_page_rows if target_top == prev_bottom + 1 else 1, target_top - cur_top)
         padding = int(payload.get("scroll_padding_lines") if payload.get("scroll_padding_lines") is not None else cfg.get("scroll_padding_lines", 0))
 
         if padding > 0:
             calibrated_init = (needed_scroll + padding) * 2
             calibrated_step = needed_scroll + padding
         else:
-            cursor_travel = max(0, prev_bottom - cursor_line)
-            viewport_scroll = max(1, target_top - cur_top)
+            cursor_travel = 23 if (cur_top == 1 or cursor_line <= cur_top) else 0
+            viewport_scroll = needed_scroll
             calibrated_init = cursor_travel + viewport_scroll
             calibrated_step = viewport_scroll
 
@@ -160,10 +164,20 @@ class ArrowDownPagerNode(BaseDagNode):
         # 2. Viewport step dispatch & closed-loop PageUp/PageDown + Arrow alignment
         dispatch_meth = str(payload.get("dispatch_method") or cfg.get("dispatch_method", "arrow_down"))
         use_page_keys = bool(payload.get("use_page_keys", cfg.get("use_page_keys", True)))
-        max_attempts = int(cfg.get("max_adjust_attempts", 10))
+        max_attempts = max(12, int(cfg.get("max_adjust_attempts", 12)))
+
+        # Only perform an open-loop initial step if running inside a fresh fast_loop cycle AND
+        # the viewport has not already been moved toward target_top by an earlier attempt/manual click.
+        prev_n6 = state.dag_state["nodes"].get("arrow_down", {})
+        already_moved = (
+            not payload.get("fast_loop")
+            or prev_n6.get("status") == "error"
+            or state.latest_telemetry.get("current_top_line") == target_top
+            or (prev_n6.get("new_top_line") and prev_n6.get("new_top_line") != cur_top)
+        )
 
         total_arrows_pressed = 0
-        if dispatch_meth.lower() not in ("page_up_down", "pagedown", "pageup"):
+        if not already_moved and dispatch_meth.lower() not in ("page_up_down", "pagedown", "pageup"):
             await dispatch_accelerated_viewport_step(
                 delta_lines=tracked_arrow_count,
                 serial=serial,
@@ -179,13 +193,24 @@ class ArrowDownPagerNode(BaseDagNode):
             target_top=target_top,
             serial=serial,
             display_id=valid_disp_id,
-            current_top=cur_top if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
-            current_bottom=prev_bottom if dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup") else None,
+            current_top=cur_top if (not already_moved and dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup")) else None,
+            current_bottom=prev_bottom if (not already_moved and dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup")) else None,
             lines_per_page=visible_span,
             use_page_keys=use_page_keys,
             max_attempts=max_attempts,
             caller_node="arrow_down"
         )
+
+        snap_after = nav_res.get("snapshot_bytes")
+        if snap_after:
+            blackboard.current_image_bytes = snap_after
+            blackboard.latest_frame_bytes = snap_after
+            try:
+                temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+                with open(temp_calib, "wb") as f:
+                    f.write(snap_after)
+            except Exception:
+                pass
 
         matched = bool(nav_res.get("reached", False))
         actual_top = nav_res.get("actual_top")
