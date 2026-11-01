@@ -5243,6 +5243,52 @@ def trigger_dag2_accuracy_audit():
     return audit
 
 
+@router.post("/api/projects/{project_id}/reference-markdown")
+async def orchestration_upload_reference_markdown(
+    project_id: str,
+    request: Request,
+    file_path: Optional[str] = None,
+    path: Optional[str] = None,
+):
+    """Ingests a reference .md file (upload or local file path) into project_reference_lines."""
+    from routers.frames_document import upload_project_reference_markdown
+    return await upload_project_reference_markdown(
+        project_id=project_id,
+        request=request,
+        file_path=file_path,
+        path=path,
+    )
+
+
+@router.get("/api/projects/{project_id}/ground-truth-score")
+async def orchestration_get_ground_truth_score(
+    project_id: str,
+    max_line: Optional[int] = None,
+):
+    """Scores state.document_lines against project_reference_lines for 1..max_line."""
+    from services.accuracy_verifier import score_against_reference_markdown
+    return await asyncio.to_thread(
+        score_against_reference_markdown,
+        project_id=project_id,
+        max_line=max_line,
+    )
+
+
+@router.post("/api/projects/{project_id}/auto-heal-mismatches")
+async def orchestration_auto_heal_mismatches(
+    project_id: str,
+    lines: Optional[str] = None,
+    req: Optional[Dict[str, Any]] = None,
+):
+    """Automatically re-crops and re-OCRs only mismatched line strips from their source PNG frames."""
+    from routers.frames_document import auto_heal_project_mismatches
+    return await auto_heal_project_mismatches(
+        project_id=project_id,
+        lines=lines,
+        req=req,
+    )
+
+
 @router.get("/api/telemetry/key-events")
 async def get_key_events_telemetry_endpoint(limit: int = 50, loop_id: Optional[str] = None):
     """

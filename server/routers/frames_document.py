@@ -1387,3 +1387,227 @@ async def get_verified_lines_report():
     report_text = "\n".join(report_lines)
     return PlainTextResponse(report_text, headers={"Content-Type": "text/markdown; charset=utf-8"})
 
+
+# ─── GROUND-TRUTH REFERENCE MARKDOWN INGESTION, SCORING & AUTO-HEAL ───────────
+
+@router.post("/api/projects/{project_id}/reference-markdown")
+async def upload_project_reference_markdown(
+    project_id: str,
+    request: Request,
+    file_path: Optional[str] = Query(None, description="Local file path to reference .md file"),
+    path: Optional[str] = Query(None, description="Alias for local file path to reference .md file"),
+):
+    """
+    Reference Markdown Ingestion Endpoint:
+    Accepts a raw .md file upload (multipart/form-data or raw text body) or a local file path
+    (JSON body, form field, or query parameter) and stores the reference lines indexed 1..N
+    in SQLite table project_reference_lines (project_id, line_number, text_content).
+    """
+    from services.accuracy_verifier import ingest_reference_markdown
+
+    ct = (request.headers.get("content-type") or "").lower()
+    raw_content: Optional[str] = None
+    local_path: Optional[str] = file_path or path
+    source_name: Optional[str] = None
+
+    if "multipart/form-data" in ct or "application/x-www-form-urlencoded" in ct:
+        form = await request.form()
+        file_obj = form.get("file") or form.get("markdown_file") or form.get("reference_file")
+        if file_obj and hasattr(file_obj, "read"):
+            raw_bytes = await file_obj.read()
+            raw_content = raw_bytes.decode("utf-8-sig", errors="replace")
+            source_name = getattr(file_obj, "filename", None) or "uploaded_reference.md"
+        elif isinstance(file_obj, str) and file_obj.strip():
+            raw_content = file_obj
+
+        if raw_content is None:
+            fp_form = form.get("file_path") or form.get("path") or form.get("local_path")
+            if fp_form:
+                local_path = str(fp_form).strip()
+            else:
+                txt_form = form.get("content") or form.get("markdown") or form.get("text")
+                if txt_form is not None:
+                    raw_content = str(txt_form)
+    elif "application/json" in ct:
+        try:
+            body = await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON payload: {e}")
+        if isinstance(body, dict):
+            local_path = (
+                body.get("file_path")
+                or body.get("path")
+                or body.get("local_path")
+                or local_path
+            )
+            for k in ("content", "markdown", "text", "markdown_text", "raw_markdown"):
+                if body.get(k) is not None:
+                    raw_content = str(body[k])
+                    break
+            source_name = body.get("filename") or body.get("source_name")
+        elif isinstance(body, str):
+            raw_content = body
+    else:
+        raw_bytes = await request.body()
+        if raw_bytes:
+            decoded = raw_bytes.decode("utf-8-sig", errors="replace")
+            stripped_dec = decoded.strip()
+            if stripped_dec.startswith("{") and stripped_dec.endswith("}"):
+                try:
+                    parsed_json = json.loads(stripped_dec)
+                    if isinstance(parsed_json, dict):
+                        local_path = (
+                            parsed_json.get("file_path")
+                            or parsed_json.get("path")
+                            or parsed_json.get("local_path")
+                            or local_path
+                        )
+                        for k in ("content", "markdown", "text", "markdown_text", "raw_markdown"):
+                            if parsed_json.get(k) is not None:
+                                raw_content = str(parsed_json[k])
+                                break
+                        source_name = parsed_json.get("filename") or parsed_json.get("source_name")
+                except Exception:
+                    raw_content = decoded
+            elif (
+                "\n" not in stripped_dec
+                and len(stripped_dec) < 512
+                and stripped_dec.lower().endswith(".md")
+                and Path(stripped_dec.strip('"').strip("'")).exists()
+            ):
+                local_path = stripped_dec.strip('"').strip("'")
+            else:
+                raw_content = decoded
+
+    if raw_content is None and not local_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a .md file upload ('file'), markdown text ('content'), or local file path ('file_path' / 'path').",
+        )
+
+    try:
+        res = await asyncio.to_thread(
+            ingest_reference_markdown,
+            project_id,
+            raw_content,
+            local_path,
+            source_name,
+        )
+    except FileNotFoundError as fnf:
+        raise HTTPException(status_code=404, detail=str(fnf))
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to ingest reference markdown: {e}")
+
+    try:
+        await state.ws_manager.broadcast({
+            "type": "reference_markdown_ingested",
+            **res,
+        })
+    except Exception:
+        pass
+
+    return res
+
+
+@router.get("/api/projects/{project_id}/reference-markdown")
+async def get_project_reference_markdown_info(
+    project_id: str,
+    from_line: Optional[int] = Query(None),
+    to_line: Optional[int] = Query(None),
+):
+    """Returns stored reference markdown line count and optional line slice for the project."""
+    from services.accuracy_verifier import resolve_project_id
+
+    resolved_pid = resolve_project_id(project_id)
+    total_cnt = db.get_project_reference_count(resolved_pid)
+    ref_slice = (
+        db.get_project_reference_lines(resolved_pid, from_line=from_line, to_line=to_line)
+        if (from_line is not None or to_line is not None or total_cnt <= 500)
+        else {}
+    )
+    return {
+        "status": "success",
+        "project_id": resolved_pid,
+        "total_reference_lines": total_cnt,
+        "lines": [
+            {"line_number": ln, "text_content": txt}
+            for ln, txt in sorted(ref_slice.items())
+        ],
+    }
+
+
+@router.get("/api/projects/{project_id}/ground-truth-score")
+async def get_project_ground_truth_score(
+    project_id: str,
+    max_line: Optional[int] = Query(None, description="Optional max line number to score up to"),
+):
+    """
+    Computes line-by-line and character-by-character fidelity against the stored reference markdown:
+      - Exact line match rate (%)
+      - Levenshtein Character Error Rate (CER)
+      - Indentation accuracy (%)
+      - Syntax token accuracy (CODESCAN_FILE_START, CODESCAN_FILE_END, code fences, brackets)
+      - Flagged mismatched lines with diff_opcodes and failure_category
+    """
+    from services.accuracy_verifier import score_against_reference_markdown
+
+    score_report = await asyncio.to_thread(
+        score_against_reference_markdown,
+        project_id=project_id,
+        max_line=max_line,
+    )
+    return score_report
+
+
+@router.post("/api/projects/{project_id}/auto-heal-mismatches")
+async def auto_heal_project_mismatches(
+    project_id: str,
+    lines: Optional[str] = Query(None, description="Optional comma-separated line numbers to heal"),
+    req: Optional[Dict[str, Any]] = None,
+):
+    """
+    Automatically re-crops and re-OCRs only the mismatched line strips from their source PNG frames,
+    overwriting healed lines in state.document_lines and SQLite document_lines, and returns updated scores.
+    """
+    from services.accuracy_verifier import auto_heal_mismatches_against_reference
+
+    raw_lns = (req.get("line_numbers") if req else None) or (lines.split(",") if lines else None)
+    line_numbers: Optional[List[int]] = None
+    if raw_lns is not None:
+        if isinstance(raw_lns, (int, str)):
+            raw_lns = [raw_lns]
+        line_numbers = [int(str(x).strip()) for x in raw_lns if str(x).strip().isdigit()]
+
+    max_lines = int(req["max_lines_to_heal"]) if (req and req.get("max_lines_to_heal")) else None
+
+    heal_report = await asyncio.to_thread(
+        auto_heal_mismatches_against_reference,
+        project_id=project_id,
+        line_numbers=line_numbers,
+        max_lines_to_heal=max_lines,
+    )
+
+    clear_ocr_inspect_cache()
+
+    try:
+        if hasattr(state, "ws_manager") and state.ws_manager:
+            await state.ws_manager.broadcast({
+                "type": "ground_truth_auto_healed",
+                "project_id": heal_report.get("project_id", project_id),
+                "healed_lines": heal_report.get("healed_lines", []),
+                "rescanned_lines": heal_report.get("rescanned_lines", []),
+                "exact_line_match_rate": heal_report.get("exact_line_match_rate"),
+                "cer": heal_report.get("cer"),
+            })
+            await state.ws_manager.broadcast({
+                "type": "document_updated",
+                "data": _doc_payload(),
+            })
+    except Exception:
+        pass
+
+    return heal_report
+
+

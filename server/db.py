@@ -28,6 +28,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT DEFAULT '', target_total_lines INTEGER DEFAULT 0, status TEXT DEFAULT 'active', is_active INTEGER DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS frames (frame_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, filename TEXT NOT NULL, top_line INTEGER NOT NULL, bottom_line INTEGER NOT NULL, page_index INTEGER NOT NULL, file_size INTEGER DEFAULT 0, status TEXT DEFAULT 'processed', extracted_line_count INTEGER DEFAULT 0, custom_offset_y REAL DEFAULT 0.0, token_usage_json TEXT DEFAULT '{}', bounding_boxes_json TEXT DEFAULT '{}', model_used TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS document_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, line_text TEXT NOT NULL, confidence REAL DEFAULT 1.0, frame_id TEXT DEFAULT '', is_verified INTEGER DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (project_id, line_number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS project_reference_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, text_content TEXT NOT NULL, PRIMARY KEY (project_id, line_number));
         CREATE TABLE IF NOT EXISTS project_telemetry (project_id TEXT PRIMARY KEY, telemetry_json TEXT DEFAULT '{}', token_stats_json TEXT DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS device_profiles (
             id TEXT PRIMARY KEY,
@@ -420,6 +421,7 @@ def delete_project(project_id: str) -> bool:
         c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM project_telemetry WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
         conn.commit()
 
@@ -754,4 +756,102 @@ def import_project_data(
         conn.commit()
 
     return get_project(new_id) or {}
+
+
+def ensure_reference_lines_table(conn: Optional[sqlite3.Connection] = None):
+    sql = """
+    CREATE TABLE IF NOT EXISTS project_reference_lines (
+        project_id TEXT NOT NULL,
+        line_number INTEGER NOT NULL,
+        text_content TEXT NOT NULL,
+        PRIMARY KEY (project_id, line_number)
+    );
+    """
+    if conn is not None:
+        conn.execute(sql)
+    else:
+        with get_connection() as c_conn:
+            c_conn.execute(sql)
+            c_conn.commit()
+
+
+def save_project_reference_lines(project_id: str, lines: Any) -> int:
+    """
+    Stores reference markdown lines indexed 1..N in SQLite table
+    project_reference_lines (project_id, line_number, text_content).
+    """
+    if not project_id:
+        return 0
+    rows: List[tuple] = []
+    if isinstance(lines, dict):
+        for ln, txt in sorted(lines.items(), key=lambda x: int(x[0])):
+            rows.append((project_id, int(ln), str(txt if txt is not None else "")))
+    elif isinstance(lines, str):
+        for idx, txt in enumerate(lines.splitlines(), start=1):
+            rows.append((project_id, idx, str(txt)))
+    else:
+        for idx, txt in enumerate(lines or [], start=1):
+            rows.append((project_id, idx, str(txt if txt is not None else "")))
+
+    with get_connection() as conn:
+        ensure_reference_lines_table(conn)
+        c = conn.cursor()
+        c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
+        if rows:
+            c.executemany(
+                "INSERT OR REPLACE INTO project_reference_lines (project_id, line_number, text_content) VALUES (?, ?, ?);",
+                rows
+            )
+        conn.commit()
+    return len(rows)
+
+
+def get_project_reference_lines(
+    project_id: Optional[str],
+    from_line: Optional[int] = None,
+    to_line: Optional[int] = None
+) -> Dict[int, str]:
+    """
+    Retrieves reference markdown lines indexed by line_number (1..N) from project_reference_lines.
+    """
+    if not project_id:
+        return {}
+    with get_connection() as conn:
+        ensure_reference_lines_table(conn)
+        c = conn.cursor()
+        clauses = ["project_id = ?"]
+        params: List[Any] = [project_id]
+        if from_line is not None and from_line > 0:
+            clauses.append("line_number >= ?")
+            params.append(int(from_line))
+        if to_line is not None and to_line > 0:
+            clauses.append("line_number <= ?")
+            params.append(int(to_line))
+        sql = f"SELECT line_number, text_content FROM project_reference_lines WHERE {' AND '.join(clauses)} ORDER BY line_number ASC;"
+        rows = c.execute(sql, tuple(params)).fetchall()
+        return {int(r["line_number"]): r["text_content"] for r in rows}
+
+
+def get_project_reference_count(project_id: Optional[str]) -> int:
+    if not project_id:
+        return 0
+    with get_connection() as conn:
+        ensure_reference_lines_table(conn)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM project_reference_lines WHERE project_id = ?;",
+            (project_id,)
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
+
+def clear_project_reference_lines(project_id: str) -> int:
+    if not project_id:
+        return 0
+    with get_connection() as conn:
+        ensure_reference_lines_table(conn)
+        c = conn.cursor()
+        c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
+        conn.commit()
+        return c.rowcount
+
 
