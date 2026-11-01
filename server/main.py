@@ -45,6 +45,7 @@ from routers import (
     orchestration,
     classifiers,
     kiosk,
+    analyzer_sandbox,
 )
 
 from contextlib import asynccontextmanager
@@ -340,6 +341,7 @@ app.include_router(frames_document.router)
 app.include_router(orchestration.router)
 app.include_router(classifiers.router)
 app.include_router(kiosk.router)
+app.include_router(analyzer_sandbox.router)
 
 if __name__ == "__main__":
     import uvicorn

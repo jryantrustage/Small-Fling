@@ -5715,124 +5715,24 @@ async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None
     return res
 
 
-# ─── POST-CAPTURE ANALYZER & SANDBOX MONACO VFS ENDPOINTS ──────────────────
+# ─── POST-CAPTURE ANALYZER & SANDBOX MONACO VFS HELPERS ────────────────────
 
-@router.get("/api/analyzer/workspace")
-@router.get("/api/analyzer/workspace/{project_id}")
 async def get_analyzer_workspace(
     project_id: Optional[str] = None,
     refresh: bool = False,
 ):
-    """
-    Publishes the complete VFS tree, compiler diagnostics, and line-to-frame source map
-    for the Web UI's Monaco Editor and VFS File Tree.
-    """
-    from services.accuracy_verifier import resolve_project_id
-
-    pid = resolve_project_id(project_id)
-    workspaces = getattr(state, "analyzer_workspaces", {}) or {}
-    ws = workspaces.get(pid) or workspaces.get(project_id or "")
-
-    if refresh or not ws or not ws.get("vfs_tree"):
-        await execute_dag_group_post_capture_analyzer(project_id=pid)
-        workspaces = getattr(state, "analyzer_workspaces", {}) or {}
-        ws = workspaces.get(pid) or workspaces.get("default") or {}
-
-    return {
-        "status": "ok",
-        "project_id": pid,
-        **ws,
-    }
+    """Delegates to routers.analyzer_sandbox.get_analyzer_workspace_endpoint."""
+    from routers.analyzer_sandbox import get_analyzer_workspace_endpoint
+    return await get_analyzer_workspace_endpoint(project_id=project_id, refresh=refresh)
 
 
-@router.post("/api/analyzer/workspace/{project_id}")
-@router.put("/api/analyzer/workspace/{project_id}/file")
 async def update_analyzer_workspace_file(
     project_id: str,
     payload: Dict[str, Any],
 ):
-    """
-    Updates a VFS file from Monaco Editor or triggers a full re-parse/re-compile of the sandbox workspace.
-    """
-    from services.accuracy_verifier import resolve_project_id
+    """Delegates to routers.analyzer_sandbox.save_analyzer_workspace_file_endpoint."""
+    from routers.analyzer_sandbox import save_analyzer_workspace_file_endpoint
+    return await save_analyzer_workspace_file_endpoint(project_id=project_id, payload=payload)
 
-    pid = resolve_project_id(project_id)
-    file_path = (payload.get("normalized_path") or payload.get("path") or "").strip()
-    new_content = payload.get("content")
-
-    if not file_path or new_content is None:
-        # Full workspace rebuild requested
-        res = await execute_dag_group_post_capture_analyzer(project_id=pid, payload=payload)
-        ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
-        return {"status": "ok", "project_id": pid, "pipeline_result": res, **ws}
-
-    workspaces = getattr(state, "analyzer_workspaces", {}) or {}
-    ws = workspaces.get(pid)
-    if not ws or not ws.get("vfs_files"):
-        await execute_dag_group_post_capture_analyzer(project_id=pid)
-        ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
-
-    vfs_files = ws.get("vfs_files") or []
-    norm_target = file_path.replace("\\", "/").lstrip("/")
-
-    matched_entry = None
-    for f_entry in vfs_files:
-        if f_entry.get("normalized_path") == norm_target or f_entry.get("path") == file_path:
-            matched_entry = f_entry
-            break
-
-    if matched_entry:
-        matched_entry["content"] = str(new_content)
-        new_lines = str(new_content).split("\n")
-        matched_entry["actual_lines"] = len(new_lines)
-        start_md_line = int(matched_entry.get("start_md_line") or 0)
-        if start_md_line > 0 and payload.get("sync_document_lines", True):
-            for idx, ln_txt in enumerate(new_lines, start=1):
-                g_ln = start_md_line + idx
-                if g_ln in state.document_lines:
-                    state.document_lines[g_ln] = state.MasterLine(
-                        ln_txt,
-                        line_number=g_ln,
-                        gutter_number=g_ln,
-                        status="verified",
-                        updated_at=datetime.now().isoformat(),
-                    )
-    else:
-        vfs_files.append({
-            "index": len(vfs_files) + 1,
-            "path": norm_target,
-            "normalized_path": norm_target,
-            "ext": Path(norm_target).suffix.lower(),
-            "expected_lines": len(str(new_content).splitlines()),
-            "actual_lines": len(str(new_content).splitlines()),
-            "line_count_delta": 0,
-            "content": str(new_content),
-            "start_md_line": 0,
-            "end_md_line": 0,
-            "source_frame_ids": [],
-            "tag_status": "edited",
-        })
-
-    # Re-run Node 11 (AST & TypeScript Compiler Check) and Node 12 (Sandbox & Monaco VFS Ready)
-    bb_meta = {"vfs_files": vfs_files, "directory_tree": ws.get("directory_tree", {})}
-    n11_res = await run_single_dag_node(
-        "ast_compiler_validator",
-        {"project_id": pid, "allow_concurrent": True, "metadata": bb_meta},
-    )
-    bb_meta["compilation_summary"] = n11_res.get("compilation_summary")
-    n12_res = await run_single_dag_node(
-        "sandbox_ide",
-        {"project_id": pid, "allow_concurrent": True, "metadata": bb_meta},
-    )
-
-    updated_ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
-    return {
-        "status": "ok",
-        "project_id": pid,
-        "updated_file": norm_target,
-        "node11": n11_res,
-        "node12": n12_res,
-        **updated_ws,
-    }
 
 

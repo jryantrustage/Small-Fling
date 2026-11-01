@@ -56,65 +56,9 @@ class TsAnalyzerWorkerClient:
         )
         return self._proc
 
-    def validate_files_sync(self, vfs_files: List[Dict[str, Any]]) -> Dict[str, Any]:
-        req_id = f"req_{uuid.uuid4().hex[:8]}"
-        payload = {
-            "id": req_id,
-            "action": "validate",
-            "files": [
-                {
-                    "path": f.get("path", ""),
-                    "normalized_path": f.get("normalized_path", ""),
-                    "ext": f.get("ext", ""),
-                    "content": f.get("content", ""),
-                    "start_md_line": f.get("start_md_line", 0),
-                    "end_md_line": f.get("end_md_line", 0),
-                }
-                for f in vfs_files
-            ],
-        }
-        line_str = json.dumps(payload, ensure_ascii=False) + "\n"
-
-        with self._lock:
-            for attempt in range(2):
-                try:
-                    proc = self._ensure_started()
-                    assert proc.stdin is not None and proc.stdout is not None
-                    proc.stdin.write(line_str)
-                    proc.stdin.flush()
-                    resp_line = proc.stdout.readline()
-                    if not resp_line:
-                        if self._proc:
-                            try:
-                                self._proc.kill()
-                            except Exception:
-                                pass
-                            self._proc = None
-                        continue
-                    return json.loads(resp_line)
-                except Exception as e:
-                    if self._proc:
-                        try:
-                            self._proc.kill()
-                        except Exception:
-                            pass
-                        self._proc = None
-                    if attempt == 1:
-                        return {
-                            "status": "error",
-                            "error": str(e),
-                            "total_files": len(vfs_files),
-                            "compilable_files": 0,
-                            "syntax_errors_count": 0,
-                            "diagnostics": [],
-                        }
-        return {
-            "status": "error",
-            "total_files": len(vfs_files),
-            "compilable_files": 0,
-            "syntax_errors_count": 0,
-            "diagnostics": [],
-        }
+    def validate_files_sync(self, vfs_files: List[Dict[str, Any]], tsconfig: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        from services.analyzer_bridge import analyzer_bridge
+        return analyzer_bridge.validate_files_sync(vfs_files, tsconfig=tsconfig)
 
 
 _ts_worker_client = TsAnalyzerWorkerClient()
@@ -484,11 +428,14 @@ class AstCompilerValidatorNode(BaseDagNode):
             "total_files": int(final_res.get("total_files", len(vfs_files))),
             "compilable_files": int(final_res.get("compilable_files", 0)),
             "syntax_errors_count": len(final_diagnostics),
+            "semantic_errors_count": int(final_res.get("semantic_errors_count", 0)),
             "initial_syntax_errors_count": len(initial_diagnostics),
             "auto_healed_lines_count": auto_healed_lines_count,
             "healed_lines": healed_lines_details,
             "typescript_version": final_res.get("typescript_version", ""),
             "diagnostics": final_diagnostics,
+            "syntactic_diagnostics": final_diagnostics,
+            "semantic_diagnostics": final_res.get("semantic_diagnostics", []),
             "file_statuses": final_res.get("file_statuses", {}),
         }
 
