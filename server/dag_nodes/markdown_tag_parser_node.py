@@ -589,7 +589,14 @@ class MarkdownTagParserNode(BaseDagNode):
             "repaired_tags": repaired_tags,
             "line_count_mismatches": line_count_mismatches,
             "parsed_at": datetime.now().isoformat(),
+            "_vfs_dirty": True,
         })
+        if project_id:
+            try:
+                db.save_vfs_files(project_id, vfs_files)
+                ws_entry["_vfs_dirty"] = False
+            except Exception:
+                pass
 
         summary_data = {
             "project_id": project_id,

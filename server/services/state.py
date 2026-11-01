@@ -146,6 +146,11 @@ class MasterLine(str):
         s.meta = dict(meta)
         return s
 
+    def _notify_dirty(self):
+        ln = self.meta.get("line_number")
+        if ln is not None and isinstance(document_lines, MasterDocumentLines):
+            document_lines.mark_dirty(int(ln))
+
     def get(self, key, default=None):
         if key == "text": return self.meta.get("text", str(self))
         if key == "line_number": return self.meta.get("line_number", 0)
@@ -160,6 +165,7 @@ class MasterLine(str):
     def __setitem__(self, item, value):
         if isinstance(item, str):
             self.meta[item] = value
+            self._notify_dirty()
             return
         raise TypeError("MasterLine item assignment only supports string metadata keys")
 
@@ -168,6 +174,7 @@ class MasterLine(str):
 
     def update(self, d: dict):
         self.meta.update(d)
+        self._notify_dirty()
 
     def to_dict(self) -> dict:
         d = dict(self.meta)
@@ -177,9 +184,30 @@ class MasterLine(str):
         return d
 
 class MasterDocumentLines(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.dirty_lines: set = set()
+        self.deleted_lines: set = set()
+        self.cleared: bool = False
+        self._suppress_tracking: bool = False
+        if args or kwargs:
+            self.update(*args, **kwargs)
+
+    def mark_dirty(self, line_number: int):
+        if not self._suppress_tracking:
+            ln = int(line_number)
+            self.dirty_lines.add(ln)
+            self.deleted_lines.discard(ln)
+
+    def mark_clean(self):
+        self.dirty_lines.clear()
+        self.deleted_lines.clear()
+        self.cleared = False
+
     def __setitem__(self, key: int, value: Any):
         k = int(key)
         if isinstance(value, MasterLine):
+            value.meta.setdefault("line_number", k)
             super().__setitem__(k, value)
         elif isinstance(value, str):
             existing_meta = self[k].meta if (k in self and hasattr(self[k], "meta")) else {
@@ -194,9 +222,84 @@ class MasterDocumentLines(dict):
             super().__setitem__(k, MasterLine(text, **meta))
         else:
             super().__setitem__(k, MasterLine(str(value), line_number=k))
+        self.mark_dirty(k)
 
-document_lines: Dict[int, str] = MasterDocumentLines()
-captured_frames: Dict[str, Dict[str, Any]] = {}
+    def __delitem__(self, key: int):
+        k = int(key)
+        super().__delitem__(k)
+        if not self._suppress_tracking:
+            self.dirty_lines.discard(k)
+            self.deleted_lines.add(k)
+
+    def pop(self, key: int, *args):
+        k = int(key)
+        existed = k in self
+        res = super().pop(k, *args)
+        if existed and not self._suppress_tracking:
+            self.dirty_lines.discard(k)
+            self.deleted_lines.add(k)
+        return res
+
+    def clear(self):
+        had_items = len(self) > 0
+        super().clear()
+        self.dirty_lines.clear()
+        self.deleted_lines.clear()
+        if had_items and not self._suppress_tracking:
+            self.cleared = True
+
+    def update(self, *args, **kwargs):
+        if args:
+            other = args[0]
+            if isinstance(other, dict):
+                for k, v in other.items():
+                    self[int(k)] = v
+            else:
+                for k, v in other:
+                    self[int(k)] = v
+        for k, v in kwargs.items():
+            self[int(k)] = v
+
+
+class CapturedFramesDict(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.dirty_frames: set = set()
+        self._suppress_tracking: bool = False
+        if args or kwargs:
+            self.update(*args, **kwargs)
+
+    def mark_dirty(self, frame_id: str):
+        if not self._suppress_tracking and frame_id:
+            self.dirty_frames.add(str(frame_id))
+
+    def mark_clean(self):
+        self.dirty_frames.clear()
+
+    def __setitem__(self, key: str, value: Any):
+        k = str(key)
+        super().__setitem__(k, value)
+        self.mark_dirty(k)
+
+    def update(self, *args, **kwargs):
+        if args:
+            other = args[0]
+            if isinstance(other, dict):
+                for k, v in other.items():
+                    self[str(k)] = v
+            else:
+                for k, v in other:
+                    self[str(k)] = v
+        for k, v in kwargs.items():
+            self[str(k)] = v
+
+    def clear(self):
+        super().clear()
+        self.dirty_frames.clear()
+
+
+document_lines: MasterDocumentLines = MasterDocumentLines()
+captured_frames: CapturedFramesDict = CapturedFramesDict()
 recapture_queue: List[Dict[str, Any]] = []
 
 token_stats: Dict[str, Any] = {
@@ -1953,36 +2056,35 @@ def load_persisted_state():
     try:
         p = db.get_active_project()
         pid = p["id"] if p else None
-        if p:
-            lines_db = db.get_document_lines(pid)
-            document_lines.clear()
-            for k, v in lines_db.items(): document_lines[k] = v
-            captured_frames.clear()
-            captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
-            tel = db.get_project_telemetry(pid)
-            if tel.get("telemetry"): latest_telemetry.update(tel["telemetry"])
-            if tel.get("token_stats"): token_stats.update(tel["token_stats"])
-            if p.get("target_total_lines"): latest_telemetry["target_total_lines"] = p["target_total_lines"]
-        else:
-            document_lines.clear()
-            captured_frames.clear()
-
-        if (not document_lines or not captured_frames) and DOCUMENT_FILE.exists():
-            try:
-                with open(DOCUMENT_FILE, "r", encoding="utf-8") as f:
-                    doc_data = json.load(f)
-                    doc_pid = doc_data.get("project_id")
-                    if (pid and doc_pid == pid) or (not pid):
-                        for k, v in doc_data.get("lines", {}).items():
-                            document_lines[int(k)] = v
-                        if not captured_frames:
-                            captured_frames.update(doc_data.get("frames", {}))
-                        if doc_data.get("latest_telemetry"):
-                            latest_telemetry.update(doc_data["latest_telemetry"])
-                        if doc_data.get("token_stats"):
-                            token_stats.update(doc_data["token_stats"])
-            except Exception as ex:
-                print(f"Fallback loading DOCUMENT_FILE error: {ex}")
+        document_lines._suppress_tracking = True
+        captured_frames._suppress_tracking = True
+        try:
+            if p and pid:
+                lines_db = db.get_document_lines(pid)
+                document_lines.clear()
+                for k, v in lines_db.items():
+                    document_lines[k] = v
+                captured_frames.clear()
+                captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
+                tel = db.get_project_telemetry(pid)
+                if tel.get("telemetry"):
+                    latest_telemetry.update(tel["telemetry"])
+                if tel.get("token_stats"):
+                    token_stats.update(tel["token_stats"])
+                if p.get("target_total_lines"):
+                    latest_telemetry["target_total_lines"] = p["target_total_lines"]
+                vfs_db = db.get_vfs_files(pid)
+                if vfs_db:
+                    ws = analyzer_workspaces.setdefault(pid, {"project_id": pid})
+                    ws.setdefault("vfs_files", vfs_db)
+            else:
+                document_lines.clear()
+                captured_frames.clear()
+        finally:
+            document_lines._suppress_tracking = False
+            captured_frames._suppress_tracking = False
+            document_lines.mark_clean()
+            captured_frames.mark_clean()
     except Exception as e:
         print(f"Error loading state from SQLite: {e}")
 
@@ -1999,35 +2101,57 @@ def load_persisted_state():
     except Exception as e:
         print(f"Error loading diagnostics trace: {e}")
 
+
 def save_persisted_state():
+    """
+    Persists dirty frames, dirty/deleted document lines, VFS files, and telemetry
+    in a single SQLite WAL transaction (without rewriting multi-megabyte document_state.json).
+    """
     try:
         pid = get_current_project_id()
         if not pid:
             return
-        for fid, f in captured_frames.items():
-            db.save_frame(
-                pid, fid, f.get("filename", f"{fid}.png"),
-                f.get("top_line", 0), f.get("bottom_line", 0),
-                f.get("page_index", 1), f.get("file_size", 0),
-                f.get("status", "processed"), f.get("extracted_line_count", 0),
-                f.get("custom_offset_y", 0.0), f.get("token_usage", {}),
-                f.get("bounding_boxes", {}), f.get("model_used", ""),
-                f.get("created_at"),
-                f.get("arrow_count", 0)
-            )
-        db.save_document_lines(pid, document_lines)
-        db.save_project_telemetry(pid, latest_telemetry, token_stats)
-        with open(DOCUMENT_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "project_id": pid,
-                "lines": {str(k): v.to_dict() if hasattr(v, "to_dict") else (v if isinstance(v, dict) else {"text": str(v)}) for k, v in sorted(document_lines.items())},
-                "frames": captured_frames,
-                "token_stats": token_stats,
-                "latest_telemetry": latest_telemetry,
-                "updated_at": datetime.now().isoformat()
-            }, f, indent=2, cls=NumpySafeJSONEncoder)
-        with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(recapture_queue, f, indent=2, cls=NumpySafeJSONEncoder)
+
+        dirty_fids = set(getattr(captured_frames, "dirty_frames", set()) or set())
+        if dirty_fids:
+            frames_to_save = [captured_frames[fid] for fid in dirty_fids if fid in captured_frames]
+        else:
+            frames_to_save = list(captured_frames.values())
+
+        dirty_ln_keys = set(getattr(document_lines, "dirty_lines", set()) or set())
+        deleted_ln_keys = list(getattr(document_lines, "deleted_lines", set()) or set())
+        clear_all = bool(getattr(document_lines, "cleared", False))
+
+        dirty_lines_payload = {
+            ln: document_lines[ln]
+            for ln in dirty_ln_keys
+            if ln in document_lines
+        }
+
+        ws = analyzer_workspaces.get(pid) if isinstance(analyzer_workspaces, dict) else None
+        vfs_payload = ws.get("vfs_files") if (isinstance(ws, dict) and ws.get("_vfs_dirty")) else None
+
+        db.save_dirty_state_transaction(
+            project_id=pid,
+            dirty_frames=frames_to_save,
+            dirty_lines=dirty_lines_payload,
+            deleted_lines=deleted_ln_keys,
+            clear_all_lines=clear_all,
+            telemetry=latest_telemetry,
+            token_stats=token_stats,
+            vfs_files=vfs_payload,
+        )
+
+        if hasattr(document_lines, "mark_clean"):
+            document_lines.mark_clean()
+        if hasattr(captured_frames, "mark_clean"):
+            captured_frames.mark_clean()
+        if isinstance(ws, dict) and ws.get("_vfs_dirty"):
+            ws["_vfs_dirty"] = False
+
+        if recapture_queue or RECAPTURE_QUEUE_FILE.exists():
+            with open(RECAPTURE_QUEUE_FILE, "w", encoding="utf-8") as f:
+                json.dump(recapture_queue, f, indent=2, cls=NumpySafeJSONEncoder)
     except Exception as e:
         print(f"Error saving state to SQLite: {e}")
 

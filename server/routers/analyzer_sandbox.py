@@ -334,9 +334,16 @@ async def save_analyzer_workspace_file_endpoint(
         "vfs_tree": vfs_tree,
         "compilation_summary": compilation_summary,
         "line_to_frame_map": source_map,
+        "_vfs_dirty": True,
     })
     state.analyzer_workspaces[pid] = ws
     state.analyzer_workspaces[safe_project_id] = ws
+    if pid:
+        try:
+            db.save_vfs_files(pid, vfs_files)
+            ws["_vfs_dirty"] = False
+        except Exception:
+            pass
 
     try:
         await asyncio.to_thread(state.save_persisted_state)

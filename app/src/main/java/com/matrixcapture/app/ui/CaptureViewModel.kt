@@ -3,19 +3,19 @@ package com.matrixcapture.app.ui
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.provider.Settings
 import android.os.PowerManager
-import android.util.Log
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.matrixcapture.app.capture.DisplayCaptureManager
-import com.matrixcapture.app.network.FrameUploadClient
 import com.matrixcapture.app.data.DeviceModel
+import com.matrixcapture.app.network.FrameUploadClient
 import com.matrixcapture.app.service.DesktopPaginationService
 import com.matrixcapture.app.service.SegmentRecorderService
-import com.matrixcapture.app.splicer.MarkdownAssembler
-import kotlinx.coroutines.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class CaptureViewModel(application: Application) : AndroidViewModel(application) {
     private val context: Context get() = getApplication<Application>().applicationContext
@@ -27,7 +27,10 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     private fun acquireVmWakeLock() = runCatching {
         if (vmWakeLock == null) {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            vmWakeLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP, "MatrixCapture:VmWakeLock")
+            vmWakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ON_AFTER_RELEASE or PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "MatrixCapture:VmWakeLock"
+            )
         }
         if (vmWakeLock?.isHeld == false) vmWakeLock?.acquire()
     }
@@ -39,12 +42,19 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     init {
         val prefs = context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE)
         prefs.getString("gemini_api_key", "")?.takeIf { it.isNotEmpty() }?.let {
-            SegmentRecorderService.apiKey = it; _uiState.update { s -> s.copy(geminiApiKey = it) }
+            SegmentRecorderService.apiKey = it
+            _uiState.update { s -> s.copy(geminiApiKey = it) }
         }
         val host = prefs.getString("server_host", "192.168.86.83:8000") ?: "192.168.86.83:8000"
-        uploadClient.serverHost = host; _uiState.update { it.copy(serverHost = host) }
+        uploadClient.serverHost = host
+        _uiState.update { it.copy(serverHost = host) }
 
-        val lines = prefs.getInt("target_total_lines", 0).let { if (it in listOf(9487, 9994)) { prefs.edit().putInt("target_total_lines", 0).apply(); 0 } else it }
+        val lines = prefs.getInt("target_total_lines", 0).let {
+            if (it in listOf(9487, 9994)) {
+                prefs.edit().putInt("target_total_lines", 0).apply()
+                0
+            } else it
+        }
         val savedDeviceStr = prefs.getString("device_model", DeviceModel.AUTO.id)
         val initialDevice = DeviceModel.fromString(savedDeviceStr)
         DesktopPaginationService.setDeviceModel(initialDevice)
@@ -67,35 +77,78 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                 try {
                     val pState = DesktopPaginationService.telemetry.value
                     val api = SegmentRecorderService.instance?.getGeminiApiService()
-                    val pt = api?.mobilePromptTokens?.get() ?: 0; val ct = api?.mobileCandidatesTokens?.get() ?: 0; val tt = api?.mobileTotalTokens?.get() ?: 0
-                    _uiState.update { it.copy(mobilePromptTokens = pt, mobileCandidatesTokens = ct, mobileTotalTokens = tt, autoTuneFactor = pState.autoTuneFactor, bottomToTopError = pState.bottomToTopError, wrappedLinesDetected = pState.wrappedLinesDetected) }
+                    val pt = api?.mobilePromptTokens?.get() ?: 0
+                    val ct = api?.mobileCandidatesTokens?.get() ?: 0
+                    val tt = api?.mobileTotalTokens?.get() ?: 0
+                    _uiState.update {
+                        it.copy(
+                            mobilePromptTokens = pt,
+                            mobileCandidatesTokens = ct,
+                            mobileTotalTokens = tt,
+                            autoTuneFactor = pState.autoTuneFactor,
+                            bottomToTopError = pState.bottomToTopError,
+                            wrappedLinesDetected = pState.wrappedLinesDetected
+                        )
+                    }
 
                     val resolvedDevice = DesktopPaginationService.deviceModel.value.resolve()
                     val devName = "${resolvedDevice.displayName} Desktop (${_uiState.value.targetDisplay?.name ?: "Display 1"})"
-                    val ok = uploadClient.sendTelemetry(FrameUploadClient.TelemetryData(devName, DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running, pState.currentPage, pState.currentTopLine, pState.currentBottomLine, pState.targetTotalLines, pState.dwellRemainingMs.toInt(), pState.phase, pState.statusMessage, pState.activeStep, "mobile", pt, ct, tt, pState.autoTuneFactor, pState.linePitchPx, pState.bottomToTopError, pState.wrappedLinesDetected))
+                    val ok = uploadClient.sendTelemetry(
+                        FrameUploadClient.TelemetryData(
+                            devName,
+                            DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running,
+                            pState.currentPage,
+                            pState.currentTopLine,
+                            pState.currentBottomLine,
+                            pState.targetTotalLines,
+                            pState.dwellRemainingMs.toInt(),
+                            pState.phase,
+                            pState.statusMessage,
+                            pState.activeStep,
+                            "mobile",
+                            pt,
+                            ct,
+                            tt,
+                            pState.autoTuneFactor,
+                            pState.linePitchPx,
+                            pState.bottomToTopError,
+                            pState.wrappedLinesDetected
+                        )
+                    )
                     _uiState.update { it.copy(isBackendConnected = ok) }
 
                     uploadClient.fetchOrchestrationState().getOrNull()?.let { ro ->
                         val prev = _uiState.value.orchestrationStatus
-                        _uiState.update { it.copy(orchestrationStatus = ro.status, orchestrationInvokedBy = ro.invokedBy, orchestrationActiveStep = ro.activeStep, orchestrationStepLabel = ro.stepLabel, orchestrationNextTargetTop = ro.nextTargetTop) }
+                        _uiState.update {
+                            it.copy(
+                                orchestrationStatus = ro.status,
+                                orchestrationInvokedBy = ro.invokedBy,
+                                orchestrationActiveStep = ro.activeStep,
+                                orchestrationStepLabel = ro.stepLabel,
+                                orchestrationNextTargetTop = ro.nextTargetTop
+                            )
+                        }
                         if (ro.status != prev) {
                             when (ro.status) {
                                 "RUNNING" -> {
                                     acquireVmWakeLock()
-                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) DesktopPaginationService.instance?.resumePagination() else if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Idle && !_uiState.value.isWorkflowRunning) startPacingOnly()
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Paused) {
+                                        DesktopPaginationService.instance?.resumePagination()
+                                    }
                                 }
-                                "PAUSED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) DesktopPaginationService.instance?.pausePagination()
+                                "PAUSED" -> if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                    DesktopPaginationService.instance?.pausePagination()
+                                }
                                 "COMPLETED", "ABORTED" -> {
                                     releaseVmWakeLock()
-                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) stopWorkflow()
+                                    if (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) {
+                                        stopWorkflow()
+                                    }
                                 }
                             }
                         }
                         val cmdKey = "${ro.command}_${ro.updatedAt.ifEmpty { ro.stepLabel }}"
-                        if (ro.command == "CAPTURE_DESKTOP" && lastHandledRemoteCommand != cmdKey) {
-                            lastHandledRemoteCommand = cmdKey
-                            android.util.Log.i("CaptureViewModel", "Ignored CAPTURE_DESKTOP: actuator disabled")
-                        } else if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != cmdKey) {
+                        if (ro.command == "GET_NEXT_LINE" && lastHandledRemoteCommand != cmdKey) {
                             lastHandledRemoteCommand = cmdKey
                             getNextPageLine()
                         } else if ((ro.command == "CALIBRATE_INSTANT" || ro.command == "CALIBRATE") && lastHandledRemoteCommand != cmdKey) {
@@ -106,7 +159,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                             alignAndCaptureNextPage()
                         }
                     }
-                } catch (_: Exception) { _uiState.update { it.copy(isBackendConnected = false) } }
+                } catch (_: Exception) {
+                    _uiState.update { it.copy(isBackendConnected = false) }
+                }
             }
         }
         initDisplayDetection()
@@ -130,18 +185,26 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                     @Suppress("DEPRECATION") ext.getRealMetrics(m)
                     Triple(m.widthPixels, m.heightPixels, m.densityDpi)
                 }
-                _uiState.update { it.copy(targetDisplay = DisplayCaptureManager.ExternalDisplayInfo(ext.displayId, ext.name, w, h, dpi, ext.refreshRate, true)) }
-            } else _uiState.update { it.copy(targetDisplay = null) }
+                _uiState.update {
+                    it.copy(targetDisplay = DisplayCaptureManager.ExternalDisplayInfo(ext.displayId, ext.name, w, h, dpi, ext.refreshRate, true))
+                }
+            } else {
+                _uiState.update { it.copy(targetDisplay = null) }
+            }
         }
         upd()
         dm.registerDisplayListener(object : android.hardware.display.DisplayManager.DisplayListener {
-            override fun onDisplayAdded(id: Int) = upd(); override fun onDisplayRemoved(id: Int) = upd(); override fun onDisplayChanged(id: Int) = upd()
+            override fun onDisplayAdded(id: Int) = upd()
+            override fun onDisplayRemoved(id: Int) = upd()
+            override fun onDisplayChanged(id: Int) = upd()
         }, null)
     }
 
     fun setApiKey(k: String) {
-        val t = k.trim(); context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE).edit().putString("gemini_api_key", t).apply()
-        SegmentRecorderService.apiKey = t; _uiState.update { it.copy(geminiApiKey = t) }
+        val t = k.trim()
+        context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE).edit().putString("gemini_api_key", t).apply()
+        SegmentRecorderService.apiKey = t
+        _uiState.update { it.copy(geminiApiKey = t) }
     }
 
     fun startFullWorkflow(resultCode: Int, resultData: Intent) {
@@ -150,43 +213,50 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             try {
                 _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Initializing capture...", errorMessage = null) }
-                context.startForegroundService(Intent(context, SegmentRecorderService::class.java).apply { action = SegmentRecorderService.ACTION_START; putExtra(SegmentRecorderService.EXTRA_RESULT_CODE, resultCode); putExtra(SegmentRecorderService.EXTRA_RESULT_DATA, resultData) })
+                context.startForegroundService(
+                    Intent(context, SegmentRecorderService::class.java).apply {
+                        action = SegmentRecorderService.ACTION_START
+                        putExtra(SegmentRecorderService.EXTRA_RESULT_CODE, resultCode)
+                        putExtra(SegmentRecorderService.EXTRA_RESULT_DATA, resultData)
+                    }
+                )
 
-                var rs = SegmentRecorderService.instance; var w = 0
-                while ((rs == null || !rs.serviceState.value.isReady) && w < 40) { delay(200); rs = SegmentRecorderService.instance; w++ }
-                if (rs == null) { _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Failed to bind to SegmentRecorderService.") }; return@launch }
+                var rs = SegmentRecorderService.instance
+                var w = 0
+                while ((rs == null || !rs.serviceState.value.isReady) && w < 40) {
+                    delay(200)
+                    rs = SegmentRecorderService.instance
+                    w++
+                }
+                if (rs == null) {
+                    _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Failed to bind to SegmentRecorderService.") }
+                    return@launch
+                }
 
                 val svc: SegmentRecorderService = rs
                 launch { svc.serviceState.collect { s -> _uiState.update { it.copy(recorderState = s, targetDisplay = s.targetDisplayInfo) } } }
-                svc.getGutterTracker()?.let { gt -> launch { gt.gutterState.collect { g -> _uiState.update { it.copy(currentTopLine = g.currentTopLine, currentBottomLine = g.currentBottomLine, linePitchPx = g.linePitchPx) } } } }
+                svc.getGutterTracker()?.let { gt ->
+                    launch {
+                        gt.gutterState.collect { g ->
+                            _uiState.update { it.copy(currentTopLine = g.currentTopLine, currentBottomLine = g.currentBottomLine, linePitchPx = g.linePitchPx) }
+                        }
+                    }
+                }
 
-                val ps = DesktopPaginationService.instance ?: return@launch run { _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Accessibility Service not enabled.") } }
+                val ps = DesktopPaginationService.instance ?: return@launch run {
+                    _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Accessibility Service not enabled.") }
+                }
                 val dId = svc.serviceState.value.targetDisplayInfo?.displayId ?: ps.resolveTargetDisplayId()
                 _uiState.update { it.copy(workflowStatus = "Calibrating line count...", uploadedFramesCount = 0) }
 
                 val measured = ps.performLineCalibration(dId) { svc.getGutterTracker()?.getCalibrationSnapshot() }
                 val total = if (measured > 10) measured else _uiState.value.targetTotalLines
                 setTargetTotalLines(total)
-                _uiState.update { it.copy(workflowStatus = "Calibrated: $total lines. Starting capture...", calculatedTotalLines = total, targetTotalLines = total) }
-
-                ps.startPacingEngine(dId, total, 1200L, "SETTLED_CAPTURE_AND_UPLOAD", onFrameCaptureNeeded = { pIdx, top, bot ->
-                    val cm = svc.getCaptureManager()
-                    cm?.captureSettledSnapshot()?.let { snap ->
-                        val res = uploadClient.uploadFrame(snap, top, bot, pIdx)
-                        svc.reportFrameUploaded(pIdx, top, bot, res.success)
-                        if (res.success) _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1) }
-                    }
-                    try {
-                        for (task in uploadClient.fetchRecaptureQueue()) {
-                            ps.seekToLine(task.lineNumber, top, dId); delay(500)
-                            cm?.captureSettledSnapshot()?.let { rSnap -> uploadClient.uploadFrame(rSnap, task.lineNumber, task.lineNumber + 45, pIdx); uploadClient.completeRecapture(task.lineNumber) }
-                        }
-                    } catch (_: Exception) {}
-                }, onPageAdvanced = { page, top, bot -> _uiState.update { it.copy(workflowStatus = "Page $page (Lines $top-$bot) Settled & Uploaded") } })
-
-                while (DesktopPaginationService.paginationState.value == DesktopPaginationService.PaginationState.Running) delay(500)
-                _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Capture Complete!") }
-            } catch (e: Exception) { _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Workflow error: ${e.message}") } }
+                _uiState.update { it.copy(workflowStatus = "Calibrated: $total lines. Triggering DAG Capture...", calculatedTotalLines = total, targetTotalLines = total) }
+                runDagCapture()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isWorkflowRunning = false, errorMessage = "Workflow error: ${e.message}") }
+            }
         }
     }
 
@@ -203,19 +273,27 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         DesktopPaginationService.resetToStart(0)
         viewModelScope.launch {
             uploadClient.resetServerState(0)
-            _uiState.update { it.copy(targetTotalLines = 0, calculatedTotalLines = 0, currentPage = 1, currentTopLine = 0, currentBottomLine = 0, uploadedFramesCount = 0, workflowStatus = "Session reset to Page 1", errorMessage = null) }
+            _uiState.update {
+                it.copy(
+                    targetTotalLines = 0,
+                    calculatedTotalLines = 0,
+                    currentPage = 1,
+                    currentTopLine = 0,
+                    currentBottomLine = 0,
+                    uploadedFramesCount = 0,
+                    workflowStatus = "Session reset to Page 1",
+                    errorMessage = null
+                )
+            }
         }
     }
 
     fun setServerHost(host: String) {
-        val t = host.trim(); context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE).edit().putString("server_host", t).apply()
-        uploadClient.serverHost = t; _uiState.update { it.copy(serverHost = t) }
+        val t = host.trim()
+        context.getSharedPreferences("matrix_capture_prefs", Context.MODE_PRIVATE).edit().putString("server_host", t).apply()
+        uploadClient.serverHost = t
+        _uiState.update { it.copy(serverHost = t) }
         viewModelScope.launch { _uiState.update { it.copy(isBackendConnected = uploadClient.testConnection()) } }
-    }
-
-    fun startPacingOnly(totalLines: Int = _uiState.value.targetTotalLines, dwellMs: Long = 1500L) {
-        Log.w(TAG, "Legacy startPacingOnly deprecated in favor of server DAG node workflow.")
-        runDagCapture()
     }
 
     fun calibrateDocument() {
@@ -227,28 +305,25 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
             val measured = ps.performLineCalibration(dId) { SegmentRecorderService.instance?.getGutterTracker()?.getCalibrationSnapshot() }
             if (measured > 10) {
                 setTargetTotalLines(measured)
-                _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Calibration complete: $measured lines.", targetTotalLines = measured, calculatedTotalLines = measured) }
-            } else _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Calibration completed. Lines: ${_uiState.value.targetTotalLines}") }
+                _uiState.update {
+                    it.copy(isWorkflowRunning = false, workflowStatus = "Calibration complete: $measured lines.", targetTotalLines = measured, calculatedTotalLines = measured)
+                }
+            } else {
+                _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Calibration completed. Lines: ${_uiState.value.targetTotalLines}") }
+            }
         }
     }
 
     fun stopWorkflow() = viewModelScope.launch {
         releaseVmWakeLock()
-        DesktopPaginationService.instance?.stopPagination(); SegmentRecorderService.instance?.stopWorkflow()
+        DesktopPaginationService.instance?.stopPagination()
+        SegmentRecorderService.instance?.stopWorkflow()
         _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "Stopped by user.") }
     }
 
     override fun onCleared() {
         super.onCleared()
         releaseVmWakeLock()
-    }
-
-    fun captureDesktopMode() {
-        android.util.Log.i("CaptureViewModel", "captureDesktopMode is disabled")
-    }
-
-    fun sendCapturesToPythonApi() {
-        android.util.Log.i("CaptureViewModel", "sendCapturesToPythonApi is disabled")
     }
 
     fun getNextPageLine() = viewModelScope.launch {
@@ -271,12 +346,21 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         delay(DesktopPaginationService.DWELL_TIME_MS)
         val snap = ps.captureScreenshot(dId) ?: return@launch run { _uiState.update { it.copy(workflowStatus = "Capture failed: Screen image was null") } }
         DesktopPaginationService.latestCapturedBitmap = snap
-        _uiState.update { it.copy(currentPage = targetPage, currentTopLine = expectedTop, currentBottomLine = expectedBot, workflowStatus = "Uploading Page $targetPage (Lines $expectedTop-$expectedBot)...") }
+        _uiState.update {
+            it.copy(
+                currentPage = targetPage,
+                currentTopLine = expectedTop,
+                currentBottomLine = expectedBot,
+                workflowStatus = "Uploading Page $targetPage (Lines $expectedTop-$expectedBot)..."
+            )
+        }
         val res = uploadClient.uploadFrame(snap, expectedTop, expectedBot, targetPage, sync = true)
         if (res.success) {
             _uiState.update { it.copy(uploadedFramesCount = it.uploadedFramesCount + 1, workflowStatus = "Page $targetPage (Ln $expectedTop-$expectedBot) Aligned & Uploaded ✔") }
             DesktopPaginationService.updateStatus("Page $targetPage (Ln $expectedTop-$expectedBot) Aligned & Uploaded ✔")
-        } else _uiState.update { it.copy(workflowStatus = "Upload failed: ${res.message}") }
+        } else {
+            _uiState.update { it.copy(workflowStatus = "Upload failed: ${res.message}") }
+        }
     }
 
     fun openAccessibilitySettings() = context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK })
@@ -294,26 +378,71 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         uploadClient.sendOrchestrationCommand(cmd, "mobile")
     }
 
-    fun runDagCapture() { updateOrch("RUN_DAG_CAPTURE", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 2 (Capture)") } }
-    fun runDagInit() { updateOrch("RUN_DAG_INIT", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 1 (Initialize)") } }
-    fun beginOrchestration() { runDagCapture() }
-    fun pauseOrchestration() { updateOrch("PAUSE", "PAUSED"); _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Paused") } }
-    fun resumeOrchestration() { updateOrch("RESUME", "RUNNING"); _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "DAG Resumed") } }
-    fun endOrchestration() { updateOrch("END", "COMPLETED"); _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Stopped") }; stopWorkflow() }
+    fun runDagCapture() {
+        updateOrch("RUN_DAG_CAPTURE", "RUNNING")
+        _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 2 (Capture)") }
+    }
+
+    fun runDagInit() {
+        updateOrch("RUN_DAG_INIT", "RUNNING")
+        _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "Running DAG 1 (Initialize)") }
+    }
+
+    fun beginOrchestration() {
+        runDagCapture()
+    }
+
+    fun pauseOrchestration() {
+        updateOrch("PAUSE", "PAUSED")
+        _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Paused") }
+    }
+
+    fun resumeOrchestration() {
+        updateOrch("RESUME", "RUNNING")
+        _uiState.update { it.copy(isWorkflowRunning = true, workflowStatus = "DAG Resumed") }
+    }
+
+    fun endOrchestration() {
+        updateOrch("END", "COMPLETED")
+        _uiState.update { it.copy(isWorkflowRunning = false, workflowStatus = "DAG Stopped") }
+        stopWorkflow()
+    }
+
     fun restartOrchestration() {
-        updateOrch("RESTART", "RUNNING"); _uiState.update { it.copy(currentPage = 1, currentTopLine = 1, currentBottomLine = 0, isWorkflowRunning = true, workflowStatus = "Restarting DAG 1 (Initialize)") }
+        updateOrch("RESTART", "RUNNING")
+        _uiState.update { it.copy(currentPage = 1, currentTopLine = 1, currentBottomLine = 0, isWorkflowRunning = true, workflowStatus = "Restarting DAG 1 (Initialize)") }
     }
 
     data class UiState(
-        val isWorkflowRunning: Boolean = false, val isAccessibilityActive: Boolean = false, val geminiApiKey: String = "", val serverHost: String = "192.168.86.83:8000",
-        val isBackendConnected: Boolean = false, val uploadedFramesCount: Int = 0, val targetTotalLines: Int = 0, val workflowStatus: String = "Ready on Page 1",
-        val calibrationStatus: String = "Uncalibrated", val calculatedTotalLines: Int = 0, val currentPage: Int = 1, val dwellCountdownMs: Long = 0L,
-        val currentTopLine: Int = 1, val currentBottomLine: Int = 44, val linePitchPx: Float = 32f, val mobilePromptTokens: Int = 0, val mobileCandidatesTokens: Int = 0,
-        val mobileTotalTokens: Int = 0, val autoTuneFactor: Float = 1.0f, val bottomToTopError: Int = 0, val wrappedLinesDetected: Int = 0,
-        val targetDisplay: DisplayCaptureManager.ExternalDisplayInfo? = null, val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
-        val assemblyResult: MarkdownAssembler.AssemblyResult? = null, val errorMessage: String? = null, val orchestrationStatus: String = "IDLE",
-        val orchestrationInvokedBy: String = "Web Studio 💻", val orchestrationActiveStep: String = "START_READY", val orchestrationStepLabel: String = "Ready at Ln 1",
-        val orchestrationNextTargetTop: Int? = null, val deviceModel: DeviceModel = DeviceModel.AUTO
+        val isWorkflowRunning: Boolean = false,
+        val isAccessibilityActive: Boolean = false,
+        val geminiApiKey: String = "",
+        val serverHost: String = "192.168.86.83:8000",
+        val isBackendConnected: Boolean = false,
+        val uploadedFramesCount: Int = 0,
+        val targetTotalLines: Int = 0,
+        val workflowStatus: String = "Ready on Page 1",
+        val calibrationStatus: String = "Uncalibrated",
+        val calculatedTotalLines: Int = 0,
+        val currentPage: Int = 1,
+        val dwellCountdownMs: Long = 0L,
+        val currentTopLine: Int = 1,
+        val currentBottomLine: Int = 49,
+        val linePitchPx: Float = 32f,
+        val mobilePromptTokens: Int = 0,
+        val mobileCandidatesTokens: Int = 0,
+        val mobileTotalTokens: Int = 0,
+        val autoTuneFactor: Float = 1.0f,
+        val bottomToTopError: Int = 0,
+        val wrappedLinesDetected: Int = 0,
+        val targetDisplay: DisplayCaptureManager.ExternalDisplayInfo? = null,
+        val recorderState: SegmentRecorderService.RecorderState = SegmentRecorderService.RecorderState(),
+        val errorMessage: String? = null,
+        val orchestrationStatus: String = "IDLE",
+        val orchestrationInvokedBy: String = "Web Studio 💻",
+        val orchestrationActiveStep: String = "START_READY",
+        val orchestrationStepLabel: String = "Ready at Ln 1",
+        val orchestrationNextTargetTop: Int? = null,
+        val deviceModel: DeviceModel = DeviceModel.AUTO
     )
-    companion object { private const val TAG = "CaptureViewModel" }
 }

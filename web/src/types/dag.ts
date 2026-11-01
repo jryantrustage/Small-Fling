@@ -52,7 +52,14 @@ export interface PerformanceDiagnosis {
   promptDataUri: string;
 }
 
-export type DagGroup = 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble';
+export type DagGroup =
+  | 'initialize'
+  | 'capture_entire_markdown'
+  | 'position_navigation'
+  | 'verify_assemble'
+  | 'post_capture_analyzer';
+
+export type DagPhase = 'phase1_init' | 'phase2_capture' | 'phase3_analyzer';
 
 export interface NodeMeta {
   id: string;
@@ -223,12 +230,45 @@ export const NODES_METADATA: NodeMeta[] = [
   {
     id: 'batch_frames_ocr',
     step: '9',
-    shortName: 'Batch OCR Rescan',
+    shortName: 'Batch Rescan',
     fullName: '9. SEQUENTIAL BATCH OCR',
     subhead: 'Sequential All-Frames Rescan',
     desc: 'Runs full OCR rescan on each captured frame sequentially top-to-bottom, aligning duplicated line numbers and assembling markdown.',
     group: 'verify_assemble',
     accentColor: '#00ff9d',
+    hasConfig: true
+  },
+  {
+    id: 'markdown_tag_parser',
+    step: '10',
+    shortName: 'Parse File Tags',
+    fullName: '10. PARSE FILE TAGS & VFS TREE',
+    subhead: 'CODESCAN Tag & Boundary Repair',
+    desc: 'Parses reconstructed markdown file blocks, repairs OCR-corrupted CODESCAN tags from source frames, and builds the VFS tree.',
+    group: 'post_capture_analyzer',
+    accentColor: '#38bdf8',
+    hasConfig: true
+  },
+  {
+    id: 'ast_compiler_validator',
+    step: '11',
+    shortName: 'TS AST Compile',
+    fullName: '11. AST & TYPESCRIPT COMPILER CHECK',
+    subhead: 'In-Memory memfs AST & Auto-Heal',
+    desc: 'Validates all VFS files with TypeScript Compiler API in memfs and auto-heals syntax errors by re-OCRing source frame crops.',
+    group: 'post_capture_analyzer',
+    accentColor: '#f59e0b',
+    hasConfig: true
+  },
+  {
+    id: 'sandbox_ide',
+    step: '12',
+    shortName: 'Sandbox & Monaco',
+    fullName: '12. SANDBOX & MONACO VFS READY',
+    subhead: 'Materialize Sandbox & Live IDE',
+    desc: 'Materializes VFS files to disk, links shared node_modules, and publishes workspace diagnostics and line-to-frame source maps.',
+    group: 'post_capture_analyzer',
+    accentColor: '#10b981',
     hasConfig: true
   }
 ];

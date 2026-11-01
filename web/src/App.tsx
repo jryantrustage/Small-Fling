@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
-  ChevronLeft, ChevronRight, Camera, Cloud, Zap, Smartphone, Key, Cpu,
+  Camera, Cloud, Zap, Smartphone, Key, Cpu,
   Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
   Check, FileText, X,
-  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle, Keyboard,
+  Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle,
   Upload, Download
 } from 'lucide-react';
 import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './TelemetryToaster';
@@ -14,7 +14,6 @@ import type {
   ProjectData, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
   DeviceProfile, DeviceHardwareSpecs, DesktopVerificationInfo, MultipartBundleState
 } from './types';
-import { AlignmentAlertBanner } from './components/AlignmentAlertBanner';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
 import { DeviceStudioDrawer } from './components/DeviceStudioDrawer';
 import { FrameTracePanel } from './components/FrameTracePanel';
@@ -32,6 +31,8 @@ import { VirtualizedFrameStrip } from './components/VirtualizedFrameStrip';
 import { VirtualizedLineViewer } from './components/VirtualizedLineViewer';
 import { HeadlessTelemetryModal, type HeadlessTelemetryData } from './components/HeadlessTelemetryModal';
 import { WindowControls } from './components/common/WindowControls';
+import { OcrLineInspectorWorkspace } from './components/ocr/OcrLineInspectorWorkspace';
+import { AnalyzerSandboxWorkspace } from './components/analyzer/AnalyzerSandboxWorkspace';
 
 const env = import.meta.env;
 const API_BASE = (() => {
@@ -68,7 +69,7 @@ function AppContent() {
   const { confirm, alert: showAlert } = useConfirm();
   const [projects, setProjects] = useState<ProjectData[]>([]);
   const [activeProject, setActiveProject] = useState<ProjectData | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [_isSidebarOpen, _setIsSidebarOpen] = useState(false);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProject, setNewProject] = useState({ name: '', desc: '', target: 0, deviceProfileId: 'auto', lockDevice: true });
   const [projectInitProgress, setProjectInitProgress] = useState<{
@@ -99,8 +100,11 @@ function AppContent() {
   const [streamKey, setStreamKey] = useState(0);
   const { secondsAgo: inspectorAgoSec } = useAgoTimer(streamKey);
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
-  const [showDag, setShowDag] = useState(true);
-  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>('all');
+  const [workspaceMode, setWorkspaceMode] = useState<'capture_dag' | 'ocr_inspector' | 'analyzer_sandbox'>('capture_dag');
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
+  const projectDropdownRef = useRef<HTMLDivElement>(null);
+  const [_showDag, setShowDag] = useState(true);
+  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('init_end');
   const [showGotoModal, setShowGotoModal] = useState(false);
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
@@ -111,7 +115,7 @@ function AppContent() {
   const [isCheckingAlignment, setIsCheckingAlignment] = useState(false);
   const [showAlignmentModal, setShowAlignmentModal] = useState(false);
   const [isBannerDismissed, setIsBannerDismissed] = useState(() => localStorage.getItem('mc_banner_dismissed') === 'true');
-  const [isBannerMinimized, setIsBannerMinimized] = useState(() => localStorage.getItem('mc_banner_minimized') === 'true');
+  const [_isBannerMinimized, setIsBannerMinimized] = useState(() => localStorage.getItem('mc_banner_minimized') === 'true');
   const [dismissedItems, setDismissedItems] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('mc_dismissed_alignment_items') || '[]'); } catch { return []; }
   });
@@ -280,14 +284,6 @@ function AppContent() {
   });
   const [studioInitialTab, setStudioInitialTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>('kiosk');
 
-  const handleOpenStudio = (tab?: 'kiosk' | 'device' | 'processes' | 'telemetry') => {
-    if (tab) setStudioInitialTab(tab);
-    setShowStudioDrawer(true);
-    setStudioMinimized(false);
-    setInspectorMaximized(false);
-    try { localStorage.setItem('mc_show_studio_drawer', 'true'); } catch {}
-  };
-
   const handleCloseStudio = () => {
     setShowStudioDrawer(false);
     try { localStorage.setItem('mc_show_studio_drawer', 'false'); } catch {}
@@ -304,8 +300,8 @@ function AppContent() {
   const [isClosingKeyboard, setIsClosingKeyboard] = useState(false);
   const [desktopKeyboardProhibited, setDesktopKeyboardProhibited] = useState<boolean>(true);
   const [desktopModeEnabled, setDesktopModeEnabled] = useState<boolean>(true);
-  const [isTogglingDesktopMode, setIsTogglingDesktopMode] = useState<boolean>(false);
-  const [isTogglingKeyboardProhibit, setIsTogglingKeyboardProhibit] = useState<boolean>(false);
+  const [_isTogglingDesktopMode, setIsTogglingDesktopMode] = useState<boolean>(false);
+  const [_isTogglingKeyboardProhibit, setIsTogglingKeyboardProhibit] = useState<boolean>(false);
   const [desktopVerification, setDesktopVerification] = useState<DesktopVerificationInfo | null>(null);
   const [showDesktopDiag, setShowDesktopDiag] = useState<boolean>(false);
   const desktopDiagRef = useRef<HTMLDivElement>(null);
@@ -343,17 +339,6 @@ function AppContent() {
   const layoutMenuRef = useRef<HTMLDivElement>(null);
 
   // Unified Window Navigation Handlers
-  const handleToggleDag = useCallback(() => {
-    if (!showDag) {
-      setShowDag(true);
-      setDagMinimized(false);
-    } else if (dagMinimized) {
-      setDagMinimized(false);
-    } else {
-      setShowDag(false);
-    }
-  }, [showDag, dagMinimized]);
-
   const handleTogglePhone = useCallback(() => {
     setInspectorMaximized(false);
     setFramesMaximized(false);
@@ -395,14 +380,6 @@ function AppContent() {
     }
   }, [showStudioDrawer, studioMinimized, studioInitialTab]);
 
-  const handleToggleLogs = useCallback(() => {
-    setIsTelemetryExpanded(prev => {
-      const next = !prev;
-      if (next) setTelemetryActiveTab('events');
-      return next;
-    });
-  }, []);
-
   const handleToggleFrames = useCallback(() => {
     setInspectorMaximized(false);
     setLinesMaximized(false);
@@ -427,118 +404,6 @@ function AppContent() {
     }
   }, [linesMaximized, linesMinimized]);
 
-  const handleApplyLayoutPreset = useCallback((preset: 'balanced' | 'phone_focus' | 'studio_focus' | 'document_audit' | 'zen_canvas' | 'tile_all' | 'minimize_all' | 'reset_all') => {
-    setShowLayoutMenu(false);
-    if (preset === 'balanced') {
-      setShowDag(true);
-      setDagMinimized(false);
-      setInspectorMode('live');
-      setInspectorMinimized(false);
-      setFramesMinimized(false);
-      setFramesMaximized(false);
-      setLinesMinimized(false);
-      setLinesMaximized(false);
-      setShowStudioDrawer(false);
-      setIsTelemetryExpanded(false);
-      setInspectorMaximized(false);
-      setInspectorPercent(50);
-    } else if (preset === 'phone_focus') {
-      setShowDag(true);
-      setDagMinimized(false);
-      setInspectorMode('live');
-      setInspectorMinimized(false);
-      setFramesMinimized(true);
-      setFramesMaximized(false);
-      setLinesMinimized(true);
-      setLinesMaximized(false);
-      setShowStudioDrawer(false);
-      setIsTelemetryExpanded(false);
-      setInspectorMaximized(true);
-    } else if (preset === 'studio_focus') {
-      setShowDag(true);
-      setDagMinimized(false);
-      setInspectorMode('live');
-      setInspectorMinimized(false);
-      setShowStudioDrawer(true);
-      setStudioMinimized(false);
-      setStudioInitialTab('device');
-      setFramesMinimized(true);
-      setFramesMaximized(false);
-      setLinesMinimized(true);
-      setLinesMaximized(false);
-      setIsTelemetryExpanded(false);
-      setInspectorMaximized(false);
-    } else if (preset === 'document_audit') {
-      setShowDag(true);
-      setDagMinimized(true);
-      setInspectorMode('single');
-      setInspectorMinimized(false);
-      setFramesMinimized(false);
-      setFramesMaximized(false);
-      setLinesMinimized(false);
-      setLinesMaximized(false);
-      setShowStudioDrawer(false);
-      setIsTelemetryExpanded(false);
-      setInspectorMaximized(false);
-      setInspectorPercent(48);
-    } else if (preset === 'zen_canvas') {
-      setShowDag(true);
-      setDagMinimized(true);
-      setInspectorMinimized(false);
-      setInspectorMaximized(true);
-      setFramesMinimized(true);
-      setFramesMaximized(false);
-      setLinesMinimized(true);
-      setLinesMaximized(false);
-      setShowStudioDrawer(false);
-      setIsTelemetryExpanded(false);
-    } else if (preset === 'tile_all') {
-      setShowDag(true);
-      setDagMinimized(false);
-      setInspectorMode('live');
-      setInspectorMinimized(false);
-      setInspectorMaximized(false);
-      setFramesMinimized(false);
-      setFramesMaximized(false);
-      setLinesMinimized(false);
-      setLinesMaximized(false);
-      setShowStudioDrawer(true);
-      setStudioMinimized(false);
-      setIsTelemetryExpanded(true);
-      setInspectorPercent(45);
-      setFramesPanelWidth(220);
-      setStudioPanelWidth(420);
-    } else if (preset === 'minimize_all') {
-      setShowDag(true);
-      setDagMinimized(true);
-      setFramesMinimized(true);
-      setFramesMaximized(false);
-      setLinesMinimized(true);
-      setLinesMaximized(false);
-      setShowStudioDrawer(true);
-      setStudioMinimized(true);
-      setIsTelemetryExpanded(false);
-      setInspectorMinimized(false);
-      setInspectorMaximized(false);
-      setInspectorPercent(50);
-    } else if (preset === 'reset_all') {
-      setShowDag(true);
-      setDagMinimized(false);
-      setShowStudioDrawer(true);
-      setStudioMinimized(false);
-      setFramesMinimized(false);
-      setFramesMaximized(false);
-      setLinesMinimized(false);
-      setLinesMaximized(false);
-      setInspectorMinimized(false);
-      setInspectorMaximized(false);
-      setIsTelemetryExpanded(false);
-      setInspectorPercent(50);
-      setFramesPanelWidth(240);
-      setStudioPanelWidth(460);
-    }
-  }, []);
-
   // Group Edit / Selection States
   const [selectedFrameIds, setSelectedFrameIds] = useState<Set<string>>(new Set());
   const [isBatchDeletingFrames, setIsBatchDeletingFrames] = useState(false);
@@ -546,8 +411,7 @@ function AppContent() {
   const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
 
   // Auto-Fix & Calibrate States
-  const [isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
-  const [isRunningCalibration, setIsRunningCalibration] = useState(false);
+  const [_isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
   const [sequentialRescanStatus, setSequentialRescanStatus] = useState<{
     is_running: boolean;
     current_index: number;
@@ -833,12 +697,15 @@ function AppContent() {
       if (layoutMenuRef.current && !layoutMenuRef.current.contains(e.target as Node)) {
         setShowLayoutMenu(false);
       }
+      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
+        setShowProjectDropdown(false);
+      }
     };
-    if (showLayoutMenu) {
+    if (showLayoutMenu || showProjectDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showLayoutMenu]);
+  }, [showLayoutMenu, showProjectDropdown]);
 
   const isDocVisibleRef = useRef(true);
   const isFetchingRef = useRef(false);
@@ -2324,36 +2191,6 @@ function AppContent() {
     }
   };
 
-  const handleTriggerCalibration = async () => {
-    setIsRunningCalibration(true);
-    try {
-      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
-      const res = await api('/api/dag/groups/initialize/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer })
-      });
-      let d: any = {};
-      const text = await res.text();
-      try {
-        d = text ? JSON.parse(text) : {};
-      } catch {
-        d = { message: text || `HTTP ${res.status} ${res.statusText}` };
-      }
-      if (res.ok) {
-        addTelemetryEvent('SYSTEM', 'Triggered Ctrl+End / Ctrl+Home Calibration sequence ✔');
-        await fetchData();
-      } else {
-        const errorMsg = d?.detail?.message || d?.detail || d?.message || d?.error || text || 'Failed to trigger calibration';
-        addTelemetryEvent('SYSTEM', errorMsg, undefined, 'system');
-      }
-    } catch (e: any) {
-      addTelemetryEvent('SYSTEM', `Calibration error: ${e.message}`, undefined, 'system');
-    } finally {
-      setIsRunningCalibration(false);
-    }
-  };
-
   const handleToggleSelectFrame = (fid: string, e: React.MouseEvent | React.ChangeEvent) => {
     e.stopPropagation();
     setSelectedFrameIds(prev => {
@@ -2502,729 +2339,328 @@ function AppContent() {
     return deviceModel === 'pixel_8' ? 40 : 49;
   })();
 
+  const globalCurrentLine = telemetry.current_bottom_line || documentData.max_line || 0;
+  const globalTargetLines = activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0;
+  const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
+
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">
-      <header className="studio-header">
-        <div className="header-left">
-          <div className="brand-group">
+      {/* Unified Top Navigation Bar (Single 48px Row) */}
+      <header className="unified-top-navbar">
+        {/* Left: App Brand + Project Selector Dropdown + Device Target Pill */}
+        <div className="navbar-left">
+          <div className="brand-group" style={{ display: 'flex', alignItems: 'center', gap: '7px', marginRight: '4px' }}>
             <span className="brand-dot" />
-            <h1 className="brand-title">Matrix Capture</h1>
-            <span className="brand-tag">v2.5 Studio</span>
-          </div>
-          <div className="project-badge" onClick={() => setIsSidebarOpen(!isSidebarOpen)} title={activeProject?.description ? `File: ${activeProject.description}` : (activeProject?.name || 'Select Project')}>
-            <FolderKanban size={13} color="#00ff9d" />
-            <span className="project-badge-name">
-              {activeProject ? (
-                <>
-                  {activeProject.name}
-                  {activeProject.description && (
-                    <span style={{ fontSize: '11px', color: '#8b949e', fontWeight: 400, marginLeft: '6px' }}>
-                      ({activeProject.description})
-                    </span>
-                  )}
-                </>
-              ) : 'Select Project'}
-            </span>
-            <ChevronDown size={11} />
-          </div>
-          {activeProject && (
-            <>
-              <button
-                type="button"
-                className="btn-text-secondary"
-                onClick={e => { e.stopPropagation(); handleExportProject(activeProject.id, activeProject.name); }}
-                disabled={isExportingProject}
-                title={`Export complete project "${activeProject.name}" as .zip`}
-                aria-label={`Export project ${activeProject.name}`}
-                style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#58a6ff' }}
-              >
-                <Download size={12} />
-              </button>
-              <button
-                type="button"
-                className="btn-text-danger"
-                onClick={e => { e.stopPropagation(); handleDeleteProject(activeProject.id, activeProject.name); }}
-                title={`Delete active project "${activeProject.name}"`}
-                aria-label={`Delete active project ${activeProject.name}`}
-                style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                <Trash2 size={12} />
-              </button>
-            </>
-          )}
-          <input
-            type="file"
-            ref={projectImportInputRef}
-            accept=".zip"
-            style={{ display: 'none' }}
-            onChange={e => {
-              const file = e.target.files?.[0];
-              if (file) handleImportProject(file);
-            }}
-          />
-          <button
-            type="button"
-            className="btn-text-secondary"
-            onClick={e => { e.stopPropagation(); projectImportInputRef.current?.click(); }}
-            disabled={isImportingProject}
-            title="Import complete project (.zip archive)"
-            aria-label="Import complete project archive"
-            style={{ padding: '4px 6px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px', color: '#38bdf8' }}
-          >
-            <Upload size={12} />
-            <span>{isImportingProject ? '...' : 'Import'}</span>
-          </button>
-        </div>
-
-        <div className="header-center">
-          <div className="device-selector-wrapper" ref={deviceDropdownRef}>
-            <button
-              className={`device-selector-btn ${showStudioDrawer && studioInitialTab === 'device' && !studioMinimized ? 'open' : ''} ${!isCurrentDeviceConnected ? 'unavailable' : ''}`}
-              onClick={() => handleOpenStudio('device')}
-              title="Select connected Android device & configure wireless ADB in Studio"
-            >
-              <div className={`device-status-dot ${isCurrentDeviceConnected ? 'online' : 'offline'}`} />
-              <Smartphone size={13} color={isCurrentDeviceConnected ? 'var(--color-primary)' : '#ef4444'} />
-              <span style={{ fontWeight: 700 }}>{devDisplayName}</span>
-              <span className="device-spec">({devLines}L)</span>
-            </button>
+            <h1 className="brand-title" style={{ fontSize: '13.5px', fontWeight: 800, margin: 0, whiteSpace: 'nowrap' }}>Small-Fling</h1>
           </div>
 
-          <div className="window-dock-bar">
-            {/* DAG Pill */}
+          {/* Project Selector Dropdown */}
+          <div ref={projectDropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
             <button
               type="button"
-              className={`window-dock-pill ${showDag && !dagMinimized ? 'active' : ''} ${showDag && dagMinimized ? 'minimized' : ''}`}
-              onClick={handleToggleDag}
-              title={`Toggle Flow DAG (Currently ${!showDag ? 'Closed' : (dagMinimized ? 'Minimized' : 'Active')})`}
+              className="project-badge"
+              onClick={() => setShowProjectDropdown(p => !p)}
+              title={activeProject?.description ? `File: ${activeProject.description}` : (activeProject?.name || 'Select Project')}
+              style={{ height: '30px', padding: '0 10px', gap: '6px' }}
             >
-              <span className={`pill-indicator ${!showDag ? 'off' : (dagMinimized ? 'min' : 'on')}`} />
-              <Layers size={11} />
-              <span>DAG</span>
-              <span className="pill-badge">{!showDag ? 'OFF' : (dagMinimized ? 'MIN' : 'ON')}</span>
-            </button>
-
-            {/* Phone Stream Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${inspectorMode === 'live' && !inspectorMinimized && !framesMaximized && !linesMaximized ? 'active' : ''} ${inspectorMinimized || framesMaximized || linesMaximized ? 'minimized' : ''}`}
-              onClick={handleTogglePhone}
-              title={`Toggle Live Phone Display Viewport (${inspectorMinimized || framesMaximized || linesMaximized ? 'Minimized' : (inspectorMode === 'live' ? 'Live Stream Active' : 'Single Frame Mode')})`}
-            >
-              <span className={`pill-indicator ${inspectorMinimized || framesMaximized || linesMaximized ? 'min' : (inspectorMode === 'live' ? 'on' : 'off')}`} />
-              <Smartphone size={11} />
-              <span>Phone</span>
-              <span className="pill-badge">{inspectorMinimized || framesMaximized || linesMaximized ? 'MIN' : (inspectorMaximized ? 'MAX' : (inspectorMode === 'live' ? 'LIVE' : 'FRAME'))}</span>
-            </button>
-
-            {/* Studio Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${showStudioDrawer && !studioMinimized ? 'active' : ''} ${showStudioDrawer && studioMinimized ? 'minimized' : ''}`}
-              onClick={() => handleToggleStudio()}
-              title={`Toggle Device & Hardware Studio (Currently ${!showStudioDrawer ? 'Closed' : (studioMinimized ? 'Minimized' : 'Active')})`}
-            >
-              <span className={`pill-indicator ${!showStudioDrawer ? 'off' : (studioMinimized ? 'min' : 'on')}`} />
-              <Monitor size={11} />
-              <span>Studio</span>
-              <span className="pill-badge">{!showStudioDrawer ? 'OFF' : (studioMinimized ? 'MIN' : 'ON')}</span>
-            </button>
-
-            {/* Logs / Telemetry Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${isTelemetryExpanded ? 'active' : ''}`}
-              onClick={handleToggleLogs}
-              title={`Toggle Live Logs & System Telemetry Drawer (Currently ${isTelemetryExpanded ? 'Open' : 'Collapsed'})`}
-            >
-              <span className={`pill-indicator ${isTelemetryExpanded ? 'on' : 'off'}`} />
-              <Activity size={11} />
-              <span>Logs</span>
-              <span className="pill-badge">{isTelemetryExpanded ? 'OPEN' : 'MIN'}</span>
-            </button>
-
-            <div className="dock-separator" />
-
-            {/* Frames Feed Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${!framesMinimized && !inspectorMaximized && !linesMaximized ? 'active' : 'minimized'}`}
-              onClick={handleToggleFrames}
-              title={`Toggle Captured Frames Feed (${frames.length} frames)`}
-            >
-              <span className={`pill-indicator ${!framesMinimized && !inspectorMaximized && !linesMaximized ? 'on' : 'min'}`} />
-              <Camera size={11} />
-              <span>Frames</span>
-              <span className="pill-count">{framesMaximized ? 'MAX' : frames.length}</span>
-            </button>
-
-            {/* Lines Panel Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${!linesMinimized && !inspectorMaximized && !framesMaximized ? 'active' : 'minimized'}`}
-              onClick={handleToggleLines}
-              title={`Toggle Verified Lines Panel (${filteredLines.length} lines)`}
-            >
-              <span className={`pill-indicator ${!linesMinimized && !inspectorMaximized && !framesMaximized ? 'on' : 'min'}`} />
-              <Search size={11} />
-              <span>Lines</span>
-              <span className="pill-count">{linesMaximized ? 'MAX' : filteredLines.length}</span>
-            </button>
-
-            <div className="dock-separator" />
-
-            {/* Desktop Soft Keyboard Prohibition Pill */}
-            <button
-              type="button"
-              className={`window-dock-pill ${desktopKeyboardProhibited ? 'active' : ''}`}
-              style={{
-                borderColor: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.6)' : 'rgba(210, 153, 34, 0.6)',
-                background: desktopKeyboardProhibited ? 'rgba(63, 185, 80, 0.14)' : 'rgba(210, 153, 34, 0.14)',
-                color: desktopKeyboardProhibited ? '#3fb950' : '#e3b341'
-              }}
-              onClick={() => handleToggleProhibitKeyboard(!desktopKeyboardProhibited)}
-              disabled={isTogglingKeyboardProhibit}
-              title={desktopKeyboardProhibited
-                ? 'Desktop Soft Keyboard is PROHIBITED at OS level (keyboard will NEVER pop up when clicking nodes). Click to allow.'
-                : 'Desktop Soft Keyboard is ALLOWED. Click to completely prohibit soft keyboard on desktop screen.'}
-            >
-              <span className={`pill-indicator ${desktopKeyboardProhibited ? 'on' : 'off'}`} style={{ background: desktopKeyboardProhibited ? '#3fb950' : '#d29922' }} />
-              <Keyboard size={11} />
-              <span>{desktopKeyboardProhibited ? 'KB BLOCKED' : 'ALLOW KB'}</span>
-            </button>
-
-            {/* Hardware Desktop Mode / Phone Screen (Mouse) Switcher Pill & Verification Popover */}
-            <div className="desktop-mode-wrapper" ref={desktopDiagRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-              <button
-                type="button"
-                className={`window-dock-pill desktop-pill ${
-                  desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'connected' : 'armed')
-                    : 'phone-mode'
-                }`}
-                onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
-                disabled={isTogglingDesktopMode}
-                title={desktopModeEnabled
-                  ? (desktopVerification?.hardware_connected
-                      ? `Desktop Mode ON (Connected to Display #${desktopVerification.external_display_id || 11}). Click to switch mouse to phone screen.`
-                      : 'Desktop Mode ARMED on Pixel 8. Developer options verified. Ready to plug in USB-C DP Alt Mode cable. Click to disable.')
-                  : 'Phone Screen Mode Active. Mouse routed to phone screen (Display 0). Click to enable Desktop Mode.'}
-              >
-                <span className={`pill-indicator ${
-                  desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'on radar-connected' : 'min armed-pulse')
-                    : 'off'
-                }`} />
-                {desktopModeEnabled ? <Monitor size={11} /> : <Smartphone size={11} />}
-                <span>
-                  {desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'DESKTOP ON' : 'DESKTOP ARMED')
-                    : 'PHONE MODE'}
-                </span>
-                <span className={`desktop-sub-badge ${
-                  desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? 'connected' : 'ready-plug')
-                    : 'phone'
-                }`}>
-                  {desktopModeEnabled
-                    ? (desktopVerification?.hardware_connected ? `DISP #${desktopVerification.external_display_id || 11}` : 'READY TO PLUG IN')
-                    : 'PHONE MOUSE'}
-                </span>
-              </button>
-
-              {/* Quick Info & Verification Trigger */}
-              <button
-                type="button"
-                className={`desktop-diag-trigger ${showDesktopDiag ? 'active' : ''}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowDesktopDiag(prev => !prev);
-                  if (!showDesktopDiag) {
-                    handleVerifyDesktopMode();
-                  }
-                }}
-                title="View Hardware & DP Alt Mode Diagnostics"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: desktopModeEnabled ? (desktopVerification?.hardware_connected ? '#3fb950' : '#58a6ff') : '#a371f7',
-                  padding: '2px 4px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  marginLeft: '-2px'
-                }}
-              >
-                <Info size={11} />
-              </button>
-
-              {/* Hardware & DP Alt Mode Verification Popover */}
-              {showDesktopDiag && (
-                <div className="desktop-hardware-popover animate-fadeIn" style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 6px)',
-                  right: 0,
-                  width: '350px',
-                  background: 'rgba(13, 17, 23, 0.98)',
-                  backdropFilter: 'blur(16px)',
-                  border: '1px solid rgba(88, 166, 255, 0.35)',
-                  borderRadius: '8px',
-                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255, 255, 255, 0.2)',
-                  zIndex: 2500,
-                  padding: '12px',
-                  fontSize: '11px',
-                  color: '#c9d1d9'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.4px' }}>
-                      <Monitor size={13} color="#58a6ff" />
-                      <span>DESKTOP HARDWARE STATUS</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleVerifyDesktopMode()}
-                      title="Re-verify Device Status"
-                      style={{
-                        background: 'rgba(56, 139, 253, 0.15)',
-                        border: '1px solid rgba(56, 139, 253, 0.35)',
-                        color: '#58a6ff',
-                        borderRadius: '4px',
-                        padding: '2px 6px',
-                        fontSize: '9px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '3px'
-                      }}
-                    >
-                      <RefreshCw size={9} />
-                      <span>Re-verify</span>
-                    </button>
-                  </div>
-
-                  {/* Verification Item Rows */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
-                      <span style={{ color: '#8b949e' }}>OS Developer & Window Flags:</span>
-                      <span style={{
-                        color: desktopVerification?.os_desktop_mode_ready ? '#3fb950' : '#f85149',
-                        fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px'
-                      }}>
-                        {desktopVerification?.os_desktop_mode_ready ? <Check size={11} /> : <AlertTriangle size={11} />}
-                        {desktopVerification?.os_desktop_mode_ready ? 'ARMED (8/8 Active)' : 'DISARMED'}
-                      </span>
-                    </div>
-
-                    {/* 8-Flag Grid Breakdown */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', padding: '6px 8px', background: 'rgba(0,0,0,0.25)', borderRadius: '4px', fontSize: '9px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.secure_desktop_mode ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.secure_desktop_mode ?? desktopModeEnabled) ? '✔' : '○'} secure desktop_mode
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.enable_freeform_support ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.enable_freeform_support ?? desktopModeEnabled) ? '✔' : '○'} freeform_support
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.force_desktop_mode_on_external ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.force_desktop_mode_on_external ?? desktopModeEnabled) ? '✔' : '○'} force_desktop_mode
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.override_desktop_experience ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.override_desktop_experience ?? desktopModeEnabled) ? '✔' : '○'} desktop_experience
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.force_resizable_activities ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.force_resizable_activities ?? desktopModeEnabled) ? '✔' : '○'} resizable_activities
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: (desktopVerification?.settings_breakdown?.enable_non_resizable_multi_window ?? desktopModeEnabled) ? '#3fb950' : '#8b949e' }}>
-                        {(desktopVerification?.settings_breakdown?.enable_non_resizable_multi_window ?? desktopModeEnabled) ? '✔' : '○'} multi_window
-                      </div>
-                    </div>
-
-                    {/* Developer Options Dimmed Explanation Note */}
-                    <div style={{ background: 'rgba(56, 139, 253, 0.08)', border: '1px solid rgba(56, 139, 253, 0.22)', padding: '6px 8px', borderRadius: '4px', fontSize: '9.5px', color: '#8b949e', lineHeight: '1.4' }}>
-                      <strong style={{ color: '#58a6ff' }}>Developer Options Note:</strong> In Android 15, "Enable desktop experience features" is locked to <span style={{ color: '#3fb950', fontWeight: 700 }}>ON (checked=true)</span> for eligible Pixel devices. Because user toggling is disabled by system policy, the switch appears dimmed in Developer Options, but is active.
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
-                      <span style={{ color: '#8b949e' }}>USB-C Hub Port:</span>
-                      <span style={{
-                        color: desktopVerification?.usb_connected ? '#3fb950' : '#8b949e',
-                        fontWeight: 700
-                      }}>
-                        {desktopVerification?.usb_connected ? 'CONNECTED (Host)' : 'DISCONNECTED'}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
-                      <span style={{ color: '#8b949e' }}>DisplayPort Signal (HPD):</span>
-                      <span style={{
-                        color: desktopVerification?.hot_plug_detect ? '#3fb950' : (desktopVerification?.usb_connected ? '#e3b341' : '#8b949e'),
-                        fontWeight: 700
-                      }}>
-                        {desktopVerification?.hot_plug_detect ? 'ACTIVE' : (desktopVerification?.usb_connected ? 'AWAITING MONITOR HPD' : 'STANDBY')}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
-                      <span style={{ color: '#8b949e' }}>External Monitor:</span>
-                      <span style={{
-                        color: desktopVerification?.hardware_connected ? '#3fb950' : '#8b949e',
-                        fontWeight: 700
-                      }}>
-                        {desktopVerification?.hardware_connected
-                          ? `Display #${desktopVerification.external_display_id} (${desktopVerification.resolution || 'Active'})`
-                          : 'Awaiting Cable Plug-in'}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.03)', padding: '5px 8px', borderRadius: '4px' }}>
-                      <span style={{ color: '#8b949e' }}>Mouse Pointer Route:</span>
-                      <span style={{
-                        color: desktopModeEnabled ? '#58a6ff' : '#a371f7',
-                        fontWeight: 700
-                      }}>
-                        {desktopModeEnabled ? `Display #${desktopVerification?.mouse_display_id || 11} (Monitor)` : 'Display 0 (Phone Screen)'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Diagnostic Advice Box */}
-                  <div style={{
-                    marginTop: '10px',
-                    padding: '8px 10px',
-                    borderRadius: '6px',
-                    background: desktopVerification?.hardware_connected
-                      ? 'rgba(63, 185, 80, 0.1)'
-                      : (desktopModeEnabled ? 'rgba(210, 153, 34, 0.12)' : 'rgba(163, 113, 247, 0.1)'),
-                    border: `1px solid ${
-                      desktopVerification?.hardware_connected
-                        ? 'rgba(63, 185, 80, 0.3)'
-                        : (desktopModeEnabled ? 'rgba(210, 153, 34, 0.35)' : 'rgba(163, 113, 247, 0.3)')
-                    }`,
-                    fontSize: '10px',
-                    lineHeight: '1.45',
-                    color: desktopVerification?.hardware_connected ? '#7ee787' : (desktopModeEnabled ? '#f0b72f' : '#d2a8ff')
-                  }}>
-                    <div style={{ fontWeight: 800, marginBottom: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Info size={11} />
-                      <span>{desktopVerification?.hardware_connected ? 'READY & ACTIVE' : (desktopModeEnabled ? 'VERIFIED: READY TO PLUG IN' : 'PHONE SCREEN MODE')}</span>
-                    </div>
-                    <div>
-                      {desktopVerification?.diagnostic_advice || (desktopModeEnabled
-                        ? 'Desktop mode is armed and ready on Pixel 8. Connect your USB-C DP Alt Mode cable or hub to project to the monitor.'
-                        : 'Desktop mode is disabled. Mouse is routed to phone screen for authentication.')}
-                    </div>
-                  </div>
-
-                  {/* Quick Action Toggle Button */}
-                  <div style={{ marginTop: '10px', display: 'flex', gap: '6px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleDesktopMode(!desktopModeEnabled)}
-                      style={{
-                        flex: 1,
-                        padding: '6px 8px',
-                        borderRadius: '5px',
-                        background: desktopModeEnabled ? 'rgba(248, 81, 73, 0.15)' : 'rgba(56, 139, 253, 0.2)',
-                        border: desktopModeEnabled ? '1px solid rgba(248, 81, 73, 0.4)' : '1px solid rgba(56, 139, 253, 0.5)',
-                        color: desktopModeEnabled ? '#ff7b72' : '#58a6ff',
-                        fontWeight: 700,
-                        fontSize: '10.5px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {desktopModeEnabled ? 'Switch to Phone Screen' : 'Arm & Enable Desktop Mode'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="dock-separator" />
-
-            {/* Layout / Arrange Presets Menu */}
-            <div className="layout-presets-wrapper" ref={layoutMenuRef}>
-              <button
-                type="button"
-                className={`window-dock-pill layout-presets-btn ${showLayoutMenu ? 'active' : ''}`}
-                onClick={() => setShowLayoutMenu(p => !p)}
-                title="Arrange Windows & Layout Presets"
-              >
-                <Sliders size={11} />
-                <span>Layout</span>
-                <ChevronDown size={11} style={{ transform: showLayoutMenu ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }} />
-              </button>
-
-              {showLayoutMenu && (
-                <div className="layout-presets-dropdown">
-                  <div className="layout-dropdown-header">LAYOUT PRESETS</div>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('balanced')}>
-                    <span className="preset-icon">🖥️</span>
-                    <div className="preset-text">
-                      <strong>Balanced View (Default)</strong>
-                      <small>DAG + Phone Stream + Frames + Lines</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('phone_focus')}>
-                    <span className="preset-icon">📱</span>
-                    <div className="preset-text">
-                      <strong>Phone Stream Focus</strong>
-                      <small>Full Live Phone View + DAG (Sidebars parked)</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('studio_focus')}>
-                    <span className="preset-icon">🛠️</span>
-                    <div className="preset-text">
-                      <strong>Hardware & ADB Studio</strong>
-                      <small>Device Pairing + Studio Drawer + Live Screen</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('document_audit')}>
-                    <span className="preset-icon">🔍</span>
-                    <div className="preset-text">
-                      <strong>Document Frame Audit</strong>
-                      <small>Single Frame Inspector + Verified Lines + Frames</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('zen_canvas')}>
-                    <span className="preset-icon">✨</span>
-                    <div className="preset-text">
-                      <strong>Zen / Full Canvas</strong>
-                      <small>Maximize viewport canvas across screen</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('tile_all')}>
-                    <span className="preset-icon">🔲</span>
-                    <div className="preset-text">
-                      <strong>Tile All Windows</strong>
-                      <small>Open DAG, Studio, Frames, Phone &amp; Lines</small>
-                    </div>
-                  </button>
-                  <button type="button" className="layout-dropdown-item" onClick={() => handleApplyLayoutPreset('minimize_all')}>
-                    <span className="preset-icon">🗕</span>
-                    <div className="preset-text">
-                      <strong>Minimize All Sidebars</strong>
-                      <small>Park panels into rails to maximize workspace</small>
-                    </div>
-                  </button>
-                  <div className="layout-dropdown-divider" />
-                  <button type="button" className="layout-dropdown-item reset" onClick={() => handleApplyLayoutPreset('reset_all')}>
-                    <span className="preset-icon">🔄</span>
-                    <div className="preset-text">
-                      <strong>Reset All Windows</strong>
-                      <small>Open all panes & restore default sizing</small>
-                    </div>
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {isCurrentDeviceConnected ? (
-            <div className={`alignment-header-pill ${alignmentData.is_aligned ? 'aligned' : 'unaligned'}`} onClick={() => alignmentData.is_aligned ? handleTriggerAlignmentCheck() : setIsBannerDismissed(p => !p)}>
-              <div className={`dot ${alignmentData.is_aligned ? 'pulse-green' : ''}`} style={{ width: '7px', height: '7px', borderRadius: '50%', background: alignmentData.is_aligned ? '#22c55e' : '#ef4444' }} />
-              <span style={{ fontWeight: 700 }}>{alignmentData.is_aligned ? 'TEAMS ALIGNED' : 'NOT ALIGNED'}</span>
-              {alignmentData.first_line_number && alignmentData.last_line_number && <span style={{ fontSize: '10px', opacity: 0.85 }}>(Ln {alignmentData.first_line_number}-{alignmentData.last_line_number})</span>}
-            </div>
-          ) : (
-            <div className="alignment-header-pill unaligned" onClick={() => setIsBannerDismissed(p => !p)} title="Device not connected - click to toggle alert banner">
-              <div className="dot" style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#ef4444' }} />
-              <span style={{ fontWeight: 700 }}>NO DEVICE CONNECTED</span>
-            </div>
-          )}
-
-          {/* Multi-Part Markdown Bundle Pill */}
-          {(multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
-            <button
-              type="button"
-              onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
-              title="Multi-Part Markdown Bundle Detected! Click to toggle Auto-Chain (Exit via Back Arrow -> Open Next Part -> Maximize -> Edit + Dark Mode -> New Project)"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '3px 9px',
-                borderRadius: '14px',
-                fontSize: '10.5px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                background: multipartState.auto_chain_enabled ? 'rgba(56, 189, 248, 0.16)' : 'rgba(148, 163, 184, 0.12)',
-                border: multipartState.auto_chain_enabled ? '1px solid rgba(56, 189, 248, 0.5)' : '1px solid rgba(148, 163, 184, 0.3)',
-                color: multipartState.auto_chain_enabled ? '#38bdf8' : '#94a3b8'
-              }}
-            >
-              <span>📂 PART {multipartState.current_part || alignmentData.part_number || 1}{multipartState.total_parts || alignmentData.total_parts ? `/${multipartState.total_parts || alignmentData.total_parts}` : ''}</span>
-              <span style={{ opacity: 0.7 }}>•</span>
-              <span style={{ color: multipartState.auto_chain_enabled ? '#00ff9d' : '#94a3b8' }}>
-                AUTO-CHAIN {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
+              <FolderKanban size={13} color="#00ff9d" />
+              <span className="project-badge-name" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {activeProject ? activeProject.name : 'Select Project'}
               </span>
-            </button>
-          )}
-
-          {/* Prominent Headless Option & Instant Web UI View Switcher */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: 'rgba(15, 23, 42, 0.85)', border: `1px solid ${headlessMode ? '#a855f7' : '#30363d'}`, borderRadius: '6px', padding: '2px' }}>
-            <button
-              type="button"
-              onClick={handleToggleHeadlessMode}
-              title={headlessMode
-                ? 'Headless Mode is ON (Fast Multi-Bundle OCR with suspended UI overhead). Click to turn Headless Mode OFF.'
-                : 'Enable Headless Mode to accelerate local image acquisition, OCR, and multi-part markdown assembly'}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '5px',
-                padding: '3px 8px',
-                borderRadius: '4px',
-                fontSize: '10.5px',
-                fontWeight: 700,
-                border: 'none',
-                cursor: 'pointer',
-                background: headlessMode ? 'linear-gradient(135deg, #7e22ce 0%, #6b21a8 100%)' : 'transparent',
-                color: headlessMode ? '#fff' : '#c9d1d9'
-              }}
-            >
-              <Cpu size={11} color={headlessMode ? '#e9d5ff' : '#a855f7'} />
-              <span>{headlessMode ? '⚡ HEADLESS: ON' : '⚡ HEADLESS: OFF'}</span>
-            </button>
-            {headlessMode && (
-              <button
-                type="button"
-                onClick={() => setForceWebUiInHeadless(prev => !prev)}
-                title={forceWebUiInHeadless
-                  ? 'Currently inspecting in Full Web UI View. Click to return to Fast Headless Console (suspends UI rendering for maximum local OCR speed).'
-                  : 'Switch to Full Web UI View at any time to inspect and control the quality of the overall process.'}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  padding: '3px 8px',
+              {(multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
+                <span style={{
+                  fontSize: '9.5px',
+                  fontWeight: 800,
+                  padding: '1px 5px',
                   borderRadius: '4px',
-                  fontSize: '10.5px',
-                  fontWeight: 700,
-                  border: 'none',
-                  cursor: 'pointer',
-                  background: forceWebUiInHeadless ? '#059669' : 'rgba(56, 189, 248, 0.2)',
-                  color: forceWebUiInHeadless ? '#fff' : '#38bdf8'
-                }}
-              >
-                <Eye size={11} />
-                <span>{forceWebUiInHeadless ? '⚡ Return to Headless Console' : '🖥️ Switch to Web UI View'}</span>
-              </button>
+                  background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.16)' : 'rgba(139, 148, 158, 0.2)',
+                  color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e',
+                  border: `1px solid ${multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`
+                }}>
+                  Part {multipartState.current_part || alignmentData.part_number || 1}
+                  {(multipartState.total_parts || alignmentData.total_parts) ? `..${multipartState.total_parts || alignmentData.total_parts}` : '..N'}
+                </span>
+              )}
+              <ChevronDown size={11} />
+            </button>
+
+            <input
+              type="file"
+              ref={projectImportInputRef}
+              accept=".zip"
+              style={{ display: 'none' }}
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) handleImportProject(file);
+              }}
+            />
+
+            {showProjectDropdown && (
+              <div className="project-dropdown-popover">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '6px', borderBottom: '1px solid #21262d' }}>
+                  <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#8b949e', letterSpacing: '0.5px' }}>PROJECTS ({projects.length})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-primary"
+                      onClick={() => { setShowProjectDropdown(false); setShowNewProjectModal(true); }}
+                      style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                    >
+                      <Plus size={11} />
+                      <span>New</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-xs btn-outline"
+                      onClick={() => projectImportInputRef.current?.click()}
+                      disabled={isImportingProject}
+                      style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px', color: '#38bdf8', borderColor: '#38bdf855' }}
+                    >
+                      <Upload size={11} />
+                      <span>{isImportingProject ? '...' : 'Import'}</span>
+                    </button>
+                    {activeProject && (
+                      <button
+                        type="button"
+                        className="btn btn-xs btn-outline"
+                        onClick={() => handleExportProject(activeProject.id, activeProject.name)}
+                        disabled={isExportingProject}
+                        style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px', color: '#00ff9d', borderColor: '#00ff9d55' }}
+                      >
+                        <Download size={11} />
+                        <span>Export</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Multi-Part Auto-Chain Row */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '5px 8px', background: '#161b22', borderRadius: '6px', border: '1px solid #21262d', fontSize: '10.5px'
+                }}>
+                  <span style={{ color: '#c9d1d9', fontWeight: 600 }}>
+                    📂 Multi-Part Bundle ({multipartState.current_part || alignmentData.part_number || 1}..{multipartState.total_parts || alignmentData.total_parts || 'N'})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+                    style={{
+                      padding: '2px 7px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800, cursor: 'pointer',
+                      border: `1px solid ${multipartState.auto_chain_enabled ? '#00ff9d66' : '#30363d'}`,
+                      background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.14)' : '#0d1117',
+                      color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e'
+                    }}
+                  >
+                    Auto-Chain: {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+
+                {/* Project List */}
+                <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {projects.map(p => (
+                    <div
+                      key={p.id}
+                      onClick={() => { handleSwitchProject(p.id); setShowProjectDropdown(false); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '6px 8px', borderRadius: '6px', cursor: 'pointer',
+                        background: p.id === activeProject?.id ? 'rgba(56, 139, 253, 0.15)' : '#161b22',
+                        border: `1px solid ${p.id === activeProject?.id ? '#58a6ff66' : '#21262d'}`
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {p.name}
+                        </div>
+                        <div style={{ fontSize: '9.5px', color: '#8b949e' }}>
+                          {p.frame_count ?? 0} frames • {p.line_count ?? 0} lines
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn-text-secondary"
+                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
+                          title="Export .zip"
+                          style={{ padding: '3px', color: '#58a6ff' }}
+                        >
+                          <Download size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-text-danger"
+                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                          title="Delete project"
+                          style={{ padding: '3px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
-          <div className="metric-pill" style={{ borderColor: wsConnected ? '#00ff9d44' : '#ff7b7244' }}>
-            <span className="label">SOCKET:</span><span className="value" style={{ color: wsConnected ? '#00ff9d' : '#ff7b72' }}>{wsConnected ? 'LIVE' : 'OFFLINE'}</span>
+          {/* Device Target Pill (Pixel 8 / Pixel 10 with lock icon) */}
+          <div ref={deviceDropdownRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="device-target-pill"
+              onClick={() => handleToggleStudio('device')}
+              title="Toggle Device & ADB Hardware Drawer (Click lock icon in Device Settings to lock/unlock hardware profile)"
+            >
+              <span
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: isCurrentDeviceConnected ? '#00ff9d' : '#ef4444',
+                  boxShadow: isCurrentDeviceConnected ? '0 0 6px #00ff9d' : 'none'
+                }}
+              />
+              <Smartphone size={12} color={isCurrentDeviceConnected ? '#00ff9d' : '#ef4444'} />
+              <span>{deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'}</span>
+              <span style={{ color: '#8b949e', fontSize: '10px' }}>({devLines}L)</span>
+              <Lock size={11} color={lockDeviceInput ? '#e3b341' : '#8b949e'} />
+            </button>
           </div>
         </div>
 
-        <div className="header-actions">
-          <button className="gear-btn" onClick={() => setShowConfigModal(true)} title="Settings" aria-label="Settings"><Settings size={16} /></button>
+        {/* Center: 3 Primary Workspace Mode Pills */}
+        <div className="navbar-center" role="tablist" aria-label="Workspace Modes">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'capture_dag'}
+            className={`workspace-mode-pill ${workspaceMode === 'capture_dag' ? 'active' : ''}`}
+            onClick={() => setWorkspaceMode('capture_dag')}
+          >
+            <span>⚡ 1. Capture &amp; DAG Flow</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'ocr_inspector'}
+            className={`workspace-mode-pill ${workspaceMode === 'ocr_inspector' ? 'active' : ''}`}
+            onClick={() => setWorkspaceMode('ocr_inspector')}
+          >
+            <span>🔍 2. OCR Line Inspector</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'analyzer_sandbox'}
+            className={`workspace-mode-pill ${workspaceMode === 'analyzer_sandbox' ? 'active' : ''}`}
+            onClick={() => setWorkspaceMode('analyzer_sandbox')}
+          >
+            <span>🛠️ 3. Analyzer &amp; Sandbox IDE</span>
+          </button>
+        </div>
+
+        {/* Right: Execution Mode Toggle + Global Progress Pill + Primary CTA */}
+        <div className="navbar-right">
+          <div className="exec-mode-toggle" title="Switch between Headless Speed and Live Monitor">
+            <button
+              type="button"
+              className={`exec-mode-btn headless ${headlessMode ? 'active' : ''}`}
+              onClick={() => { if (!headlessMode) handleToggleHeadlessMode(); }}
+            >
+              <span>⚡ Headless Speed</span>
+            </button>
+            <button
+              type="button"
+              className={`exec-mode-btn live ${!headlessMode ? 'active' : ''}`}
+              onClick={() => { if (headlessMode) handleToggleHeadlessMode(); }}
+            >
+              <span>👁️ Live Monitor</span>
+            </button>
+          </div>
+
+          <div
+            className="global-progress-pill"
+            onClick={() => setIsTelemetryExpanded(p => !p)}
+            style={{ cursor: 'pointer' }}
+            title="Click to toggle telemetry & event drawer"
+          >
+            <span style={{ color: '#00ff9d' }}>Ln {globalCurrentLine}</span>
+            <span style={{ color: '#8b949e' }}>/</span>
+            <span>{globalTargetLines || '—'}</span>
+            <span style={{ color: '#8b949e' }}>•</span>
+            <span style={{ color: '#58a6ff' }}>{globalPercent}%</span>
+          </div>
+
+          <button
+            type="button"
+            className={`primary-cta-pipeline-btn ${isCaptureLoopRunning ? 'stop' : 'run'}`}
+            onClick={() => {
+              if (!activeProject && !isCaptureLoopRunning) {
+                handleCreateProject(startupProjectName || alignmentData.file_name || 'Markdown_Capture_Part1.md', true);
+              } else {
+                handleStartStopCaptureLoop(!isCaptureLoopRunning);
+              }
+            }}
+          >
+            <span>{isCaptureLoopRunning ? '⏹ Stop' : '▶ Run Pipeline'}</span>
+          </button>
+
+          <button
+            type="button"
+            className="gear-btn"
+            onClick={() => setShowConfigModal(true)}
+            title="Settings"
+            aria-label="Settings"
+            style={{ width: '30px', height: '30px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Settings size={15} />
+          </button>
         </div>
       </header>
 
-      {headlessMode && forceWebUiInHeadless && (
-        <div style={{
-          background: 'linear-gradient(90deg, rgba(88, 28, 135, 0.45) 0%, rgba(15, 23, 42, 0.95) 50%, rgba(6, 78, 59, 0.45) 100%)',
-          borderBottom: '1px solid rgba(168, 85, 247, 0.45)',
-          padding: '6px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '12px',
-          color: '#e9d5ff'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Cpu size={14} color="#c084fc" />
-            <span>
-              <strong>Web UI Quality Inspection Active</strong> while Headless OCR Engine is enabled. You can inspect frames, lines, and live alignment here, or return to the Headless Console to maximize local OCR throughput.
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={() => setForceWebUiInHeadless(false)}
-              style={{ background: '#7e22ce', borderColor: '#a855f7', fontSize: '11px', padding: '3px 10px', fontWeight: 700 }}
-            >
-              ⚡ Return to Fast Headless Console
-            </button>
-            <button
-              type="button"
-              className="btn btn-sm btn-outline"
-              onClick={handleToggleHeadlessMode}
-              style={{ fontSize: '11px', padding: '3px 10px' }}
-            >
-              Turn Off Headless Mode
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!(headlessMode && !forceWebUiInHeadless) && (
-        <AlignmentAlertBanner
-          alignmentData={alignmentData}
-          deviceInfo={deviceInfo}
-          deviceModel={deviceModel}
-          isCheckingAlignment={isCheckingAlignment}
-          onTriggerCheck={handleTriggerAlignmentCheck}
-          onOpenModal={() => setShowAlignmentModal(true)}
-          onOpenLiveScreen={() => { setStudioInitialTab('kiosk'); setShowStudioDrawer(true); setLiveMode('desktop'); setStreamKey(Date.now()); }}
-          onOpenDeviceDrawer={() => { setStudioInitialTab('device'); setShowStudioDrawer(true); }}
-          onConnectDevice={(ip, model) => handleConnectAdbIp(ip, model)}
-          isConnectingDevice={isConnectingIp}
-          onFixClassifier={handleFixClassifier}
-          onFixAllClassifiers={handleFixAllClassifiers}
-          fixingClassifierId={fixingClassifierId}
-          isFixingAll={isFixingAll}
-          isDismissed={isBannerDismissed}
-          onDismissBanner={() => { setIsBannerDismissed(true); localStorage.setItem('mc_banner_dismissed', 'true'); }}
-          isMinimized={isBannerMinimized}
-          onToggleMinimizeBanner={() => setIsBannerMinimized(p => !p)}
-          dismissedItems={dismissedItems}
-          onDismissItem={handleDismissItem}
-        />
-      )}
-
-      {showDag && !(headlessMode && !forceWebUiInHeadless) && (
-        <div style={{ padding: '0 20px 6px 20px', position: 'relative', zIndex: 100 }}>
-          <FlowDag
-            apiBase={API_BASE}
-            activeProjectId={activeProject?.id}
-            activeProject={activeProject}
-            onOpenSettings={(tab) => { if (tab) setSettingsTab(tab as any); setShowConfigModal(true); }}
-            activeDeviceSerial={deviceInfo?.active_serial}
-            currentTopLine={telemetry.current_top_line !== undefined ? telemetry.current_top_line : (documentData.min_line ?? 0)}
-            currentBottomLine={telemetry.current_bottom_line !== undefined ? telemetry.current_bottom_line : (documentData.max_line ?? 0)}
-            targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
-            currentPage={telemetry.current_page || frames.length || 1}
-            isOrchestrating={Boolean(telemetry.phase?.startsWith('DAG_') || projectInitProgress?.status === 'running')}
-            onRefresh={fetchData}
-            selectedDag={selectedDag}
-            onSelectDag={setSelectedDag}
-            selectedNodeId={selectedNodeId}
-            onSelectNodeId={setSelectedNodeId}
-            projectInitProgress={projectInitProgress}
-            onDismissInitProgress={() => setProjectInitProgress(null)}
-            onRetryInit={async () => {
-              setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
-              try {
-                const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
-                await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer }) });
-              } catch {}
-            }}
-            eventsLog={eventsLog}
-            onClose={() => setShowDag(false)}
-            isMinimized={dagMinimized}
-            onToggleMinimize={() => setDagMinimized(p => !p)}
-            desktopKeyboardProhibited={desktopKeyboardProhibited}
-            onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
-            desktopModeEnabled={desktopModeEnabled}
-            onToggleDesktopMode={handleToggleDesktopMode}
-            desktopVerification={desktopVerification}
-            onOpenHeadlessTelemetry={() => setIsHeadlessTelemetryOpen(true)}
-          />
-        </div>
-      )}
-
+      {/* Interactive DAG Pipeline Ribbon (Unified Nodes 1–12) */}
+      <FlowDag
+        apiBase={API_BASE}
+        activeProjectId={activeProject?.id}
+        activeProject={activeProject}
+        onOpenSettings={(tab) => { if (tab) setSettingsTab(tab as any); setShowConfigModal(true); }}
+        activeDeviceSerial={deviceInfo?.active_serial}
+        currentTopLine={telemetry.current_top_line !== undefined ? telemetry.current_top_line : (documentData.min_line ?? 0)}
+        currentBottomLine={telemetry.current_bottom_line !== undefined ? telemetry.current_bottom_line : (documentData.max_line ?? 0)}
+        targetTotalLines={activeProject?.target_total_lines || telemetry.target_total_lines || 0}
+        currentPage={telemetry.current_page || frames.length || 1}
+        isOrchestrating={Boolean(telemetry.phase?.startsWith('DAG_') || projectInitProgress?.status === 'running' || isCaptureLoopRunning)}
+        onRefresh={fetchData}
+        selectedDag={selectedDag}
+        onSelectDag={setSelectedDag}
+        selectedNodeId={selectedNodeId}
+        onSelectNodeId={(nid) => {
+          setSelectedNodeId(nid);
+          if (nid === 'sandbox_ide') {
+            setWorkspaceMode('analyzer_sandbox');
+          }
+        }}
+        projectInitProgress={projectInitProgress}
+        onDismissInitProgress={() => setProjectInitProgress(null)}
+        onRetryInit={async () => {
+          setProjectInitProgress(curr => curr ? ({ ...curr, percent: 15, stage: 'Retrying DAG Group: Initialize...', status: 'running', error: undefined }) : null);
+          try {
+            const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+            await api('/api/dag/groups/initialize/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project_id: activeProject?.id, serial: activeSer }) });
+          } catch {}
+        }}
+        eventsLog={eventsLog}
+        onClose={() => setShowDag(false)}
+        isMinimized={dagMinimized}
+        onToggleMinimize={() => setDagMinimized(p => !p)}
+        desktopKeyboardProhibited={desktopKeyboardProhibited}
+        onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
+        desktopModeEnabled={desktopModeEnabled}
+        onToggleDesktopMode={handleToggleDesktopMode}
+        desktopVerification={desktopVerification}
+        onOpenHeadlessTelemetry={() => setIsHeadlessTelemetryOpen(true)}
+      />
 
       {!backendConnected && (
         <div style={{ backgroundColor: '#ff7b7218', borderBottom: '1px solid #ff7b7233', color: '#ff7b72', padding: '6px 16px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', fontWeight: 500 }}>
@@ -3233,92 +2669,35 @@ function AppContent() {
       )}
 
       <div className="studio-body">
-        <aside className={`projects-sidebar ${isSidebarOpen ? 'open' : 'collapsed'}`}>
-          {isSidebarOpen ? (
-            <div className="projects-sidebar-content">
-              <div className="sidebar-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><FolderKanban size={16} color="#00ff9d" /><span style={{ fontWeight: 600, fontSize: '13px', color: '#e6edf3' }}>Projects</span></div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <button className="btn btn-sm btn-outline" onClick={() => setShowNewProjectModal(true)} style={{ padding: '3px 8px', fontSize: '11px' }}><Plus size={12} /> New</button>
-                  <input
-                    type="file"
-                    ref={sidebarImportInputRef}
-                    accept=".zip"
-                    style={{ display: 'none' }}
-                    onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) handleImportProject(file);
-                    }}
-                  />
-                  <button
-                    className="btn btn-sm btn-outline"
-                    onClick={() => sidebarImportInputRef.current?.click()}
-                    disabled={isImportingProject}
-                    style={{ padding: '3px 8px', fontSize: '11px', color: '#38bdf8', borderColor: '#38bdf866' }}
-                    title="Import Project Archive (.zip)"
-                  >
-                    <Upload size={12} /> {isImportingProject ? '...' : 'Import'}
-                  </button>
-                  <button className="sidebar-toggle-btn" onClick={() => setIsSidebarOpen(false)}><ChevronLeft size={14} /></button>
-                </div>
-              </div>
-              <div className="projects-list">
-                {projects.map(p => (
-                  <div key={p.id} className={`project-card ${p.id === activeProject?.id ? 'active' : ''}`} onClick={() => handleSwitchProject(p.id)}>
-                    <div className="project-card-top">
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                        <span className={`project-status-dot ${p.id === activeProject?.id ? 'active' : ''}`} />
-                        <span className="project-title" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                        {p.id === activeProject?.id && <span className="active-badge">ACTIVE</span>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <button
-                          type="button"
-                          className="btn-text-secondary"
-                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
-                          title={`Export project "${p.name}" (.zip)`}
-                          aria-label={`Export project ${p.name}`}
-                          style={{ padding: '2px', color: '#58a6ff' }}
-                        >
-                          <Download size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-text-danger"
-                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
-                          title={`Delete project "${p.name}"`}
-                          aria-label={`Delete project ${p.name}`}
-                          style={{ padding: '2px' }}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                    {p.description && (
-                      <div style={{ fontSize: '11px', color: '#58a6ff', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.description}>
-                        File: {p.description}
-                      </div>
-                    )}
-                    <div className="project-stats" style={{ marginTop: p.description ? '3px' : undefined }}>
-                      <span>{p.frame_count ?? 0} frames</span>
-                      <span>•</span>
-                      <span>{p.line_count ?? 0} lines</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="sidebar-footer"><div className="db-indicator"><span className="db-dot" /><span>SQLite3: matrix_capture.db</span></div></div>
-            </div>
-          ) : (
-            <div className="projects-sidebar-rail" onClick={() => setIsSidebarOpen(true)}>
-              <button className="rail-add-btn" onClick={(e) => { e.stopPropagation(); setShowNewProjectModal(true); }}><Plus size={14} /></button>
-              <FolderKanban size={16} color="#00ff9d" /><span className="rail-project-label">{activeProject ? activeProject.name : 'Projects'}</span>
-              <ChevronRight size={14} color="#8b949e" style={{ marginTop: 'auto' }} />
-            </div>
-          )}
-        </aside>
-
-        {headlessMode && !forceWebUiInHeadless ? (
+        {workspaceMode === 'ocr_inspector' ? (
+          <OcrLineInspectorWorkspace
+            apiBase={API_BASE}
+            projectId={activeProject?.id}
+            frames={sortedFrames}
+            totalLines={documentData.total_lines || documentData.max_line || 0}
+            selectedFrameId={selectedFrameId}
+            selectedFrameIds={selectedFrameIds}
+            reprocessingFrameId={reprocessingFrameId}
+            deletingFrameId={deletingFrameId}
+            onSelectFrame={(fid) => setSelectedFrameId(fid)}
+            onToggleSelectFrame={(fid, e) => handleToggleSelectFrame(fid, e)}
+            onReprocessFrame={(fid, e) => handleReprocessFrame(fid, e)}
+            onUpdateFramePosition={(fid, delta) => handleUpdateFramePosition(fid, delta)}
+            onOpenTrace={(fid, e) => {
+              e.stopPropagation();
+              setSelectedFrameId(fid);
+              setTraceFrameId(fid);
+            }}
+            onDeleteFrame={(fid, e) => handleDeleteFrame(fid, e)}
+            onDocumentUpdated={fetchData}
+          />
+        ) : workspaceMode === 'analyzer_sandbox' ? (
+          <AnalyzerSandboxWorkspace
+            apiBase={API_BASE}
+            projectId={activeProject?.id}
+            onDocumentUpdated={fetchData}
+          />
+        ) : headlessMode && !forceWebUiInHeadless ? (
           <main
             className="frame-inspector-panel headless-console-workspace"
             style={{
@@ -4016,65 +3395,7 @@ function AppContent() {
                         </strong>
                       </div>
 
-                      {/* Yellow Arrow 2 Target + Rename AI Boxes to Content Framing */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={handlePrepareMarkdownEditor}
-                          disabled={isPreparingScreen}
-                          title="Maximize floating markdown window (□), switch to Edit Mode (pencil) and Dark Mode (moon)"
-                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px', borderColor: '#c084fc', color: '#e9d5ff', background: 'rgba(168, 85, 247, 0.14)' }}
-                        >
-                          <Maximize2 size={10} />
-                          <span>{isPreparingScreen ? 'Preparing...' : '□ Maximize + Edit + Dark'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => handleTransitionNextPart(true)}
-                          disabled={isTransitioningNextPart}
-                          title="Click top-left Back Arrow (<-), select next markdown part in folder, maximize (□), enable Edit + Dark mode, create next project & continue loop"
-                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px', borderColor: '#38bdf8', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)' }}
-                        >
-                          <span>{isTransitioningNextPart ? 'Opening Next Part...' : '← Exit & Next Part'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline btn-autofix"
-                          onClick={handleAutoFixViewport}
-                          disabled={isAutoFixingViewport}
-                          title="Auto-fix desktop viewport layout & suppress software keyboard"
-                        >
-                          <Zap size={11} className={isAutoFixingViewport ? 'spin' : ''} />
-                          <span>{isAutoFixingViewport ? 'Fixing...' : 'AUTO-FIX VIEWPORT'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          onClick={() => {
-                            setShowDag(true);
-                            setDagMinimized(false);
-                            setSelectedDag('capture_entire_markdown');
-                            setSelectedNodeId('verify_trigger');
-                          }}
-                          title="Configure Node 6 Verification Trigger & Qualifiers"
-                          style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                        >
-                          <Sliders size={11} />
-                          <span>Configure Trigger (Node 6)</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-primary"
-                          onClick={handleTriggerCalibration}
-                          disabled={isRunningCalibration}
-                          title="Run EOF / SOF calibration sequence"
-                          style={{ padding: '2px 10px', height: '24px', fontSize: '10px' }}
-                        >
-                          <RefreshCw size={11} className={isRunningCalibration ? 'spin' : ''} />
-                          <span>{isRunningCalibration ? 'Calibrating...' : 'Run Ctrl+End / Ctrl+Home Calibrate'}</span>
-                        </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <button
                           type="button"
                           className={`live-ai-boxes-btn ${showBoundingBoxes ? 'active' : ''}`}
@@ -5847,7 +5168,7 @@ function AppContent() {
         isAlignmentDismissed={isBannerDismissed} isAligned={alignmentData.is_aligned}
         onReturnAlignmentOverlay={() => { setIsBannerDismissed(false); setIsBannerMinimized(false); localStorage.setItem('mc_banner_dismissed', 'false'); localStorage.setItem('mc_banner_minimized', 'false'); addTelemetryEvent('SYSTEM', 'Alignment Alert Overlay returned'); }}
         onOpenStudio={() => handleToggleStudio('telemetry')}
-        selectedDag={selectedDag}
+        selectedDag={selectedDag as any}
         onSelectDag={setSelectedDag}
         selectedNodeId={selectedNodeId}
         onSelectNodeId={setSelectedNodeId}

@@ -11,7 +11,10 @@ DATA_DIR, FRAMES_DIR = Path(__file__).parent / "data", config.FRAMES_DIR
 def get_connection() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True); FRAMES_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH), timeout=10.0)
-    conn.row_factory = sqlite3.Row; conn.execute("PRAGMA foreign_keys = ON;")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA foreign_keys = ON;")
     return conn
 
 def _execute(sql: str, params: tuple = (), commit: bool = True, fetchone: bool = False, fetchall: bool = False):
@@ -29,6 +32,25 @@ def init_db():
         CREATE TABLE IF NOT EXISTS frames (frame_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, filename TEXT NOT NULL, top_line INTEGER NOT NULL, bottom_line INTEGER NOT NULL, page_index INTEGER NOT NULL, file_size INTEGER DEFAULT 0, status TEXT DEFAULT 'processed', extracted_line_count INTEGER DEFAULT 0, custom_offset_y REAL DEFAULT 0.0, token_usage_json TEXT DEFAULT '{}', bounding_boxes_json TEXT DEFAULT '{}', model_used TEXT DEFAULT '', created_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS document_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, line_text TEXT NOT NULL, confidence REAL DEFAULT 1.0, frame_id TEXT DEFAULT '', is_verified INTEGER DEFAULT 0, updated_at TEXT NOT NULL, PRIMARY KEY (project_id, line_number), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS project_reference_lines (project_id TEXT NOT NULL, line_number INTEGER NOT NULL, text_content TEXT NOT NULL, PRIMARY KEY (project_id, line_number));
+        CREATE TABLE IF NOT EXISTS vfs_files (
+            project_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            normalized_path TEXT DEFAULT '',
+            ext TEXT DEFAULT '',
+            content TEXT DEFAULT '',
+            start_md_line INTEGER DEFAULT 0,
+            end_md_line INTEGER DEFAULT 0,
+            expected_lines INTEGER DEFAULT 0,
+            actual_lines INTEGER DEFAULT 0,
+            expected_chars INTEGER DEFAULT 0,
+            actual_chars INTEGER DEFAULT 0,
+            tag_status TEXT DEFAULT 'verified',
+            source_frame_ids_json TEXT DEFAULT '[]',
+            metadata_json TEXT DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (project_id, path),
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
         CREATE TABLE IF NOT EXISTS project_telemetry (project_id TEXT PRIMARY KEY, telemetry_json TEXT DEFAULT '{}', token_stats_json TEXT DEFAULT '{}', updated_at TEXT NOT NULL, FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS device_profiles (
             id TEXT PRIMARY KEY,
@@ -420,6 +442,7 @@ def delete_project(project_id: str) -> bool:
         # Explicitly clean up related tables to ensure thorough deletion
         c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM vfs_files WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM project_telemetry WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
@@ -442,6 +465,7 @@ def _purge_project_data(project_id: str, new_status: str) -> bool:
         fns = [r["filename"] for r in c.execute("SELECT filename FROM frames WHERE project_id = ?;", (project_id,)).fetchall()]
         c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
         c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        c.execute("DELETE FROM vfs_files WHERE project_id = ?;", (project_id,))
         now = datetime.now().isoformat()
         c.execute("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?;", (new_status, now, project_id))
         c.execute("UPDATE project_telemetry SET telemetry_json = '{}', updated_at = ? WHERE project_id = ?;", (now, project_id))
@@ -565,6 +589,22 @@ def get_document_lines_window(
         }
 
 
+def _extract_line_row(project_id: str, lnum: int, ld: Any, now: str) -> tuple:
+    if isinstance(ld, dict) or hasattr(ld, "get"):
+        txt = ld.get("text", str(ld))
+        conf = float(ld.get("confidence", 1.0) or 1.0)
+        fid = str(ld.get("frame_id", "") or "")
+        ver = 1 if (ld.get("verified", False) or ld.get("status") == "verified") else 0
+        upd = str(ld.get("updated_at") or now)
+    else:
+        txt = str(ld) if ld is not None else ""
+        conf = 1.0
+        fid = ""
+        ver = 0
+        upd = now
+    return (project_id, int(lnum), txt, conf, fid, ver, upd)
+
+
 def save_document_lines(project_id: str, lines: Dict[int, Dict[str, Any]]):
     now = datetime.now().isoformat()
     with get_connection() as conn:
@@ -572,8 +612,11 @@ def save_document_lines(project_id: str, lines: Dict[int, Dict[str, Any]]):
         if not lines:
             c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
         else:
-            for lnum, ld in lines.items():
-                c.execute("INSERT OR REPLACE INTO document_lines VALUES (?, ?, ?, ?, ?, ?, ?);", (project_id, lnum, ld.get("text", ""), ld.get("confidence", 1.0), ld.get("frame_id", ""), 1 if ld.get("verified", False) else 0, ld.get("updated_at", now)))
+            rows = [_extract_line_row(project_id, lnum, ld, now) for lnum, ld in lines.items()]
+            c.executemany(
+                "INSERT OR REPLACE INTO document_lines (project_id, line_number, line_text, confidence, frame_id, is_verified, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?);",
+                rows
+            )
             existing = [r[0] for r in c.execute("SELECT line_number FROM document_lines WHERE project_id = ?;", (project_id,)).fetchall()]
             to_del = [ln for ln in existing if ln not in lines]
             if to_del:
@@ -853,5 +896,226 @@ def clear_project_reference_lines(project_id: str) -> int:
         c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
         conn.commit()
         return c.rowcount
+
+
+def ensure_vfs_files_table(conn: Optional[sqlite3.Connection] = None):
+    sql = """
+    CREATE TABLE IF NOT EXISTS vfs_files (
+        project_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        normalized_path TEXT DEFAULT '',
+        ext TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        start_md_line INTEGER DEFAULT 0,
+        end_md_line INTEGER DEFAULT 0,
+        expected_lines INTEGER DEFAULT 0,
+        actual_lines INTEGER DEFAULT 0,
+        expected_chars INTEGER DEFAULT 0,
+        actual_chars INTEGER DEFAULT 0,
+        tag_status TEXT DEFAULT 'verified',
+        source_frame_ids_json TEXT DEFAULT '[]',
+        metadata_json TEXT DEFAULT '{}',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, path),
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+    """
+    if conn is not None:
+        conn.execute(sql)
+    else:
+        with get_connection() as c_conn:
+            c_conn.execute(sql)
+            c_conn.commit()
+
+
+def _upsert_vfs_files_cursor(c: sqlite3.Cursor, project_id: str, vfs_files: List[Dict[str, Any]], now: str):
+    c.execute("DELETE FROM vfs_files WHERE project_id = ?;", (project_id,))
+    if not vfs_files:
+        return
+    rows = []
+    for vf in vfs_files:
+        if not isinstance(vf, dict):
+            continue
+        path = str(vf.get("path") or vf.get("normalized_path") or "")
+        if not path:
+            continue
+        norm_path = str(vf.get("normalized_path") or path)
+        ext = str(vf.get("ext") or "")
+        content = str(vf.get("content") or "")
+        start_ln = int(vf.get("start_md_line") or 0)
+        end_ln = int(vf.get("end_md_line") or 0)
+        exp_lines = int(vf.get("expected_lines") or 0)
+        act_lines = int(vf.get("actual_lines") or 0)
+        exp_chars = int(vf.get("expected_chars") or 0)
+        act_chars = int(vf.get("actual_chars") or len(content))
+        tag_status = str(vf.get("tag_status") or "verified")
+        fids_json = json.dumps(vf.get("source_frame_ids") or [])
+        meta_copy = {k: v for k, v in vf.items() if k != "content"}
+        meta_json = json.dumps(meta_copy)
+        rows.append((
+            project_id, path, norm_path, ext, content,
+            start_ln, end_ln, exp_lines, act_lines, exp_chars, act_chars,
+            tag_status, fids_json, meta_json, now
+        ))
+    if rows:
+        c.executemany(
+            """INSERT OR REPLACE INTO vfs_files (
+                project_id, path, normalized_path, ext, content,
+                start_md_line, end_md_line, expected_lines, actual_lines,
+                expected_chars, actual_chars, tag_status,
+                source_frame_ids_json, metadata_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+            rows
+        )
+
+
+def save_vfs_files(project_id: str, vfs_files: List[Dict[str, Any]]) -> int:
+    if not project_id:
+        return 0
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        ensure_vfs_files_table(conn)
+        c = conn.cursor()
+        _upsert_vfs_files_cursor(c, project_id, vfs_files, now)
+        conn.commit()
+    return len(vfs_files or [])
+
+
+def get_vfs_files(project_id: Optional[str]) -> List[Dict[str, Any]]:
+    if not project_id:
+        return []
+    with get_connection() as conn:
+        ensure_vfs_files_table(conn)
+        rows = conn.execute(
+            "SELECT * FROM vfs_files WHERE project_id = ? ORDER BY start_md_line ASC, path ASC;",
+            (project_id,)
+        ).fetchall()
+        result: List[Dict[str, Any]] = []
+        for idx, r in enumerate(rows, start=1):
+            try:
+                meta = json.loads(r["metadata_json"] or "{}")
+            except Exception:
+                meta = {}
+            try:
+                fids = json.loads(r["source_frame_ids_json"] or "[]")
+            except Exception:
+                fids = []
+            entry = dict(meta)
+            entry.update({
+                "index": entry.get("index", idx),
+                "path": r["path"],
+                "normalized_path": r["normalized_path"] or r["path"],
+                "ext": r["ext"],
+                "content": r["content"],
+                "start_md_line": r["start_md_line"],
+                "end_md_line": r["end_md_line"],
+                "expected_lines": r["expected_lines"],
+                "actual_lines": r["actual_lines"],
+                "expected_chars": r["expected_chars"],
+                "actual_chars": r["actual_chars"],
+                "tag_status": r["tag_status"],
+                "source_frame_ids": fids,
+                "updated_at": r["updated_at"],
+            })
+            result.append(entry)
+        return result
+
+
+def save_dirty_state_transaction(
+    project_id: str,
+    dirty_frames: Optional[List[Dict[str, Any]]] = None,
+    dirty_lines: Optional[Dict[int, Any]] = None,
+    deleted_lines: Optional[List[int]] = None,
+    clear_all_lines: bool = False,
+    telemetry: Optional[Dict[str, Any]] = None,
+    token_stats: Optional[Dict[str, Any]] = None,
+    vfs_files: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """
+    Commits dirty frames, dirty document_lines, deleted lines, vfs_files, and telemetry
+    for project_id in a single atomic SQLite WAL transaction.
+    """
+    if not project_id:
+        return
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+
+        if dirty_frames:
+            frame_rows = []
+            for f in dirty_frames:
+                fid = f.get("frame_id")
+                if not fid:
+                    continue
+                frame_rows.append((
+                    fid,
+                    project_id,
+                    f.get("filename", f"{fid}.png"),
+                    int(f.get("top_line", 0) or 0),
+                    int(f.get("bottom_line", 0) or 0),
+                    int(f.get("page_index", 1) or 1),
+                    int(f.get("file_size", 0) or 0),
+                    str(f.get("status", "processed") or "processed"),
+                    int(f.get("extracted_line_count", 0) or 0),
+                    float(f.get("custom_offset_y", 0.0) or 0.0),
+                    json.dumps(f.get("token_usage") or {}),
+                    json.dumps(f.get("bounding_boxes") or {}),
+                    str(f.get("model_used", "") or ""),
+                    str(f.get("created_at") or now),
+                    int(f.get("arrow_count", 0) or 0),
+                ))
+            if frame_rows:
+                c.executemany(
+                    """INSERT OR REPLACE INTO frames (
+                        frame_id, project_id, filename, top_line, bottom_line, page_index,
+                        file_size, status, extracted_line_count, custom_offset_y,
+                        token_usage_json, bounding_boxes_json, model_used, created_at, arrow_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                    frame_rows
+                )
+
+        if clear_all_lines:
+            c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
+        elif deleted_lines:
+            del_list = [int(ln) for ln in deleted_lines]
+            for i in range(0, len(del_list), 500):
+                chunk = del_list[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                c.execute(
+                    f"DELETE FROM document_lines WHERE project_id = ? AND line_number IN ({placeholders});",
+                    [project_id] + chunk
+                )
+
+        if dirty_lines:
+            line_rows = [
+                _extract_line_row(project_id, lnum, ld, now)
+                for lnum, ld in dirty_lines.items()
+            ]
+            if line_rows:
+                c.executemany(
+                    """INSERT OR REPLACE INTO document_lines (
+                        project_id, line_number, line_text, confidence, frame_id, is_verified, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?);""",
+                    line_rows
+                )
+
+        if vfs_files is not None:
+            ensure_vfs_files_table(conn)
+            _upsert_vfs_files_cursor(c, project_id, vfs_files, now)
+
+        if telemetry is not None or token_stats is not None:
+            c.execute(
+                "INSERT OR REPLACE INTO project_telemetry (project_id, telemetry_json, token_stats_json, updated_at) VALUES (?, ?, ?, ?);",
+                (
+                    project_id,
+                    json.dumps(telemetry or {}),
+                    json.dumps(token_stats or {}),
+                    now,
+                )
+            )
+
+        c.execute("UPDATE projects SET updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
+
 
 
