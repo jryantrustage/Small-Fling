@@ -206,7 +206,7 @@ class FrameOcrNode(BaseDagNode):
                 bot_ln = top_ln + lpp - 1
 
             if not lines_detected or not any(bool((l.get("text") or "").strip()) for l in lines_detected):
-                full_scan = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=top_ln)
+                full_scan = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=top_ln, live_capture=True)
                 if full_scan.get("lines"):
                     lines_detected = full_scan["lines"]
 

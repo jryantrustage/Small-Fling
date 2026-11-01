@@ -196,7 +196,7 @@ class LocalAiOcrNode(BaseDagNode):
         if is_bg:
             async def _bg_worker(target_img: Path, top_expected: int):
                 try:
-                    res = await ocr_svc.scan_image_with_minicpm(target_img, expected_top=top_expected)
+                    res = await ocr_svc.scan_image_with_minicpm(target_img, expected_top=top_expected, live_capture=True)
                     lines_det = res.get("lines", [])
                     for item in lines_det:
                         try:
@@ -206,10 +206,15 @@ class LocalAiOcrNode(BaseDagNode):
                         except Exception:
                             ln = None
                         if ln and ln > 0:
+                            blank_locked = bool(item.get("blank_locked", False))
+                            txt = "" if blank_locked else item.get("text", "")
                             state.document_lines[ln] = {
-                                "line_number": ln, "gutter_number": ln, "text": item.get("text", ""),
-                                "is_blank": not bool(item.get("text", "").strip()), "is_wrapped": False,
-                                "wrapped_line_count": 1, "status": "verified", "confidence": 0.98,
+                                "line_number": ln, "gutter_number": ln, "text": txt,
+                                "is_blank": True if blank_locked else not bool(txt.strip()),
+                                "blank_locked": blank_locked,
+                                "is_wrapped": False if blank_locked else item.get("is_wrapped", False),
+                                "wrapped_line_count": 1 if blank_locked else item.get("wrapped_line_count", 1),
+                                "status": "verified", "confidence": 1.0 if blank_locked else 0.98,
                                 "notes": f"MiniCPM-V OCR ({res.get('model_used', 'MiniCPM-V')})",
                                 "updated_at": datetime.now().isoformat()
                             }
@@ -233,7 +238,7 @@ class LocalAiOcrNode(BaseDagNode):
 
         # Synchronous execution
         try:
-            scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=exp_top)
+            scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=exp_top, live_capture=True)
         except Exception as e:
             print(f"[LocalAiOcrNode] MiniCPM-V invocation error: {e}")
             scan_res = {

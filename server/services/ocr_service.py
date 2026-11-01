@@ -101,14 +101,27 @@ def _apply_extracted_lines(frame_id: str, plines: list, top_g: Any, bot_g: Any, 
     state.update_dag_after_frame(frame_id, state.captured_frames[frame_id].get("top_line", 0), state.captured_frames[frame_id].get("bottom_line", 0))
     return added
 
+import difflib
+from ocr_engine import _normalize_codescan_tags
+
 async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: int, bottom_line: int):
     if not config.GEMINI_API_KEY:
         print(f"[Gemini OCR] No cloud API key configured. Defaulting to local OCR for frame {frame_id}")
         return await process_frame_with_local_ocr(frame_id, image_path)
     try:
+        from ocr_engine import worker_scan_image
+        aux = await asyncio.to_thread(worker_scan_image, str(image_path))
+        gt_lines = aux.get("lines", [])
+        blank_locked_set = {int(l["line_number"]) for l in gt_lines if l.get("blank_locked") is True and l.get("line_number") is not None}
+
         client = genai.Client(api_key=config.GEMINI_API_KEY)
-        prompt = "Extract code document lines verbatim with line numbers in left gutter. Output ONLY JSON: {\"top_gutter_line\": <int>, \"bottom_gutter_line\": <int>, \"lines\": [{\"line_number\": <int>, \"gutter_number\": <int>, \"text\": \"<verbatim>\", \"is_blank\": <bool>, \"is_wrapped\": <bool>, \"wrapped_line_count\": <int>, \"flagged\": <bool>}]}"
-        pil_image = Image.open(image_path)
+        prompt = (
+            "Extract code document lines verbatim using the synthetic [L<number>] tags and 1px horizontal row guide lines in the left gutter. "
+            "Output ONLY JSON: {\"top_gutter_line\": <int>, \"bottom_gutter_line\": <int>, \"lines\": ["
+            "{\"line_number\": <int>, \"gutter_number\": <int>, \"text\": \"<verbatim>\", \"is_blank\": <bool>, \"is_wrapped\": <bool>, \"wrapped_line_count\": <int>, \"flagged\": <bool>}]}"
+        )
+        with Image.open(image_path) as raw_pil:
+            pil_image = render_row_anchored_visual_prompt(raw_pil, ground_truth_lines=gt_lines, roi_crop=True)
         response, last_error, model_used = None, None, "unknown"
         for model_name in config.get_candidate_models():
             for attempt in range(config.GEMINI_RETRY_ATTEMPTS):
@@ -154,6 +167,16 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
         top_g = parsed.get("top_gutter_line") if isinstance(parsed, dict) else None
         bot_g = parsed.get("bottom_gutter_line") if isinstance(parsed, dict) else None
         plines = parsed.get("lines", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+        for pl in plines:
+            if isinstance(pl, dict) and pl.get("line_number") is not None:
+                ln_val = int(pl["line_number"])
+                if ln_val in blank_locked_set:
+                    pl["text"] = ""
+                    pl["is_blank"] = True
+                    pl["blank_locked"] = True
+                    pl["confidence"] = 1.0
+                else:
+                    pl["text"] = sanitize_line_text(ln_val, str(pl.get("text", "")))
         _apply_extracted_lines(frame_id, plines, top_g, bot_g, f"Gemini Vision OCR ({model_used})")
     except Exception as e:
         print(f"Error processing frame {frame_id} with Gemini: {e}")
@@ -162,7 +185,7 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
         state.save_persisted_state()
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
-    res = await scan_image_with_minicpm(image_path)
+    res = await scan_image_with_minicpm(image_path, live_capture=False)
     top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
     model_name = res.get("model_used", "MiniCPM-V")
     det_fn = res.get("detected_filename")
@@ -188,17 +211,20 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     for item in lines:
         if item.get("line_number"):
             ln = int(item["line_number"])
+            blank_locked = bool(item.get("blank_locked", False))
+            txt = "" if blank_locked else item.get("text", "")
             state.document_lines[ln] = {
                 "line_number": ln,
                 "gutter_number": ln,
-                "text": item.get("text", ""),
-                "is_blank": item.get("is_blank", not bool(item.get("text", "").strip())),
+                "text": txt,
+                "is_blank": True if blank_locked else item.get("is_blank", not bool(txt.strip())),
+                "blank_locked": blank_locked,
                 "is_wrapped": item.get("is_wrapped", False),
                 "wrapped_line_count": item.get("wrapped_line_count", 1),
                 "status": "verified",
                 "frame_id": frame_id,
                 "sources": [frame_id],
-                "confidence": item.get("confidence", 0.98),
+                "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
                 "notes": f"Local LLM OCR ({model_name})",
                 "updated_at": datetime.now().isoformat()
             }
@@ -208,19 +234,34 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
 
 def sanitize_line_text(ln: int, text: str) -> str:
     """
-    Strips accidental OCR gutter line numbers that were inserted into line text content.
-    For example:
-      - '2' on a blank line -> ''
-      - '3> **Directory Structure' -> '> **Directory Structure'
-      - '4> Total Files...' -> '> Total Files...'
-      - '6 ## Directory Structure' -> '## Directory Structure'
-      - '10 DevAnalysis/...' -> 'DevAnalysis/...'
-      - '11 .env.example' -> '.env.example'
-      - '23 azure-devops-service.ts' -> 'azure-devops-service.ts'
+    Strips accidental OCR gutter line numbers and synthetic row tags ([L{ln}]) from line text content,
+    and normalizes common OCR tag corruptions:
+      - Auto-corrects '<--- CODESCAN_FILE_END ---' or '<!-- CODESCAN_FILE_END ---' to '<!-- CODESCAN_FILE_END -->'
+      - Validates and normalizes '<!-- CODESCAN_FILE_START ... -->' syntax
     """
-    cleaned = (text or "").rstrip()
+    cleaned = (
+        (text or "")
+        .replace("\uff08", "(")
+        .replace("\uff09", ")")
+        .replace("\uff1a", ":")
+        .replace("\uff1b", ";")
+        .replace("\uff0c", ",")
+        .rstrip()
+    )
     stripped = cleaned.strip()
     if not stripped:
+        return ""
+
+    # Strip synthetic [L12]: or L12: row tag if echoed by VLM
+    m_tag = re.match(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", stripped, re.IGNORECASE)
+    if m_tag:
+        cleaned_body = m_tag.group(2).rstrip()
+        stripped = cleaned_body.strip()
+        if not stripped:
+            return ""
+        cleaned = cleaned_body
+
+    if re.match(r"^\[?L\d{1,6}\]?$", stripped, re.IGNORECASE):
         return ""
 
     # Gutter number alone on an empty line
@@ -230,18 +271,25 @@ def sanitize_line_text(ln: int, text: str) -> str:
             return ""
 
     # Gutter number prepended to markdown syntax, symbols, or word characters
-    m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
+    m = re.match(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
     if m:
         val = int(m.group(1))
         if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
-            return m.group(2).strip()
+            cleaned = m.group(2).strip()
+            stripped = cleaned
 
     # Tree branch characters preceded by numbers e.g. "10 ├── DevAnalysis"
-    m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
+    m2 = re.match(r"^(\d{1,6})\s*([├│└].*)$", stripped)
     if m2:
         val = int(m2.group(1))
         if abs(val - ln) <= 4:
-            return m2.group(2).strip()
+            cleaned = m2.group(2).strip()
+            stripped = cleaned
+
+    # Normalize CODESCAN_FILE_END and CODESCAN_FILE_START tags
+    normalized_tag = _normalize_codescan_tags(stripped)
+    if normalized_tag != stripped:
+        return normalized_tag
 
     return cleaned
 
@@ -275,30 +323,116 @@ def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True, exclud
     return img
 
 
-def call_minicpm_ollama_sync(image_path: Path, expected_top: Optional[int] = None) -> Tuple[str, str]:
+def render_row_anchored_visual_prompt(
+    pil_img: Image.Image,
+    ground_truth_lines: Optional[List[Dict[str, Any]]] = None,
+    roi_crop: bool = True
+) -> Image.Image:
     """
-    Synchronous worker for invoking MiniCPM-V vision models via Ollama.
+    Row-Anchored Visual Prompting for VLM (MiniCPM-V / Gemini):
+      - Renders a 1px horizontal guide line at each y_bottom(ln) boundary.
+      - Burns a high-contrast synthetic tag [L{ln}] on the left edge of each row.
+      - Clears blank_locked row slices so the VLM never shifts text across empty rows.
+    """
+    import cv2
+    import numpy as np
+
+    rgb = np.array(pil_img.convert("RGB"))
+    h, w = rgb.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+
+    if ground_truth_lines:
+        canvas = rgb.copy()
+        gutter_x_end = int(round(92 * scale_x))
+        code_x_start = int(round(94 * scale_x))
+        code_x_end = max(code_x_start + 1, w - 24)
+        font_scale = max(0.35, 0.42 * scale_y)
+
+        for gl in ground_truth_lines:
+            ln = gl.get("line_number")
+            if ln is None:
+                continue
+            bbox = gl.get("bbox") or {}
+            y_top = int(gl.get("y_top", bbox.get("y", 0)))
+            y_bot = int(gl.get("y_bottom", y_top + bbox.get("height", int(round(22 * scale_y)))))
+            y_top = max(0, min(h - 1, y_top))
+            y_bot = max(y_top + 1, min(h - 1, y_bot))
+
+            # If blank_locked, wipe the horizontal code slice to clean dark background
+            if gl.get("blank_locked") is True:
+                canvas[y_top:y_bot, code_x_start:code_x_end] = (20, 23, 28)
+
+            # Render 1px horizontal guide line at y_bottom(ln)
+            cv2.line(canvas, (0, y_bot), (w - 1, y_bot), (70, 95, 130), 1)
+
+            # Burn high-contrast synthetic tag [L{ln}] on the left edge of the row
+            cv2.rectangle(canvas, (2, y_top + 1), (gutter_x_end, y_bot - 1), (16, 20, 28), -1)
+            tag_str = f"[L{ln}]"
+            text_y = min(y_bot - 4, y_top + max(12, int((y_bot - y_top) * 0.72)))
+            cv2.putText(
+                canvas,
+                tag_str,
+                (4, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (255, 240, 150),
+                1,
+                cv2.LINE_AA,
+            )
+
+        out_pil = Image.fromarray(canvas)
+    else:
+        out_pil = pil_img
+
+    return preprocess_frame_for_ocr(out_pil, roi_crop=roi_crop, exclude_gutter=False)
+
+
+def call_minicpm_ollama_sync(
+    image_path: Path,
+    expected_top: Optional[int] = None,
+    ground_truth_lines: Optional[List[Dict[str, Any]]] = None
+) -> Tuple[str, str]:
+    """
+    Synchronous worker for invoking MiniCPM-V vision models via Ollama with Row-Anchored Visual Prompting.
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, 4 Lion Cove P-cores with AVX-VNNI).
     """
+    if ground_truth_lines is None:
+        try:
+            from ocr_engine import worker_scan_image
+            aux = worker_scan_image(str(image_path))
+            ground_truth_lines = aux.get("lines", [])
+        except Exception:
+            ground_truth_lines = []
+
     with Image.open(image_path) as raw_img:
-        # Preprocess with ROI crop strictly to editor bounds, keeping left gutter line numbers visible
-        # so vision models can read and ground against the actual physical gutter numbers
-        img = preprocess_frame_for_ocr(raw_img, roi_crop=True, exclude_gutter=False)
+        # Render 1px horizontal guide lines at y_bottom(ln) and synthetic [L{ln}] tags on the left edge
+        img = render_row_anchored_visual_prompt(raw_img, ground_truth_lines=ground_truth_lines, roi_crop=True)
         buf = io.BytesIO()
         # PNG format avoids 8x8 DCT JPEG ringing artifacts that distort brackets, colons, and backticks
         img.convert("RGB").save(buf, format="PNG", optimize=False)
         img_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    start_ex = expected_top if (expected_top and expected_top > 0) else 1
+    non_blank_lns = [
+        int(l["line_number"])
+        for l in (ground_truth_lines or [])
+        if l.get("line_number") is not None and not l.get("blank_locked")
+    ]
+    non_blank_hint = (
+        f"Non-blank rows to transcribe: {', '.join(f'[L{n}]' for n in non_blank_lns)}.\n"
+        if non_blank_lns
+        else ""
+    )
+
     prompt = (
         "You are an expert OCR transcription engine for code and markdown.\n"
-        "The image contains an editor document with line numbers in the left gutter (e.g. 1, 2, 3, 4, 6, 10...).\n"
-        "Transcribe each document line from top to bottom.\n"
-        "Use the exact line number shown in the gutter for each line (format: '<number>: <content>').\n"
-        "If a line has no text or is empty, output ONLY the line number and colon (e.g. '5: ').\n"
-        "DO NOT output the gutter line number inside the code/markdown content.\n"
+        "Each row in the image is separated by a 1px horizontal guide line and labeled on the left edge with a synthetic tag [L<number>].\n"
+        f"{non_blank_hint}"
+        "Transcribe each row from top to bottom using its exact [L<number>] tag (format: '[L<number>]: <content>').\n"
+        "If a row is blank, output ONLY '[L<number>]: '.\n"
+        "DO NOT shift text across rows and DO NOT include the [L<number>] tag inside the code content.\n"
         "Preserve indentation, symbols, brackets, and markdown verbatim.\n"
-        "Output only the numbered lines:"
+        "Output only the tagged lines:"
     )
     models = []
     for cand in [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]:
@@ -345,7 +479,7 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
     Parses MiniCPM-V textual output with robust multi-delimiter regex, multiline code fences,
     filename detection, and JSON fallback.
     Supports formats:
-      '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code',
+      '[L1]: code', 'L1: code', '1: code', '1. code', '1 | code', '[1] code', '1) code', 'Line 1: code', '1   code',
       and multiline blocks like:
       'LINE_27:\n```\ncode\n```'
     Extracts FILE_NAME from header and ensures Line 1 of the gutter aligns with Line 1 of document text.
@@ -362,7 +496,10 @@ def parse_minicpm_output(raw_resp: str) -> Tuple[List[Dict[str, Any]], int, int,
         if cand and cand.upper() not in {"NONE", "N/A", "NULL", "UNKNOWN", "NOT VISIBLE"}:
             detected_filename = cand
 
-    line_pattern = re.compile(r"^\s*(?:line[_\s]*|ln\s*|l)?[\[<]?(\d+)[\]>]?\s*(?:[:|.)\]>\-][ ]?|\s{2,}|\s*$)(.*)$", re.IGNORECASE)
+    line_pattern = re.compile(
+        r"^\s*[\[<]?(?:line[_\s]*|ln\s*|l)?[\[<]?(\d+)[\]>]?\s*(?:[:|.)\]>\-][ ]?|\s{2,}|\s*$)(.*)$",
+        re.IGNORECASE
+    )
 
     line_map: Dict[int, List[str]] = {}
     current_ln: Optional[int] = None
@@ -634,8 +771,8 @@ def rescan_lines_on_image_sync(
     existing_bboxes: Dict[str, Any]
 ) -> Tuple[List[Dict[str, Any]], List[int]]:
     """
-    Selectively rescans only the specified line numbers using RapidOCR on tight image crops.
-    Flags and overwrites the text for those lines in existing_lines.
+    Selectively rescans only the specified line numbers using RapidOCR on tight, non-overlapping
+    row slices anchored by the deterministic gutter grid solver and gated by foreground ink pixel energy.
     """
     import cv2
     import numpy as np
@@ -646,14 +783,26 @@ def rescan_lines_on_image_sync(
         raise FileNotFoundError(f"Image not found: {image_path}")
 
     h, w = img.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
     ocr = get_rapid_ocr()
     if ocr is None:
         raise RuntimeError("RapidOCR engine is not available")
 
     line_boxes = existing_bboxes.get("line_boxes", {})
     gutter_boxes = existing_bboxes.get("gutter_boxes", {})
-    lines_map = {int(l.get("line_number")): l for l in existing_lines if l.get("line_number") is not None and str(l.get("line_number")).isdigit()}
+    lines_map = {
+        int(l.get("line_number")): l
+        for l in existing_lines
+        if l.get("line_number") is not None and str(l.get("line_number")).isdigit()
+    }
     rescanned_lns = []
+
+    x_code_start = int(round(94 * scale_x))
+    x_code_end = max(x_code_start + 1, w - 24)
+    char_pitch_x = 8.2 * scale_x
+    sep_end_col = max(4, int(round(14 * scale_x)))
+    bleed_end_col = max(1, int(round(3 * scale_x)))
 
     for ln in line_numbers:
         target_line = lines_map.get(ln)
@@ -663,6 +812,7 @@ def rescan_lines_on_image_sync(
                 "gutter_number": ln,
                 "text": "",
                 "is_blank": True,
+                "blank_locked": False,
                 "is_wrapped": False,
                 "status": "flagged",
                 "confidence": 0.95
@@ -673,57 +823,102 @@ def rescan_lines_on_image_sync(
         bbox = target_line.get("bbox") or line_boxes.get(ln) or line_boxes.get(str(ln))
         gbox = target_line.get("gutter_bbox") or gutter_boxes.get(ln) or gutter_boxes.get(str(ln))
 
-        if bbox:
-            y1 = max(0, int(bbox.get("y", 0)) - 6)
-            y2 = min(h, int(bbox.get("y", 0) + bbox.get("height", 30)) + 6)
+        # Use exact non-overlapping row bounds [y_top(ln), y_bottom(ln)] without +/- 6px cross-row bleed
+        if target_line.get("y_top") is not None and target_line.get("y_bottom") is not None:
+            y1 = max(0, int(target_line["y_top"]))
+            y2 = min(h, int(target_line["y_bottom"]))
+        elif bbox:
+            y1 = max(0, int(bbox.get("y", 0)))
+            y2 = min(h, int(bbox.get("y", 0) + bbox.get("height", int(round(22 * scale_y)))))
         elif gbox:
-            y1 = max(0, int(gbox.get("y", 0)) - 6)
-            y2 = min(h, int(gbox.get("y", 0) + gbox.get("height", 30)) + 6)
+            y1 = max(0, int(gbox.get("y", 0)))
+            y2 = min(h, int(gbox.get("y", 0) + gbox.get("height", int(round(22 * scale_y)))))
         else:
-            y1 = max(0, int(h * 0.15 + (ln - 1) * 32))
-            y2 = min(h, y1 + 38)
+            pitch_est = 27.0 * scale_y
+            yc_est = 313.5 * scale_y + (ln - 1) * pitch_est
+            y1 = max(0, int(round(yc_est - 0.42 * pitch_est)))
+            y2 = min(h, int(round(yc_est + 0.42 * pitch_est)))
 
-        gx_end = int(gbox.get("x", 20) + gbox.get("width", 50)) if gbox else (int(bbox.get("x", 75)) - 8 if bbox else 75)
-        x1 = max(0, gx_end + 8)
-        x2 = w
-
-        if x1 >= x2 or y1 >= y2:
+        if y1 >= y2 or x_code_start >= x_code_end:
             continue
 
-        crop = img[y1:y2, x1:x2]
-        if crop.size == 0:
+        # 1. Blank-Line Pixel Energy Gate on horizontal code strip img[y1:y2, x_code_start:img_w - 24]
+        code_strip = img[y1:y2, x_code_start:x_code_end]
+        if code_strip.size == 0:
             continue
 
-        res, _ = ocr(crop)
-        new_text = ""
-        indent_prefix = ""
-        if res:
-            sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
-            first_x = float(np.min(np.array(sorted_words[0][0])[:, 0])) if sorted_words else 0
-            if first_x >= 14:
-                indent_spaces = max(0, int(round(first_x / 8.2)))
-                indent_prefix = " " * indent_spaces
-            new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
-        else:
+        gray_strip = cv2.cvtColor(code_strip, cv2.COLOR_BGR2GRAY) if code_strip.ndim == 3 else code_strip
+        bg_med = float(np.median(gray_strip))
+        fg_mask = np.abs(gray_strip.astype(np.int16) - bg_med) > 24
+        if fg_mask.shape[1] > sep_end_col and np.count_nonzero(fg_mask[:, bleed_end_col:sep_end_col]) == 0:
+            fg_mask[:, :bleed_end_col] = False
+        ink_px = int(np.count_nonzero(fg_mask))
+
+        if ink_px < 10:
+            target_line["text"] = ""
+            target_line["is_blank"] = True
+            target_line["blank_locked"] = True
+            target_line["ink_px"] = ink_px
+            target_line["status"] = "rescanned"
+            target_line["overwritten"] = True
+            target_line["confidence"] = 1.0
+            target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
+            rescanned_lns.append(ln)
+            continue
+
+        # 2. Non-blank row slice: pad with clean background luminance so RapidOCR has detector margin without row bleed
+        clean_crop = code_strip[:, bleed_end_col:] if code_strip.shape[1] > bleed_end_col else code_strip
+        bg_val = int(round(bg_med))
+        pad_px = 8
+        padded_crop = cv2.copyMakeBorder(
+            clean_crop, pad_px, pad_px, pad_px, pad_px, cv2.BORDER_CONSTANT, value=(bg_val, bg_val, bg_val)
+        )
+
+        res, _ = ocr(padded_crop)
+        if not res:
             try:
-                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(padded_crop, cv2.COLOR_BGR2GRAY)
                 clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
                 enhanced = clahe.apply(gray)
-                res_enh, _ = ocr(enhanced)
-                if res_enh:
-                    sorted_words = sorted(res_enh, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
-                    first_x = float(np.min(np.array(sorted_words[0][0])[:, 0])) if sorted_words else 0
-                    if first_x >= 14:
-                        indent_spaces = max(0, int(round(first_x / 8.2)))
-                        indent_prefix = " " * indent_spaces
-                    new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+                res, _ = ocr(enhanced)
             except Exception:
-                pass
+                res = None
+
+        new_text = ""
+        if res:
+            is_wrapped = bool(target_line.get("is_wrapped", False))
+            if is_wrapped and len(res) > 1:
+                pitch_est = 27.0 * scale_y
+                sorted_words = sorted(
+                    res,
+                    key=lambda r: (
+                        int(round((float(np.mean(np.array(r[0])[:, 1])) - pad_px) / max(1.0, pitch_est))),
+                        float(np.min(np.array(r[0])[:, 0])),
+                    ),
+                )
+            else:
+                sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
+            first_x = max(0.0, float(np.min(np.array(sorted_words[0][0])[:, 0])) - pad_px) if sorted_words else 0.0
+            indent_spaces = max(0, int(round((first_x - 11.0 * scale_x) / max(1.0, char_pitch_x))))
+            indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
+            new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+        elif 10 <= ink_px <= 90:
+            ys_fg, xs_fg = np.where(fg_mask)
+            if len(xs_fg) > 0:
+                x_span = int(xs_fg.max() - xs_fg.min() + 1)
+                y_mean_rel = float(ys_fg.mean()) / max(1.0, float(fg_mask.shape[0]))
+                active_cols = np.count_nonzero(fg_mask.any(axis=0))
+                if x_span <= int(round(8 * scale_x)) and y_mean_rel >= 0.45:
+                    new_text = "."
+                elif int(round(16 * scale_x)) <= x_span <= int(round(36 * scale_x)) and active_cols <= x_span - 4 and y_mean_rel <= 0.55:
+                    new_text = "```"
 
         new_text = sanitize_line_text(ln, new_text)
 
         target_line["text"] = new_text
-        target_line["is_blank"] = not bool(new_text.strip())
+        target_line["is_blank"] = False
+        target_line["blank_locked"] = False
+        target_line["ink_px"] = ink_px
         target_line["status"] = "rescanned"
         target_line["overwritten"] = True
         target_line["confidence"] = 0.99
@@ -734,18 +929,165 @@ def rescan_lines_on_image_sync(
     return existing_lines, rescanned_lns
 
 
-async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] = None) -> Dict[str, Any]:
+def align_ui_lines_with_dp(
+    ground_truth_lines: List[Dict[str, Any]],
+    ui_lines: List[str]
+) -> Tuple[int, float]:
+    """
+    Aligns ui_lines (from Android accessibility buffer) to ground_truth_lines using
+    semi-global Needleman-Wunsch dynamic programming + difflib.SequenceMatcher,
+    strictly anchored on blank_locked rows and high-confidence RapidOCR tokens.
+    NEVER overwrites ground_truth_lines where blank_locked is True.
+    """
+    import numpy as np
+    if not ground_truth_lines or not ui_lines:
+        return 0, 0.0
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or "").strip()).lower()
+
+    def _alnum(s: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9]", "", (s or "")).lower()
+
+    n_gt = len(ground_truth_lines)
+    # Restrict search window in ui_lines if ui_lines is huge, centered around expected line numbers
+    top_ln = int(ground_truth_lines[0].get("line_number", 1))
+    bot_ln = int(ground_truth_lines[-1].get("line_number", n_gt))
+    win_start = max(0, top_ln - 60)
+    win_end = min(len(ui_lines), bot_ln + 80)
+    if win_end - win_start < n_gt:
+        win_start = 0
+        win_end = len(ui_lines)
+
+    sub_ui = ui_lines[win_start:win_end]
+    m_ui = len(sub_ui)
+    if m_ui == 0:
+        return 0, 0.0
+
+    def _pair_score(gl: Dict[str, Any], u_str: str, u_abs_idx: int) -> Tuple[float, bool]:
+        g_blank_locked = bool(gl.get("blank_locked", False))
+        u_blank = not bool(u_str.strip())
+        pos_prior = 0.35 if (u_abs_idx == int(gl.get("line_number", 0)) - 1) else 0.0
+
+        # Anchor 1: blank_locked rows
+        if g_blank_locked:
+            if u_blank:
+                return 3.0 + pos_prior, False
+            return -6.0, False
+        if u_blank:
+            return -4.5, False
+
+        # Anchor 2: RapidOCR token similarity via SequenceMatcher
+        g_txt = _norm(gl.get("text", ""))
+        u_txt = _norm(u_str)
+        if not g_txt:
+            return 0.4 + pos_prior, False
+
+        g_an = _alnum(g_txt)
+        u_an = _alnum(u_txt)
+        if g_an and u_an:
+            ratio = difflib.SequenceMatcher(None, g_an, u_an).ratio()
+            if (len(g_an) >= 4 and (g_an in u_an or u_an in g_an)) or ratio >= 0.65:
+                return 2.5 + 4.0 * ratio + pos_prior, True
+            if ratio >= 0.40:
+                return 1.0 + 2.0 * ratio + pos_prior, False
+            return -2.5, False
+
+        sym_ratio = difflib.SequenceMatcher(None, g_txt, u_txt).ratio()
+        if sym_ratio >= 0.55:
+            return 2.0 + 2.0 * sym_ratio + pos_prior, True
+        return -1.5, False
+
+    gap_penalty = -2.5
+    dp = np.full((n_gt + 1, m_ui + 1), -1e9, dtype=np.float64)
+    back = np.zeros((n_gt + 1, m_ui + 1), dtype=np.int8)  # 1: diag, 2: up (skip gt), 3: left (skip ui)
+    anchor_hits = np.zeros((n_gt + 1, m_ui + 1), dtype=np.int32)
+
+    # Semi-global initialization: free start anywhere in sub_ui
+    dp[0, :] = 0.0
+
+    for i in range(1, n_gt + 1):
+        gl = ground_truth_lines[i - 1]
+        for j in range(1, m_ui + 1):
+            u_str = sub_ui[j - 1]
+            sc, is_anchor = _pair_score(gl, u_str, win_start + j - 1)
+
+            cand_diag = dp[i - 1, j - 1] + sc
+            cand_up = dp[i - 1, j] + gap_penalty
+            cand_left = dp[i, j - 1] + gap_penalty
+
+            if cand_diag >= cand_up and cand_diag >= cand_left:
+                dp[i, j] = cand_diag
+                back[i, j] = 1
+                anchor_hits[i, j] = anchor_hits[i - 1, j - 1] + (1 if is_anchor else 0)
+            elif cand_up >= cand_left:
+                dp[i, j] = cand_up
+                back[i, j] = 2
+                anchor_hits[i, j] = anchor_hits[i - 1, j]
+            else:
+                dp[i, j] = cand_left
+                back[i, j] = 3
+                anchor_hits[i, j] = anchor_hits[i, j - 1]
+
+    best_j = int(np.argmax(dp[n_gt, 1:])) + 1
+    best_score = float(dp[n_gt, best_j])
+    total_anchors = int(anchor_hits[n_gt, best_j])
+
+    min_required_anchors = 1 if top_ln == 1 else 2
+    if best_score <= 0.0 or total_anchors < min_required_anchors:
+        return 0, best_score
+
+    # Backtrack optimal alignment path
+    i, j = n_gt, best_j
+    aligned_pairs: List[Tuple[int, int]] = []
+    while i > 0 and j > 0:
+        move = int(back[i, j])
+        if move == 1:
+            aligned_pairs.append((i - 1, win_start + j - 1))
+            i -= 1
+            j -= 1
+        elif move == 2:
+            i -= 1
+        else:
+            j -= 1
+
+    aligned_pairs.reverse()
+    applied_count = 0
+    for gt_idx, ui_idx in aligned_pairs:
+        gl = ground_truth_lines[gt_idx]
+        # CRITICAL: Never overwrite blank_locked lines from ui_lines
+        if gl.get("blank_locked") is True:
+            gl["text"] = ""
+            gl["is_blank"] = True
+            gl["confidence"] = 1.0
+            continue
+        cand_txt = sanitize_line_text(int(gl["line_number"]), ui_lines[ui_idx])
+        if cand_txt.strip():
+            gl["text"] = cand_txt
+            gl["is_blank"] = False
+            gl["status"] = "verified"
+            applied_count += 1
+
+    return applied_count, round(best_score, 2)
+
+
+async def scan_image_with_minicpm(
+    image_path: Path,
+    expected_top: Optional[int] = None,
+    live_capture: bool = False
+) -> Dict[str, Any]:
     """
     Scan image with local vision model (MiniCPM-V in Ollama, with OpenVINO RapidOCR fallback)
     for verbatim code/markdown line extraction and bounding boxes.
-    Always uses worker_scan_image's ground truth gutter grid (top_ln..bot_ln) to anchor line numbers
-    and bounding boxes strictly within editor boundaries [ed_top, ed_bot].
+    Always uses worker_scan_image's deterministic RANSAC gutter grid (top_ln..bot_ln) and
+    blank-line pixel energy gate to enforce strict 1:1 physical alignment.
+    Only queries dump_ui_hierarchy when live_capture=True (active DAG Node 4 capture).
     """
     from ocr_engine import worker_scan_image
 
     aux = await asyncio.to_thread(worker_scan_image, str(image_path))
     top_ln = aux.get("top_line", 1)
-    bot_ln = aux.get("bottom_line", 26)
+    bot_ln = aux.get("bottom_line", 24)
     img_w = aux.get("image_width", 1920)
     img_h = aux.get("image_height", 1080)
     bboxes = aux.get("bounding_boxes", {})
@@ -754,112 +1096,91 @@ async def scan_image_with_minicpm(image_path: Path, expected_top: Optional[int] 
     detected_filename = None
     plines = list(ground_truth_lines)
 
-    # 0. Check UI hierarchy accessibility buffer for ground-truth text matching
-    try:
-        from services.ui_automator_service import dump_ui_hierarchy
-        from services.adb_service import get_active_adb_serial
-        ser = await get_active_adb_serial()
-        if ser:
-            root = await dump_ui_hierarchy(ser)
-            if root is not None:
-                ui_buffer_text = ""
-                for node in root.iter("node"):
-                    if "EditText" in node.attrib.get("class", ""):
-                        ui_buffer_text = node.attrib.get("text", "")
-                        break
-                if ui_buffer_text:
-                    ui_lines = ui_buffer_text.splitlines()
-                    # 1. Direct 1-to-1 match for top_ln == 1 (file header at home)
-                    if top_ln == 1 and len(ui_lines) >= len(ground_truth_lines):
-                        for gl in ground_truth_lines:
-                            idx = gl["line_number"] - 1
-                            if 0 <= idx < len(ui_lines):
-                                gl["text"] = ui_lines[idx]
-                                gl["is_blank"] = not bool(ui_lines[idx].strip())
-                                gl["status"] = "verified"
-                        model_used = "UI Ground Truth Buffer (Home)"
-                    else:
-                        # 2. Consensus offset voting for any scrolled page
-                        def _clean_str(s: str) -> str:
-                            return re.sub(r"[^a-zA-Z0-9]", "", s).lower()
-
-                        candidates = []
-                        for gl in ground_truth_lines:
-                            g_ln = gl["line_number"]
-                            g_txt = gl.get("text", "").strip()
-                            c_gt = _clean_str(g_txt)
-                            if len(c_gt) >= 4:
-                                for u_idx, uil in enumerate(ui_lines):
-                                    c_ui = _clean_str(uil)
-                                    if c_gt in c_ui or c_ui in c_gt:
-                                        candidates.append(u_idx - g_ln)
-
-                        if candidates:
-                            from collections import Counter
-                            best_offset, count = Counter(candidates).most_common(1)[0]
-                            matched_count = 0
-                            for gl in ground_truth_lines:
-                                g_ln = gl["line_number"]
-                                target_idx = g_ln + best_offset
-                                if 0 <= target_idx < len(ui_lines):
-                                    gl["text"] = ui_lines[target_idx]
-                                    gl["is_blank"] = not bool(ui_lines[target_idx].strip())
-                                    gl["status"] = "verified"
-                                    matched_count += 1
-                            if matched_count > 0:
-                                model_used = f"UI Ground Truth Buffer (Offset {best_offset}, {count} votes)"
-
-                    # If ground truth was verified directly from editor buffer, return immediately with 100% fidelity
-                    if model_used.startswith("UI Ground Truth Buffer") and any(gl.get("status") == "verified" for gl in ground_truth_lines):
-                        return {
-                            "top_line": top_ln,
-                            "bottom_line": bot_ln,
-                            "lines": ground_truth_lines,
-                            "confidence": 0.99,
-                            "model_used": model_used,
-                            "page_index": 1 if top_ln == 1 else max(1, int(round((top_ln - 1) / 24)) + 1),
-                            "image_width": img_w,
-                            "image_height": img_h,
-                            "bboxes": bboxes,
-                            "detected_filename": detected_filename or "Matrix_main_26-09-17-8-19am.md"
-                        }
-    except Exception as ex:
-        print(f"[scan_image_with_minicpm] UI dump check note: {ex}")
+    # 0. Check UI hierarchy accessibility buffer ONLY during active live capture (never when inspecting/rescanning saved disk frames)
+    if live_capture:
+        try:
+            from services.ui_automator_service import dump_ui_hierarchy
+            from services.adb_service import get_active_adb_serial
+            ser = await get_active_adb_serial()
+            if ser:
+                root = await dump_ui_hierarchy(ser)
+                if root is not None:
+                    ui_buffer_text = ""
+                    for node in root.iter("node"):
+                        if "EditText" in node.attrib.get("class", ""):
+                            ui_buffer_text = node.attrib.get("text", "")
+                            break
+                    if ui_buffer_text:
+                        ui_lines = ui_buffer_text.splitlines()
+                        matched_cnt, dp_score = align_ui_lines_with_dp(ground_truth_lines, ui_lines)
+                        if matched_cnt > 0:
+                            model_used = f"UI Ground Truth Buffer (DP Aligned {matched_cnt} lines, score={dp_score})"
+                            formatted_ui = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in ground_truth_lines)
+                            return {
+                                "status": "success",
+                                "top_line": top_ln,
+                                "bottom_line": bot_ln,
+                                "lines": ground_truth_lines,
+                                "extracted_text": formatted_ui,
+                                "lines_count": len(ground_truth_lines),
+                                "confidence": 0.99,
+                                "model_used": model_used,
+                                "page_index": 1 if top_ln == 1 else max(1, int(round((top_ln - 1) / 24)) + 1),
+                                "image_width": img_w,
+                                "image_height": img_h,
+                                "bounding_boxes": bboxes,
+                                "bboxes": bboxes,
+                                "detected_filename": detected_filename
+                            }
+        except Exception as ex:
+            print(f"[scan_image_with_minicpm] UI dump check note: {ex}")
 
     try:
-        raw_resp, model_name = await asyncio.to_thread(call_minicpm_ollama_sync, Path(image_path), expected_top or top_ln)
+        raw_resp, model_name = await asyncio.to_thread(
+            call_minicpm_ollama_sync,
+            Path(image_path),
+            expected_top or top_ln,
+            ground_truth_lines
+        )
         mcpm_lines, _, _, _, det_fn = parse_minicpm_output(raw_resp)
         if det_fn:
             detected_filename = det_fn
         if mcpm_lines:
             model_used = f"MiniCPM-V ({model_name})"
-            if not any(bool((l.get("text") or "").strip()) for l in ground_truth_lines):
-                plines = mcpm_lines
-                top_ln = min((p["line_number"] for p in plines), default=top_ln)
-                bot_ln = max((p["line_number"] for p in plines), default=bot_ln)
-            else:
-                mcpm_map = {l.get("line_number"): l.get("text", "") for l in mcpm_lines if l.get("line_number") is not None}
-                for gl in ground_truth_lines:
-                    g_ln = gl["line_number"]
-                    if g_ln in mcpm_map:
-                        raw_m = mcpm_map[g_ln]
-                        m_txt = sanitize_line_text(g_ln, raw_m)
-                        g_txt = gl.get("text", "").strip()
-                        # If ground truth was empty, accept vision model's text
-                        if not g_txt and m_txt.strip():
+            mcpm_map = {l.get("line_number"): l.get("text", "") for l in mcpm_lines if l.get("line_number") is not None}
+            for gl in ground_truth_lines:
+                g_ln = gl["line_number"]
+                # CRITICAL: Never overwrite blank_locked lines from mcpm_map
+                if gl.get("blank_locked") is True:
+                    gl["text"] = ""
+                    gl["is_blank"] = True
+                    gl["confidence"] = 1.0
+                    continue
+                if g_ln in mcpm_map:
+                    raw_m = mcpm_map[g_ln]
+                    m_txt = sanitize_line_text(g_ln, raw_m)
+                    g_txt = (gl.get("text") or "").strip()
+                    if g_txt and m_txt.strip():
+                        g_words = set(re.findall(r'\w{2,}', g_txt.lower()))
+                        m_words = set(re.findall(r'\w{2,}', m_txt.lower()))
+                        seq_ratio = difflib.SequenceMatcher(None, g_txt.lower(), m_txt.lower()).ratio()
+                        if (g_words & m_words) or (g_txt.lower() in m_txt.lower()) or (m_txt.lower() in g_txt.lower()) or seq_ratio >= 0.45:
                             gl["text"] = m_txt
-                            gl["is_blank"] = False
-                        elif g_txt and m_txt.strip():
-                            g_words = set(re.findall(r'\w{2,}', g_txt.lower()))
-                            m_words = set(re.findall(r'\w{2,}', m_txt.lower()))
-                            if (g_words & m_words) or (g_txt.lower() in m_txt.lower()) or (m_txt.lower() in g_txt.lower()):
-                                gl["text"] = m_txt
-                                gl["is_blank"] = not bool(m_txt.strip())
+                            gl["is_blank"] = not bool(m_txt.strip())
     except Exception as e:
         print(f"[MiniCPM-V OCR] Ollama call note: {e}")
 
-    if not plines:
-        plines = ground_truth_lines
+    # Final pass: guarantee every blank_locked line remains strictly empty and every non-blank line is sanitized
+    for gl in ground_truth_lines:
+        if gl.get("blank_locked") is True:
+            gl["text"] = ""
+            gl["is_blank"] = True
+            gl["confidence"] = 1.0
+        else:
+            gl["text"] = sanitize_line_text(int(gl["line_number"]), gl.get("text", ""))
+            gl["is_blank"] = not bool(gl["text"].strip())
+
+    plines = ground_truth_lines
     formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
 
     if plines:
@@ -1043,11 +1364,15 @@ async def sequential_rescan_all_frames_task(
                 ln = l_item.get("line_number")
                 if not ln:
                     continue
+                blank_locked = bool(l_item.get("blank_locked", False))
+                final_txt = "" if blank_locked else l_item.get("text", "")
                 existing = state.document_lines.get(ln)
                 meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
                 meta.update({
                     "line_number": ln,
                     "gutter_number": ln,
+                    "is_blank": True if blank_locked else not bool(final_txt.strip()),
+                    "blank_locked": blank_locked,
                     "status": "verified",
                     "overwritten": True,
                     "frame_id": fid,
@@ -1055,11 +1380,13 @@ async def sequential_rescan_all_frames_task(
                     "updated_at": datetime.now().isoformat()
                 })
                 if l_item.get("confidence") is not None:
-                    meta["confidence"] = l_item.get("confidence")
+                    meta["confidence"] = 1.0 if blank_locked else l_item.get("confidence")
                 if l_item.get("is_wrapped") is not None:
-                    meta["is_wrapped"] = l_item.get("is_wrapped")
+                    meta["is_wrapped"] = False if blank_locked else l_item.get("is_wrapped")
+                if l_item.get("wrapped_line_count") is not None:
+                    meta["wrapped_line_count"] = 1 if blank_locked else l_item.get("wrapped_line_count")
                 state.document_lines[ln] = state.MasterLine(
-                    l_item.get("text", ""),
+                    final_txt,
                     **meta
                 )
 

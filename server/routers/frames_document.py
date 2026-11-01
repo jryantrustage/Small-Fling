@@ -205,8 +205,8 @@ async def inspect_ocr_image(
     file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
     cache_key = f"{str(ipath.resolve())}_{file_mtime}"
 
-    ed_top = max(280, int(img_h * 0.260))
-    ed_bot = min(int(img_h * 0.875), img_h - 135)
+    ed_top = max(280, int(round(280 * (img_h / 1080.0))))
+    ed_bot = min(int(round(960 * (img_h / 1080.0))), img_h - 120)
     def _is_valid_entry(cand_lines, cand_bboxes):
         if not cand_lines or not cand_bboxes:
             return False
@@ -214,11 +214,11 @@ async def inspect_ocr_image(
         if not g_boxes:
             return False
         first_ln = min((int(k) for k in g_boxes.keys()), default=0)
-        first_y = g_boxes.get(first_ln, {}).get("y", 0)
+        first_y = (g_boxes.get(first_ln) or g_boxes.get(str(first_ln)) or {}).get("y", 0)
         if first_y < (ed_top - 35):
             return False
         last_ln = max((int(k) for k in g_boxes.keys()), default=0)
-        last_y = g_boxes.get(last_ln, {}).get("y", 0)
+        last_y = (g_boxes.get(last_ln) or g_boxes.get(str(last_ln)) or {}).get("y", 0)
         if last_y > (ed_bot + 25):
             return False
         return True
@@ -265,7 +265,7 @@ async def inspect_ocr_image(
             bot_ln = max((l.get("line_number", 0) for l in lines), default=0)
     else:
         exp_top = cached_frame.get("top_line") if cached_frame else None
-        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top)
+        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top, live_capture=False)
         lines = res.get("lines", [])
         bboxes = res.get("bounding_boxes", {})
         model_used = res.get("model_used", "MiniCPM-V (Ollama)")
@@ -390,22 +390,28 @@ async def rescan_ocr_lines(
     for ln in rescanned:
         line_item = next((l for l in updated_lines if l.get("line_number") == ln), None)
         if line_item and hasattr(state, "document_lines"):
+            blank_locked = bool(line_item.get("blank_locked", False))
+            final_txt = "" if blank_locked else line_item.get("text", "")
             existing = state.document_lines.get(ln)
             meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
             meta.update({
                 "line_number": ln,
                 "gutter_number": ln,
+                "is_blank": True if blank_locked else not bool(final_txt.strip()),
+                "blank_locked": blank_locked,
                 "status": "verified",
                 "overwritten": True,
                 "frame_id": target_id,
                 "updated_at": datetime.now().isoformat()
             })
             if line_item.get("confidence") is not None:
-                meta["confidence"] = line_item.get("confidence")
+                meta["confidence"] = 1.0 if blank_locked else line_item.get("confidence")
             if line_item.get("is_wrapped") is not None:
-                meta["is_wrapped"] = line_item.get("is_wrapped")
+                meta["is_wrapped"] = False if blank_locked else line_item.get("is_wrapped")
+            if line_item.get("wrapped_line_count") is not None:
+                meta["wrapped_line_count"] = 1 if blank_locked else line_item.get("wrapped_line_count")
             state.document_lines[ln] = state.MasterLine(
-                line_item.get("text", ""),
+                final_txt,
                 **meta
             )
     state.save_persisted_state()
@@ -650,7 +656,7 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
     mt = normalize_model_target((payload.model_target if payload and payload.model_target else None) or model_target)
     try:
         exp_top = finfo.get("top_line")
-        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top)
+        res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top, live_capture=False)
         top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
         det_fn = res.get("detected_filename")
         if det_fn:
@@ -682,13 +688,17 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
         for item in lines:
             if item.get("line_number"):
                 ln = int(item["line_number"])
+                blank_locked = bool(item.get("blank_locked", False))
+                final_txt = "" if blank_locked else item.get("text", "")
                 state.document_lines[ln] = {
-                    "line_number": ln, "gutter_number": ln, "text": item.get("text", ""),
-                    "is_blank": item.get("is_blank", not bool(item.get("text", "").strip())),
-                    "is_wrapped": item.get("is_wrapped", False),
-                    "wrapped_line_count": item.get("wrapped_line_count", 1),
+                    "line_number": ln, "gutter_number": ln, "text": final_txt,
+                    "is_blank": True if blank_locked else item.get("is_blank", not bool(final_txt.strip())),
+                    "blank_locked": blank_locked,
+                    "is_wrapped": False if blank_locked else item.get("is_wrapped", False),
+                    "wrapped_line_count": 1 if blank_locked else item.get("wrapped_line_count", 1),
                     "status": "verified",
-                    "frame_id": frame_id, "sources": [frame_id], "confidence": item.get("confidence", 0.98),
+                    "frame_id": frame_id, "sources": [frame_id],
+                    "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
                     "notes": f"Local MiniCPM-V OCR ({mt})", "updated_at": datetime.now().isoformat()
                 }
         state.save_persisted_state()

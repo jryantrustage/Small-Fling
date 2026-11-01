@@ -2276,7 +2276,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
 
             async def _run_minicpm_background(target_calib: Path):
                 try:
-                    s_res = await ocr_svc.scan_image_with_minicpm(target_calib, expected_top=exp_top)
+                    s_res = await ocr_svc.scan_image_with_minicpm(target_calib, expected_top=exp_top, live_capture=True)
                     ext_text = s_res.get("extracted_text", "")
                     l_det = s_res.get("lines", [])
                     l_cnt = s_res.get("lines_count", len(l_det))
@@ -2344,7 +2344,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                     })
 
             try:
-                scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=exp_top)
+                scan_res = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=exp_top, live_capture=True)
             except Exception as e:
                 print(f"[local_ai_ocr] MiniCPM-V invocation error: {e}")
                 scan_res = {
@@ -2591,7 +2591,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
             # High-speed asynchronous OCR background processing via MiniCPM-V
             async def _bg_frame_ocr(target_img: Path, target_fid: str, t_val: int, b_val: int):
                 try:
-                    bg_scan = await ocr_svc.scan_image_with_minicpm(target_img, expected_top=t_val)
+                    bg_scan = await ocr_svc.scan_image_with_minicpm(target_img, expected_top=t_val, live_capture=True)
                     bg_lines = bg_scan.get("lines", [])
                     real_top = bg_scan.get("top_line", t_val) or t_val
                     real_bot = bg_scan.get("bottom_line", b_val) or b_val

@@ -1605,25 +1605,8 @@ def get_current_project_id() -> Optional[str]:
     return p["id"] if p else None
 
 def sanitize_line_text(ln: int, text: str) -> str:
-    cleaned = (text or "").rstrip()
-    stripped = cleaned.strip()
-    if not stripped:
-        return ""
-    if stripped.isdigit():
-        val = int(stripped)
-        if abs(val - ln) <= 4:
-            return ""
-    m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
-    if m:
-        val = int(m.group(1))
-        if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
-            return m.group(2).strip()
-    m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
-    if m2:
-        val = int(m2.group(1))
-        if abs(val - ln) <= 4:
-            return m2.group(2).strip()
-    return cleaned
+    from ocr_engine import LocalOllamaStitcher
+    return LocalOllamaStitcher.sanitize_line_text(ln, text)
 
 def get_serialized_lines() -> List[Dict[str, Any]]:
     if not document_lines:

@@ -794,11 +794,81 @@ def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top:
     top, _ = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
     return top
 
+def _normalize_codescan_tags(text: str) -> str:
+    """
+    Normalizes common OCR corruptions on CODESCAN_FILE_END and CODESCAN_FILE_START tags,
+    as well as fullwidth CJK punctuation emitted by PP-OCRv3:
+      - Auto-corrects '<--- CODESCAN_FILE_END ---' or '<!-- CODESCAN_FILE_END ---' (and variants)
+        to '<!-- CODESCAN_FILE_END -->'.
+      - Validates and normalizes '<!-- CODESCAN_FILE_START ... -->' syntax and key="value" attributes.
+    """
+    if not text:
+        return text
+    # Replace fullwidth CJK punctuation from PP-OCRv3 with standard ASCII code symbols
+    text = (
+        text.replace("\uff08", "(")
+        .replace("\uff09", ")")
+        .replace("\uff1a", ":")
+        .replace("\uff1b", ";")
+        .replace("\uff0c", ",")
+    )
+    stripped = text.strip()
+    if not stripped:
+        return text
+
+    # 1. Normalize CODESCAN_FILE_END variants
+    if re.search(r"<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*END\b", stripped, re.IGNORECASE) or re.match(
+        r"^\s*<[\-!\s]*C[O0]DESCAN[_\s]*FILE[_\s]*END[\-\s>]*$", stripped, re.IGNORECASE
+    ):
+        return "<!-- CODESCAN_FILE_END -->"
+
+    # 2. Validate & normalize CODESCAN_FILE_START syntax
+    m_start = re.match(
+        r"^\s*<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*START\b(.*)$",
+        stripped,
+        re.IGNORECASE,
+    )
+    if m_start:
+        rest = m_start.group(1).strip()
+        # Strip trailing comment closure variants (--->, -->, ---, --, ->, >)
+        rest = re.sub(r"[\-\s>]+$", "", rest).strip()
+        # Validate and normalize known attributes: path, type, size, lines, chars
+        # Repair unquoted or half-quoted attribute values e.g. size="2082 or lines=62
+        def _fix_attr(m_attr: re.Match) -> str:
+            key = m_attr.group(1).lower()
+            raw_val = m_attr.group(2).strip().strip("\"'`")
+            return f'{key}="{raw_val}"'
+
+        rest = re.sub(
+            r'\b(path|type|size|lines|chars)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+)',
+            _fix_attr,
+            rest,
+            flags=re.IGNORECASE,
+        )
+        # Catch trailing unclosed quote on final attribute
+        rest = re.sub(
+            r'\b(path|type|size|lines|chars)\s*=\s*["\']([^"\'\s>]+)$',
+            lambda m: f'{m.group(1).lower()}="{m.group(2)}"',
+            rest,
+            flags=re.IGNORECASE,
+        )
+        return f"<!-- CODESCAN_FILE_START {rest} -->" if rest else "<!-- CODESCAN_FILE_START -->"
+
+    return text
+
+
 def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model: str = "", ollama_timeout: int = 15) -> Dict[str, Any]:
-    """Top-level multi-process worker for full image OCR, gutter detection & bounding boxes."""
+    """
+    Top-level multi-process worker for full image OCR, deterministic RANSAC gutter grid solving,
+    blank-line pixel energy gating, & non-overlapping bounding boxes.
+    """
     img = cv2.imread(image_path)
-    if img is None: raise FileNotFoundError(f"Image not found: {image_path}")
+    if img is None:
+        raise FileNotFoundError(f"Image not found: {image_path}")
     h, w = img.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+
     ocr_boxes: List[Dict[str, Any]] = []
     ocr = get_rapid_ocr()
     if ocr is not None:
@@ -807,183 +877,416 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             if results:
                 for bbox, text, score in results:
                     pts = np.array(bbox)
-                    min_x, max_x, min_y, max_y = int(np.min(pts[:, 0])), int(np.max(pts[:, 0])), int(np.min(pts[:, 1])), int(np.max(pts[:, 1]))
+                    min_x, max_x = int(np.min(pts[:, 0])), int(np.max(pts[:, 0]))
+                    min_y, max_y = int(np.min(pts[:, 1])), int(np.max(pts[:, 1]))
                     ocr_boxes.append({
-                        "text": text.strip(), "score": float(score), "x": min_x, "y": min_y,
-                        "width": max_x - min_x, "height": max_y - min_y,
-                        "center_y": (min_y + max_y) / 2.0, "center_x": (min_x + max_x) / 2.0
+                        "text": text.strip(),
+                        "score": float(score),
+                        "x": min_x,
+                        "y": min_y,
+                        "width": max_x - min_x,
+                        "height": max_y - min_y,
+                        "center_y": (min_y + max_y) / 2.0,
+                        "center_x": (min_x + max_x) / 2.0,
                     })
-        except Exception as e: print(f"[worker_scan_image] RapidOCR error: {e}")
+        except Exception as e:
+            print(f"[worker_scan_image] RapidOCR error: {e}")
 
-    # 1. Editor Vertical and Horizontal Boundaries:
-    # Top boundary: ignore Android status bar, Teams title header, and markdown formatting toolbar (ends at ~292).
-    ed_top = max(292, int(295 * (h / 1080.0)))
-    # Bottom boundary: ignore clipped 25th row (y_min >= 948) and bottom Android dock / status pill.
-    ed_bot = min(int(943 * (h / 1080.0)), h - 135)
+    # 1. Left Gutter ROI & Editor Boundaries:
+    # Gutter ROI: x: 0..92px (scaled by w / 1920.0), y: 280..960px (scaled by h / 1080.0)
+    gutter_roi_y1 = max(0, int(round(280 * scale_y)))
+    gutter_roi_y2 = min(h, int(round(960 * scale_y)))
+    gutter_roi_x_max = int(round(92 * scale_x))
 
-    # Gutter horizontal bounds (gutter digits span x=[63..99], content starts at x>=102):
-    gx_min = max(16, int(w * 0.015))
-    gx_max = max(92, min(98, int(w * 0.051)))
-    content_min_x = gx_max + 2
-    content_max_x = min(w - 20, 1080)
+    # Strict unclipped editor line vertical bounds (excludes top toolbar <=292 and bottom clipped/status bar >=944)
+    ed_top = max(gutter_roi_y1, int(round(295 * scale_y)))
+    ed_bot = min(gutter_roi_y2, int(round(943 * scale_y)), h - int(round(135 * scale_y)))
 
-    # 2. Extract genuine gutter candidate digits and content words within [ed_top, ed_bot]
+    gx_min = max(16, int(round(28 * scale_x)))
+    gx_max = gutter_roi_x_max
+    x_code_start = int(round(94 * scale_x))
+    x_code_end = max(x_code_start + 1, w - 24)
+    content_min_x = x_code_start
+    content_max_x = min(x_code_end, int(round(1896 * scale_x)))
+
+    def _clean_gutter_digits(s: str) -> str:
+        c = s.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
+        return re.sub(r'(\d)\s+(\d)', r'\1\2', c)
+
+    # 2. Detect all gutter numbers in the left gutter ROI (x: 0..92px, y: 280..960px scaled)
     raw_gutter_pairs: List[Tuple[float, int, Dict[str, Any]]] = []
     content_boxes: List[Dict[str, Any]] = []
 
     for b in ocr_boxes:
         cy = b["center_y"]
+        if cy < gutter_roi_y1 or cy > gutter_roi_y2:
+            continue
         if cy < ed_top or cy > ed_bot:
             continue
         txt = b["text"].strip()
         bx = b["x"]
         bw = b["width"]
 
-        # Reject any bounding boxes belonging to wallpaper icons or background windows past the 1080px editor margin
-        if bx >= content_max_x or (bx + bw // 2) > (content_max_x + 10):
-            continue
-
         # Filter Android/Teams status pills like "Offline" appearing near the bottom bar
-        if txt.lower() in ["offline", "online", "syncing", "saved"] and cy > (ed_bot - 30):
+        if txt.lower() in ["offline", "online", "syncing", "saved"] and cy > (ed_bot - 30 * scale_y):
             continue
 
-        if bx < gx_max:
-            if txt.isdigit() and len(txt) <= 6:
-                raw_gutter_pairs.append((cy, int(txt), b))
-            elif m := re.match(r'^(\d{1,6})\s*([^\d\s].*)$', txt):
+        if bx <= gx_max:
+            clean_g = _clean_gutter_digits(txt)
+            if clean_g.isdigit() and 0 < int(clean_g) < 500000:
+                raw_gutter_pairs.append((cy, int(clean_g), b))
+            elif m := re.match(r'^(\d{1,6})\s+(.+)$', txt):
                 g_num = int(m.group(1))
                 c_txt = m.group(2).strip()
-                raw_gutter_pairs.append((cy, g_num, {**b, "width": 35}))
+                raw_gutter_pairs.append((cy, g_num, {**b, "width": max(24, gx_max - bx)}))
                 if c_txt:
                     content_boxes.append({
                         **b,
                         "x": max(content_min_x, bx + 28),
                         "text": c_txt,
-                        "width": max(30, bw - 28)
+                        "width": max(30, bw - 28),
                     })
             elif (bx + bw) >= content_min_x:
                 content_boxes.append(b)
-        else:
+        elif bx < content_max_x:
             content_boxes.append(b)
+
+    # Dedicated left-gutter ROI pass (with slight right margin to prevent clipping right-aligned last digit)
+    if ocr is not None:
+        try:
+            gutter_crop_w = min(w, int(round(104 * scale_x)))
+            gutter_crop = img[gutter_roi_y1:gutter_roi_y2, 0:gutter_crop_w]
+            if gutter_crop.size > 0:
+                g_res, _ = ocr(gutter_crop)
+                for bbox, text, score in (g_res or []):
+                    pts = np.array(bbox)
+                    gx1, gy1 = int(np.min(pts[:, 0])), gutter_roi_y1 + int(np.min(pts[:, 1]))
+                    gx2, gy2 = int(np.max(pts[:, 0])), gutter_roi_y1 + int(np.max(pts[:, 1]))
+                    gcy = (gy1 + gy2) / 2.0
+                    if gx1 <= gx_max and ed_top <= gcy <= ed_bot:
+                        clean_g = _clean_gutter_digits(text)
+                        if m_g := re.match(r'^(\d{1,6})$', clean_g):
+                            g_num = int(m_g.group(1))
+                            if 0 < g_num < 500000:
+                                if not any(abs(existing_cy - gcy) < 12.0 * scale_y for existing_cy, _, _ in raw_gutter_pairs):
+                                    raw_gutter_pairs.append((
+                                        gcy,
+                                        g_num,
+                                        {
+                                            "text": str(g_num),
+                                            "score": float(score),
+                                            "x": gx1,
+                                            "y": gy1,
+                                            "width": max(16, min(gx2, gx_max) - gx1),
+                                            "height": max(14, gy2 - gy1),
+                                            "center_y": gcy,
+                                            "center_x": (gx1 + gx2) / 2.0,
+                                        },
+                                    ))
+        except Exception as e:
+            print(f"[worker_scan_image] Gutter ROI scan note: {e}")
 
     raw_gutter_pairs.sort(key=lambda p: p[0])
 
-    # Filter strictly increasing sequences using correct_gutter_sequence and back-project to ed_top
-    pairs_for_corr = [(p[0], p[1]) for p in raw_gutter_pairs]
+    # Consensus sequence validation to repair any truncated/misread gutter numbers
+    pairs_for_corr = [(int(round(p[0])), p[1]) for p in raw_gutter_pairs]
     corrected_pairs = correct_gutter_sequence(pairs_for_corr, min_content_y=ed_top)
 
-    raw_box_map = {p[1]: p[2] for p in raw_gutter_pairs}
-    avg_gw = max(28, int(np.mean([p[2]["width"] for p in raw_gutter_pairs]))) if raw_gutter_pairs else (gx_max - gx_min)
+    # Preserve exact sub-pixel cy from raw_gutter_pairs
+    cy_lookup: Dict[int, float] = {}
+    box_lookup: Dict[int, Dict[str, Any]] = {}
+    for f_cy, raw_n, b_dict in raw_gutter_pairs:
+        iy = int(round(f_cy))
+        cy_lookup[iy] = f_cy
+        box_lookup[iy] = b_dict
+
+    avg_gw = max(24, int(np.mean([p[2]["width"] for p in raw_gutter_pairs]))) if raw_gutter_pairs else max(24, gx_max - gx_min)
 
     valid_pairs: List[Tuple[float, int, Dict[str, Any]]] = []
-    for cy, c_num in corrected_pairs:
-        b = raw_box_map.get(c_num)
+    for iy, c_num in corrected_pairs:
+        exact_cy = cy_lookup.get(iy, float(iy))
+        b = box_lookup.get(iy)
         if not b:
             b = {
                 "x": gx_min,
-                "y": int(cy - 12),
+                "y": int(round(exact_cy - 12 * scale_y)),
                 "width": avg_gw,
-                "height": 24,
-                "confidence": 0.95
+                "height": int(round(24 * scale_y)),
+                "confidence": 0.95,
             }
-        valid_pairs.append((float(cy), c_num, {**b, "line_number": c_num}))
+        valid_pairs.append((exact_cy, c_num, {**b, "line_number": c_num}))
 
-    # 3. Fit monospaced line grid (pitch and intercept)
+    # 3. Deterministic Gutter Grid Solver:
+    # Estimate median single-row pitch (~27.0px at 1080p) and fit RANSAC linear regression
+    default_pitch = 27.0 * scale_y
+    pitch_samples: List[float] = []
+    for i in range(len(valid_pairs) - 1):
+        dy = valid_pairs[i + 1][0] - valid_pairs[i][0]
+        dn = valid_pairs[i + 1][1] - valid_pairs[i][1]
+        if dn == 1 and (18.0 * scale_y) <= dy <= (33.5 * scale_y):
+            pitch_samples.append(float(dy))
+        elif dn > 1 and (18.0 * scale_y) <= (dy / dn) <= (32.5 * scale_y):
+            pitch_samples.append(float(dy) / float(dn))
+
+    pitch_y = float(np.median(pitch_samples)) if pitch_samples else default_pitch
+
     if len(valid_pairs) >= 2:
-        ys = np.array([p[0] for p in valid_pairs])
-        lns = np.array([p[1] for p in valid_pairs])
-        slope, intercept = np.polyfit(lns, ys, 1)
-        pitch = max(18.0, min(65.0, float(slope)))
+        # Map each detected gutter number to its visual row offset v_i (accounting for multi-row wrapped lines where dy > 1.5 * pitch_y)
+        v_offsets = [0]
+        for i in range(1, len(valid_pairs)):
+            dy = valid_pairs[i][0] - valid_pairs[i - 1][0]
+            dn = max(1, valid_pairs[i][1] - valid_pairs[i - 1][1])
+            if dn == 1 and dy > 1.5 * pitch_y:
+                v_step = max(2, int(round(dy / pitch_y)))
+            else:
+                v_step = max(dn, int(round(dy / pitch_y)))
+            v_offsets.append(v_offsets[-1] + v_step)
+
+        # RANSAC inlier selection on (v_i, cy_i)
+        best_inlier_idxs: List[int] = []
+        inlier_tol = 0.38 * pitch_y
+        for i in range(len(valid_pairs)):
+            cy_i = valid_pairs[i][0]
+            v_i = v_offsets[i]
+            inliers = [
+                j for j in range(len(valid_pairs))
+                if abs((valid_pairs[j][0] - cy_i) - (v_offsets[j] - v_i) * pitch_y) <= inlier_tol
+            ]
+            if len(inliers) > len(best_inlier_idxs):
+                best_inlier_idxs = inliers
+
+        if len(best_inlier_idxs) >= 2:
+            v_in = np.array([v_offsets[idx] for idx in best_inlier_idxs], dtype=np.float64)
+            y_in = np.array([valid_pairs[idx][0] for idx in best_inlier_idxs], dtype=np.float64)
+            slope, y_v0 = np.polyfit(v_in, y_in, 1)
+            if (19.0 * scale_y) <= slope <= (34.0 * scale_y):
+                pitch_y = float(slope)
+                y_v0 = float(y_v0)
+            else:
+                y_v0 = float(np.median(y_in - v_in * pitch_y))
+        else:
+            y_v0 = float(valid_pairs[0][0])
+
+        # Determine top_ln and bot_ln strictly within valid line-center viewport bounds [min_center_y, max_center_y]
+        min_center_y = 300.0 * scale_y
+        max_center_y = 940.0 * scale_y
+
+        first_ln = valid_pairs[0][1]
+        first_cy = y_v0
+        rows_above = max(0, int(np.floor((first_cy - min_center_y) / pitch_y + 0.18)))
+        top_line = max(1, first_ln - rows_above)
+
+        last_ln = valid_pairs[-1][1]
+        last_cy = y_v0 + v_offsets[-1] * pitch_y
+        rows_below = max(0, int(np.floor((max_center_y - last_cy) / pitch_y + 0.18)))
+        bottom_line = max(top_line, last_ln + rows_below)
+
+        # Build exact y_center(ln) for every integer line ln in range(top_line, bottom_line + 1):
+        # When no wrapped lines exist on the page, v_offsets[k] == valid_pairs[k][1] - first_ln,
+        # so y_center(ln) = y_0 + (ln - top_line) * pitch_y identically.
+        y_0 = first_cy - (first_ln - top_line) * pitch_y
+        y_centers: Dict[int, float] = {}
+
+        # Anchor each detected gutter number to the fitted RANSAC visual row grid
+        anchor_lns = [valid_pairs[i][1] for i in range(len(valid_pairs))]
+        anchor_ys = [y_v0 + v_offsets[i] * pitch_y for i in range(len(valid_pairs))]
+
+        for ln in range(top_line, bottom_line + 1):
+            if ln <= anchor_lns[0]:
+                y_centers[ln] = anchor_ys[0] + (ln - anchor_lns[0]) * pitch_y
+            elif ln >= anchor_lns[-1]:
+                y_centers[ln] = anchor_ys[-1] + (ln - anchor_lns[-1]) * pitch_y
+            else:
+                # Find bounding anchors anchor_lns[k] <= ln <= anchor_lns[k+1]
+                k = 0
+                for idx_a in range(len(anchor_lns) - 1):
+                    if anchor_lns[idx_a] <= ln <= anchor_lns[idx_a + 1]:
+                        k = idx_a
+                        break
+                ln_a, ln_b = anchor_lns[k], anchor_lns[k + 1]
+                ya, yb = anchor_ys[k], anchor_ys[k + 1]
+                if ln == ln_a:
+                    y_centers[ln] = ya
+                elif ln == ln_b:
+                    y_centers[ln] = yb
+                else:
+                    # Interpolate across intermediate lines
+                    y_centers[ln] = ya + (ln - ln_a) * pitch_y
     elif len(valid_pairs) == 1:
-        y0, ln0, _ = valid_pairs[0]
-        pitch = 27.0 if h <= 1200 else 60.0
-        intercept = y0 - ln0 * pitch
+        y0_pt, ln0_pt, _ = valid_pairs[0]
+        min_center_y = 300.0 * scale_y
+        max_center_y = 940.0 * scale_y
+        rows_above = max(0, int(np.floor((y0_pt - min_center_y) / pitch_y + 0.18)))
+        top_line = max(1, ln0_pt - rows_above)
+        y_0 = y0_pt - (ln0_pt - top_line) * pitch_y
+        rows_total = max(1, int(np.floor((max_center_y - y_0) / pitch_y + 0.18)) + 1)
+        bottom_line = top_line + rows_total - 1
+        y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
     else:
-        pitch = 27.0 if h <= 1200 else 60.0
-        intercept = ed_top - pitch
-
-    # Determine top_line (starting line number in the editor)
-    # y(ln) = intercept + ln * pitch
-    y_ln1 = intercept + 1 * pitch
-    if abs(y_ln1 - ed_top) <= pitch * 1.5:
         top_line = 1
-    else:
-        top_line = max(1, int(round((ed_top - intercept) / pitch)))
-
-    # Determine bottom_line (ending line number in the editor)
-    bottom_line = max(top_line, int(round((ed_bot - intercept) / pitch)))
+        bottom_line = 24
+        y_0 = 313.5 * scale_y
+        y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
 
     gutter_boxes: Dict[int, Dict[str, Any]] = {}
     line_boxes: Dict[int, Dict[str, Any]] = {}
     lines_list: List[Dict[str, Any]] = []
 
-    for ln in range(top_line, bottom_line + 1):
-        ly = intercept + ln * pitch
-        box_y = max(ed_top, int(ly - pitch * 0.5))
-        box_h = int(pitch)
-        if box_y + box_h > ed_bot + 10:
-            box_h = max(16, (ed_bot + 10) - box_y)
+    half_strip = 0.42 * pitch_y
+    char_pitch_x = 8.2 * scale_x
+    sep_end_col = max(4, int(round(14 * scale_x)))
+    bleed_end_col = max(1, int(round(3 * scale_x)))
 
-        # Gutter box strictly inside [ed_top, ed_bot]
+    for ln in range(top_line, bottom_line + 1):
+        yc = y_centers[ln]
+        y_top_ln = yc - half_strip
+        y_bot_ln = yc + half_strip
+
+        # Check for wrapped line: y_center(ln + 1) - y_center(ln) > 1.5 * pitch_y
+        if (ln + 1) in y_centers and (y_centers[ln + 1] - yc) > 1.5 * pitch_y:
+            dY = y_centers[ln + 1] - yc
+            is_wrapped = True
+            wrapped_line_count = max(2, int(round(dY / pitch_y)))
+            y_top_next = y_centers[ln + 1] - half_strip
+            strip_y1 = max(0, int(round(y_top_ln)))
+            strip_y2 = min(h, int(round(y_top_next)))
+        else:
+            is_wrapped = False
+            wrapped_line_count = 1
+            strip_y1 = max(0, int(round(y_top_ln)))
+            strip_y2 = min(h, int(round(y_bot_ln)))
+
+        if strip_y2 <= strip_y1:
+            strip_y2 = min(h, strip_y1 + max(16, int(round(0.84 * pitch_y))))
+
+        box_h = strip_y2 - strip_y1
+
+        # Gutter box aligned to the first visual row of line ln
+        gbox_h = max(14, int(round(0.84 * pitch_y)))
         gbox = {
             "x": gx_min,
-            "y": box_y,
+            "y": strip_y1,
             "width": avg_gw,
-            "height": box_h,
+            "height": gbox_h,
             "line_number": ln,
-            "confidence": 0.95
+            "confidence": 0.98,
         }
         gutter_boxes[ln] = gbox
 
-        # Content words for this line
+        # 4. Blank-Line Pixel Energy Gate on horizontal code strip img[y1:y2, x_code_start:img_w - 24]
+        code_strip = img[strip_y1:strip_y2, x_code_start:x_code_end]
+        if code_strip.size > 0:
+            gray_strip = cv2.cvtColor(code_strip, cv2.COLOR_BGR2GRAY) if code_strip.ndim == 3 else code_strip
+            bg_med = float(np.median(gray_strip))
+            fg_mask = np.abs(gray_strip.astype(np.int16) - bg_med) > 24
+            # Ignore 1-3px right-edge bleed of right-aligned gutter digits at x=94..96 when separator channel (x=97..107) is empty
+            if fg_mask.shape[1] > sep_end_col and np.count_nonzero(fg_mask[:, bleed_end_col:sep_end_col]) == 0:
+                fg_mask[:, :bleed_end_col] = False
+            ink_px = int(np.count_nonzero(fg_mask))
+        else:
+            bg_med = 20.0
+            ink_px = 0
+
+        if ink_px < 10:
+            # Strictly lock blank line: never allow text from adjacent rows to shift onto this line
+            content_box = {
+                "x": content_min_x,
+                "y": strip_y1,
+                "width": int(content_max_x - content_min_x),
+                "height": box_h,
+                "line_number": ln,
+                "interpolated": True,
+            }
+            line_boxes[ln] = content_box
+            lines_list.append({
+                "line_number": ln,
+                "gutter_number": ln,
+                "text": "",
+                "is_blank": True,
+                "blank_locked": True,
+                "ink_px": ink_px,
+                "is_wrapped": False,
+                "wrapped_line_count": 1,
+                "status": "verified",
+                "confidence": 1.0,
+                "y_top": strip_y1,
+                "y_bottom": strip_y2,
+                "y_center": round(yc, 2),
+                "bbox": content_box,
+                "gutter_bbox": gbox,
+            })
+            continue
+
+        # 5. Non-blank line (ink_px >= 10): match content boxes strictly within [strip_y1, strip_y2]
         matched_words = [
             b for b in content_boxes
-            if content_min_x <= (b["x"] + b["width"]) <= (content_max_x + 30) and abs(b["center_y"] - ly) < pitch * 0.48
+            if content_min_x <= (b["x"] + b["width"]) <= (content_max_x + 30)
+            and strip_y1 <= b["center_y"] <= strip_y2
         ]
-        matched_words.sort(key=lambda b: b["x"])
 
-        # Content bounding box
+        if is_wrapped and len(matched_words) > 1:
+            matched_words.sort(key=lambda b: (int(round((b["center_y"] - yc) / pitch_y)), b["x"]))
+        else:
+            matched_words.sort(key=lambda b: b["x"])
+
         if matched_words:
             rx_min = max(content_min_x, int(min(b["x"] for b in matched_words)))
             rx_max = int(min(content_max_x, max(b["x"] + b["width"] for b in matched_words)))
             content_box = {
                 "x": rx_min,
-                "y": box_y,
+                "y": strip_y1,
                 "width": max(50, rx_max - rx_min),
                 "height": box_h,
-                "line_number": ln
+                "line_number": ln,
             }
-            # Compute leading indentation from monospace character pitch (~8.2px per char)
-            indent_spaces = max(0, int(round((rx_min - content_min_x) / 8.2)))
+            first_word_x = matched_words[0]["x"]
+            indent_spaces = max(0, int(round((first_word_x - (content_min_x + 14 * scale_x)) / max(1.0, char_pitch_x))))
             indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
             line_str = indent_prefix + " ".join(b["text"] for b in matched_words)
+            avg_conf = float(np.mean([b.get("score", 0.95) for b in matched_words]))
         else:
             content_box = {
                 "x": content_min_x,
-                "y": box_y,
+                "y": strip_y1,
                 "width": int(content_max_x - content_min_x),
                 "height": box_h,
                 "line_number": ln,
-                "interpolated": True
+                "interpolated": True,
             }
             line_str = ""
-            # Inspect localized line slice for thin markdown symbols (fences, dots, tree lines)
-            slice_crop = img[box_y:box_y + box_h, content_min_x:content_max_x]
-            if slice_crop.size > 0:
-                sc_gray = cv2.cvtColor(slice_crop, cv2.COLOR_BGR2GRAY)
-                bright_coords = np.argwhere(sc_gray > 75)
-                if len(bright_coords) >= 15:
-                    # Run quick slice OCR with CLAHE
+            avg_conf = 0.90
+            # Localized padded row OCR for faint symbols (e.g. ```, ., };, ---) when ink_px >= 10
+            if ocr is not None and code_strip.size > 0:
+                clean_crop = code_strip[:, bleed_end_col:] if code_strip.shape[1] > bleed_end_col else code_strip
+                bg_val = int(round(bg_med))
+                padded = cv2.copyMakeBorder(clean_crop, 8, 8, 8, 8, cv2.BORDER_CONSTANT, value=(bg_val, bg_val, bg_val))
+                sc_res, _ = ocr(padded)
+                if not sc_res:
+                    sc_gray = cv2.cvtColor(padded, cv2.COLOR_BGR2GRAY) if padded.ndim == 3 else padded
                     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
                     enhanced_sc = clahe.apply(sc_gray)
-                    sc_res, _ = (ocr(enhanced_sc) if ocr else (None, None))
-                    if sc_res:
-                        line_str = " ".join(r[1].strip() for r in sorted(sc_res, key=lambda x: float(np.min(np.array(x[0])[:, 0]))))
+                    sc_res, _ = ocr(enhanced_sc)
+                if sc_res:
+                    sorted_sc = sorted(sc_res, key=lambda x: float(np.min(np.array(x[0])[:, 0])))
+                    first_x = max(0.0, float(np.min(np.array(sorted_sc[0][0])[:, 0])) - 8.0)
+                    indent_spaces = max(0, int(round((first_x - 11.0 * scale_x) / max(1.0, char_pitch_x))))
+                    indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
+                    line_str = indent_prefix + " ".join(r[1].strip() for r in sorted_sc if r[1].strip())
+                    avg_conf = float(np.mean([float(r[2]) for r in sorted_sc]))
+                elif 10 <= ink_px <= 90:
+                    # Micro-glyph geometric fallback for standalone ``` or . missed by PP-OCR text detector
+                    ys_fg, xs_fg = np.where(fg_mask)
+                    if len(xs_fg) > 0:
+                        x_span = int(xs_fg.max() - xs_fg.min() + 1)
+                        y_mean_rel = float(ys_fg.mean()) / max(1.0, float(fg_mask.shape[0]))
+                        active_cols = np.count_nonzero(fg_mask.any(axis=0))
+                        if x_span <= int(round(8 * scale_x)) and y_mean_rel >= 0.45:
+                            line_str = "."
+                        elif int(round(16 * scale_x)) <= x_span <= int(round(36 * scale_x)) and active_cols <= x_span - 4 and y_mean_rel <= 0.55:
+                            line_str = "```"
 
-        # Clean line_str of accidental duplicate gutter digit prefix
-        line_str = re.sub(rf"^{ln}\s*[:\.]?\s*", "", line_str)
-        is_blank = not bool(line_str.strip())
-        is_w = len(line_str) > 65
+        line_str = LocalOllamaStitcher.sanitize_line_text(ln, line_str)
+        is_blank = False
 
         line_boxes[ln] = content_box
         lines_list.append({
@@ -991,20 +1294,26 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             "gutter_number": ln,
             "text": line_str,
             "is_blank": is_blank,
-            "is_wrapped": is_w,
-            "wrapped_line_count": 2 if is_w else 1,
-            "status": "verified" if not is_blank else "empty",
-            "confidence": 0.95,
+            "blank_locked": False,
+            "ink_px": ink_px,
+            "is_wrapped": is_wrapped,
+            "wrapped_line_count": wrapped_line_count,
+            "status": "verified",
+            "confidence": round(max(0.85, min(0.99, avg_conf)), 3),
+            "y_top": strip_y1,
+            "y_bottom": strip_y2,
+            "y_center": round(yc, 2),
             "bbox": content_box,
-            "gutter_bbox": gbox
+            "gutter_bbox": gbox,
         })
 
-    first_line_box = line_boxes.get(top_line, {"x": content_min_x, "y": ed_top, "width": 55, "height": int(pitch), "line_number": top_line})
-    last_line_box = line_boxes.get(bottom_line, {"x": content_min_x, "y": ed_bot - int(pitch), "width": 55, "height": int(pitch), "line_number": bottom_line})
+    first_line_box = line_boxes.get(top_line, {"x": content_min_x, "y": ed_top, "width": 55, "height": int(pitch_y), "line_number": top_line})
+    last_line_box = line_boxes.get(bottom_line, {"x": content_min_x, "y": ed_bot - int(pitch_y), "width": 55, "height": int(pitch_y), "line_number": bottom_line})
 
     return {
         "top_line": top_line,
         "bottom_line": bottom_line,
+        "pitch_y": round(pitch_y, 3),
         "lines": lines_list,
         "image_width": w,
         "image_height": h,
@@ -1013,8 +1322,8 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             "last_line": last_line_box,
             "wrapped_lines": [l["bbox"] for l in lines_list if l.get("is_wrapped")],
             "line_boxes": line_boxes,
-            "gutter_boxes": gutter_boxes
-        }
+            "gutter_boxes": gutter_boxes,
+        },
     }
 
 class BaseOCREngine(ABC):
@@ -1032,24 +1341,47 @@ class LocalOllamaStitcher:
 
     @staticmethod
     def sanitize_line_text(ln: int, text: str) -> str:
-        cleaned = (text or "").rstrip()
+        cleaned = (
+            (text or "")
+            .replace("\uff08", "(")
+            .replace("\uff09", ")")
+            .replace("\uff1a", ":")
+            .replace("\uff1b", ";")
+            .replace("\uff0c", ",")
+            .rstrip()
+        )
         stripped = cleaned.strip()
         if not stripped:
+            return ""
+        # Strip synthetic row tag [L12]: or L12: if echoed by VLM
+        m_tag = re.match(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", stripped, re.IGNORECASE)
+        if m_tag:
+            cleaned_body = m_tag.group(2).rstrip()
+            stripped = cleaned_body.strip()
+            if not stripped:
+                return ""
+            cleaned = cleaned_body
+        if re.match(r"^\[?L\d{1,6}\]?$", stripped, re.IGNORECASE):
             return ""
         if stripped.isdigit():
             val = int(stripped)
             if abs(val - ln) <= 4:
                 return ""
-        m = re.match(r"^(\d{1,5})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
+        m = re.match(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
         if m:
             val = int(m.group(1))
             if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
-                return m.group(2).strip()
-        m2 = re.match(r"^(\d{1,5})\s*([├│└].*)$", stripped)
+                cleaned = m.group(2).strip()
+                stripped = cleaned
+        m2 = re.match(r"^(\d{1,6})\s*([├│└].*)$", stripped)
         if m2:
             val = int(m2.group(1))
             if abs(val - ln) <= 4:
-                return m2.group(2).strip()
+                cleaned = m2.group(2).strip()
+                stripped = cleaned
+        normalized_tag = _normalize_codescan_tags(stripped)
+        if normalized_tag != stripped:
+            return normalized_tag
         return cleaned
 
     def stitch_frame_lines(self, existing_lines: Dict[int, Any], new_lines: List[Dict[str, Any]], frame_id: str, model_desc: str = "Ollama") -> int:
@@ -1059,8 +1391,13 @@ class LocalOllamaStitcher:
             ln = item.get("line_number")
             if ln is None: continue
             ln = int(ln)
-            text = self.sanitize_line_text(ln, item.get("text", ""))
-            is_blank = not bool(text.strip())
+            blank_locked = bool(item.get("blank_locked", False))
+            if blank_locked:
+                text = ""
+                is_blank = True
+            else:
+                text = self.sanitize_line_text(ln, item.get("text", ""))
+                is_blank = not bool(text.strip())
             is_wrapped = item.get("is_wrapped", False)
             wcount = item.get("wrapped_line_count", 1)
             flagged = item.get("flagged", False)
