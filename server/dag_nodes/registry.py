@@ -27,6 +27,12 @@ CANONICAL_ALIASES = {
     "node_9": "batch_frames_ocr",
     "batch_frames_ocr": "batch_frames_ocr",
     "sequential_rescan": "batch_frames_ocr",
+    "node_10": "markdown_tag_parser",
+    "markdown_tag_parser": "markdown_tag_parser",
+    "node_11": "ast_compiler_validator",
+    "ast_compiler_validator": "ast_compiler_validator",
+    "node_12": "sandbox_ide",
+    "sandbox_ide": "sandbox_ide",
 }
 
 

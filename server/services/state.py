@@ -1024,6 +1024,14 @@ dag_state: Dict[str, Any] = {
             "nodes": ["verification_trigger", "document_assemble", "batch_frames_ocr"],
             "status": "idle",
             "progress": None
+        },
+        "post_capture_analyzer": {
+            "id": "post_capture_analyzer",
+            "title": "Post-Capture Analyzer & Sandbox VFS",
+            "description": "Parses CODESCAN_FILE_START/END tags into VFS tree, validates AST/TypeScript compilation in memfs with auto-healing, and materializes sandbox workspace for Monaco IDE",
+            "nodes": ["markdown_tag_parser", "ast_compiler_validator", "sandbox_ide"],
+            "status": "idle",
+            "progress": None
         }
     },
     "semaphore_group2_to_3": True,
@@ -1307,6 +1315,82 @@ dag_state: Dict[str, Any] = {
                 "auto_save_markdown": True,
                 "output_filename": "reconstructed.md"
             }
+        },
+        "markdown_tag_parser": {
+            "id": "markdown_tag_parser",
+            "group": "post_capture_analyzer",
+            "title": "10. Parse File Tags & VFS Tree",
+            "description": "Parses Directory Structure header and CODESCAN_FILE_START/END file blocks, self-heals corrupted tags from PNG frames, validates line counts, and builds VFS manifest.",
+            "status": "idle",
+            "vfs_files_count": 0,
+            "repaired_tags_count": 0,
+            "line_count_mismatches_count": 0,
+            "evaluator": None,
+            "healing_step": None,
+            "telemetry_insight": None,
+            "timings": None,
+            "dag_context": None,
+            "trace_insights": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "stitch_multipart_bundles": True,
+                "self_heal_corrupted_tags": True,
+                "validate_line_counts": True
+            }
+        },
+        "ast_compiler_validator": {
+            "id": "ast_compiler_validator",
+            "group": "post_capture_analyzer",
+            "title": "11. AST & TypeScript Compiler Check",
+            "description": "Invokes persistent Node.js TypeScript Compiler API + memfs worker to parse and type-check VFS files, auto-healing OCR symbol errors from source PNG frames.",
+            "status": "idle",
+            "total_files": 0,
+            "compilable_files": 0,
+            "syntax_errors_count": 0,
+            "auto_healed_lines_count": 0,
+            "evaluator": None,
+            "healing_step": None,
+            "telemetry_insight": None,
+            "timings": None,
+            "dag_context": None,
+            "trace_insights": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "auto_heal_syntax_errors": True,
+                "max_heal_attempts_per_file": 10,
+                "validate_css_and_json": True
+            }
+        },
+        "sandbox_ide": {
+            "id": "sandbox_ide",
+            "group": "post_capture_analyzer",
+            "title": "12. Sandbox & Monaco VFS Ready",
+            "description": "Materializes VFS files into server/storage/sandbox/<project_id>/, generates missing package.json/tsconfig.json, links shared_node_modules, and publishes workspace to /api/analyzer/workspace/{project_id}.",
+            "status": "idle",
+            "materialized_files_count": 0,
+            "node_modules_linked": False,
+            "workspace_endpoint": "",
+            "evaluator": None,
+            "healing_step": None,
+            "telemetry_insight": None,
+            "timings": None,
+            "dag_context": None,
+            "trace_insights": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "auto_link_node_modules": True,
+                "generate_missing_configs": True,
+                "start_preview_server": True
+            }
         }
     },
     "edges": [
@@ -1318,7 +1402,10 @@ dag_state: Dict[str, Any] = {
         {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "has_semaphore": True},
         {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True},
         {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True},
-        {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True}
+        {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True},
+        {"id": "document_assemble->markdown_tag_parser", "from": "document_assemble", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_EOF"},
+        {"id": "markdown_tag_parser->ast_compiler_validator", "from": "markdown_tag_parser", "to": "ast_compiler_validator", "enabled": True, "condition": "ON_SUCCESS"},
+        {"id": "ast_compiler_validator->sandbox_ide", "from": "ast_compiler_validator", "to": "sandbox_ide", "enabled": True, "condition": "ON_SUCCESS"}
     ],
     "current_active_node": None,
     "bypass_live_ocr": False,
@@ -1334,8 +1421,13 @@ DEFAULT_DAG_EDGES = [
     {"id": "arrow_down->verification_trigger", "from": "arrow_down", "to": "verification_trigger", "enabled": True, "label": "Assert Settle & Trigger Next", "has_semaphore": True},
     {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True, "label": "Append Verified Text"},
     {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True, "label": "Continuous Loopback Track"},
-    {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True, "label": "Run Sequential Batch Rescan"}
+    {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True, "label": "Run Sequential Batch Rescan"},
+    {"id": "document_assemble->markdown_tag_parser", "from": "document_assemble", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_EOF", "label": "100% Complete -> Parse VFS Tags"},
+    {"id": "markdown_tag_parser->ast_compiler_validator", "from": "markdown_tag_parser", "to": "ast_compiler_validator", "enabled": True, "condition": "ON_SUCCESS", "label": "Validate AST & TypeScript in VFS"},
+    {"id": "ast_compiler_validator->sandbox_ide", "from": "ast_compiler_validator", "to": "sandbox_ide", "enabled": True, "condition": "ON_SUCCESS", "label": "Materialize Sandbox & Monaco VFS"}
 ]
+
+analyzer_workspaces: Dict[str, Dict[str, Any]] = {}
 
 capture_loop_running: bool = False
 headless_mode: bool = False
@@ -1534,19 +1626,27 @@ def set_edge_connection(from_node: str, to_node: str, enabled: bool = True) -> D
     edges = dag_state.setdefault("edges", [])
     matched = None
     for edge in edges:
-        if edge.get("from") == from_node:
-            edge["to"] = to_node
+        if edge.get("from") == from_node and edge.get("to") == to_node:
             edge["enabled"] = bool(enabled)
             edge["id"] = f"{from_node}->{to_node}"
             matched = edge
             break
+    if not matched and from_node != "document_assemble":
+        for edge in edges:
+            if edge.get("from") == from_node:
+                edge["to"] = to_node
+                edge["enabled"] = bool(enabled)
+                edge["id"] = f"{from_node}->{to_node}"
+                matched = edge
+                break
     if not matched:
         matched = {
             "id": f"{from_node}->{to_node}",
             "from": from_node,
             "to": to_node,
             "enabled": bool(enabled),
-            "is_loopback": (from_node == "document_assemble" and to_node == "frame_acquire")
+            "is_loopback": (from_node == "document_assemble" and to_node == "frame_acquire"),
+            "condition": "ON_EOF" if (from_node == "document_assemble" and to_node == "markdown_tag_parser") else "ON_SUCCESS"
         }
         edges.append(matched)
     sync_semaphore_states_from_edges()

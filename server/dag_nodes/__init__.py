@@ -26,6 +26,9 @@ from dag_nodes.arrow_down_node import ArrowDownPagerNode, ArrowDownNode
 from dag_nodes.verification_trigger_node import VerificationTriggerNode
 from dag_nodes.document_assemble_node import DocumentAssembleNode
 from dag_nodes.batch_frames_ocr_node import BatchFramesOcrNode
+from dag_nodes.markdown_tag_parser_node import MarkdownTagParserNode
+from dag_nodes.ast_compiler_validator_node import AstCompilerValidatorNode
+from dag_nodes.sandbox_ide_node import SandboxIdeNode
 
 __all__ = [
     # Base and Blackboard
@@ -55,4 +58,7 @@ __all__ = [
     "VerificationTriggerNode",
     "DocumentAssembleNode",
     "BatchFramesOcrNode",
+    "MarkdownTagParserNode",
+    "AstCompilerValidatorNode",
+    "SandboxIdeNode",
 ]

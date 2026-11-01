@@ -330,7 +330,10 @@ NODE_ALIAS_MAP = {
     "node_6": "arrow_down", "arrow_down": "arrow_down", "navigation": "arrow_down",
     "node_7": "verification_trigger", "verification_trigger": "verification_trigger", "verify": "verification_trigger",
     "node_8": "document_assemble", "document_assemble": "document_assemble", "assemble": "document_assemble", "markdown_assemble": "document_assemble",
-    "node_9": "batch_frames_ocr", "batch_frames_ocr": "batch_frames_ocr", "sequential_rescan": "batch_frames_ocr", "batch_ocr": "batch_frames_ocr"
+    "node_9": "batch_frames_ocr", "batch_frames_ocr": "batch_frames_ocr", "sequential_rescan": "batch_frames_ocr", "batch_ocr": "batch_frames_ocr",
+    "node_10": "markdown_tag_parser", "markdown_tag_parser": "markdown_tag_parser", "tag_parser": "markdown_tag_parser", "parse_vfs_tags": "markdown_tag_parser",
+    "node_11": "ast_compiler_validator", "ast_compiler_validator": "ast_compiler_validator", "ast_validator": "ast_compiler_validator", "ts_compiler_check": "ast_compiler_validator",
+    "node_12": "sandbox_ide", "sandbox_ide": "sandbox_ide", "sandbox_vfs": "sandbox_ide", "monaco_vfs": "sandbox_ide"
 }
 
 @router.get("/api/dag/nodes/metadata")
@@ -557,6 +560,9 @@ async def snap_to_clean_layout():
         "verification_trigger": {"x": 1380.0, "y": 140.0},
         "document_assemble": {"x": 1600.0, "y": 140.0},
         "batch_frames_ocr": {"x": 1820.0, "y": 140.0},
+        "markdown_tag_parser": {"x": 2040.0, "y": 140.0},
+        "ast_compiler_validator": {"x": 2260.0, "y": 140.0},
+        "sandbox_ide": {"x": 2480.0, "y": 140.0},
     }
     for nid, pos in clean_coords.items():
         if nid in state.dag_state.get("nodes", {}):
@@ -1413,7 +1419,8 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     if not node: raise HTTPException(status_code=404, detail=f"Node {node_id} not found in DAG")
 
     payload = payload or {}
-    active_serial = await get_active_adb_serial(payload.get("serial"))
+    is_post_capture_node = target_key in ("markdown_tag_parser", "ast_compiler_validator", "sandbox_ide")
+    active_serial = payload.get("serial") or ("" if is_post_capture_node else await get_active_adb_serial(payload.get("serial")))
     cfg = dict(node.get("config", {}))
     if payload.get("config") and isinstance(payload["config"], dict):
         cfg.update(payload["config"])
@@ -1479,7 +1486,7 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
     healing_ms = 0
 
     try:
-        disp_id = await detect_external_display_id(active_serial)
+        disp_id = 0 if is_post_capture_node else await detect_external_display_id(active_serial)
 
         # Delegate execution directly to the modular BaseDagNode instance
         dag_node = dag_node_registry.get_node(target_key)
@@ -1500,15 +1507,16 @@ async def run_single_dag_node(node_id: str, payload: Optional[Dict[str, Any]] = 
                 or state.dag_state["nodes"].get("frame_acquire", {}).get("frame_id")
             )
             bb = DagBlackboard(
-                active_serial=active_serial,
+                active_serial=active_serial or "",
                 display_id=disp_id,
-                project_id=state.get_current_project_id(),
+                project_id=payload.get("project_id") or state.get_current_project_id() or "",
                 config=cfg,
                 payload=payload,
                 frame_id=cur_fid,
                 top_line=init_top,
                 bottom_line=state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line", 0),
                 total_lines=state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0),
+                metadata=dict(payload.get("metadata") or {}),
             )
             exec_res = await dag_node.run(bb)
             if exec_res.status == "error":
@@ -4551,6 +4559,15 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                                 serial=active_serial
                             )
 
+                    # 3. Trigger Post-Capture Analyzer DAG Group (Nodes 10 -> 11 -> 12) when EOF reached and edge connected
+                    if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
+                        try:
+                            await execute_dag_group_post_capture_analyzer(
+                                project_id=state.get_current_project_id()
+                            )
+                        except Exception as pca_err:
+                            print(f"[CaptureLoop] Post-capture analyzer note: {pca_err}")
+
                     stop_reason_logged = True
                     if is_headless:
                         state.headless_telemetry_session["total_lines_reached"] = True
@@ -4875,11 +4892,121 @@ async def execute_dag_group_verify_assemble(serial: Optional[str] = None, payloa
         serial=active_serial
     )
 
+    post_capture_res = None
+    if n8_res.get("is_complete") and state.is_edge_connected("document_assemble", "markdown_tag_parser"):
+        post_capture_res = await execute_dag_group_post_capture_analyzer(
+            project_id=state.get_current_project_id(),
+            payload=payload
+        )
+
     return {
         "status": "success",
         "group": "verify_assemble",
         "node7": n7_res,
-        "node8": n8_res
+        "node8": n8_res,
+        "post_capture_analyzer": post_capture_res,
+    }
+
+
+async def execute_dag_group_post_capture_analyzer(
+    project_id: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Executes DAG Group 'post_capture_analyzer' (Nodes 10 -> 11 -> 12 sequentially):
+      1. Node 10 (markdown_tag_parser): Parses Directory Structure & CODESCAN_FILE_START/END tags,
+         self-heals corrupted tags from PNG frames, validates line counts, outputs vfs_files.
+      2. Node 11 (ast_compiler_validator): Invokes persistent Node.js TypeScript Compiler API + memfs
+         worker to parse/type-check VFS files and auto-heal OCR symbol errors from PNG frames.
+      3. Node 12 (sandbox_ide): Materializes VFS into server/storage/sandbox/<project_id>/, generates
+         package.json/tsconfig.json, links shared_node_modules, and publishes /api/analyzer/workspace/{project_id}.
+    """
+    payload = dict(payload or {})
+    pid = project_id or payload.get("project_id") or state.get_current_project_id() or "default"
+    payload["project_id"] = pid
+    payload.setdefault("allow_concurrent", True)
+
+    analyzer_group = state.dag_state.setdefault("groups", {}).setdefault("post_capture_analyzer", {
+        "id": "post_capture_analyzer",
+        "title": "Post-Capture Analyzer & Sandbox VFS",
+        "description": "Parses CODESCAN_FILE_START/END tags into VFS tree, validates AST/TypeScript compilation in memfs with auto-healing, and materializes sandbox workspace for Monaco IDE",
+        "nodes": ["markdown_tag_parser", "ast_compiler_validator", "sandbox_ide"],
+        "status": "active",
+        "progress": None,
+    })
+    analyzer_group["status"] = "active"
+    state.dag_state["current_active_group"] = "post_capture_analyzer"
+
+    await emit_dag_telemetry_event(
+        category="SYSTEM",
+        message="Running Post-Capture Analyzer DAG Group (Nodes 10 → 11 → 12)...",
+        dag="post_capture_analyzer",
+    )
+
+    # Node 10: markdown_tag_parser
+    n10_res = await run_single_dag_node("markdown_tag_parser", payload)
+    if n10_res.get("status") == "error":
+        analyzer_group["status"] = "error"
+        return {
+            "status": "error",
+            "group": "post_capture_analyzer",
+            "node_id": "markdown_tag_parser",
+            "result": n10_res,
+            "error": n10_res.get("error") or n10_res.get("message"),
+        }
+
+    n11_res = None
+    n12_res = None
+
+    # Node 11: ast_compiler_validator (if connected)
+    if state.is_edge_connected("markdown_tag_parser", "ast_compiler_validator"):
+        n11_res = await run_single_dag_node("ast_compiler_validator", payload)
+        if n11_res.get("status") == "error":
+            analyzer_group["status"] = "error"
+            return {
+                "status": "error",
+                "group": "post_capture_analyzer",
+                "node_id": "ast_compiler_validator",
+                "node10": n10_res,
+                "result": n11_res,
+                "error": n11_res.get("error") or n11_res.get("message"),
+            }
+
+        # Node 12: sandbox_ide (if connected)
+        if state.is_edge_connected("ast_compiler_validator", "sandbox_ide"):
+            n12_res = await run_single_dag_node("sandbox_ide", payload)
+            if n12_res.get("status") == "error":
+                analyzer_group["status"] = "error"
+                return {
+                    "status": "error",
+                    "group": "post_capture_analyzer",
+                    "node_id": "sandbox_ide",
+                    "node10": n10_res,
+                    "node11": n11_res,
+                    "result": n12_res,
+                    "error": n12_res.get("error") or n12_res.get("message"),
+                }
+
+    analyzer_group["status"] = "completed"
+    ws_data = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
+    await state.ws_manager.broadcast({
+        "type": "analyzer_workspace_ready",
+        "project_id": pid,
+        "workspace_endpoint": f"/api/analyzer/workspace/{pid}",
+        "vfs_files_count": n10_res.get("vfs_files_count", 0),
+        "compilation_summary": (n11_res or {}).get("compilation_summary"),
+        "dag": state.dag_state,
+    })
+
+    return {
+        "status": "success",
+        "group": "post_capture_analyzer",
+        "project_id": pid,
+        "node10": n10_res,
+        "node11": n11_res,
+        "node12": n12_res,
+        "workspace_endpoint": f"/api/analyzer/workspace/{pid}",
+        "workspace": ws_data,
     }
 
 @router.get("/api/dag/semaphore")
@@ -5090,6 +5217,8 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
             return await execute_dag_group_position_navigation(serial=serial, payload=payload)
         elif group_id in {"verify_assemble", "verify", "assemble", "dag_4", "group_4"}:
             return await execute_dag_group_verify_assemble(serial=serial, payload=payload)
+        elif group_id in {"post_capture_analyzer", "analyzer", "post_capture", "dag_5", "group_5"}:
+            return await execute_dag_group_post_capture_analyzer(project_id=payload.get("project_id"), payload=payload)
         else:
             raise HTTPException(status_code=400, detail=f"Unknown DAG group: {group_id}")
     except HTTPException:
@@ -5584,4 +5713,126 @@ async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None
         capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(ser))
         res["loop_started"] = True
     return res
+
+
+# ─── POST-CAPTURE ANALYZER & SANDBOX MONACO VFS ENDPOINTS ──────────────────
+
+@router.get("/api/analyzer/workspace")
+@router.get("/api/analyzer/workspace/{project_id}")
+async def get_analyzer_workspace(
+    project_id: Optional[str] = None,
+    refresh: bool = False,
+):
+    """
+    Publishes the complete VFS tree, compiler diagnostics, and line-to-frame source map
+    for the Web UI's Monaco Editor and VFS File Tree.
+    """
+    from services.accuracy_verifier import resolve_project_id
+
+    pid = resolve_project_id(project_id)
+    workspaces = getattr(state, "analyzer_workspaces", {}) or {}
+    ws = workspaces.get(pid) or workspaces.get(project_id or "")
+
+    if refresh or not ws or not ws.get("vfs_tree"):
+        await execute_dag_group_post_capture_analyzer(project_id=pid)
+        workspaces = getattr(state, "analyzer_workspaces", {}) or {}
+        ws = workspaces.get(pid) or workspaces.get("default") or {}
+
+    return {
+        "status": "ok",
+        "project_id": pid,
+        **ws,
+    }
+
+
+@router.post("/api/analyzer/workspace/{project_id}")
+@router.put("/api/analyzer/workspace/{project_id}/file")
+async def update_analyzer_workspace_file(
+    project_id: str,
+    payload: Dict[str, Any],
+):
+    """
+    Updates a VFS file from Monaco Editor or triggers a full re-parse/re-compile of the sandbox workspace.
+    """
+    from services.accuracy_verifier import resolve_project_id
+
+    pid = resolve_project_id(project_id)
+    file_path = (payload.get("normalized_path") or payload.get("path") or "").strip()
+    new_content = payload.get("content")
+
+    if not file_path or new_content is None:
+        # Full workspace rebuild requested
+        res = await execute_dag_group_post_capture_analyzer(project_id=pid, payload=payload)
+        ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
+        return {"status": "ok", "project_id": pid, "pipeline_result": res, **ws}
+
+    workspaces = getattr(state, "analyzer_workspaces", {}) or {}
+    ws = workspaces.get(pid)
+    if not ws or not ws.get("vfs_files"):
+        await execute_dag_group_post_capture_analyzer(project_id=pid)
+        ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
+
+    vfs_files = ws.get("vfs_files") or []
+    norm_target = file_path.replace("\\", "/").lstrip("/")
+
+    matched_entry = None
+    for f_entry in vfs_files:
+        if f_entry.get("normalized_path") == norm_target or f_entry.get("path") == file_path:
+            matched_entry = f_entry
+            break
+
+    if matched_entry:
+        matched_entry["content"] = str(new_content)
+        new_lines = str(new_content).split("\n")
+        matched_entry["actual_lines"] = len(new_lines)
+        start_md_line = int(matched_entry.get("start_md_line") or 0)
+        if start_md_line > 0 and payload.get("sync_document_lines", True):
+            for idx, ln_txt in enumerate(new_lines, start=1):
+                g_ln = start_md_line + idx
+                if g_ln in state.document_lines:
+                    state.document_lines[g_ln] = state.MasterLine(
+                        ln_txt,
+                        line_number=g_ln,
+                        gutter_number=g_ln,
+                        status="verified",
+                        updated_at=datetime.now().isoformat(),
+                    )
+    else:
+        vfs_files.append({
+            "index": len(vfs_files) + 1,
+            "path": norm_target,
+            "normalized_path": norm_target,
+            "ext": Path(norm_target).suffix.lower(),
+            "expected_lines": len(str(new_content).splitlines()),
+            "actual_lines": len(str(new_content).splitlines()),
+            "line_count_delta": 0,
+            "content": str(new_content),
+            "start_md_line": 0,
+            "end_md_line": 0,
+            "source_frame_ids": [],
+            "tag_status": "edited",
+        })
+
+    # Re-run Node 11 (AST & TypeScript Compiler Check) and Node 12 (Sandbox & Monaco VFS Ready)
+    bb_meta = {"vfs_files": vfs_files, "directory_tree": ws.get("directory_tree", {})}
+    n11_res = await run_single_dag_node(
+        "ast_compiler_validator",
+        {"project_id": pid, "allow_concurrent": True, "metadata": bb_meta},
+    )
+    bb_meta["compilation_summary"] = n11_res.get("compilation_summary")
+    n12_res = await run_single_dag_node(
+        "sandbox_ide",
+        {"project_id": pid, "allow_concurrent": True, "metadata": bb_meta},
+    )
+
+    updated_ws = (getattr(state, "analyzer_workspaces", {}) or {}).get(pid) or {}
+    return {
+        "status": "ok",
+        "project_id": pid,
+        "updated_file": norm_target,
+        "node11": n11_res,
+        "node12": n12_res,
+        **updated_ws,
+    }
+
 

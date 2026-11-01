@@ -153,6 +153,7 @@ class DagGraphExecutor:
                     eof_edges = [
                         e for e in self.get_outgoing_edges(current_node_id)
                         if e.get("condition") == "ON_EOF"
+                        or CANONICAL_ALIASES.get(e.get("to"), e.get("to")) == "markdown_tag_parser"
                     ]
                     if eof_edges:
                         current_node_id = CANONICAL_ALIASES.get(eof_edges[0].get("to"), eof_edges[0].get("to"))
@@ -162,7 +163,10 @@ class DagGraphExecutor:
                 else:
                     loop_edges = [
                         e for e in self.get_outgoing_edges(current_node_id)
-                        if e.get("condition") in ("ON_LOOP_CONTINUE", None, "ON_SUCCESS")
+                        if (
+                            e.get("condition") in ("ON_LOOP_CONTINUE", None, "ON_SUCCESS")
+                            and CANONICAL_ALIASES.get(e.get("to"), e.get("to")) != "markdown_tag_parser"
+                        )
                     ]
                     if loop_edges:
                         current_node_id = CANONICAL_ALIASES.get(loop_edges[0].get("to"), loop_edges[0].get("to"))
