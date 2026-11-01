@@ -28,7 +28,8 @@ import { OcrDiagnosticsReportModal } from './components/ocr/OcrDiagnosticsReport
 import { NODES_METADATA, type PerformanceDiagnosis } from './types/dag';
 import { discernNodePerformance } from './utils/dagDiagnostics';
 import { Dag4OcrFullInspectorModal } from './components/dag/Dag4OcrFullInspectorModal';
-import { LazyFrameCard } from './components/frames/LazyFrameCard';
+import { VirtualizedFrameStrip } from './components/VirtualizedFrameStrip';
+import { VirtualizedLineViewer } from './components/VirtualizedLineViewer';
 import { HeadlessTelemetryModal, type HeadlessTelemetryData } from './components/HeadlessTelemetryModal';
 import { WindowControls } from './components/common/WindowControls';
 
@@ -89,7 +90,7 @@ function AppContent() {
   const [followCurrentProcess, setFollowCurrentProcess] = useState<boolean>(true);
   const [isLoadingLazyLines, setIsLoadingLazyLines] = useState<boolean>(false);
   const [frames, setFrames] = useState<FrameData[]>([]);
-  const [recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
+  const [_recaptureQueue, setRecaptureQueue] = useState<RecaptureItem[]>([]);
   const [tokenStats, setTokenStats] = useState<TokenStats>({ total_prompt_tokens: 0, total_candidates_tokens: 0, total_tokens: 0, total_api_calls: 0, estimated_cost_usd: 0 });
   const [telemetry, setTelemetry] = useState<TelemetryData>({});
   const [latencyMs, setLatencyMs] = useState(0);
@@ -778,6 +779,9 @@ function AppContent() {
           if (d.from_line) {
             setLazyFromLine(d.from_line);
             setLazyFromInput(String(d.from_line));
+            if (!follow && scrollToLineRef.current) {
+              scrollToLineRef.current(d.from_line);
+            }
           }
           if (d.to_line) {
             setLazyToLine(d.to_line);
@@ -844,7 +848,24 @@ function AppContent() {
   useEffect(() => { deviceInfoRef.current = deviceInfo; }, [deviceInfo]);
   const deviceModelRef = useRef(deviceModel);
   useEffect(() => { deviceModelRef.current = deviceModel; }, [deviceModel]);
-  const lineListRef = useRef<HTMLDivElement>(null);
+  const scrollToLineRef = useRef<((lineNumber: number) => void) | null>(null);
+  const [armedSplitter, setArmedSplitter] = useState<'frames' | 'split' | 'studio' | null>(null);
+  const splitterHoverTimerRef = useRef<number | null>(null);
+
+  const handleSplitterMouseEnter = useCallback((which: 'frames' | 'split' | 'studio') => {
+    if (splitterHoverTimerRef.current) window.clearTimeout(splitterHoverTimerRef.current);
+    splitterHoverTimerRef.current = window.setTimeout(() => {
+      setArmedSplitter(which);
+    }, 80);
+  }, []);
+
+  const handleSplitterMouseLeave = useCallback(() => {
+    if (splitterHoverTimerRef.current) {
+      window.clearTimeout(splitterHoverTimerRef.current);
+      splitterHoverTimerRef.current = null;
+    }
+    setArmedSplitter(null);
+  }, []);
 
   const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'system' | 'all') => {
     let inferredDag = dag;
@@ -3713,68 +3734,55 @@ function AppContent() {
                     </div>
                   )}
 
-                  <div className="frames-list">
-                    {sortedFrames.length === 0 ? (
-                      <div className="drop-zone-placeholder" style={{ cursor: 'default' }}>
-                        <span style={{ fontWeight: 600, color: '#e6edf3' }}>Captured Frames</span>
-                        <span style={{ fontSize: '11px', color: '#8b949e' }}>Settled {devDisplayName} frames appear here automatically</span>
-                      </div>
-                    ) : sortedFrames.map((f, idx) => {
-                      const prevFrame = idx > 0 ? sortedFrames[idx - 1] : null;
-                      const hasGap = prevFrame && prevFrame.bottom_line > 0 && f.top_line > prevFrame.bottom_line + 1;
-                      const isSelected = selectedFrameIds.has(f.frame_id);
-                      const isVeryFirstFrame = idx === 0;
-                      const hasPage1InSet = sortedFrames.some(sf => sf.page_index === 1);
-                      const displayPageNum = (isVeryFirstFrame && (!f.page_index || f.page_index > 1) && !hasPage1InSet)
-                        ? 1
-                        : (f.page_index || (idx + 1));
-                      return (
-                        <div key={f.frame_id} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                          {hasGap && <div className="gap-alert-tag"><AlertCircle size={11} /><span>Gap: missing Ln {prevFrame.bottom_line + 1} → {f.top_line - 1}</span></div>}
-                          <LazyFrameCard
-                            frame={f}
-                            isSelected={isSelected}
-                            isActive={selectedFrameId === f.frame_id}
-                            displayPageNum={displayPageNum}
-                            apiBase={API_BASE}
-                            reprocessingFrameId={reprocessingFrameId}
-                            deletingFrameId={deletingFrameId}
-                            onClick={() => {
-                              setSelectedFrameId(f.frame_id);
-                              if (inspectorMode === 'ocr_inspect') {
-                                setOcrInspectImageId(f.frame_id);
-                              } else if (inspectorMode === 'live') {
-                                setInspectorMode('single');
-                              }
-                              setInspectorMaximized(false);
-                              setFramesMinimized(false);
-                            }}
-                            onDoubleClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenInlineOcrInspector(f.frame_id);
-                            }}
-                            onToggleSelect={(e) => handleToggleSelectFrame(f.frame_id, e)}
-                            onReprocess={(e) => handleReprocessFrame(f.frame_id, e)}
-                            onUpdatePosition={(delta) => handleUpdateFramePosition(f.frame_id, delta)}
-                            onOpenTrace={(e) => {
-                              e.stopPropagation();
-                              setSelectedFrameId(f.frame_id);
-                              setTraceFrameId(f.frame_id);
-                            }}
-                            onDelete={(e) => {
-                              e.stopPropagation();
-                              handleDeleteFrame(f.frame_id, e);
-                            }}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <VirtualizedFrameStrip
+                    frames={sortedFrames}
+                    totalLines={documentData.total_lines || documentData.max_line || 0}
+                    selectedFrameId={selectedFrameId}
+                    selectedFrameIds={selectedFrameIds}
+                    apiBase={API_BASE}
+                    devDisplayName={devDisplayName}
+                    reprocessingFrameId={reprocessingFrameId}
+                    deletingFrameId={deletingFrameId}
+                    onSelectFrame={(f) => {
+                      setSelectedFrameId(f.frame_id);
+                      if (inspectorMode === 'ocr_inspect') {
+                        setOcrInspectImageId(f.frame_id);
+                      } else if (inspectorMode === 'live') {
+                        setInspectorMode('single');
+                      }
+                      setInspectorMaximized(false);
+                      setFramesMinimized(false);
+                    }}
+                    onDoubleClickFrame={(f, e) => {
+                      e.stopPropagation();
+                      handleOpenInlineOcrInspector(f.frame_id);
+                    }}
+                    onToggleSelectFrame={(fid, e) => handleToggleSelectFrame(fid, e)}
+                    onReprocessFrame={(fid, e) => handleReprocessFrame(fid, e)}
+                    onUpdateFramePosition={(fid, delta) => handleUpdateFramePosition(fid, delta)}
+                    onOpenTrace={(fid, e) => {
+                      e.stopPropagation();
+                      setSelectedFrameId(fid);
+                      setTraceFrameId(fid);
+                    }}
+                    onDeleteFrame={(fid, e) => {
+                      e.stopPropagation();
+                      handleDeleteFrame(fid, e);
+                    }}
+                  />
                 </aside>
 
                 {!framesMaximized && !linesMaximized && !inspectorMinimized && (
-                  <div className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''}`} onMouseDown={handleFramesResizer} onDoubleClick={() => setFramesPanelWidth(280)} role="separator">
+                  <div
+                    className={`panel-resizer ${isDraggingFrames ? 'dragging' : ''} ${armedSplitter === 'frames' ? 'hover-armed' : ''}`}
+                    onMouseEnter={() => handleSplitterMouseEnter('frames')}
+                    onMouseLeave={handleSplitterMouseLeave}
+                    onMouseDown={handleFramesResizer}
+                    onDoubleClick={() => setFramesPanelWidth(280)}
+                    role="separator"
+                  >
                     <div className="panel-resizer-line" />
+                    <div className="panel-resizer-pill" onMouseDown={handleFramesResizer} />
                   </div>
                 )}
               </>
@@ -4177,7 +4185,17 @@ function AppContent() {
           )}
 
           {!inspectorMaximized && !framesMaximized && !linesMaximized && !inspectorMinimized && !linesMinimized && (
-            <div className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''}`} onMouseDown={handleSplitResizer} onDoubleClick={() => setInspectorPercent(48)} role="separator"><div className="panel-resizer-line" /></div>
+            <div
+              className={`panel-resizer ${isDraggingSplit ? 'dragging' : ''} ${armedSplitter === 'split' ? 'hover-armed' : ''}`}
+              onMouseEnter={() => handleSplitterMouseEnter('split')}
+              onMouseLeave={handleSplitterMouseLeave}
+              onMouseDown={handleSplitResizer}
+              onDoubleClick={() => setInspectorPercent(48)}
+              role="separator"
+            >
+              <div className="panel-resizer-line" />
+              <div className="panel-resizer-pill" onMouseDown={handleSplitResizer} />
+            </div>
           )}
 
           {linesMinimized || inspectorMaximized || framesMaximized ? (
@@ -4452,64 +4470,36 @@ function AppContent() {
                       </div>
                     </div>
                     <div className="filter-bar"><Search size={14} color="#8b949e" /><input type="text" className="search-input" placeholder="Search lines..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
-                    <div className="lines-table-container" ref={lineListRef} style={{ paddingBottom: isTelemetryExpanded ? '340px' : '40px' }}>
-                      {filteredLines.length === 0 ? <div style={{ padding: '30px', textAlign: 'center', color: '#6e7681' }}><p>No lines transcribed yet.</p></div> : (
-                        <table className="clean-lines-table">
-                          <thead>
-                            <tr>
-                              <th className="th-select">
-                                <input
-                                  type="checkbox"
-                                  checked={filteredLines.length > 0 && selectedLineNumbers.size === filteredLines.length}
-                                  onChange={handleToggleSelectAllLines}
-                                />
-                              </th>
-                              <th className="th-line-num">Line #</th>
-                              <th className="th-line-text">text</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {filteredLines.map(line => {
-                              const isSelected = selectedLineNumbers.has(line.line_number);
-                              const isGap = line.status === 'gap' || line.status === 'missing';
-                              return (
-                                <tr
-                                  key={line.line_number}
-                                  className={`table-line-row ${line.status} ${selectedLine?.line_number === line.line_number ? 'selected' : ''} ${isSelected ? 'selected-for-edit' : ''}`}
-                                  onClick={() => { setSelectedLine(line); if (line.frame_id && line.frame_id !== 'manual') setSelectedFrameId(line.frame_id); }}
-                                >
-                                  <td className="td-select" onClick={e => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      className="line-select-checkbox"
-                                      checked={isSelected}
-                                      onChange={(e) => handleToggleSelectLine(line.line_number, e)}
-                                    />
-                                  </td>
-                                  <td className="td-line-num">
-                                    {isGap ? (
-                                      <span style={{ color: '#f85149', fontWeight: 700 }}>{line.gutter_number || line.line_number}</span>
-                                    ) : (
-                                      <>{line.gutter_number || line.line_number}{line.is_wrapped && <span className="wrap-tag"> ↵</span>}</>
-                                    )}
-                                  </td>
-                                  <td className="td-line-text">
-                                    {isGap ? (
-                                      <span className="gap-line-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: '#f85149', fontStyle: 'italic', fontSize: '11px', fontWeight: 600 }}>
-                                        <AlertCircle size={11} color="#f85149" />
-                                        <span>[GAP: Line #{line.line_number} Missing — Not Captured in Paging]</span>
-                                      </span>
-                                    ) : (
-                                      <pre className="table-code-text">{line.text || <span className="blank-line-tag">(blank line)</span>}</pre>
-                                    )}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
+                    <VirtualizedLineViewer
+                      apiBase={API_BASE}
+                      projectId={activeProject?.id}
+                      totalLines={documentData.total_lines}
+                      minLine={documentData.min_line || 1}
+                      maxLine={documentData.max_line || documentData.total_lines}
+                      initialLines={documentData.lines}
+                      frames={sortedFrames}
+                      selectedLine={selectedLine}
+                      selectedLineNumbers={selectedLineNumbers}
+                      filterMode={filterMode}
+                      searchQuery={searchQuery}
+                      followCurrentProcess={followCurrentProcess}
+                      currentProcessTopLine={currentProcessTopLine}
+                      isTelemetryExpanded={isTelemetryExpanded}
+                      scrollToLineRef={scrollToLineRef}
+                      onSelectLine={(line) => {
+                        setSelectedLine(line);
+                        if (line.frame_id && line.frame_id !== 'manual') {
+                          setSelectedFrameId(line.frame_id);
+                        }
+                      }}
+                      onToggleSelectLine={(ln, e) => handleToggleSelectLine(ln, e)}
+                      onToggleSelectAllLines={handleToggleSelectAllLines}
+                      onVisibleRangeChange={(fromLn, toLn, loading) => {
+                        setLazyFromLine(fromLn);
+                        setLazyToLine(toLn);
+                        setIsLoadingLazyLines(loading);
+                      }}
+                    />
                   </section>
                 )}
           </>
@@ -4785,11 +4775,14 @@ function AppContent() {
             <>
               {!studioMaximized && (
                 <div
-                  className={`panel-resizer ${isDraggingStudio ? 'dragging' : ''}`}
+                  className={`panel-resizer ${isDraggingStudio ? 'dragging' : ''} ${armedSplitter === 'studio' ? 'hover-armed' : ''}`}
+                  onMouseEnter={() => handleSplitterMouseEnter('studio')}
+                  onMouseLeave={handleSplitterMouseLeave}
                   onMouseDown={handleStudioResizer}
                   title="Drag to resize Device Studio window"
                 >
                   <div className="panel-resizer-line" />
+                  <div className="panel-resizer-pill" onMouseDown={handleStudioResizer} />
                 </div>
               )}
               <section

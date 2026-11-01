@@ -1,4 +1,4 @@
-import asyncio, base64, hashlib, io, json, re
+import asyncio, base64, functools, hashlib, io, json, os, re, threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -850,6 +850,18 @@ async def purge_all_frames():
     except Exception as e:
         print(f"Error purging frame files: {e}")
 
+    try:
+        if THUMBNAILS_DIR.exists():
+            for tf in THUMBNAILS_DIR.glob("*"):
+                if tf.is_file() and tf.name != ".gitkeep":
+                    try:
+                        tf.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        _get_cached_thumbnail_bytes.cache_clear()
+    except Exception:
+        pass
+
     pid = state.get_current_project_id()
     if pid: db.clear_project_data(pid)
     state.captured_frames.clear()
@@ -884,43 +896,149 @@ async def get_frame_image(frame_id: str):
 
 THUMBNAILS_DIR = Path(__file__).parent.parent / "data" / "thumbnails"
 
-@router.get("/api/frames/{frame_id}/thumbnail")
-async def get_frame_thumbnail(frame_id: str):
+_THUMB_FORMAT_MAP: Dict[str, tuple] = {
+    "webp": ("WEBP", "image/webp", "webp"),
+    "jpeg": ("JPEG", "image/jpeg", "jpeg"),
+    "jpg": ("JPEG", "image/jpeg", "jpg"),
+    "png": ("PNG", "image/png", "png"),
+}
+
+
+def _atomic_write_thumbnail(thumb_path: Path, data: bytes, ext: str) -> None:
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+    tmp_path = THUMBNAILS_DIR / f".{thumb_path.stem}_{os.getpid()}_{threading.get_ident()}.tmp.{ext}"
+    try:
+        tmp_path.write_bytes(data)
+        os.replace(tmp_path, thumb_path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            thumb_path.write_bytes(data)
+        except Exception:
+            pass
+
+
+@functools.lru_cache(maxsize=512)
+def _get_cached_thumbnail_bytes(
+    clean_id: str,
+    w: int,
+    h: int,
+    q: int,
+    norm_fmt: str,
+) -> bytes:
     """
-    Returns an optimized, cached 384x216 JPEG thumbnail for fast lazy loading
-    with a dramatically smaller memory footprint.
+    In-memory LRU byte cache (maxsize=512) for JIT-generated frame thumbnails.
+    Checks server/data/thumbnails/{clean_id}_{w}x{h}.{fmt} first; if missing or empty,
+    opens the source PNG via Pillow, resizes using Image.Resampling.LANCZOS, and saves
+    atomically to disk.
     """
     THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
-    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
-    thumb_path = THUMBNAILS_DIR / f"{clean_id}.jpg"
+    pil_fmt, _, ext = _THUMB_FORMAT_MAP.get(norm_fmt, ("WEBP", "image/webp", "webp"))
+    thumb_path = THUMBNAILS_DIR / f"{clean_id}_{w}x{h}.{ext}"
 
-    if thumb_path.exists() and thumb_path.stat().st_size > 500:
-        return FileResponse(
-            thumb_path,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400"}
-        )
+    if thumb_path.exists():
+        try:
+            if thumb_path.stat().st_size > 0:
+                return thumb_path.read_bytes()
+        except Exception:
+            pass
 
+    source_path = _get_frame_path(clean_id)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Frame image '{clean_id}' not found")
+
+    with Image.open(source_path) as im:
+        im = im.convert("RGB")
+        resized = im.resize((w, h), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        save_kwargs: Dict[str, Any] = {}
+        if pil_fmt in ("WEBP", "JPEG"):
+            save_kwargs["quality"] = int(max(1, min(100, q)))
+        if pil_fmt == "JPEG":
+            save_kwargs["optimize"] = True
+        elif pil_fmt == "WEBP":
+            save_kwargs["method"] = 4
+        resized.save(buf, format=pil_fmt, **save_kwargs)
+        thumb_bytes = buf.getvalue()
+
+    _atomic_write_thumbnail(thumb_path, thumb_bytes, ext)
+    return thumb_bytes
+
+
+@router.get("/api/frames/{frame_id}/thumbnail")
+async def get_frame_thumbnail(
+    frame_id: str,
+    request: Request,
+    w: int = Query(384, ge=16, le=3840, description="Thumbnail width in pixels"),
+    h: int = Query(216, ge=16, le=2160, description="Thumbnail height in pixels"),
+    q: int = Query(80, ge=1, le=100, description="Thumbnail compression quality (1-100)"),
+    fmt: str = Query("webp", description="Thumbnail image format (webp, jpeg, jpg, png)"),
+):
+    """
+    Just-In-Time (JIT) Thumbnail Generation & Caching Endpoint:
+    Accepts ?w=384&h=216&q=80&fmt=webp, checks server/data/thumbnails/{clean_id}_{w}x{h}.{fmt},
+    generates via Pillow Image.Resampling.LANCZOS on miss, caches in functools.lru_cache(maxsize=512)
+    and atomically on disk, and returns with ETag and immutable Cache-Control headers.
+    Never pre-generates or transmits full-resolution PNGs in list views.
+    """
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+    raw_clean = frame_id[:-4] if frame_id.lower().endswith(".png") else frame_id
+    clean_id = re.sub(r"[^a-zA-Z0-9_.\-]", "_", raw_clean)
+
+    norm_fmt = (fmt or "webp").strip().lower().lstrip(".")
+    if norm_fmt not in _THUMB_FORMAT_MAP:
+        norm_fmt = "webp"
+    _, media_type, ext = _THUMB_FORMAT_MAP[norm_fmt]
+    thumb_path = THUMBNAILS_DIR / f"{clean_id}_{w}x{h}.{ext}"
+
+    disk_exists = False
     try:
+        disk_exists = thumb_path.exists() and thumb_path.stat().st_size > 0
+    except Exception:
+        disk_exists = False
+
+    if not disk_exists:
         source_path = _get_frame_path(frame_id)
         if not source_path.exists():
             raise HTTPException(status_code=404, detail="Frame not found")
 
-        with Image.open(source_path) as im:
-            im = im.convert("RGB")
-            im.thumbnail((384, 216), Image.Resampling.LANCZOS)
-            im.save(thumb_path, format="JPEG", quality=80, optimize=True)
-
-        return FileResponse(
-            thumb_path,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=86400"}
+    try:
+        thumb_bytes = await asyncio.to_thread(
+            _get_cached_thumbnail_bytes,
+            clean_id,
+            int(w),
+            int(h),
+            int(q),
+            norm_fmt,
         )
+        if not disk_exists and (not thumb_path.exists() or thumb_path.stat().st_size == 0):
+            await asyncio.to_thread(_atomic_write_thumbnail, thumb_path, thumb_bytes, ext)
+    except HTTPException:
+        raise
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Frame '{frame_id}' not found")
     except Exception as e:
-        try:
-            return FileResponse(_get_frame_path(frame_id), media_type="image/png")
-        except Exception:
-            raise HTTPException(status_code=404, detail=f"Failed to generate thumbnail: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate JIT thumbnail: {e}")
+
+    etag = f'"{hashlib.md5(thumb_bytes).hexdigest()}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=31536000, immutable",
+    }
+
+    if request is not None:
+        inm = request.headers.get("if-none-match")
+        if inm and (inm.strip() == etag or inm.strip() == etag.strip('"')):
+            return Response(status_code=304, headers=headers)
+
+    return Response(
+        content=thumb_bytes,
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 @router.post("/api/frames/{frame_id}/reprocess")
@@ -998,6 +1116,9 @@ async def get_document_lines_endpoint(
             min_l = min(state.document_lines.keys())
             from_line = min_l
             to_line = min_l + limit - 1
+
+    if from_line is not None and to_line is not None and to_line >= from_line:
+        limit = max(limit, min(1000, int(to_line) - int(from_line) + 1))
 
     # Query local SQLite database
     db_res = db.get_document_lines_window(

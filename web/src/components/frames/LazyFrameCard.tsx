@@ -25,6 +25,7 @@ export interface LazyFrameCardProps {
   apiBase: string;
   reprocessingFrameId: string | null;
   deletingFrameId: string | null;
+  defaultVisible?: boolean;
   onClick: () => void;
   onDoubleClick: (e: React.MouseEvent) => void;
   onToggleSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -42,6 +43,7 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
   apiBase,
   reprocessingFrameId,
   deletingFrameId,
+  defaultVisible = false,
   onClick,
   onDoubleClick,
   onToggleSelect,
@@ -50,11 +52,15 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
   onOpenTrace,
   onDelete,
 }) => {
-  const [isVisible, setIsVisible] = useState(false);
+  const [isVisible, setIsVisible] = useState(defaultVisible);
   const [imgError, setImgError] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (defaultVisible) {
+      setIsVisible(true);
+      return;
+    }
     const el = cardRef.current;
     if (!el) return;
 
@@ -79,11 +85,10 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
     return () => {
       observer.disconnect();
     };
-  }, []);
+  }, [defaultVisible]);
 
-  const thumbUrl = imgError
-    ? `${apiBase}/api/frames/${frame.frame_id}/image?t=${encodeURIComponent(frame.created_at || '')}`
-    : `${apiBase}/api/frames/${frame.frame_id}/thumbnail`;
+  // Always use JIT WebP thumbnail endpoint in list views; never transmit full-resolution PNGs
+  const thumbUrl = `${apiBase}/api/frames/${encodeURIComponent(frame.frame_id)}/thumbnail?w=384&h=216&q=80&fmt=webp`;
 
   return (
     <div
@@ -105,15 +110,17 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
           title="Select frame for group operations"
         />
 
-        {isVisible ? (
+        {isVisible && !imgError ? (
           <img
             key={`thumb_${frame.frame_id}`}
             src={thumbUrl}
             alt={frame.frame_id}
+            width={384}
+            height={216}
             loading="lazy"
             decoding="async"
             onError={() => {
-              if (!imgError) setImgError(true);
+              setImgError(true);
             }}
           />
         ) : (
