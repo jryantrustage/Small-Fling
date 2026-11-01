@@ -55,7 +55,8 @@ class VerificationTriggerNode(BaseDagNode):
             or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
         )
 
-        if n6_needs_check and expected_target_top > 0:
+        is_mock = bool(serial and "mock" in str(serial).lower())
+        if n6_needs_check and expected_target_top > 0 and not is_mock:
             nav_heal = await navigate_to_target_top_line(
                 target_top=expected_target_top,
                 serial=serial,

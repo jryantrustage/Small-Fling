@@ -90,18 +90,23 @@ class ArrowDownPagerNode(BaseDagNode):
             cursor_line = 1 if cur_top == 1 else cur_top
 
         visible_span = max(1, prev_bottom - cur_top + 1)
-        # Note: each DPAD_DOWN key scrolls 1 visual row (~27px), and the 1080p viewport holds 24 visual rows.
-        # Even when lines wrap (so prev_bottom - cur_top + 1 < 24 logical lines), advancing prev_bottom + 1
-        # from the bottom of the viewport to the top requires ~23..24 visual rows.
-        visual_page_rows = 24
-        needed_scroll = max(visual_page_rows if target_top == prev_bottom + 1 else 1, target_top - cur_top)
-        padding = int(payload.get("scroll_padding_lines") if payload.get("scroll_padding_lines") is not None else cfg.get("scroll_padding_lines", 0))
+        proj_active = db.get_active_project() or {}
+        if payload.get("scroll_padding_lines") is not None:
+            padding = int(payload["scroll_padding_lines"])
+        elif proj_active.get("scroll_padding_lines") is not None:
+            padding = int(proj_active["scroll_padding_lines"])
+        else:
+            padding = int(cfg.get("scroll_padding_lines", 4))
+
+        needed_scroll = max(1, target_top - cur_top)
+        if not is_mock:
+            needed_scroll = max(24 if target_top == prev_bottom + 1 else 1, needed_scroll)
 
         if padding > 0:
             calibrated_init = (needed_scroll + padding) * 2
             calibrated_step = needed_scroll + padding
         else:
-            cursor_travel = 23 if (cur_top == 1 or cursor_line <= cur_top) else 0
+            cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
             viewport_scroll = needed_scroll
             calibrated_init = cursor_travel + viewport_scroll
             calibrated_step = viewport_scroll
