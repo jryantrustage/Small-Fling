@@ -1681,6 +1681,139 @@ def update_headless_telemetry_session(
     return headless_telemetry_session
 
 
+def sync_resume_frontier_state(
+    exclude_frame_id: Optional[str] = None,
+    override_resume_top_line: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Computes the authoritative resume frontier from the last OCR'd frame / screen capture
+    and document_lines, and synchronizes all DAG nodes, orchestration_state, and telemetry
+    so auto-resume always picks up at last_bottom_line + 1 without resetting to Line 1.
+    """
+    pid = get_current_project_id()
+    if pid and not captured_frames:
+        try:
+            db_frames = db.get_frames(pid)
+            if db_frames:
+                captured_frames._suppress_tracking = True
+                try:
+                    captured_frames.update({f["frame_id"]: f for f in db_frames})
+                finally:
+                    captured_frames._suppress_tracking = False
+        except Exception:
+            pass
+    if pid and not document_lines:
+        try:
+            db_lines = db.get_document_lines(pid)
+            if db_lines:
+                document_lines._suppress_tracking = True
+                try:
+                    for k, v in db_lines.items():
+                        document_lines[k] = v
+                finally:
+                    document_lines._suppress_tracking = False
+        except Exception:
+            pass
+
+    valid_frames = [
+        f for f in captured_frames.values()
+        if (not exclude_frame_id or f.get("frame_id") != exclude_frame_id)
+        and (f.get("bottom_line", 0) or 0) > 0
+    ]
+    processed_frames = [f for f in valid_frames if f.get("status") != "acquired"]
+    candidate_frames = processed_frames if processed_frames else valid_frames
+
+    last_frame = None
+    max_frame_bot = 0
+    if candidate_frames:
+        sorted_cands = sorted(
+            candidate_frames,
+            key=lambda x: ((x.get("bottom_line", 0) or 0), (x.get("page_index", 0) or 0), (x.get("created_at", "") or ""))
+        )
+        last_frame = sorted_cands[-1]
+        max_frame_bot = int(last_frame.get("bottom_line", 0) or 0)
+
+    max_doc_ln = int(max(document_lines.keys(), default=0)) if document_lines else 0
+    last_bot = max(max_frame_bot, max_doc_ln)
+    if override_resume_top_line and int(override_resume_top_line) > 1:
+        last_bot = max(last_bot, int(override_resume_top_line) - 1)
+
+    last_top = int(last_frame.get("top_line") or max(1, last_bot - 23)) if (last_frame and last_bot > 0) else (1 if last_bot > 0 else 0)
+    last_page = int(last_frame.get("page_index") or len(candidate_frames)) if (last_frame and last_bot > 0) else len(candidate_frames)
+    next_top = (last_bot + 1) if last_bot > 0 else 1
+
+    proj = db.get_active_project() or {}
+    target_total = int(
+        proj.get("target_total_lines")
+        or latest_telemetry.get("target_total_lines")
+        or headless_telemetry_session.get("target_total_lines")
+        or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+        or 0
+    )
+
+    if target_total > 0:
+        latest_telemetry["target_total_lines"] = target_total
+        headless_telemetry_session["target_total_lines"] = target_total
+        dag_state.get("nodes", {}).get("init_end", {}).update({
+            "total_lines": target_total,
+            "status": "completed",
+        })
+
+    if last_bot > 0:
+        # Project already has captured frames / OCR lines — mark Phase I completed and sync frontier
+        init_grp = dag_state.get("groups", {}).get("initialize", {})
+        init_grp["status"] = "completed"
+        if target_total > 0:
+            init_grp["progress"] = {
+                "percent": 100,
+                "stage": f"Project Ready • Resuming from Line {next_top:,} of {target_total:,} ✔",
+                "status": "completed",
+                "total_lines": target_total,
+                "verified": True,
+            }
+        dag_state.get("nodes", {}).get("reset_home", {}).update({
+            "status": "completed",
+            "verified": True,
+            "is_active": False,
+        })
+        dag_state.get("nodes", {}).get("frame_ocr", {}).update({
+            "top_line": last_top,
+            "bottom_line": last_bot,
+            "target_top_line": next_top,
+        })
+        dag_state.get("nodes", {}).get("arrow_down", {}).update({
+            "prev_bottom": last_bot,
+            "target_top": next_top,
+            "target_top_line": next_top,
+            "new_top_line": next_top,
+        })
+        dag_state.get("nodes", {}).get("verification_trigger", {}).update({
+            "target_top": next_top,
+            "target_top_line": next_top,
+            "expected_top": next_top,
+            "remaining_lines": max(0, target_total - last_bot) if target_total > 0 else 0,
+        })
+        latest_telemetry["current_top_line"] = last_top
+        latest_telemetry["current_bottom_line"] = last_bot
+        latest_telemetry["current_page"] = max(1, last_page)
+        orchestration_state["top_line"] = last_top
+        orchestration_state["bottom_line"] = last_bot
+        orchestration_state["next_target_top"] = next_top
+        orchestration_state["page"] = max(1, last_page)
+
+    return {
+        "has_existing_progress": bool(last_bot > 0),
+        "last_top_line": last_top,
+        "last_bottom_line": last_bot,
+        "next_top_line": next_top,
+        "last_page_index": last_page,
+        "last_frame_id": last_frame.get("frame_id") if last_frame else None,
+        "target_total_lines": target_total,
+        "frames_count": len(captured_frames),
+        "lines_count": len(document_lines),
+    }
+
+
 def get_next_expected_top_line(exclude_frame_id: Optional[str] = None) -> int:
     """
     Returns the single authoritative forward capture frontier (next expected top line) across
@@ -1692,7 +1825,15 @@ def get_next_expected_top_line(exclude_frame_id: Optional[str] = None) -> int:
         and f.get("status") != "acquired"
     ]
     if not other_frames and not document_lines:
-        return 1
+        # Check if acquired frames with valid bounds exist before falling back to 1
+        acq_frames = [
+            f for f in captured_frames.values()
+            if (not exclude_frame_id or f.get("frame_id") != exclude_frame_id)
+            and (f.get("bottom_line", 0) or 0) > 0
+        ]
+        if not acq_frames:
+            return int(dag_state.get("nodes", {}).get("frame_ocr", {}).get("target_top_line") or 1)
+        other_frames = acq_frames
     max_frame_bot = max(((f.get("bottom_line", 0) or 0) for f in other_frames), default=0)
     max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
     frontier = max(max_frame_bot, max_doc_ln)
@@ -1810,15 +1951,14 @@ def get_loop_diagnosis() -> Dict[str, Any]:
     now_ms = int(time.time() * 1000)
     sec_since_last = round(max(0.0, (now_ms - last_ts_ms) / 1000.0), 1) if last_ts_ms else None
 
+    frontier_idx = next(
+        (i for i, f in enumerate(sorted_f) if (f.get("bottom_line", 0) or 0) == frontier_line),
+        -1,
+    )
     regressed_frames = [
-        f.get("frame_id") for f in sorted_f
+        f.get("frame_id")
+        for f in (sorted_f[frontier_idx + 1 :] if frontier_idx >= 0 else [])
         if (f.get("bottom_line", 0) or 0) < frontier_line - 10
-        and _parse_iso_to_ms(f.get("created_at"))
-        and any(
-            (earlier.get("bottom_line", 0) or 0) == frontier_line
-            and (_parse_iso_to_ms(earlier.get("created_at")) or 0) < (_parse_iso_to_ms(f.get("created_at")) or 0)
-            for earlier in sorted_f
-        )
     ]
 
     last_stop_reason = (
@@ -2327,6 +2467,7 @@ def load_persisted_state():
         except Exception:
             pass
     try:
+        sync_resume_frontier_state()
         load_diagnostics_trace()
         ensure_diagnostics_trace_backfilled()
     except Exception as e:

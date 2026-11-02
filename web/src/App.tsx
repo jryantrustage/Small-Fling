@@ -576,10 +576,16 @@ function AppContent() {
     try {
       const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
       if (start) {
+        const maxFrameBot = frames.reduce((m, f) => Math.max(m, f.bottom_line || 0), 0);
+        const lastBot = Math.max(telemetry?.current_bottom_line || 0, documentData.max_line || 0, maxFrameBot);
         const res = await api('/api/dag/loop/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ serial: activeSer, headless_mode: headlessMode })
+          body: JSON.stringify({
+            serial: activeSer,
+            headless_mode: headlessMode,
+            resume_from_line: lastBot > 0 ? lastBot + 1 : undefined,
+          })
         });
         if (res.ok) setIsCaptureLoopRunning(true);
       } else {
@@ -2339,7 +2345,7 @@ function AppContent() {
     return deviceModel === 'pixel_8' ? 40 : 49;
   })();
 
-  const globalCurrentLine = telemetry.current_bottom_line || documentData.max_line || 0;
+  const globalCurrentLine = Math.max(telemetry.current_bottom_line || 0, documentData.max_line || 0, lastCapturedLine || 0);
   const globalTargetLines = activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0;
   const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
 
@@ -2595,6 +2601,13 @@ function AppContent() {
           <button
             type="button"
             className={`primary-cta-pipeline-btn ${isCaptureLoopRunning ? 'stop' : 'run'}`}
+            title={
+              isCaptureLoopRunning
+                ? 'Stop continuous capture loop'
+                : globalCurrentLine > 0
+                  ? `Auto-Resume capture loop at Line ${(globalCurrentLine + 1).toLocaleString()} (last line ${globalCurrentLine.toLocaleString()} + 1 on top)`
+                  : 'Start capture pipeline from Line 1'
+            }
             onClick={() => {
               if (!activeProject && !isCaptureLoopRunning) {
                 handleCreateProject(startupProjectName || alignmentData.file_name || 'Markdown_Capture_Part1.md', true);
@@ -2603,7 +2616,13 @@ function AppContent() {
               }
             }}
           >
-            <span>{isCaptureLoopRunning ? '⏹ Stop' : '▶ Run Pipeline'}</span>
+            <span>
+              {isCaptureLoopRunning
+                ? '⏹ Stop'
+                : globalCurrentLine > 0 && (globalTargetLines <= 0 || globalCurrentLine < globalTargetLines)
+                  ? `▶ Resume (Ln ${globalCurrentLine + 1})`
+                  : '▶ Run Pipeline'}
+            </span>
           </button>
 
           <button

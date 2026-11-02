@@ -364,10 +364,11 @@ async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
         state.headless_mode = state.dag_state["headless_mode"] = bool(payload["headless_mode"])
     if getattr(state, "capture_loop_running", False):
         return {"status": "already_running", "message": "Capture loop is already running", "diagnosis": state.get_loop_diagnosis()}
+    resume_info = state.sync_resume_frontier_state(override_resume_top_line=payload.get("resume_from_line"))
     state.capture_loop_running = True
-    capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(payload.get("serial")))
+    capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(payload.get("serial"), resume_from_line=payload.get("resume_from_line")))
     await state.ws_manager.broadcast({"type": "capture_loop_status", "running": True, "dag": state.dag_state, "telemetry": state.latest_telemetry})
-    return {"status": "started", "message": f"Capture loop started{' (Headless Mode)' if getattr(state, 'headless_mode', False) else ''}", "diagnosis": state.get_loop_diagnosis()}
+    return {"status": "started", "resume_top_line": resume_info.get("next_top_line", 1), "last_bottom_line": resume_info.get("last_bottom_line", 0), "message": f"Capture loop started at Line {resume_info.get('next_top_line', 1)}{' (Headless Mode)' if getattr(state, 'headless_mode', False) else ''}", "diagnosis": state.get_loop_diagnosis()}
 @router.post("/api/dag/loop/stop")
 async def stop_dag_loop():
     global capture_loop_task
@@ -449,9 +450,9 @@ async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]
     payload = payload or {}
     serial = payload.get("serial")
     if group_id in {"initialize", "init"}:
-        return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"))
+        return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"), force_reset=bool(payload.get("force_reset", False)))
     elif group_id in {"capture_entire_markdown", "capture"}:
-        return await execute_dag_group_capture_markdown(serial=serial) if payload.get("single_cycle") else await start_dag_loop({"serial": serial})
+        return await execute_dag_group_capture_markdown(serial=serial) if payload.get("single_cycle") else await start_dag_loop(payload)
     elif group_id in {"position_navigation", "positioning", "dag_3", "group_3"}:
         return await execute_dag_group_position_navigation(serial=serial, payload=payload)
     elif group_id in {"verify_assemble", "verify", "assemble", "dag_4", "group_4"}:

@@ -112,3 +112,291 @@
 
 
 
+
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/ErrorTooltip/
+│   ├── ErrorTooltip.tsx
+│   ├── index.ts
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/ExpositionTextModalTrigger/
+│   ├── ExpositionTextModalTrigger.tsx
+│   ├── index.ts
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/FAQ/
+│   ├── FAQ.tsx
+│   ├── index.ts
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/FAQ/svg/
+│   └── downArrow.svg
+├── DevCode/CommonUI/src/components/molecules/Footer/
+│   ├── Footer.tsx
+│   ├── index.ts
+│   ├── styles.ts
+│   └── types.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+├── DevCode/CommonUI/src/components/molecules/InfoModalTrigger/
+│   ├── index.ts
+│   ├── InfoModalTrigger.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/InfoTooltip/
+│   ├── index.ts
+│   ├── InfoTooltip.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/InputBlocks/
+│   ├── index.ts
+│   ├── InputBlocks.tsx
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/KeyValueList/
+│   ├── index.ts
+│   ├── KeyValueList.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/LeftRightNavButtons/
+│   ├── index.ts
+│   ├── LeftRightNavButtons.tsx
+│   ├── styles.ts
+│   └── types.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/ModalFooter/
+│   ├── index.ts
+│   ├── ModalFooter.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/MSRGlobalSearch/
+│   ├── helpers.ts
+│   ├── index.ts
+│   ├── MSRGlobalSearch.tsx
+│   ├── styles.ts
+│   ├── types.ts
+│   └── useMSRGlobalSearch.ts
+├── DevCode/CommonUI/src/components/molecules/MSRGlobalSearchResults/
+│   ├── index.ts
+│   ├── MSRGlobalSearchResults.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/PdfViewer/
+│   ├── index.ts
+│   ├── PdfViewer.tsx
+│   ├── styles.ts
+│   └── types.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+│   ├── RuleFactField.tsx
+│   ├── styles.tsx
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/Search/
+│   ├── index.ts
+│   ├── Search.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/ServiceList/
+│   ├── index.ts
+│   ├── ServiceList.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/SidebarNav/
+│   ├── index.ts
+│   ├── SidebarNav.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/SimpleAccordion/
+│   ├── index.ts
+│   ├── SimpleAccordion.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/static/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+│   ├── TableReducer.ts
+│   ├── types.tsx
+│   └── useTable.ts
+├── DevCode/CommonUI/src/components/molecules/TaskPanelAccordion/
+│   ├── index.ts
+│   ├── styles.ts
+│   ├── TaskPanelAccordion.tsx
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/TermsOfUseLink/
+│   ├── index.ts
+│   ├── styles.ts
+│   └── TermsOfUseLink.tsx
+├── DevCode/CommonUI/src/components/molecules/TextAreaMarkdown/
+│   ├── index.ts
+│   ├── styles.ts
+│   ├── TextAreaMarkdown.tsx
+│   └── types.ts
+├── DevCode/CommonUI/src/components/molecules/TimeGranular/
+│   ├── index.ts
+│   ├── styles.ts
+│   ├── TimeGranular.tsx
+│   ├── types.ts
+│   └── util.ts
+├── DevCode/CommonUI/src/components/molecules/TimezoneSelector/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+│   └── WizardModal.tsx
+├── DevCode/CommonUI/src/components/molecules/WizardUtilityInput/
+│   ├── index.ts
+│   ├── styles.ts
+│   ├── types.ts
+│   └── WizardUtilityInput.tsx
+├── DevCode/CommonUI/src/components/organisms/DynamicForm/mock-data/
+│   ├── custom-test-segment.json
+│   ├── field-inventory-test-segment.json
+│   ├── modify-value-rule-segment.json
+│   ├── modify-value-rule-valuesList-cc-segment.json
+│   └── modify-value-rule-valuesList-segment.json
+├── DevCode/CommonUI/src/components/organisms/ProductAccountsSection/
+│   ├── index.ts
+│   ├── ProductAccountsSection.tsx
+│   ├── styles.ts
+│   └── types.ts
+├── DevCode/CommonUI/src/components/organisms/RuleBuilder/
+│   └── utils.ts
+├── DevCode/CommonUI/src/components/organisms/RulePreview/
+│   ├── index.ts
+│   ├── RulePreview.tsx
+│   ├── styles.ts
+│   └── types.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

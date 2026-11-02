@@ -230,11 +230,27 @@ def get_active_project() -> Optional[Dict[str, Any]]:
         return None
 
 def get_projects() -> List[Dict[str, Any]]:
-    sql = "SELECT p.*, COUNT(DISTINCT f.frame_id) as frame_count, COUNT(DISTINCT l.line_number) as line_count, MIN(l.line_number) as min_line, MAX(l.line_number) as max_line FROM projects p LEFT JOIN frames f ON p.id = f.project_id LEFT JOIN document_lines l ON p.id = l.project_id GROUP BY p.id ORDER BY p.created_at DESC;"
+    sql = """
+    SELECT p.*,
+        (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
+        (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+        (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
+        (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
+    FROM projects p
+    ORDER BY p.created_at DESC;
+    """
     return [dict(r) for r in _execute(sql, fetchall=True)]
 
 def get_project(project_id: str) -> Optional[Dict[str, Any]]:
-    sql = "SELECT p.*, COUNT(DISTINCT f.frame_id) as frame_count, COUNT(DISTINCT l.line_number) as line_count, MIN(l.line_number) as min_line, MAX(l.line_number) as max_line FROM projects p LEFT JOIN frames f ON p.id = f.project_id LEFT JOIN document_lines l ON p.id = l.project_id WHERE p.id = ? GROUP BY p.id;"
+    sql = """
+    SELECT p.*,
+        (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
+        (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+        (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
+        (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
+    FROM projects p
+    WHERE p.id = ?;
+    """
     r = _execute(sql, (project_id,), fetchone=True)
     return dict(r) if r else None
 

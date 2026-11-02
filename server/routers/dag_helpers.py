@@ -750,7 +750,125 @@ async def _run_node_safe(node_id: str, opts: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "node_id": node_id, "error": err_msg, "message": err_msg}
 
 
-async def execute_dag_group_initialize(serial: Optional[str] = None, project_id: Optional[str] = None) -> Dict[str, Any]:
+async def align_viewport_for_auto_resume(
+    serial: Optional[str] = None,
+    disp_id: Optional[int] = None,
+    override_resume_top_line: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Ensures that when auto-resuming an in-progress project, the external display viewport
+    is positioned with `last_captured_bottom_line + 1` at the very top row BEFORE Node 3
+    (Screen Capture) and Node 4 (AI OCR) execute.
+    """
+    resume_info = state.sync_resume_frontier_state(override_resume_top_line=override_resume_top_line)
+    last_bot = int(resume_info.get("last_bottom_line") or 0)
+    expected_top = int(resume_info.get("next_top_line") or 1)
+    if last_bot <= 0 or expected_top <= 1:
+        return {"status": "fresh_start", "expected_top": 1, "last_bottom_line": 0}
+
+    state.orchestration_state["auto_resume_pending"] = True
+    active_serial = await get_active_adb_serial(serial)
+    if not active_serial or "mock" in str(active_serial).lower():
+        return {"status": "aligned_mock", "expected_top": expected_top, "last_bottom_line": last_bot}
+
+    if disp_id is None:
+        disp_id = await detect_external_display_id(active_serial)
+
+    try:
+        from services.adb_service import capture_external_screenshot, fetch_current_display_dpi_factor
+        snap = await capture_external_screenshot(active_serial, max_cache_age_s=0.0, bypass_lock=True)
+        cur_top, cur_bot = 0, 0
+        temp_calib = state.FRAMES_DIR / "dag_node3_capture_temp.png"
+        if snap and len(snap) >= 2000:
+            with open(temp_calib, "wb") as f:
+                f.write(snap)
+            dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial, disp_id)
+            cur_top, cur_bot = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+
+        if cur_top == expected_top:
+            msg = f"🔄 Auto-Resume Verified: Line {expected_top:,} (last line {last_bot:,} + 1) is already at top of viewport ✔"
+            state.latest_telemetry["status_message"] = msg
+            await emit_dag_telemetry_event(
+                category="PACER", message=msg, dag="position_navigation", node_id="frame_acquire", serial=active_serial
+            )
+            return {
+                "status": "already_aligned",
+                "expected_top": expected_top,
+                "actual_top": cur_top,
+                "actual_bottom": cur_bot,
+                "last_bottom_line": last_bot,
+            }
+
+        align_msg = (
+            f"🔄 Auto-Resuming project at Line {expected_top:,} (last OCR/capture ended at Line {last_bot:,}) • "
+            f"Navigating viewport from Line {cur_top or '?'} → Line {expected_top:,}..."
+        )
+        state.latest_telemetry["status_message"] = align_msg
+        state.dag_state["nodes"]["frame_acquire"].update({
+            "status": "active",
+            "is_active": True,
+            "evaluator": "Auto-Resume Precision Viewport Aligner",
+            "telemetry_insight": f"Positioning Line {expected_top:,} (last line {last_bot:,} + 1) at top of viewport...",
+        })
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "running_node": "frame_acquire",
+            "node_id": "frame_acquire",
+            "is_active": True,
+            "telemetry": state.latest_telemetry,
+        })
+        await emit_dag_telemetry_event(
+            category="PACER", message=align_msg, dag="position_navigation", node_id="frame_acquire", serial=active_serial
+        )
+
+        nav_res = await navigate_to_target_top_line(
+            target_top=expected_top,
+            serial=active_serial,
+            display_id=disp_id,
+            current_top=cur_top if cur_top > 0 else None,
+            current_bottom=cur_bot if cur_bot > 0 else None,
+            use_page_keys=True,
+            max_attempts=18,
+            caller_node="auto_resume",
+        )
+        if nav_res.get("snapshot_bytes") and len(nav_res["snapshot_bytes"]) >= 2000:
+            with open(temp_calib, "wb") as f:
+                f.write(nav_res["snapshot_bytes"])
+
+        actual_top = int(nav_res.get("actual_top") or expected_top)
+        actual_bot = int(nav_res.get("actual_bottom") or 0)
+        done_msg = f"🔄 Auto-Resume Positioned at Line {actual_top:,} (target Line {expected_top:,} = last line {last_bot:,} + 1) ✔"
+        state.latest_telemetry["status_message"] = done_msg
+        state.record_diagnostics_trace_event(
+            event_type="LOOP_AUTO_RECOVERED",
+            node_id="frame_acquire",
+            target_top_line=expected_top,
+            actual_top_line=actual_top,
+            actual_bottom_line=actual_bot,
+            reason=f"Auto-resumed project where it left off (last frame bottom Line {last_bot})",
+            recovery_action=f"Aligned viewport top from Line {cur_top or '?'} to Line {actual_top} before next capture & OCR",
+        )
+        await emit_dag_telemetry_event(
+            category="PACER", message=done_msg, dag="position_navigation", node_id="frame_acquire", serial=active_serial
+        )
+        return {
+            "status": "aligned",
+            "expected_top": expected_top,
+            "actual_top": actual_top,
+            "actual_bottom": actual_bot,
+            "last_bottom_line": last_bot,
+        }
+    except Exception as ex:
+        print(f"[align_viewport_for_auto_resume] warning: {ex}")
+        return {"status": "warning", "expected_top": expected_top, "last_bottom_line": last_bot, "error": str(ex)}
+
+
+async def execute_dag_group_initialize(
+    serial: Optional[str] = None,
+    project_id: Optional[str] = None,
+    force_reset: bool = False,
+) -> Dict[str, Any]:
     state.dag_state.setdefault("groups", {})
     init_group = state.dag_state["groups"].setdefault("initialize", {
         "id": "initialize", "title": "Initialize", "description": "Auto-calibrates total lines via EOF Ctrl+End and verifies return to Line 1",
@@ -766,6 +884,48 @@ async def execute_dag_group_initialize(serial: Optional[str] = None, project_id:
         "description": "Gutter OCR boundary detection and down-arrow viewport alignment",
         "nodes": ["frame_ocr", "arrow_down"], "status": "idle",
     })
+
+    # Safeguard: Never wipe an in-progress project or reset to Line 1 unless force_reset=True
+    resume_info = state.sync_resume_frontier_state()
+    if not force_reset and resume_info.get("has_existing_progress") and resume_info.get("last_bottom_line", 0) > 0:
+        active_serial = await get_active_adb_serial(serial)
+        disp_id = await detect_external_display_id(active_serial)
+        total_lines = int(resume_info.get("target_total_lines") or 0)
+        if total_lines <= 0:
+            node1_res = await _call_run_single_dag_node("init_end", {"serial": active_serial})
+            total_lines = int(node1_res.get("total_lines") or 0)
+            state.sync_resume_frontier_state()
+        align_res = await align_viewport_for_auto_resume(serial=active_serial, disp_id=disp_id)
+        next_top = int(resume_info.get("next_top_line") or 1)
+        last_bot = int(resume_info.get("last_bottom_line") or 0)
+        init_group["status"] = "completed"
+        init_group["progress"] = {
+            "percent": 100,
+            "stage": f"Auto-Resumed at Line {next_top:,} (preserved {resume_info.get('frames_count', 0)} frames up to Line {last_bot:,}) ✔",
+            "status": "completed",
+            "total_lines": total_lines,
+            "verified": True,
+        }
+        await state.ws_manager.broadcast({
+            "type": "project_init_progress",
+            "stage": init_group["progress"]["stage"],
+            "percent": 100,
+            "status": "completed",
+            "total_lines": total_lines,
+            "verified": True,
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry,
+        })
+        return {
+            "status": "success",
+            "group": "initialize",
+            "auto_resumed": True,
+            "total_lines": total_lines,
+            "first_line": next_top,
+            "last_bottom_line": last_bot,
+            "verified": True,
+            "align": align_res,
+        }
 
     try:
         active_serial = await get_active_adb_serial(serial)
@@ -992,11 +1152,15 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
     opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "pipelined": False, "skip_env_heal": True}
 
     disp_id = await detect_external_display_id(active_serial)
-    if loop_idx == 1:
+    if loop_idx == 1 or state.orchestration_state.get("auto_resume_pending"):
         is_open, _, _ = await assert_markdown_open(active_serial)
         if not is_open:
             heal_fn = _get_orch_attr("auto_heal_pipeline_environment", auto_heal_pipeline_environment)
             await heal_fn(active_serial, disp_id, "frame_acquire")
+        resume_info = state.sync_resume_frontier_state()
+        if resume_info.get("has_existing_progress") and resume_info.get("last_bottom_line", 0) > 0:
+            opts["auto_resume"] = True
+            await align_viewport_for_auto_resume(serial=active_serial, disp_id=disp_id)
 
     loop_start_ms = int(time.time() * 1000)
     loop_t0 = time.perf_counter()
@@ -1256,7 +1420,7 @@ async def execute_dag_group_capture_markdown(serial: Optional[str] = None) -> Di
         return {"status": "error", "group": "capture_entire_markdown", "error": err_msg, "detail": err_msg, "message": f"Capture cycle failed: {err_msg}"}
 
 
-async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
+async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resume_from_line: Optional[int] = None):
     active_serial = await get_active_adb_serial(serial)
     env_fn = _get_orch_attr("resolve_and_enforce_dag_device_environment", resolve_and_enforce_dag_device_environment)
     dev_env = await env_fn(serial=active_serial)
@@ -1289,10 +1453,16 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
             recovery_action=f"Restored capture frontier to Line {prune_res.get('next_expected_top_line')}"
         )
 
+    resume_info = state.sync_resume_frontier_state(override_resume_top_line=resume_from_line)
     state.ensure_diagnostics_trace_backfilled()
     state.record_diagnostics_trace_event(
         event_type="LOOP_STARTED",
-        reason=f"Continuous DAG capture loop started at Page {state.latest_telemetry.get('current_page') or 1} (Line {state.get_next_expected_top_line()})",
+        reason=(
+            f"Auto-resumed DAG capture loop at Page {(resume_info.get('last_page_index') or 0) + 1} "
+            f"(Line {resume_info.get('next_top_line')} = last frame bottom {resume_info.get('last_bottom_line')} + 1)"
+            if resume_info.get("has_existing_progress")
+            else f"Continuous DAG capture loop started at Page {state.latest_telemetry.get('current_page') or 1} (Line {state.get_next_expected_top_line()})"
+        ),
     )
 
     stop_reason_logged = False
@@ -1301,33 +1471,51 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     try:
         while state.capture_loop_running:
             state.sync_multipart_state_from_alignment()
+            resume_info = state.sync_resume_frontier_state(override_resume_top_line=resume_from_line)
+            has_existing_progress = bool(resume_info.get("has_existing_progress") and resume_info.get("last_bottom_line", 0) > 0)
             init_group = state.dag_state.get("groups", {}).get("initialize", {})
             node1_state = state.dag_state.get("nodes", {}).get("init_end", {})
             node2_state = state.dag_state.get("nodes", {}).get("reset_home", {})
             target_lines_pre = int(
-                state.headless_telemetry_session.get("target_total_lines", 0)
+                resume_info.get("target_total_lines", 0)
+                or state.headless_telemetry_session.get("target_total_lines", 0)
                 or state.latest_telemetry.get("target_total_lines", 0)
                 or node1_state.get("total_lines", 0)
                 or 0
             )
             is_initialized = bool(
-                (init_group.get("status") == "completed" and node2_state.get("verified", False) and target_lines_pre > 0)
+                (has_existing_progress and target_lines_pre > 0)
+                or (init_group.get("status") == "completed" and node2_state.get("verified", False) and target_lines_pre > 0)
                 or (len(state.document_lines) > 0 and target_lines_pre > 0)
+                or (len(state.captured_frames) > 0 and target_lines_pre > 0)
             )
 
             if not is_initialized:
                 await emit_dag_telemetry_event(
-                    category="SYSTEM", message="DAG Loop: Project not initialized yet. Executing DAG Group 1 (Determine total lines & Return to Line 1)...",
+                    category="SYSTEM",
+                    message=(
+                        f"DAG Loop: Calibrating total lines and auto-resuming at Line {resume_info.get('next_top_line')}..."
+                        if has_existing_progress
+                        else "DAG Loop: Project not initialized yet. Executing DAG Group 1 (Determine total lines & Return to Line 1)..."
+                    ),
                     dag="initialize", serial=active_serial,
                 )
-                state.latest_telemetry["status_message"] = "Running DAG Group 1: Calibrating EOF total lines & returning to Line 1..."
+                state.latest_telemetry["status_message"] = (
+                    f"Calibrating EOF total lines & auto-resuming at Line {resume_info.get('next_top_line')}..."
+                    if has_existing_progress
+                    else "Running DAG Group 1: Calibrating EOF total lines & returning to Line 1..."
+                )
                 state.latest_telemetry["phase"] = "INITIALIZING"
                 await state.ws_manager.broadcast({
-                    "type": "capture_loop_status", "running": True, "stage": "Running DAG Group 1 (Initialize)...",
+                    "type": "capture_loop_status", "running": True, "stage": state.latest_telemetry["status_message"],
                     "dag": state.dag_state, "telemetry": state.latest_telemetry,
                 })
 
-                init_res = await execute_dag_group_initialize(serial=active_serial, project_id=state.get_current_project_id())
+                init_res = await execute_dag_group_initialize(
+                    serial=active_serial,
+                    project_id=state.get_current_project_id(),
+                    force_reset=False,
+                )
                 if init_res.get("status") in ("error", "failed") or not state.capture_loop_running:
                     err_msg = init_res.get("error") or "DAG Group 1 Initialization failed"
                     state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
@@ -1356,6 +1544,14 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
             if not is_open:
                 heal_fn = _get_orch_attr("auto_heal_pipeline_environment", auto_heal_pipeline_environment)
                 await heal_fn(active_serial, disp_id, "frame_acquire")
+
+            if has_existing_progress:
+                await align_viewport_for_auto_resume(
+                    serial=active_serial,
+                    disp_id=disp_id,
+                    override_resume_top_line=resume_from_line,
+                )
+                resume_from_line = None
 
             is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
             if is_headless or state.headless_telemetry_session.get("status") == "STOPPED":

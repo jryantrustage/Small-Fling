@@ -185,8 +185,23 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  const frontierBottomLine = Math.max(
+    dagStatus?.loop_diagnosis?.frontier_line || 0,
+    dagStatus?.current_bottom_line || 0,
+    dagStatus?.dag?.nodes?.frame_ocr?.bottom_line || 0
+  );
+  const autoResumeTopLine = frontierBottomLine > 0 ? frontierBottomLine + 1 : 1;
+
   // Run an entire phase group (Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
   const handleRunPhase = async (phase: 1 | 2 | 3) => {
+    let forceReset = false;
+    if (phase === 1 && frontierBottomLine > 0) {
+      const ok = window.confirm(
+        `Project already has captured lines up to Line ${frontierBottomLine.toLocaleString()}.\n\nClick OK only if you want to RESET to Line 1 and clear existing progress, or Cancel to keep your progress and use Phase II to auto-resume at Line ${autoResumeTopLine.toLocaleString()}.`
+      );
+      if (!ok) return;
+      forceReset = true;
+    }
     setRunningPhase(phase);
     const groupMap: Record<number, DagGroup> = {
       1: 'initialize',
@@ -201,6 +216,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         body: JSON.stringify({
           project_id: activeProjectId,
           serial: activeDeviceSerial,
+          force_reset: forceReset || undefined,
+          resume_from_line: phase === 2 && frontierBottomLine > 0 ? autoResumeTopLine : undefined,
         }),
       });
       await fetchDagStatus();
@@ -363,12 +380,34 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         <div className="dag-ribbon-phase-header">
           <span className="dag-phase-dot" style={{ background: phaseAccent, color: phaseAccent }} />
           <span className="dag-phase-title">{phaseTitle}</span>
+          {phaseNum === 2 && frontierBottomLine > 0 && (
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                fontFamily: "'JetBrains Mono', monospace",
+                color: '#00ff9d',
+                background: 'rgba(0, 255, 157, 0.12)',
+                border: '1px solid rgba(0, 255, 157, 0.35)',
+                borderRadius: 4,
+                padding: '1px 5px',
+                marginRight: 4,
+              }}
+              title={`Last captured frame ended at Line ${frontierBottomLine.toLocaleString()} • Next capture & OCR starts at Line ${autoResumeTopLine.toLocaleString()} on top`}
+            >
+              Resume Ln {autoResumeTopLine.toLocaleString()}
+            </span>
+          )}
           <button
             type="button"
             className="dag-phase-run-btn"
             onClick={() => handleRunPhase(phaseNum)}
             disabled={runningPhase === phaseNum}
-            title={`Run all nodes in ${phaseTitle}`}
+            title={
+              phaseNum === 2 && frontierBottomLine > 0
+                ? `Auto-Resume Capture & OCR Loop at Line ${autoResumeTopLine.toLocaleString()} (last line ${frontierBottomLine.toLocaleString()} + 1 on top)`
+                : `Run all nodes in ${phaseTitle}`
+            }
           >
             {runningPhase === phaseNum ? <RotateCw size={9} className="spin" /> : <Play size={9} />}
           </button>

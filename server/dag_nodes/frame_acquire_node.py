@@ -92,44 +92,64 @@ class FrameAcquireNode(BaseDagNode):
 
         pid = blackboard.project_id or state.get_current_project_id()
         existing_frames = db.get_frames(pid) if pid else list(state.captured_frames.values())
-        is_first_frame = (len(existing_frames) == 0)
+        is_first_frame = (
+            len(existing_frames) == 0
+            and len(state.captured_frames) == 0
+            and len(state.document_lines) == 0
+        )
         is_fast = bool(cfg.get("fast_mode", True) or (blackboard.payload and blackboard.payload.get("fast_loop")))
+        is_auto_resume = bool(
+            state.orchestration_state.get("auto_resume_pending")
+            or (blackboard.payload and blackboard.payload.get("auto_resume"))
+        )
 
         expected_top = 1 if is_first_frame else state.get_next_expected_top_line()
         target_top = (
             (blackboard.config or {}).get("target_top")
+            or expected_top
             or state.orchestration_state.get("next_target_top")
             or state.dag_state["nodes"].get("arrow_down", {}).get("new_top_line")
-            or expected_top
             or blackboard.top_line
             or state.latest_telemetry.get("current_top_line")
         )
 
-        # Auto-recover only if the gutter jumped outside the contiguous overlap window [expected_top - 6, expected_top]
-        # and recover_gutter_range is explicitly enabled (in fast_loop, Node 5 & Node 6 handle boundary alignment).
+        # Ensure exact `last_line + 1` alignment on top of the next image capture & OCR when auto-resuming,
+        # OR whenever the viewport jumped outside the contiguous window [expected_top - 6, expected_top].
         is_mock = bool(serial and "mock" in str(serial).lower())
+        is_exact_match = (t_det == expected_top)
+        is_contiguous_window = (
+            t_det > 0
+            and max(1, expected_top - 6) <= t_det <= expected_top
+            and (b_det == 0 or b_det >= expected_top)
+        )
         needs_range_recovery = (
             not is_mock
-            and not is_fast
             and cfg.get("recover_gutter_range", True)
             and expected_top
-            and expected_top > 0
-            and t_det > 0
-            and not (max(1, expected_top - 6) <= t_det <= expected_top and (b_det == 0 or b_det >= expected_top))
+            and expected_top > 1
+            and (
+                (is_auto_resume and not is_exact_match)
+                or (t_det > 0 and not is_contiguous_window)
+            )
         )
         if needs_range_recovery:
             state.dag_state["nodes"]["frame_acquire"].update({
-                "evaluator": "Gutter Range Recovery Evaluator",
-                "telemetry_insight": f"Gutter at Ln {t_det}..{b_det} != expected Ln {expected_top} • Navigating via PageUp/PageDown + Arrows..."
+                "evaluator": "Auto-Resume Precision Viewport Aligner" if is_auto_resume else "Gutter Range Recovery Evaluator",
+                "telemetry_insight": (
+                    f"Auto-Resume: Aligning top of capture from Ln {t_det or '?'} → Ln {expected_top} (last line + 1)..."
+                    if is_auto_resume
+                    else f"Gutter at Ln {t_det}..{b_det} != expected Ln {expected_top} • Navigating via PageUp/PageDown + Arrows..."
+                )
             })
             nav_res = await navigate_to_target_top_line(
                 target_top=expected_top,
                 serial=serial,
                 display_id=disp_id,
-                current_top=t_det,
-                current_bottom=b_det,
+                current_top=t_det if t_det > 0 else None,
+                current_bottom=b_det if b_det > 0 else None,
                 lines_per_page=lpp,
                 use_page_keys=True,
+                max_attempts=18 if is_auto_resume else 12,
                 caller_node="frame_acquire"
             )
             if nav_res.get("snapshot_bytes"):
@@ -140,6 +160,11 @@ class FrameAcquireNode(BaseDagNode):
                 t_det = int(nav_res["actual_top"])
             if nav_res.get("actual_bottom"):
                 b_det = int(nav_res["actual_bottom"])
+            if t_det <= 0 or b_det <= 0:
+                t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+
+        if is_auto_resume:
+            state.orchestration_state["auto_resume_pending"] = False
 
         if is_first_frame:
             top_ln = 1
