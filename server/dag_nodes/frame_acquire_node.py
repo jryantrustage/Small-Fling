@@ -93,28 +93,31 @@ class FrameAcquireNode(BaseDagNode):
         pid = blackboard.project_id or state.get_current_project_id()
         existing_frames = db.get_frames(pid) if pid else list(state.captured_frames.values())
         is_first_frame = (len(existing_frames) == 0)
+        is_fast = bool(cfg.get("fast_mode", True) or (blackboard.payload and blackboard.payload.get("fast_loop")))
 
-        prev_bot = max(((f.get("bottom_line", 0) or 0) for f in existing_frames), default=0)
+        expected_top = 1 if is_first_frame else state.get_next_expected_top_line()
         target_top = (
             (blackboard.config or {}).get("target_top")
             or state.orchestration_state.get("next_target_top")
             or state.dag_state["nodes"].get("arrow_down", {}).get("new_top_line")
-            or ((prev_bot + 1) if prev_bot > 0 else None)
+            or expected_top
             or blackboard.top_line
             or state.latest_telemetry.get("current_top_line")
         )
-        expected_top = 1 if is_first_frame else ((prev_bot + 1) if prev_bot > 0 else (target_top or 0))
 
-        # Auto-recover if the gutter is not showing the expected top line range
+        # Auto-recover only if the gutter jumped outside the contiguous overlap window [expected_top - 6, expected_top]
+        # and recover_gutter_range is explicitly enabled (in fast_loop, Node 5 & Node 6 handle boundary alignment).
         is_mock = bool(serial and "mock" in str(serial).lower())
-        if (
+        needs_range_recovery = (
             not is_mock
+            and not is_fast
             and cfg.get("recover_gutter_range", True)
             and expected_top
             and expected_top > 0
             and t_det > 0
-            and t_det != expected_top
-        ):
+            and not (max(1, expected_top - 6) <= t_det <= expected_top and (b_det == 0 or b_det >= expected_top))
+        )
+        if needs_range_recovery:
             state.dag_state["nodes"]["frame_acquire"].update({
                 "evaluator": "Gutter Range Recovery Evaluator",
                 "telemetry_insight": f"Gutter at Ln {t_det}..{b_det} != expected Ln {expected_top} • Navigating via PageUp/PageDown + Arrows..."

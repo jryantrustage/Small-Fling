@@ -125,7 +125,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
                                 orchestrationInvokedBy = ro.invokedBy,
                                 orchestrationActiveStep = ro.activeStep,
                                 orchestrationStepLabel = ro.stepLabel,
-                                orchestrationNextTargetTop = ro.nextTargetTop
+                                orchestrationNextTargetTop = ro.nextTargetTop,
+                                manualAttentionRequired = ro.manualAttentionRequired,
+                                haltReason = ro.haltReason
                             )
                         }
                         if (ro.status != prev) {
@@ -443,6 +445,8 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         val orchestrationActiveStep: String = "START_READY",
         val orchestrationStepLabel: String = "Ready at Ln 1",
         val orchestrationNextTargetTop: Int? = null,
+        val manualAttentionRequired: Boolean = false,
+        val haltReason: String = "",
         val deviceModel: DeviceModel = DeviceModel.AUTO
     )
 }

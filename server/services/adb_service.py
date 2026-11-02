@@ -2610,23 +2610,40 @@ async def navigate_to_target_top_line(
             continue
         h_img = img.shape[0]
         scale_y = h_img / 1080.0
-        top_row_y = 304.0 * scale_y
-        max_top_row_y = int(322 * scale_y)
 
         det_top, meta = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
         gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
         row_pitch = float(meta.get("avg_pitch") or (27.0 * scale_y))
+        top_row_y = float(meta.get("effective_top_row_y") or (304.0 * scale_y))
+        max_top_row_y = int(meta.get("max_top_row_y") or (top_row_y + max(20.0 * scale_y, 0.75 * row_pitch)))
+        wrapped_top_tolerance_y = int(round(top_row_y + 2.25 * row_pitch))
+
         first_g = gutter[0][1] if gutter else det_top
         first_y = gutter[0][0] if gutter else int(top_row_y)
         last_g = gutter[-1][1] if gutter else meta.get("bottom_gutter_line", 0)
         last_y = gutter[-1][0] if gutter else int(923 * scale_y)
 
-        is_aligned_at_top = (
-            (bool(gutter) and first_g == target_top and first_y <= max_top_row_y)
+        cur_t = first_g if (first_g and first_g > 0) else det_top
+        if last_g and cur_t and last_g >= cur_t and 4 <= (last_g - cur_t + 1) <= 75:
+            cur_bot = last_g
+        else:
+            cur_bot = (cur_t or target_top) + page_span - 1
+
+        is_exact_or_wrapped_top = (
+            (bool(gutter) and first_g == target_top and first_y <= wrapped_top_tolerance_y)
             or (not gutter and det_top == target_top)
         )
+        # Safe contiguous overlap: after >=2 adjustment attempts, if cur_t is 1..5 lines above target_top
+        # and the viewport includes target_top..cur_bot with forward progress, ZERO lines are skipped!
+        is_contiguous_overlap = (
+            attempt >= 3
+            and bool(cur_t and cur_t > 0)
+            and max(1, target_top - 5) <= cur_t <= target_top
+            and cur_bot >= target_top + 2
+            and (current_top is None or cur_t > current_top or target_top <= 2)
+        )
 
-        if is_aligned_at_top:
+        if is_exact_or_wrapped_top or is_contiguous_overlap:
             # Ensure no mini-modal / toast popup contaminates the aligned viewport frame
             if latest_snap:
                 modal_res = await resolve_and_dismiss_mini_modals(
@@ -2638,7 +2655,7 @@ async def navigate_to_target_top_line(
                 if modal_res.get("detected") and modal_res.get("snapshot_bytes"):
                     latest_snap = modal_res["snapshot_bytes"]
                     actions_taken.extend(modal_res.get("actions_taken", []))
-            actual_top = target_top
+            actual_top = target_top if is_exact_or_wrapped_top else int(cur_t)
             if last_g and last_g >= actual_top and (last_g - actual_top) <= 75:
                 actual_bot = last_g
                 page_span = actual_bot - actual_top + 1
@@ -2651,11 +2668,14 @@ async def navigate_to_target_top_line(
             state.latest_telemetry["current_top_line"] = actual_top
             state.latest_telemetry["current_bottom_line"] = actual_bot
             actions_taken.append(
-                f"Verified top Line {actual_top} at y={first_y}px (range {actual_top}..{actual_bot}) on check {attempt}"
+                f"Verified top Line {actual_top} at y={first_y}px (range {actual_top}..{actual_bot}"
+                + (", contiguous overlap" if is_contiguous_overlap and not is_exact_or_wrapped_top else "")
+                + f") on check {attempt}"
             )
             return {
                 "status": "ok",
                 "reached": True,
+                "contiguous_overlap": bool(is_contiguous_overlap and not is_exact_or_wrapped_top),
                 "target_top": target_top,
                 "actual_top": actual_top,
                 "actual_bottom": actual_bot,
@@ -2666,18 +2686,15 @@ async def navigate_to_target_top_line(
                 "actions_taken": actions_taken
             }
 
-        cur_t = first_g if (first_g and first_g > 0) else det_top
         if not cur_t or cur_t <= 0:
             await dismiss_keyboard(ser, valid_d)
             await asyncio.sleep(0.18)
             continue
 
         actual_top = cur_t
+        actual_bot = cur_bot
         if last_g and last_g >= cur_t and 4 <= (last_g - cur_t + 1) <= 75:
-            actual_bot = last_g
             page_span = last_g - cur_t + 1
-        else:
-            actual_bot = cur_t + page_span - 1
 
         # If this was the final post-keystroke verification check, break out
         if attempt > max_attempts:
@@ -2703,7 +2720,7 @@ async def navigate_to_target_top_line(
             rows_to_last = max(1, int(round((last_y - top_row_y) / row_pitch)))
             rem_lines = target_top - last_g
             if rem_lines == 1 and last_y >= int(830 * scale_y):
-                visual_rows_diff = max(23, min(26, int(round(rows_to_last + avg_rows_per_line))))
+                visual_rows_diff = max(rows_span_visible, min(26, int(round(rows_to_last + avg_rows_per_line))))
             else:
                 visual_rows_diff = rows_to_last + max(rem_lines, int(round(rem_lines * avg_rows_per_line)))
         elif target_top > cur_t:
@@ -2716,7 +2733,7 @@ async def navigate_to_target_top_line(
             lines_above = max(1, cur_t - target_top)
             diff = -lines_above
             if lines_above == 1 and first_y > max_top_row_y:
-                # Only the top visual row(s) of target_top scrolled above y=304 while its wrapped tail is still visible
+                # Only the top visual row(s) of target_top scrolled above top_row_y while its wrapped tail is still visible
                 visual_rows_diff = 1
             else:
                 visual_rows_diff = max(lines_above, int(round(lines_above * avg_rows_per_line)))
@@ -2733,14 +2750,15 @@ async def navigate_to_target_top_line(
             else:
                 stall_count += 1
 
-        # If stalled twice, tap top/bottom gutter margin to focus editor & pin caret directly to the target edge
+        # If stalled twice, tap inside the safe code area (never x=80 y=305 which can hit Undo/Redo if toolbar shifted)
         if stall_count >= 2:
-            tap_y = int(305 * scale_y) if cur_dir == "up" else int(920 * scale_y)
-            await run_adb_shell(f"input {disp_pfx}tap 80 {tap_y} >/dev/null 2>&1", ser)
+            tap_x = int(350 * (img.shape[1] / 1920.0))
+            tap_y = max(int(top_row_y + 10), int(first_y)) if cur_dir == "up" else min(int(930 * scale_y), int(last_y))
+            await run_adb_shell(f"input {disp_pfx}tap {tap_x} {tap_y} >/dev/null 2>&1", ser)
             await asyncio.sleep(0.06)
             await dismiss_keyboard(ser, valid_d)
             caret_pos = "top" if cur_dir == "up" else "bottom"
-            actions_taken.append(f"Refocused editor gutter at (80, {tap_y}) [{caret_pos}] after stall on Ln {cur_t}")
+            actions_taken.append(f"Refocused editor code area at ({tap_x}, {tap_y}) [{caret_pos}] after stall on Ln {cur_t}")
 
         # Decide between coarse PageUp/PageDown (92/93) and fine Arrow Up/Down (19/20)
         if use_page_keys and visual_rows_diff >= 36 and abs(diff) >= page_span and stall_count == 0 and not target_in_gutter:
@@ -2934,6 +2952,43 @@ def detect_mini_modal_popups(image_or_bytes: Any) -> Dict[str, Any]:
                     "x_glyph_pixels": x_glyph_pixels,
                     "confidence": conf
                 })
+
+        # Also detect top notification / call banner (e.g. Microsoft Teams meeting banner at y=95..180)
+        # which pushes the editor toolbar down by ~90px and has a right-side 'X' close button around (1892, 149).
+        try:
+            tb_y1, tb_y2 = int(round(98 * sy)), int(round(178 * sy))
+            tb_x1, tb_x2 = int(round(200 * sx)), int(round(1500 * sx))
+            tb_strip = img[tb_y1:tb_y2, tb_x1:tb_x2]
+            if tb_strip.size > 0:
+                tb_b = tb_strip[:, :, 0].astype(np.int16)
+                tb_g = tb_strip[:, :, 1].astype(np.int16)
+                indigo_ratio = float(np.mean((tb_b >= 55) & ((tb_b - tb_g) >= 15)))
+                if indigo_ratio >= 0.45:
+                    xb_x1, xb_x2 = int(round(1862 * sx)), min(w, int(round(1914 * sx)))
+                    xb_y1, xb_y2 = int(round(105 * sy)), int(round(175 * sy))
+                    xb_patch = img[xb_y1:xb_y2, xb_x1:xb_x2]
+                    cx_top = int(round(1892 * sx))
+                    cy_top = int(round(145 * sy))
+                    x_cnt = 0
+                    if xb_patch.size > 0:
+                        xb_gray = cv2.cvtColor(xb_patch, cv2.COLOR_BGR2GRAY)
+                        xys, xxs = np.where(xb_gray > 150)
+                        x_cnt = int(len(xxs))
+                        if x_cnt >= max(15, int(30 * sx * sy)):
+                            cx_top = int(round(xb_x1 + float(np.mean(xxs))))
+                            cy_top = int(round(xb_y1 + float(np.mean(xys))))
+                    if x_cnt >= max(15, int(30 * sx * sy)):
+                        popups.append({
+                            "bbox": [0, tb_y1, w, tb_y2 - tb_y1],
+                            "close_button": [cx_top, cy_top],
+                            "red_icon_center": None,
+                            "red_icon_pixels": 0,
+                            "x_glyph_pixels": x_cnt,
+                            "confidence": 0.96,
+                            "banner_type": "teams_top_call_banner"
+                        })
+        except Exception:
+            pass
 
         # Sort top-to-bottom by Y coordinate so closing upper toast first never shifts lower toast coordinates
         popups.sort(key=lambda p: p["bbox"][1])

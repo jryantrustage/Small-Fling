@@ -50,13 +50,13 @@ async def get_dismissed_alignment_items_api():
     return {"dismissed_items": list(state.dismissed_alignment_items)}
 @router.get("/api/telemetry")
 async def get_telemetry():
-    return {"telemetry": state.get_fresh_telemetry(), "token_stats": state.token_stats, "alignment": state.latest_alignment_status, "document_summary": state.get_document_metrics()}
+    return {"telemetry": state.get_fresh_telemetry(), "token_stats": state.token_stats, "alignment": state.latest_alignment_status, "document_summary": state.get_document_metrics(), "loop_diagnosis": state.get_loop_diagnosis()}
 @router.post("/api/telemetry")
 async def update_telemetry(p: TelemetryUpdateRequest):
     return await handle_telemetry_update(p)
 @router.get("/api/orchestrate")
 async def get_orchestration_state():
-    return {"orchestration": state.orchestration_state, "telemetry": state.get_fresh_telemetry()}
+    return {"orchestration": state.orchestration_state, "telemetry": state.get_fresh_telemetry(), "loop_diagnosis": state.get_loop_diagnosis()}
 @router.post("/api/orchestrate")
 async def handle_orchestration_command(payload: OrchestrationRequest):
     return await handle_orchestrate_command(payload)
@@ -65,7 +65,7 @@ async def get_dag_status():
     proj = db.get_active_project()
     target_tot = proj.get("target_total_lines", 0) if proj else state.latest_telemetry.get("target_total_lines", 0)
     node_5 = state.dag_state["nodes"].get("verification_trigger", {})
-    return {"status": "success", "dag": state.dag_state, "target_total_lines": target_tot, "current_top_line": state.latest_telemetry.get("current_top_line", 0), "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 0), "current_page": state.latest_telemetry.get("current_page", 1), "active_node": state.dag_state.get("current_active_node"), "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}), "telemetry": state.get_fresh_telemetry(), "latest_telemetry": state.get_fresh_telemetry(), "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {})}
+    return {"status": "success", "dag": state.dag_state, "target_total_lines": target_tot, "current_top_line": state.latest_telemetry.get("current_top_line", 0), "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 0), "current_page": state.latest_telemetry.get("current_page", 1), "active_node": state.dag_state.get("current_active_node"), "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}), "telemetry": state.get_fresh_telemetry(), "latest_telemetry": state.get_fresh_telemetry(), "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {}), "loop_diagnosis": state.get_loop_diagnosis()}
 @router.get("/api/dag/nodes/metadata")
 async def get_all_dag_nodes_metadata():
     return {"status": "success", "nodes": [n.get_metadata() for n in dag_node_registry.get_all_nodes()]}
@@ -356,17 +356,18 @@ async def evaluate_dag_node_5_qualifiers(serial: Optional[str] = None):
     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "verification_trigger", "trigger_decision": decision})
     return {"status": "success", "node_id": "verification_trigger", "trigger_decision": decision, "allowed": decision.get("allowed", False), "prevented": decision.get("prevented", True), "message": "Trigger allowed ✔" if decision.get("allowed") else f"Trigger prevented: {', '.join(decision.get('reasons', []))} ⛔"}
 @router.post("/api/dag/loop/start")
+@router.post("/api/dag/loop/resume")
 async def start_dag_loop(payload: Optional[Dict[str, Any]] = None):
     global capture_loop_task
     payload = payload or {}
     if "headless_mode" in payload:
         state.headless_mode = state.dag_state["headless_mode"] = bool(payload["headless_mode"])
     if getattr(state, "capture_loop_running", False):
-        return {"status": "already_running", "message": "Capture loop is already running"}
+        return {"status": "already_running", "message": "Capture loop is already running", "diagnosis": state.get_loop_diagnosis()}
     state.capture_loop_running = True
     capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(payload.get("serial")))
     await state.ws_manager.broadcast({"type": "capture_loop_status", "running": True, "dag": state.dag_state, "telemetry": state.latest_telemetry})
-    return {"status": "started", "message": f"Capture loop started{' (Headless Mode)' if getattr(state, 'headless_mode', False) else ''}"}
+    return {"status": "started", "message": f"Capture loop started{' (Headless Mode)' if getattr(state, 'headless_mode', False) else ''}", "diagnosis": state.get_loop_diagnosis()}
 @router.post("/api/dag/loop/stop")
 async def stop_dag_loop():
     global capture_loop_task
@@ -380,8 +381,9 @@ async def stop_dag_loop():
     await state.ws_manager.broadcast({"type": "capture_loop_status", "running": False, "dag": state.dag_state, "telemetry": state.latest_telemetry})
     return {"status": "stopped", "message": "Capture loop stopped"}
 @router.get("/api/dag/loop/status")
+@router.get("/api/dag/loop/diagnosis")
 async def get_dag_loop_status():
-    return {"status": "success", "running": getattr(state, "capture_loop_running", False), "current_active_node": state.dag_state.get("current_active_node")}
+    return {"status": "success", "running": getattr(state, "capture_loop_running", False), "current_active_node": state.dag_state.get("current_active_node"), "diagnosis": state.get_loop_diagnosis()}
 @router.get("/api/dag/semaphore")
 async def get_dag_semaphore():
     s23, s34 = getattr(state, "dag_semaphore_group2_to_3", True), getattr(state, "dag_semaphore_group3_to_4", True)

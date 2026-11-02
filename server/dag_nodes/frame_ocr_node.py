@@ -96,8 +96,9 @@ class FrameOcrNode(BaseDagNode):
                     break
 
         other_frames = [f for f in sorted_f if f.get("frame_id") != cur_acquire_fid]
-        last_bot = other_frames[-1].get("bottom_line", 0) if other_frames else 0
-        expected_top = (last_bot + 1) if last_bot > 0 else (state.dag_state["nodes"].get("frame_ocr", {}).get("target_top_line") or 1)
+        expected_top = state.get_next_expected_top_line(exclude_frame_id=cur_acquire_fid) if other_frames else (
+            state.dag_state["nodes"].get("frame_ocr", {}).get("target_top_line") or 1
+        )
 
         is_fast = bool(cfg.get("fast_loop", False) or (blackboard.payload and blackboard.payload.get("fast_loop")))
         is_mock = bool(serial and "mock" in str(serial).lower())
@@ -115,13 +116,19 @@ class FrameOcrNode(BaseDagNode):
                     node_id="frame_ocr",
                     expected_top=expected_top
                 )
-            # Recover if gutter is not showing expected range (e.g. jumped backward or overshot)
+            # Recover ONLY if there is a gap (t_det > expected_top) or if the viewport jumped backward (> 8 lines before expected_top).
+            # If expected_top - 8 <= t_det <= expected_top and b_det >= expected_top, it is a contiguous zero-gap overlap!
+            is_contiguous = (
+                t_det > 0
+                and max(1, expected_top - 8) <= t_det <= expected_top
+                and (b_det == 0 or b_det >= expected_top)
+            )
             if (
                 not is_mock
                 and cfg.get("recover_gutter_range", True)
                 and expected_top > 0
                 and t_det > 0
-                and t_det != expected_top
+                and not is_contiguous
             ):
                 state.dag_state["nodes"]["frame_ocr"].update({
                     "evaluator": "Gutter Range Recovery Evaluator",

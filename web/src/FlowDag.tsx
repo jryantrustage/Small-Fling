@@ -299,10 +299,41 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  const [isResumingLoop, setIsResumingLoop] = useState<boolean>(false);
+
+  const handleResumeLoopFromBanner = async (healFirst = false) => {
+    setIsResumingLoop(true);
+    try {
+      if (healFirst) {
+        await fetch(`${apiBase}/api/device/autofix-viewport`, { method: 'POST' }).catch(() => {});
+      }
+      await fetch(`${apiBase}/api/dag/loop/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: activeProjectId,
+          serial: activeDeviceSerial,
+        }),
+      });
+      await fetchDagStatus();
+      onRefresh?.();
+    } catch {} finally {
+      setIsResumingLoop(false);
+    }
+  };
+
   const getStepStatus = (stepId: string) => {
     const meta = NODES_METADATA.find((n) => n.id === stepId);
     if (!meta || !dagStatus) {
-      return { isRunning: false, isActive: false, isDone: false, isError: false, metricLabel: '' };
+      return {
+        isRunning: false,
+        isActive: false,
+        isDone: false,
+        isError: false,
+        statusLabel: 'READY',
+        metricLabel: '',
+        telemetryInsight: null as string | null,
+      };
     }
     const live = calculateNodeLiveStatus(
       stepId,
@@ -330,7 +361,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     return (
       <div className="dag-ribbon-phase-group" key={phaseNum} data-testid={`dag-phase-${phaseNum}`}>
         <div className="dag-ribbon-phase-header">
-          <span className="dag-phase-dot" style={{ background: phaseAccent }} />
+          <span className="dag-phase-dot" style={{ background: phaseAccent, color: phaseAccent }} />
           <span className="dag-phase-title">{phaseTitle}</span>
           <button
             type="button"
@@ -345,6 +376,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         <div className="dag-ribbon-steps-row">
           {steps.map((step, idx) => {
             const st = getStepStatus(step.id);
+            const meta = NODES_METADATA.find((n) => n.id === step.id);
             const isSelected = popoverNodeId === step.id || selectedNodeId === step.id;
             const isRunning = runningNodeId === step.id || st.isRunning || st.isActive;
             const outgoingDisabled = edges
@@ -356,25 +388,65 @@ export const FlowDag: React.FC<FlowDagProps> = ({
                 <button
                   type="button"
                   className={`dag-ribbon-node-pill ${isSelected ? 'selected' : ''} ${
-                    isRunning ? 'running' : ''
+                    isRunning ? 'running heat-lamp-active' : ''
                   } ${st.isError ? 'error' : st.isDone ? 'done' : ''}`}
                   onClick={() => handleClickStep(step.id)}
                   data-testid={`dag-ribbon-node-${step.id}`}
-                  title={`${step.label}${st.metricLabel ? ` • ${st.metricLabel}` : ''} (Click to configure or run in isolation)`}
+                  title={`${step.label}${st.metricLabel ? ` • ${st.metricLabel}` : ''}${st.telemetryInsight ? `\n${st.telemetryInsight}` : ''}\n(Click to configure or run in isolation)`}
                 >
-                  <span className="dag-node-step-badge">{step.stepNum}</span>
-                  <span className="dag-node-step-name">{step.label.replace(/^\d+\.\s*/, '')}</span>
-                  {isRunning ? (
-                    <RotateCw size={10} className="spin" color="#00ff9d" />
-                  ) : st.isError ? (
-                    <AlertTriangle size={10} color="#f85149" />
-                  ) : st.isDone ? (
-                    <Check size={10} color="#00ff9d" />
-                  ) : null}
+                  <div className="dag-node-top-row">
+                    <div className="dag-node-left-head">
+                      <span
+                        className="dag-node-step-badge"
+                        style={
+                          !isRunning && !st.isDone && meta?.accentColor
+                            ? {
+                                borderColor: `${meta.accentColor}66`,
+                                color: meta.accentColor,
+                                background: `${meta.accentColor}1f`,
+                              }
+                            : undefined
+                        }
+                      >
+                        {step.stepNum}
+                      </span>
+                      <span className="dag-node-step-name">{step.label.replace(/^\d+\.\s*/, '')}</span>
+                    </div>
+                    {isRunning ? (
+                      <RotateCw size={10} className="spin" color="#ff9100" />
+                    ) : st.isError ? (
+                      <AlertTriangle size={10} color="#f85149" />
+                    ) : st.isDone ? (
+                      <Check size={10} color="#00ff9d" />
+                    ) : null}
+                  </div>
+                  <div className="dag-node-bottom-row">
+                    <span className="dag-node-metric-text">
+                      {st.metricLabel || meta?.subhead || 'Ready'}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '8px',
+                        fontWeight: 800,
+                        letterSpacing: '0.3px',
+                        color: isRunning
+                          ? '#ff9100'
+                          : st.isError
+                          ? '#f85149'
+                          : st.isDone
+                          ? '#00ff9d'
+                          : '#6e7681',
+                      }}
+                    >
+                      {isRunning ? '🔥 ACTIVE' : st.statusLabel || 'IDLE'}
+                    </span>
+                  </div>
                 </button>
                 {idx < steps.length - 1 && (
                   <span
-                    className={`dag-ribbon-connector ${outgoingDisabled ? 'disabled' : ''}`}
+                    className={`dag-ribbon-connector ${outgoingDisabled ? 'disabled' : ''} ${
+                      isRunning ? 'active-flow' : ''
+                    }`}
                     title={outgoingDisabled ? 'Connector paused' : 'Active transition'}
                   >
                     ➔
@@ -388,6 +460,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     );
   };
 
+  const loopDiag = dagStatus?.loop_diagnosis;
+  const showAttentionBanner = Boolean(
+    loopDiag &&
+      !loopDiag.loop_running &&
+      !loopDiag.is_complete &&
+      (loopDiag.manual_attention_required ||
+        loopDiag.headless_status === 'STOPPED' ||
+        loopDiag.orchestration_status === 'PAUSED')
+  );
+
   return (
     <div className="dag-pipeline-ribbon-wrapper" data-testid="interactive-dag-ribbon">
       <div className="dag-pipeline-ribbon">
@@ -397,6 +479,88 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         <span className="dag-phase-divider">➔</span>
         {renderPhaseGroup(3, 'Phase III — Post-Capture Analyzer & Sandbox', '#38bdf8')}
       </div>
+
+      {/* Loop Stopped / Manual Attention Required Alert & One-Click Resume Banner */}
+      {showAttentionBanner && loopDiag && (
+        <div className="loop-attention-banner" data-testid="loop-attention-banner">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+            <AlertTriangle size={16} color="#ff7b72" style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: 'rgba(248, 81, 73, 0.25)',
+                    border: '1px solid #f85149',
+                    color: '#ffa198',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  ⚠ LOOP HALTED — ATTENTION / AUTO-RESUME READY
+                </span>
+                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f0f6fc', fontFamily: 'var(--font-mono)' }}>
+                  Frontier: Ln {loopDiag.frontier_line.toLocaleString()} / {loopDiag.target_total_lines.toLocaleString()} ({loopDiag.completion_percent}%) • Next Target: Ln {loopDiag.next_expected_top_line.toLocaleString()}
+                </span>
+              </div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#e6edf3',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={loopDiag.halt_reason || loopDiag.recommended_action}
+              >
+                <strong>Diagnosis:</strong> {loopDiag.halt_reason || 'Capture loop paused before reaching target total lines.'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              onClick={() => handleResumeLoopFromBanner(true)}
+              disabled={isResumingLoop}
+              style={{
+                padding: '4px 10px',
+                fontSize: '11px',
+                fontWeight: 700,
+                borderColor: '#38bdf8',
+                color: '#38bdf8',
+                background: 'rgba(56, 189, 248, 0.12)',
+              }}
+              title="Dismiss any top notification banners, heal soft keyboard/viewport, and resume capture loop"
+            >
+              <Sparkles size={12} />
+              <span>Heal Viewport &amp; Resume</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              onClick={() => handleResumeLoopFromBanner(false)}
+              disabled={isResumingLoop}
+              data-testid="resume-capture-loop-btn"
+              style={{
+                padding: '5px 12px',
+                fontSize: '11.5px',
+                fontWeight: 800,
+                background: 'linear-gradient(135deg, #059669, #10b981)',
+                borderColor: '#34d399',
+                color: '#022c22',
+                boxShadow: '0 0 12px rgba(16, 185, 129, 0.4)',
+              }}
+            >
+              <Play size={12} />
+              <span>{isResumingLoop ? 'Resuming...' : `▶ Resume Capture Loop (Ln ${loopDiag.next_expected_top_line})`}</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Compact Single-Card Node Popover */}
       {popoverNodeId && activePopoverMeta && (

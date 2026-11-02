@@ -245,15 +245,23 @@ fun MinimalHudPill(onDrag: (Float, Float) -> Unit, onClose: () -> Unit) {
 
     val isRunning = paginationState == DesktopPaginationService.PaginationState.Running || remoteOrch?.status == "RUNNING"
     val isPaused = paginationState == DesktopPaginationService.PaginationState.Paused || remoteOrch?.status == "PAUSED"
+    val needsAttention = !isRunning && (remoteOrch?.manualAttentionRequired == true)
     val dotColor = when {
         isRunning -> Color(0xFF00FF9D)
+        needsAttention -> Color(0xFFFF7B72)
         isPaused -> Color(0xFFD29922)
         isOnline -> Color(0xFF58A6FF)
         else -> Color(0xFF8B949E)
     }
 
     val pageNum = if (telemetry.currentPage > 0) telemetry.currentPage else currentPage
-    val lineRange = if (telemetry.currentTopLine > 0) "Ln ${telemetry.currentTopLine}→${telemetry.currentBottomLine}" else "Ready"
+    val lineRange = if (needsAttention) {
+        "⚠ HALTED (Resume Ln ${remoteOrch?.nextTargetTop ?: telemetry.currentBottomLine + 1})"
+    } else if (telemetry.currentTopLine > 0) {
+        "Ln ${telemetry.currentTopLine}→${telemetry.currentBottomLine}"
+    } else {
+        "Ready"
+    }
 
     fun sendCmd(cmd: String, localAction: () -> Unit = {}) {
         coroutineScope.launch {

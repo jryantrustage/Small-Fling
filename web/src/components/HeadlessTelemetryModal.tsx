@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Cpu, Activity, CheckCircle2, Clock, Zap, FileText, Download,
   Layers, ShieldCheck, X,
-  TrendingUp, BarChart2, Edit3, Check
+  TrendingUp, BarChart2, Edit3, Check, Play, Sparkles, AlertTriangle
 } from 'lucide-react';
 
 export interface HeadlessTelemetryData {
@@ -57,6 +57,32 @@ export const HeadlessTelemetryModal: React.FC<HeadlessTelemetryModalProps> = ({
   const [customTarget, setCustomTarget] = useState<string>('');
   const [isUpdatingTarget, setIsUpdatingTarget] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+
+  const handleResumeLoop = async (healFirst = false) => {
+    setIsResuming(true);
+    try {
+      if (healFirst) {
+        await fetch(`${apiBase}/api/device/autofix-viewport`, { method: 'POST' }).catch(() => {});
+      }
+      const res = await fetch(`${apiBase}/api/dag/loop/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: (localTelemetry || telemetry)?.project_id }),
+      });
+      if (res.ok) {
+        const tRes = await fetch(`${apiBase}/api/dag/headless/telemetry`);
+        if (tRes.ok) {
+          const d = await tRes.json();
+          if (d?.telemetry) setLocalTelemetry(d.telemetry);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to resume capture loop', e);
+    } finally {
+      setIsResuming(false);
+    }
+  };
 
   useEffect(() => {
     if (telemetry) {
@@ -295,22 +321,81 @@ export const HeadlessTelemetryModal: React.FC<HeadlessTelemetryModalProps> = ({
               style={{
                 padding: '12px 16px',
                 borderRadius: '8px',
-                background: isComplete ? 'rgba(0, 255, 157, 0.08)' : 'rgba(56, 189, 248, 0.08)',
-                border: isComplete ? '1px solid rgba(0, 255, 157, 0.3)' : '1px solid rgba(56, 189, 248, 0.25)',
+                background: isComplete
+                  ? 'rgba(0, 255, 157, 0.08)'
+                  : isStopped
+                  ? 'rgba(248, 81, 73, 0.12)'
+                  : 'rgba(56, 189, 248, 0.08)',
+                border: isComplete
+                  ? '1px solid rgba(0, 255, 157, 0.3)'
+                  : isStopped
+                  ? '1px solid rgba(248, 81, 73, 0.45)'
+                  : '1px solid rgba(56, 189, 248, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px'
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap'
               }}
             >
-              {isComplete ? (
-                <CheckCircle2 size={18} color="#00ff9d" style={{ flexShrink: 0 }} />
-              ) : (
-                <Zap size={18} color="#38bdf8" style={{ flexShrink: 0 }} />
-              )}
-              <div style={{ fontSize: '13px', color: isComplete ? '#00ff9d' : '#e0f2fe', lineHeight: 1.4 }}>
-                <strong>{isComplete ? 'Operation Complete: ' : 'Status: '}</strong>
-                {data.finish_status_message}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: '260px' }}>
+                {isComplete ? (
+                  <CheckCircle2 size={18} color="#00ff9d" style={{ flexShrink: 0 }} />
+                ) : isStopped ? (
+                  <AlertTriangle size={18} color="#ff7b72" style={{ flexShrink: 0 }} />
+                ) : (
+                  <Zap size={18} color="#38bdf8" style={{ flexShrink: 0 }} />
+                )}
+                <div style={{ fontSize: '13px', color: isComplete ? '#00ff9d' : (isStopped ? '#ffdcd7' : '#e0f2fe'), lineHeight: 1.4 }}>
+                  <strong>{isComplete ? 'Operation Complete: ' : (isStopped ? 'Loop Halted — Root Cause: ' : 'Status: ')}</strong>
+                  {data.finish_status_message}
+                </div>
               </div>
+              {!isRunning && !isComplete && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    onClick={() => handleResumeLoop(true)}
+                    disabled={isResuming}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 10px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      color: '#38bdf8',
+                      borderColor: '#38bdf8',
+                      background: 'rgba(56, 189, 248, 0.14)'
+                    }}
+                    title="Dismiss any notification/call banners, heal viewport, and resume"
+                  >
+                    <Sparkles size={12} />
+                    <span>Heal &amp; Resume</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    onClick={() => handleResumeLoop(false)}
+                    disabled={isResuming}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '5px 12px',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      background: 'linear-gradient(135deg, #059669, #10b981)',
+                      borderColor: '#34d399',
+                      color: '#022c22'
+                    }}
+                  >
+                    <Play size={12} />
+                    <span>{isResuming ? 'Resuming...' : '▶ Resume Capture Loop'}</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -695,6 +780,30 @@ export const HeadlessTelemetryModal: React.FC<HeadlessTelemetryModalProps> = ({
               >
                 <FileText size={13} />
                 <span>Inspect Lines</span>
+              </button>
+            )}
+
+            {!isRunning && !isComplete && (
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                onClick={() => handleResumeLoop(false)}
+                disabled={isResuming}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '5px 14px',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  background: 'linear-gradient(135deg, #059669, #10b981)',
+                  borderColor: '#34d399',
+                  color: '#022c22',
+                  boxShadow: '0 0 12px rgba(16, 185, 129, 0.4)'
+                }}
+              >
+                <Play size={13} />
+                <span>{isResuming ? 'Resuming...' : '▶ Resume Capture Loop'}</span>
               </button>
             )}
 

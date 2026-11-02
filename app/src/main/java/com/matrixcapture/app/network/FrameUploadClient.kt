@@ -19,12 +19,29 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
     data class RecaptureTask(val lineNumber: Int, val reason: String)
     data class UploadResult(val success: Boolean, val topLine: Int = 0, val bottomLine: Int = 0, val extractedLineCount: Int = 0, val message: String = "")
     data class TelemetryData(val deviceId: String = "Pixel 10 Desktop", val isPacing: Boolean = false, val currentPage: Int = 0, val currentTopLine: Int = 0, val currentBottomLine: Int = 0, val targetTotalLines: Int = 0, val dwellCountdownMs: Int = 0, val phase: String = "IDLE", val statusMessage: String = "", val activeStep: String? = null, val source: String = "mobile", val mobilePromptTokens: Int = 0, val mobileCandidatesTokens: Int = 0, val mobileTotalTokens: Int = 0, val autoTuneFactor: Float = 1.0f, val linePitchPx: Float = 32f, val bottomToTopError: Int = 0, val wrappedLinesDetected: Int = 0)
-    data class OrchestrationState(val status: String = "IDLE", val command: String = "NONE", val source: String = "system", val invokedBy: String = "System ⚙️", val activeStep: String = "START_READY", val stepLabel: String = "", val currentPage: Int = 1, val currentTopLine: Int = 0, val currentBottomLine: Int = 0, val nextTargetTop: Int = 0, val targetTotalLines: Int = 0, val statusMessage: String = "", val updatedAt: String = "")
+    data class OrchestrationState(
+        val status: String = "IDLE",
+        val command: String = "NONE",
+        val source: String = "system",
+        val invokedBy: String = "System ⚙️",
+        val activeStep: String = "START_READY",
+        val stepLabel: String = "",
+        val currentPage: Int = 1,
+        val currentTopLine: Int = 0,
+        val currentBottomLine: Int = 0,
+        val nextTargetTop: Int = 0,
+        val targetTotalLines: Int = 0,
+        val statusMessage: String = "",
+        val updatedAt: String = "",
+        val manualAttentionRequired: Boolean = false,
+        val haltReason: String = ""
+    )
 
     private fun parseOrchestration(bodyStr: String, fallbackCmd: String, fallbackSrc: String): OrchestrationState {
         val root = JSONObject(bodyStr)
         val orch = root.optJSONObject("orchestration") ?: JSONObject()
         val telem = root.optJSONObject("telemetry") ?: JSONObject()
+        val diag = root.optJSONObject("loop_diagnosis") ?: telem.optJSONObject("loop_diagnosis") ?: JSONObject()
         return OrchestrationState(
             status = orch.optString("status", "IDLE"), command = orch.optString("last_command", fallbackCmd),
             source = orch.optString("source", fallbackSrc), invokedBy = orch.optString("invoked_by", "System ⚙️"),
@@ -32,9 +49,12 @@ class FrameUploadClient(var serverHost: String = "192.168.86.83:8000") {
             currentPage = telem.optInt("current_page", orch.optInt("page", 1)),
             currentTopLine = telem.optInt("current_top_line", orch.optInt("top_line", 0)),
             currentBottomLine = telem.optInt("current_bottom_line", orch.optInt("bottom_line", 0)),
-            nextTargetTop = orch.optInt("next_target_top", 0), targetTotalLines = telem.optInt("target_total_lines", 0),
+            nextTargetTop = diag.optInt("next_expected_top_line", orch.optInt("next_target_top", 0)),
+            targetTotalLines = telem.optInt("target_total_lines", diag.optInt("target_total_lines", 0)),
             statusMessage = telem.optString("status_message", ""),
-            updatedAt = orch.optString("updated_at", "")
+            updatedAt = orch.optString("updated_at", ""),
+            manualAttentionRequired = diag.optBoolean("manual_attention_required", false),
+            haltReason = diag.optString("halt_reason", "")
         )
     }
 

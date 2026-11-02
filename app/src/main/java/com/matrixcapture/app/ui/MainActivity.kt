@@ -99,13 +99,16 @@ fun MinimalStatusCardScreen(
     val isKeyboardSuppressed by DesktopPaginationService.isSoftKeyboardSuppressed.collectAsState()
     val isRunning = uiState.orchestrationStatus == "RUNNING" || uiState.isWorkflowRunning
     val isPaused = uiState.orchestrationStatus == "PAUSED"
+    val needsAttention = !isRunning && uiState.manualAttentionRequired
     val statusText = when {
         isRunning -> "RUNNING"
+        needsAttention -> "HALTED ⚠"
         isPaused -> "PAUSED"
         else -> uiState.orchestrationStatus.ifEmpty { "IDLE" }
     }
     val statusColor = when (statusText) {
         "RUNNING" -> Color(0xFF00FF9D)
+        "HALTED ⚠" -> Color(0xFFFF7B72)
         "PAUSED" -> Color(0xFFD29922)
         "COMPLETED" -> Color(0xFF58A6FF)
         "ABORTED" -> Color(0xFFFF7B72)
@@ -295,6 +298,49 @@ fun MinimalStatusCardScreen(
                         color = Color(0xFF00FF9D),
                         trackColor = Color(0xFF21262D)
                     )
+                }
+
+                if (needsAttention) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF3B1E1E), RoundedCornerShape(10.dp))
+                            .border(1.dp, Color(0xFFF85149), RoundedCornerShape(10.dp))
+                            .clickable { onResume() }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                "⚠ LOOP HALTED — ATTENTION REQUIRED",
+                                color = Color(0xFFFF7B72),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                uiState.haltReason.ifEmpty { "Capture loop paused before reaching target lines. Tap to resume." },
+                                color = Color(0xFFE6EDF3),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 2
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFF00FF9D), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                "▶ RESUME",
+                                color = Color.Black,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
                 }
 
                 if (!uiState.isAccessibilityActive) {

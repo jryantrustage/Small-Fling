@@ -1275,11 +1275,24 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
     state.latest_telemetry["is_pacing"] = False
     state.latest_telemetry["phase"] = "DAG_CAPTURE"
     state.orchestration_state["status"] = "RUNNING"
+    state.orchestration_state["manual_attention_required"] = False
+    state.orchestration_state["halt_reason"] = None
+
+    # Clean up any regressed duplicate frames behind the current document_lines frontier before starting/resuming
+    prune_res = state.prune_regressed_frames()
+    if prune_res.get("pruned_count", 0) > 0:
+        state.record_diagnostics_trace_event(
+            event_type="LOOP_AUTO_RECOVERED",
+            node_id="frame_ocr",
+            target_top_line=prune_res.get("next_expected_top_line"),
+            reason=f"Pruned {prune_res['pruned_count']} regressed duplicate frame(s) behind frontier Line {prune_res.get('frontier_bottom_line')}",
+            recovery_action=f"Restored capture frontier to Line {prune_res.get('next_expected_top_line')}"
+        )
 
     state.ensure_diagnostics_trace_backfilled()
     state.record_diagnostics_trace_event(
         event_type="LOOP_STARTED",
-        reason=f"Continuous DAG capture loop started at Page {state.latest_telemetry.get('current_page') or 1} (Line {state.latest_telemetry.get('current_top_line') or 1})",
+        reason=f"Continuous DAG capture loop started at Page {state.latest_telemetry.get('current_page') or 1} (Line {state.get_next_expected_top_line()})",
     )
 
     stop_reason_logged = False
@@ -1298,7 +1311,8 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                 or 0
             )
             is_initialized = bool(
-                init_group.get("status") == "completed" and node2_state.get("verified", False) and target_lines_pre > 0
+                (init_group.get("status") == "completed" and node2_state.get("verified", False) and target_lines_pre > 0)
+                or (len(state.document_lines) > 0 and target_lines_pre > 0)
             )
 
             if not is_initialized:
@@ -1319,12 +1333,16 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                     state.latest_telemetry["status_message"] = f"Loop halted during DAG 1: {err_msg}"
                     state.capture_loop_running = False
                     state.orchestration_state["status"] = "ERROR"
+                    state.orchestration_state["manual_attention_required"] = True
+                    state.orchestration_state["halt_reason"] = f"DAG Group 1 Initialization failed: {err_msg}"
                     state.record_diagnostics_trace_event(
                         event_type="LOOP_STOPPED", node_id="init_end", reason=f"DAG Group 1 Initialization failed: {err_msg}"
                     )
                     stop_reason_logged = True
                     await state.ws_manager.broadcast({
-                        "type": "capture_loop_status", "running": False, "error": err_msg, "dag": state.dag_state, "telemetry": state.latest_telemetry
+                        "type": "capture_loop_status", "running": False, "error": err_msg,
+                        "manual_attention_required": True, "diagnosis": state.get_loop_diagnosis(),
+                        "dag": state.dag_state, "telemetry": state.latest_telemetry
                     })
                     return
 
@@ -1340,7 +1358,7 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                 await heal_fn(active_serial, disp_id, "frame_acquire")
 
             is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
-            if is_headless:
+            if is_headless or state.headless_telemetry_session.get("status") == "STOPPED":
                 session = state.start_headless_telemetry_session("continuous_capture_loop")
                 await emit_dag_telemetry_event(
                     category="SYSTEM", message="⚡ Capture loop running in HEADLESS MODE (Node 4 RapidOCR Inspector Rescan Engine Active; UI rendering bypassed)",
@@ -1350,11 +1368,23 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                     await state.ws_manager.broadcast({"type": "headless_telemetry_started", "telemetry": session})
 
             consecutive_recovery_attempts = 0
-            max_recovery_attempts = 5
+            max_recovery_attempts = 8
             advance_to_next_multipart = False
 
             while state.capture_loop_running:
-                res = await execute_dag_group_capture_markdown(serial=active_serial)
+                is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
+                try:
+                    res = await asyncio.wait_for(
+                        execute_dag_group_capture_markdown(serial=active_serial),
+                        timeout=120.0
+                    )
+                except asyncio.TimeoutError:
+                    res = {
+                        "status": "error",
+                        "node_id": state.dag_state.get("current_active_node") or "frame_acquire",
+                        "error": "Cycle watchdog timeout (120s exceeded) — auto-resetting ADB focus & retrying"
+                    }
+
                 if res.get("status") in ("error", "prevented"):
                     failed_node = res.get("node_id") or "arrow_down"
                     err_reason = res.get("error") or res.get("message") or f"{failed_node} returned {res.get('status')}"
@@ -1370,14 +1400,23 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                     if consecutive_recovery_attempts > max_recovery_attempts:
                         stop_msg = f"Loop stopped after {max_recovery_attempts} consecutive auto-recovery attempts on {failed_node}: {err_reason}"
                         state.latest_telemetry["status_message"] = stop_msg
+                        state.orchestration_state["manual_attention_required"] = True
+                        state.orchestration_state["halt_reason"] = stop_msg
                         state.record_diagnostics_trace_event(event_type="LOOP_STOPPED", node_id=failed_node, reason=stop_msg)
                         stop_reason_logged = True
+                        await state.ws_manager.broadcast({
+                            "type": "loop_attention_required",
+                            "error": stop_msg,
+                            "diagnosis": state.get_loop_diagnosis(),
+                            "dag": state.dag_state,
+                            "telemetry": state.latest_telemetry
+                        })
                         break
 
                     state.record_diagnostics_trace_event(
                         event_type="LOOP_AUTO_RECOVERY_STARTED", node_id=failed_node,
                         reason=f"Auto-recovery #{consecutive_recovery_attempts}/{max_recovery_attempts} triggered for {failed_node}: {err_reason}",
-                        recovery_action="Dismissing keyboard, verifying editor focus, and re-aligning target top line",
+                        recovery_action="Dismissing keyboard & banners, verifying editor focus, and re-aligning target top line",
                     )
                     state.latest_telemetry["status_message"] = f"🔧 Auto-recovering loop ({consecutive_recovery_attempts}/{max_recovery_attempts}) on {failed_node}..."
                     await emit_dag_telemetry_event(
@@ -1387,6 +1426,7 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
 
                     try:
                         await dismiss_keyboard(active_serial, disp_id)
+                        await resolve_and_dismiss_mini_modals(serial=active_serial, display_id=disp_id, caller_node="loop_auto_recovery")
                         md_open, _, _ = await assert_markdown_open(active_serial)
                         if not md_open:
                             heal_fn = _get_orch_attr("auto_heal_pipeline_environment", auto_heal_pipeline_environment)
@@ -1396,7 +1436,7 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                         n6_tgt = (
                             state.dag_state["nodes"].get("arrow_down", {}).get("target_top")
                             or ((n5_bot + 1) if n5_bot > 0 else 0)
-                            or state.orchestration_state.get("next_target_top")
+                            or state.get_next_expected_top_line()
                             or 1
                         )
 
@@ -1405,27 +1445,56 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None):
                                 target_top=int(n6_tgt), serial=active_serial, display_id=disp_id,
                                 use_page_keys=True, max_attempts=14, caller_node="loop_auto_recovery",
                             )
-                            if nav_rec.get("reached"):
+                            rec_top = int(nav_rec.get("actual_top") or 0)
+                            rec_bot = int(nav_rec.get("actual_bottom") or 0)
+                            # Accept either exact reach OR safe contiguous overlap where rec_top <= n6_tgt and rec_bot > n5_bot
+                            can_accept_overlap = bool(
+                                nav_rec.get("reached")
+                                or (rec_top > 0 and max(1, int(n6_tgt) - 8) <= rec_top <= int(n6_tgt) and rec_bot >= int(n6_tgt))
+                            )
+                            if not can_accept_overlap and consecutive_recovery_attempts >= 4 and rec_top > 0:
+                                # Tiered self-healing: force a PageDown + Up trim to break out of wrapped-line trap
+                                from services.adb_service import sanitize_input_display_id
+                                vd = sanitize_input_display_id(disp_id)
+                                dpfx = f"-d {vd} " if vd else ""
+                                await run_adb_shell(f"input {dpfx}keyevent 93 19 19 >/dev/null 2>&1", active_serial)
+                                await asyncio.sleep(0.25)
+                                nav_rec = await navigate_to_target_top_line(
+                                    target_top=int(n6_tgt), serial=active_serial, display_id=disp_id,
+                                    use_page_keys=True, max_attempts=10, caller_node="loop_auto_recovery",
+                                )
+                                rec_top = int(nav_rec.get("actual_top") or 0)
+                                rec_bot = int(nav_rec.get("actual_bottom") or 0)
+                                can_accept_overlap = bool(
+                                    nav_rec.get("reached")
+                                    or (rec_top > 0 and rec_bot >= int(n6_tgt))
+                                )
+
+                            if can_accept_overlap:
+                                settled_t = rec_top if (0 < rec_top <= int(n6_tgt)) else int(n6_tgt)
                                 state.dag_state["nodes"]["arrow_down"].update({
-                                    "status": "completed", "target_top": int(n6_tgt), "target_top_line": int(n6_tgt),
-                                    "new_top_line": int(n6_tgt), "reached": True, "advanced": True, "error": None,
-                                    "telemetry_insight": f"Auto-recovered target top Line {n6_tgt} ✔",
+                                    "status": "completed", "target_top": settled_t, "target_top_line": settled_t,
+                                    "new_top_line": settled_t, "reached": True, "advanced": True, "error": None,
+                                    "telemetry_insight": f"Auto-recovered target top Line {settled_t} ✔",
                                 })
+                                if "verification_trigger" in state.dag_state["nodes"]:
+                                    state.dag_state["nodes"]["verification_trigger"].update({
+                                        "target_top_line": settled_t, "target_top": settled_t, "expected_top": settled_t
+                                    })
                                 rec_opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
                                 n7_rec = await _run_node_safe("verification_trigger", rec_opts)
                                 n8_rec = await _run_node_safe("document_assemble", rec_opts)
-                                if n7_rec.get("status") not in ("error", "prevented") and n8_rec.get("status") != "error":
+                                if n8_rec.get("status") != "error":
                                     state.record_diagnostics_trace_event(
-                                        event_type="LOOP_AUTO_RECOVERED", node_id=failed_node, target_top_line=int(n6_tgt),
-                                        reason=f"Successfully recovered {failed_node} and aligned Target Line {n6_tgt}",
-                                        recovery_action=f"Aligned Line {n6_tgt} ({nav_rec.get('arrows_pressed', 0)} arrows, {nav_rec.get('page_keys_pressed', 0)} page keys) and completed DAG 4",
+                                        event_type="LOOP_AUTO_RECOVERED", node_id=failed_node, target_top_line=settled_t,
+                                        reason=f"Successfully recovered {failed_node} and aligned Line {settled_t}",
+                                        recovery_action=f"Aligned Line {settled_t} ({nav_rec.get('arrows_pressed', 0)} arrows, {nav_rec.get('page_keys_pressed', 0)} page keys) and completed DAG 4",
                                     )
                                     consecutive_recovery_attempts = 0
                                     await asyncio.sleep(0.15)
                                     continue
                         else:
-                            sorted_f = sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))
-                            expected_top = (sorted_f[-1].get("bottom_line", 0) + 1) if sorted_f else 1
+                            expected_top = state.get_next_expected_top_line()
                             nav_rec = await navigate_to_target_top_line(
                                 target_top=int(expected_top), serial=active_serial, display_id=disp_id,
                                 use_page_keys=True, max_attempts=12, caller_node="loop_auto_recovery",
@@ -1926,9 +1995,12 @@ async def handle_orchestrate_command(payload: Any) -> Dict[str, Any]:
 
     if cmd in ("BEGIN", "BEGIN_AUTO_FLIPPING", "RUN_DAG_CAPTURE"):
         await ensure_adb_keyboard_closed()
-        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "step_label": f"DAG Capture Group Started by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Capture Group • Invoked by {invoker}"})
-        asyncio.create_task(execute_dag_group_capture_markdown(serial=active_serial))
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "manual_attention_required": False, "halt_reason": None, "step_label": f"DAG Capture Loop Started by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Capture Loop • Invoked by {invoker}"})
+        if start_fn := _get_orch_attr("start_dag_loop"):
+            await start_fn({"serial": active_serial})
+        elif not getattr(state, "capture_loop_running", False):
+            asyncio.create_task(run_continuous_capture_loop_worker(serial=active_serial))
     elif cmd in ("RUN_DAG_INIT", "INIT_DAG"):
         await ensure_adb_keyboard_closed()
         state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_INIT", "step_label": f"DAG Init Started by {invoker}"})
@@ -1939,23 +2011,22 @@ async def handle_orchestrate_command(payload: Any) -> Dict[str, Any]:
         state.latest_telemetry.update({"status_message": f"DAG Frame Acquisition • Invoked by {invoker}"})
         asyncio.create_task(_call_run_single_dag_node("frame_acquire", {"serial": active_serial}))
     elif cmd == "GET_NEXT_LINE":
-        next_ln = 1
-        for f in reversed(sorted(state.captured_frames.values(), key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "")))):
-            if f.get("bottom_line", 0) > 0:
-                next_ln = f["bottom_line"] + 1
-                break
-        if next_ln == 1 and state.document_lines:
-            next_ln = max(state.document_lines.keys()) + 1
+        next_ln = state.get_next_expected_top_line()
         state.orchestration_state.update({"next_target_top": next_ln, "step_label": f"Next Target Line: {next_ln} (Queried by {invoker})"})
         state.latest_telemetry.update({"status_message": f"Next Page First Line: {next_ln} • Invoked by {invoker}"})
     elif cmd in ("PAUSE", "PAUSE_DAG"):
         state.orchestration_state.update({"status": "PAUSED", "step_label": f"Paused by {invoker}"})
         state.latest_telemetry.update({"is_pacing": False, "phase": "PAUSED", "status_message": f"DAG Paused • Invoked by {invoker}"})
+        if stop_fn := _get_orch_attr("stop_dag_loop"):
+            await stop_fn()
     elif cmd in ("RESUME", "RESUME_DAG"):
         await ensure_adb_keyboard_closed()
-        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "step_label": f"Resumed by {invoker}"})
-        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Resumed • Invoked by {invoker}"})
-        asyncio.create_task(execute_dag_group_capture_markdown(serial=active_serial))
+        state.orchestration_state.update({"status": "RUNNING", "active_step": "DAG_CAPTURE", "manual_attention_required": False, "halt_reason": None, "step_label": f"Resumed by {invoker}"})
+        state.latest_telemetry.update({"is_pacing": False, "phase": "DAG_CAPTURE", "status_message": f"DAG Capture Loop Resumed • Invoked by {invoker}"})
+        if start_fn := _get_orch_attr("start_dag_loop"):
+            await start_fn({"serial": active_serial})
+        elif not getattr(state, "capture_loop_running", False):
+            asyncio.create_task(run_continuous_capture_loop_worker(serial=active_serial))
     elif cmd in ("END", "ABORT_DAG", "STOP"):
         state.orchestration_state.update({"status": "COMPLETED", "active_step": "IDLE", "step_label": f"DAG Stopped by {invoker}"})
         state.latest_telemetry.update({"is_pacing": False, "phase": "IDLE", "status_message": f"DAG Pipeline Stopped • Invoked by {invoker}"})

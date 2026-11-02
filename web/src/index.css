@@ -3071,11 +3071,58 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 }
 
 /* ==========================================================================
-   INTERACTIVE DAG PIPELINE RIBBON (UNIFIED NODES 1–12)
+   INTERACTIVE DAG PIPELINE RIBBON & HEAT LAMP GLOW (UNIFIED NODES 1–12)
    ========================================================================== */
+@keyframes heat-lamp-glow {
+  0% {
+    box-shadow:
+      0 0 14px rgba(255, 69, 0, 0.78),
+      0 0 30px rgba(220, 20, 60, 0.52),
+      inset 0 0 10px rgba(255, 140, 0, 0.45);
+    border-color: #ff5722;
+  }
+  35% {
+    box-shadow:
+      0 0 28px rgba(255, 140, 0, 0.96),
+      0 0 54px rgba(180, 0, 30, 0.78),
+      0 0 80px rgba(255, 60, 0, 0.38),
+      inset 0 0 16px rgba(255, 215, 0, 0.65);
+    border-color: #ff9100;
+  }
+  70% {
+    box-shadow:
+      0 0 20px rgba(255, 80, 0, 0.86),
+      0 0 42px rgba(150, 0, 24, 0.65),
+      inset 0 0 12px rgba(255, 140, 0, 0.5);
+    border-color: #ff3d00;
+  }
+  100% {
+    box-shadow:
+      0 0 14px rgba(255, 69, 0, 0.78),
+      0 0 30px rgba(220, 20, 60, 0.52),
+      inset 0 0 10px rgba(255, 140, 0, 0.45);
+    border-color: #ff5722;
+  }
+}
+
+@keyframes heat-lamp-ambient {
+  0% {
+    opacity: 0.55;
+    transform: scale(0.98);
+  }
+  50% {
+    opacity: 0.98;
+    transform: scale(1.03);
+  }
+  100% {
+    opacity: 0.55;
+    transform: scale(0.98);
+  }
+}
+
 .dag-pipeline-ribbon-wrapper {
   position: relative;
-  background: #0a0e14;
+  background: linear-gradient(180deg, #0b1018 0%, #090d14 100%);
   border-bottom: 1px solid #21262d;
   padding: 6px 14px;
   flex-shrink: 0;
@@ -3084,46 +3131,61 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 
 .dag-pipeline-ribbon {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding: 2px 0;
 }
 
-.dag-phase-cluster {
+.dag-phase-cluster,
+.dag-ribbon-phase-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: #0d1117;
+  gap: 5px;
+  background: rgba(13, 17, 23, 0.92);
   border: 1px solid #21262d;
   border-radius: 8px;
-  padding: 5px 8px;
+  padding: 5px 8px 6px;
   flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
-.dag-phase-header {
+.dag-phase-header,
+.dag-ribbon-phase-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
-.dag-phase-label {
+.dag-phase-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 6px currentColor;
+}
+
+.dag-phase-label,
+.dag-phase-title {
   font-size: 9.5px;
   font-weight: 800;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   font-family: var(--font-mono, monospace);
+  color: #8b949e;
+  flex: 1;
 }
 
 .dag-phase-run-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 1px 6px;
+  padding: 2px 6px;
   border-radius: 4px;
-  border: 1px solid;
-  background: transparent;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #c9d1d9;
   font-size: 9px;
   font-weight: 700;
   cursor: pointer;
@@ -3131,69 +3193,151 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 }
 
 .dag-phase-run-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(88, 166, 255, 0.16);
+  border-color: #58a6ff;
+  color: #58a6ff;
 }
 
-.dag-phase-nodes-row {
+.dag-phase-divider {
+  color: #484f58;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 2px;
+  align-self: center;
+  user-select: none;
+}
+
+.dag-phase-nodes-row,
+.dag-ribbon-steps-row {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
-.dag-ribbon-node-card {
+.dag-ribbon-node-card,
+.dag-ribbon-node-pill {
   position: relative;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-width: 100px;
+  min-width: 108px;
   height: 44px;
   padding: 4px 8px;
-  border-radius: 6px;
-  border: 1px solid #30363d;
-  background: #161b22;
+  border-radius: 7px;
+  border: 1.5px solid #30363d;
+  background: linear-gradient(180deg, rgba(22, 27, 34, 0.96) 0%, rgba(13, 17, 23, 0.96) 100%);
   color: #e6edf3;
   cursor: pointer;
   text-align: left;
-  transition: all 0.15s ease;
-  overflow: hidden;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  font-family: var(--font-mono, monospace);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
-.dag-ribbon-node-card:hover {
+.dag-ribbon-node-card:hover,
+.dag-ribbon-node-pill:hover {
   border-color: #58a6ff;
+  background: linear-gradient(180deg, #1c232d 0%, #131820 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6), 0 0 10px rgba(88, 166, 255, 0.22);
+}
+
+.dag-ribbon-node-card.selected,
+.dag-ribbon-node-pill.selected {
+  border-color: #58a6ff !important;
+  background: radial-gradient(circle at 50% 20%, rgba(56, 139, 253, 0.2) 0%, rgba(22, 27, 34, 0.96) 80%);
+  box-shadow: 0 0 14px rgba(88, 166, 255, 0.4), 0 4px 12px rgba(0, 0, 0, 0.6);
+}
+
+.dag-ribbon-node-card.done,
+.dag-ribbon-node-pill.done {
+  border-color: rgba(0, 255, 157, 0.45);
+  background: linear-gradient(180deg, rgba(0, 255, 157, 0.06) 0%, rgba(13, 17, 23, 0.95) 100%);
+}
+
+.dag-ribbon-node-card.error,
+.dag-ribbon-node-pill.error {
+  border-color: #f85149 !important;
+  background: radial-gradient(circle at 50% 25%, rgba(248, 81, 73, 0.2) 0%, rgba(22, 27, 34, 0.96) 85%);
+  box-shadow: 0 0 14px rgba(248, 81, 73, 0.35);
+}
+
+/* Heat Lamp Active Node Glow (matches prior main branch aesthetics) */
+.dag-ribbon-node-card.running,
+.dag-ribbon-node-pill.running,
+.dag-ribbon-node-pill.heat-lamp-active {
+  border-color: #ff6b25 !important;
+  animation: heat-lamp-glow 2.2s infinite ease-in-out;
+  background: radial-gradient(circle at 50% 22%, rgba(255, 107, 37, 0.28) 0%, rgba(180, 20, 30, 0.14) 55%, rgba(22, 27, 34, 0.96) 90%) !important;
+  z-index: 12;
   transform: translateY(-1px);
 }
 
-.dag-ribbon-node-card.selected {
-  border-color: #58a6ff;
-  background: rgba(56, 139, 253, 0.12);
-  box-shadow: 0 0 12px rgba(88, 166, 255, 0.3);
+.dag-ribbon-node-pill.heat-lamp-active::before,
+.dag-ribbon-node-pill.running::before {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: -1.5px;
+  right: -1.5px;
+  bottom: -1.5px;
+  border-radius: 8px;
+  border: 1.5px solid transparent;
+  background: linear-gradient(135deg, #ff9100, #ff3d00, #dc143c, #ff6d00) border-box;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  animation: heat-lamp-ambient 2.2s ease-in-out infinite;
 }
 
-.dag-ribbon-node-card.running {
-  border-color: #ff6b25;
-  animation: heat-lamp-glow 2.2s infinite ease-in-out;
+.dag-node-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  width: 100%;
 }
 
-.dag-ribbon-node-card.done {
-  border-color: rgba(0, 255, 157, 0.45);
+.dag-node-left-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
 }
 
-.dag-ribbon-node-card.error {
-  border-color: #f85149;
-  background: rgba(248, 81, 73, 0.1);
-}
-
-.dag-ribbon-step-badge {
+.dag-ribbon-step-badge,
+.dag-node-step-badge {
   font-size: 9px;
   font-weight: 800;
   font-family: var(--font-mono, monospace);
-  padding: 1px 4px;
+  padding: 1px 4.5px;
   border-radius: 3px;
-  line-height: 1.1;
+  line-height: 1.15;
+  background: rgba(88, 166, 255, 0.18);
+  color: #79c0ff;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  flex-shrink: 0;
 }
 
-.dag-ribbon-node-title {
-  font-size: 10.5px;
+.dag-ribbon-node-pill.running .dag-node-step-badge,
+.dag-ribbon-node-pill.heat-lamp-active .dag-node-step-badge {
+  background: linear-gradient(135deg, #ff9100, #ff3d00);
+  color: #0d1117;
+  border-color: #ffab40;
+  box-shadow: 0 0 8px rgba(255, 145, 0, 0.7);
+}
+
+.dag-ribbon-node-pill.done .dag-node-step-badge {
+  background: rgba(0, 255, 157, 0.16);
+  color: #00ff9d;
+  border-color: rgba(0, 255, 157, 0.4);
+}
+
+.dag-ribbon-node-title,
+.dag-node-step-name {
+  font-size: 10px;
   font-weight: 700;
   color: #f0f6fc;
   white-space: nowrap;
@@ -3201,37 +3345,81 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   text-overflow: ellipsis;
 }
 
-.dag-ribbon-node-status {
+.dag-node-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  width: 100%;
+  margin-top: 2px;
+}
+
+.dag-ribbon-node-status,
+.dag-node-metric-text {
   font-size: 8.5px;
   font-weight: 700;
   font-family: var(--font-mono, monospace);
+  color: #8b949e;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.dag-ribbon-arrow {
+.dag-ribbon-node-pill.running .dag-node-metric-text,
+.dag-ribbon-node-pill.heat-lamp-active .dag-node-metric-text {
+  color: #ffb74d;
+  text-shadow: 0 0 6px rgba(255, 145, 0, 0.5);
+}
+
+.dag-ribbon-node-pill.done .dag-node-metric-text {
+  color: #00ff9d;
+}
+
+.dag-ribbon-node-pill.error .dag-node-metric-text {
+  color: #ff7b72;
+}
+
+.dag-ribbon-arrow,
+.dag-ribbon-connector {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
+  width: 14px;
   height: 22px;
   border: none;
   background: transparent;
-  color: #58a6ff;
-  cursor: pointer;
+  color: #484f58;
+  font-size: 10px;
   padding: 0;
   border-radius: 3px;
   transition: all 0.15s ease;
+  user-select: none;
 }
 
-.dag-ribbon-arrow.disabled {
+.dag-ribbon-connector.active-flow {
+  color: #ff9100;
+  text-shadow: 0 0 8px rgba(255, 145, 0, 0.85);
+}
+
+.dag-ribbon-arrow.disabled,
+.dag-ribbon-connector.disabled {
   color: #f85149;
-  opacity: 0.65;
+  opacity: 0.75;
 }
 
-.dag-ribbon-arrow:hover {
-  background: rgba(255, 255, 255, 0.08);
+/* Loop Halted / Manual Attention Diagnostic & One-Click Resume Banner */
+.loop-attention-banner {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(248, 81, 73, 0.16) 0%, rgba(210, 153, 34, 0.12) 60%, rgba(13, 17, 23, 0.95) 100%);
+  border: 1px solid rgba(248, 81, 73, 0.55);
+  box-shadow: 0 0 18px rgba(248, 81, 73, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .dag-compact-node-popover {
@@ -3246,6 +3434,63 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(88, 166, 255, 0.2);
   padding: 12px 14px;
   z-index: 2100;
+}
+
+.dag-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dag-popover-step-badge {
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #0d1117;
+}
+
+.dag-popover-section {
+  border-top: 1px solid #21262d;
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.dag-popover-section-title {
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8b949e;
+  margin-bottom: 6px;
+  font-family: var(--font-mono, monospace);
+}
+
+.dag-popover-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.dag-popover-params-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: #8b949e;
+  font-family: var(--font-mono, monospace);
+}
+
+.dag-popover-params-grid input {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  padding: 3px 6px;
+  color: #f0f6fc;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
 }
 
 /* ==========================================================================

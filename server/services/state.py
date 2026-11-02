@@ -1621,7 +1621,14 @@ def update_headless_telemetry_session(
 ) -> Dict[str, Any]:
     global headless_telemetry_session
     if not headless_telemetry_session.get("is_active"):
-        return headless_telemetry_session
+        if getattr(sys.modules[__name__], "capture_loop_running", False):
+            headless_telemetry_session["is_active"] = True
+            headless_telemetry_session["status"] = "RUNNING"
+        else:
+            return headless_telemetry_session
+    else:
+        headless_telemetry_session["status"] = "RUNNING"
+
     now = time.time()
     elapsed = max(0.1, now - headless_telemetry_session.get("start_time", now))
     headless_telemetry_session["elapsed_seconds"] = round(elapsed, 1)
@@ -1640,19 +1647,26 @@ def update_headless_telemetry_session(
             )
 
     doc_len = len(document_lines)
+    max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
     headless_telemetry_session["total_lines_captured"] = doc_len
 
-    cur_b = headless_telemetry_session.get("current_bottom_line", 0)
+    cur_b = max(int(headless_telemetry_session.get("current_bottom_line", 0) or 0), max_doc_ln)
+    headless_telemetry_session["current_bottom_line"] = cur_b
     start_l = headless_telemetry_session.get("start_line", 1) or 1
     lines_advanced = max(0, cur_b - start_l + 1)
     headless_telemetry_session["lines_per_second"] = round(lines_advanced / elapsed, 1)
 
-    target = headless_telemetry_session.get("target_total_lines", 0)
+    target = headless_telemetry_session.get("target_total_lines", 0) or latest_telemetry.get("target_total_lines", 0)
     if target > 0:
-        pct = round(min(100.0, (cur_b / target) * 100), 1)
+        headless_telemetry_session["target_total_lines"] = target
+        pct = round(min(100.0, (max(cur_b, doc_len) / target) * 100), 1)
         headless_telemetry_session["completion_percent"] = pct
         if cur_b >= target or doc_len >= target:
             headless_telemetry_session["total_lines_reached"] = True
+        else:
+            headless_telemetry_session["finish_status_message"] = (
+                f"Headless capture loop running • Ln {headless_telemetry_session.get('current_top_line', 1)}..{cur_b} of {target:,} ({pct}%)"
+            )
     elif headless_telemetry_session.get("total_frames_target", 0) > 0:
         tot_f = headless_telemetry_session["total_frames_target"]
         pct = round(min(100.0, (headless_telemetry_session["frames_processed"] / tot_f) * 100), 1)
@@ -1665,6 +1679,223 @@ def update_headless_telemetry_session(
             events.pop(0)
 
     return headless_telemetry_session
+
+
+def get_next_expected_top_line(exclude_frame_id: Optional[str] = None) -> int:
+    """
+    Returns the single authoritative forward capture frontier (next expected top line) across
+    all captured frames and document_lines so Node 3, Node 5, Node 6, and auto-recovery never disagree.
+    """
+    other_frames = [
+        f for f in captured_frames.values()
+        if (not exclude_frame_id or f.get("frame_id") != exclude_frame_id)
+        and f.get("status") != "acquired"
+    ]
+    if not other_frames and not document_lines:
+        return 1
+    max_frame_bot = max(((f.get("bottom_line", 0) or 0) for f in other_frames), default=0)
+    max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
+    frontier = max(max_frame_bot, max_doc_ln)
+    if frontier > 0:
+        return int(frontier) + 1
+    return int(dag_state.get("nodes", {}).get("frame_ocr", {}).get("target_top_line") or 1)
+
+
+def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Detects and removes any anomalous regressed frames created *after* the forward capture frontier
+    (for example, if a window shift caused the viewport to jump backwards and re-capture lines
+    that were already verified earlier in the document).
+    Ensures captured_frames ends cleanly at the highest captured line so resumption continues seamlessly.
+    """
+    if not captured_frames:
+        return {"pruned_count": 0, "pruned_frame_ids": [], "frontier_bottom_line": 0}
+
+    sorted_f = sorted(
+        captured_frames.values(),
+        key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or "")
+    )
+    max_bot = max(((f.get("bottom_line", 0) or 0) for f in sorted_f), default=0)
+    if max_bot <= 0:
+        return {"pruned_count": 0, "pruned_frame_ids": [], "frontier_bottom_line": 0}
+
+    # Find the earliest frame that reached max_bot
+    frontier_idx = -1
+    frontier_frame = None
+    for idx, f in enumerate(sorted_f):
+        if (f.get("bottom_line", 0) or 0) == max_bot:
+            frontier_idx = idx
+            frontier_frame = f
+            break
+
+    if frontier_idx < 0 or frontier_idx == len(sorted_f) - 1:
+        return {"pruned_count": 0, "pruned_frame_ids": [], "frontier_bottom_line": max_bot}
+
+    pruned_ids: List[str] = []
+    for f in sorted_f[frontier_idx + 1:]:
+        fid = f.get("frame_id")
+        if not fid or fid == exclude_frame_id:
+            continue
+        f_bot = int(f.get("bottom_line", 0) or 0)
+        # If a frame after the frontier regressed more than 10 lines behind max_bot, prune it
+        if f_bot < max_bot - 10:
+            pruned_ids.append(fid)
+            captured_frames.pop(fid, None)
+            try:
+                db.delete_frame(fid)
+            except Exception:
+                pass
+
+    if pruned_ids and frontier_frame:
+        f_page = int(frontier_frame.get("page_index") or (frontier_idx + 1))
+        f_top = int(frontier_frame.get("top_line") or 1)
+        f_bot = int(frontier_frame.get("bottom_line") or max_bot)
+        latest_telemetry["current_page"] = f_page
+        latest_telemetry["current_top_line"] = f_top
+        latest_telemetry["current_bottom_line"] = f_bot
+        orchestration_state["page"] = f_page
+        orchestration_state["top_line"] = f_top
+        orchestration_state["bottom_line"] = f_bot
+        orchestration_state["next_target_top"] = f_bot + 1
+        dag_state.get("nodes", {}).get("frame_ocr", {}).update({
+            "top_line": f_top,
+            "bottom_line": f_bot,
+            "target_top_line": f_bot + 1
+        })
+        dag_state.get("nodes", {}).get("arrow_down", {}).update({
+            "prev_bottom": f_bot,
+            "target_top": f_bot + 1,
+            "target_top_line": f_bot + 1,
+            "new_top_line": f_bot + 1
+        })
+
+    return {
+        "pruned_count": len(pruned_ids),
+        "pruned_frame_ids": pruned_ids,
+        "frontier_bottom_line": max_bot,
+        "next_expected_top_line": max_bot + 1
+    }
+
+
+def get_loop_diagnosis() -> Dict[str, Any]:
+    """
+    Computes a structured diagnostic snapshot explaining the current state of the markdown replication loop,
+    why it stopped (if not running), whether manual attention is required, and what recovery/resume action is ready.
+    """
+    ensure_diagnostics_trace_backfilled()
+    is_running = bool(getattr(sys.modules[__name__], "capture_loop_running", False))
+    max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
+    max_frame_bot = max(((f.get("bottom_line", 0) or 0) for f in captured_frames.values()), default=0)
+    frontier_line = max(max_doc_ln, max_frame_bot)
+    next_expected_top = (frontier_line + 1) if frontier_line > 0 else 1
+
+    proj = db.get_active_project() or {}
+    target_lines = int(
+        latest_telemetry.get("target_total_lines")
+        or headless_telemetry_session.get("target_total_lines")
+        or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+        or proj.get("target_total_lines")
+        or 0
+    )
+    is_complete = bool(target_lines > 0 and frontier_line >= target_lines)
+    pct = round(min(100.0, (frontier_line / max(1, target_lines)) * 100.0), 1) if target_lines > 0 else 0.0
+
+    sorted_f = sorted(
+        captured_frames.values(),
+        key=lambda x: (x.get("page_index", 0) or 0, x.get("created_at", "") or "")
+    )
+    last_f = sorted_f[-1] if sorted_f else None
+    last_ts_iso = last_f.get("created_at") if last_f else None
+    last_ts_ms = _parse_iso_to_ms(last_ts_iso)
+    now_ms = int(time.time() * 1000)
+    sec_since_last = round(max(0.0, (now_ms - last_ts_ms) / 1000.0), 1) if last_ts_ms else None
+
+    regressed_frames = [
+        f.get("frame_id") for f in sorted_f
+        if (f.get("bottom_line", 0) or 0) < frontier_line - 10
+        and _parse_iso_to_ms(f.get("created_at"))
+        and any(
+            (earlier.get("bottom_line", 0) or 0) == frontier_line
+            and (_parse_iso_to_ms(earlier.get("created_at")) or 0) < (_parse_iso_to_ms(f.get("created_at")) or 0)
+            for earlier in sorted_f
+        )
+    ]
+
+    last_stop_reason = (
+        orchestration_state.get("halt_reason")
+        or project_diagnostics_trace.get("last_stop_reason")
+        or (headless_telemetry_session.get("finish_status_message") if headless_telemetry_session.get("status") == "STOPPED" else None)
+    )
+    status_msg = latest_telemetry.get("status_message") or ""
+    if not is_running and not is_complete and ("stopped" in status_msg.lower() or "halted" in status_msg.lower() or "failed" in status_msg.lower() or "error" in status_msg.lower()):
+        last_stop_reason = status_msg
+
+    root_cause_cat = "none"
+    recommended_action = "Pipeline is healthy."
+    if not is_running and not is_complete and frontier_line > 0:
+        rsn_low = (last_stop_reason or "").lower()
+        if "settled at line" in rsn_low or "navigation alignment" in rsn_low or "arrow_down" in rsn_low:
+            root_cause_cat = "navigation_wrapped_or_banner_shift"
+            recommended_action = (
+                f"External top banner or wrapped line shifted top row Y-offset. "
+                f"Dynamic toolbar-relative top-row detector & contiguous overlap tolerance are active—click Resume to continue from Line {next_expected_top}."
+            )
+        elif "device" in rsn_low or "adb" in rsn_low:
+            root_cause_cat = "adb_connection"
+            recommended_action = f"Verify Android external display connection and click Resume to continue from Line {next_expected_top}."
+        elif regressed_frames:
+            root_cause_cat = "regressed_frontier"
+            recommended_action = f"Detected {len(regressed_frames)} regressed duplicate frames behind Line {frontier_line}. Resume will prune duplicates and continue at Line {next_expected_top}."
+        else:
+            root_cause_cat = "loop_interrupted"
+            recommended_action = f"Capture loop paused at Line {frontier_line:,} of {target_lines:,} ({pct}%). Click Resume Capture Loop to continue from Line {next_expected_top:,}."
+
+    manual_attention = bool(
+        not is_running
+        and not is_complete
+        and frontier_line > 0
+        and (
+            orchestration_state.get("manual_attention_required")
+            or bool(last_stop_reason)
+            or (sec_since_last is not None and sec_since_last > 120)
+        )
+    )
+
+    if is_complete:
+        status_str = "COMPLETED"
+    elif is_running:
+        status_str = "RUNNING"
+    elif manual_attention:
+        status_str = "ATTENTION_REQUIRED"
+    else:
+        status_str = orchestration_state.get("status") or "IDLE"
+
+    recent_evs = list(project_diagnostics_trace.get("stop_and_restart_log", []))[-10:]
+    recent_evs.reverse()
+
+    return {
+        "loop_running": is_running,
+        "status": status_str,
+        "manual_attention_required": manual_attention,
+        "can_resume": bool(not is_running and not is_complete),
+        "halt_reason": None if is_running else last_stop_reason,
+        "root_cause_category": "none" if is_running else root_cause_cat,
+        "recommended_action": f"Actively capturing toward Line {target_lines:,} (currently at Line {frontier_line:,})" if is_running else recommended_action,
+        "frontier_line": frontier_line,
+        "next_expected_top_line": next_expected_top,
+        "target_total_lines": target_lines,
+        "verified_lines_count": len(document_lines),
+        "completion_percent": pct,
+        "captured_frames_count": len(captured_frames),
+        "regressed_frames_count": len(regressed_frames),
+        "last_frame_id": last_f.get("frame_id") if last_f else None,
+        "last_frame_timestamp": last_ts_iso,
+        "seconds_since_last_frame": sec_since_last,
+        "total_stops": project_diagnostics_trace.get("total_stops", 0),
+        "total_auto_recoveries": project_diagnostics_trace.get("total_auto_recoveries", 0),
+        "total_downtime_formatted": _fmt_dur_trace(project_diagnostics_trace.get("total_downtime_ms", 0)),
+        "recent_events": recent_evs
+    }
 
 def complete_headless_telemetry_session(status: str = "COMPLETED", message: Optional[str] = None) -> Dict[str, Any]:
     global headless_telemetry_session

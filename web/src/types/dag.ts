@@ -105,6 +105,26 @@ export interface DagEdge {
   condition?: string;
 }
 
+export interface LoopDiagnosisData {
+  project_id?: string | null;
+  project_name?: string | null;
+  loop_running: boolean;
+  headless_status: string;
+  orchestration_status: string;
+  frontier_line: number;
+  next_expected_top_line: number;
+  target_total_lines: number;
+  completion_percent: number;
+  is_complete: boolean;
+  total_frames: number;
+  regressed_frames_count: number;
+  manual_attention_required: boolean;
+  can_resume: boolean;
+  halt_reason: string;
+  failed_node_id?: string | null;
+  recommended_action: string;
+}
+
 export interface DagStatusData {
   dag?: {
     current_active_node?: string;
@@ -121,6 +141,8 @@ export interface DagStatusData {
     headless_mode?: boolean;
   };
   active_node: string;
+  loop_running?: boolean;
+  loop_diagnosis?: LoopDiagnosisData;
   target_total_lines: number;
   current_top_line: number;
   current_bottom_line: number;

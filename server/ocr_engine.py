@@ -701,6 +701,40 @@ def find_text_anchor_offset(img: np.ndarray, anchor_text: str, target_y: int = 1
 
     return None
 
+def detect_editor_first_row_y(img: np.ndarray, gutter: Optional[List[Tuple[int, int]]] = None, avg_pitch: float = 27.0) -> Tuple[float, int]:
+    """
+    Dynamically determines the Y coordinate of the first visible text row in the Markdown editor.
+    Normally at 1080p, the blue Edit-mode pencil icon sits at y~251px and row 0 sits at y~304px.
+    If an external top banner (e.g. Microsoft Teams call bar) shifts the editor toolbar down
+    (e.g. pencil icon at y~341px), row 0 shifts down correspondingly to y~393px.
+    Returns (effective_top_row_y, max_top_row_y).
+    """
+    h, w = img.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+    default_top_y = 304.0 * scale_y
+
+    try:
+        # Locate the active Edit-mode blue pencil pill in the formatting toolbar (x: 1580..1740, y: 180..380)
+        y1, y2 = max(0, int(180 * scale_y)), min(h, int(380 * scale_y))
+        x1, x2 = max(0, int(1580 * scale_x)), min(w, int(1740 * scale_x))
+        roi = img[y1:y2, x1:x2]
+        if roi.size > 0:
+            b = roi[:, :, 0].astype(np.int16)
+            r = roi[:, :, 2].astype(np.int16)
+            blue_mask = (b > 140) & ((b - r) > 50)
+            bys, _ = np.where(blue_mask)
+            if len(bys) >= max(12, int(20 * scale_x * scale_y)):
+                pencil_cy = float(y1) + float(np.mean(bys))
+                top_row_y = pencil_cy + (53.0 * scale_y)
+                max_top_y = int(round(top_row_y + max(18.0 * scale_y, 0.72 * avg_pitch)))
+                return top_row_y, max_top_y
+    except Exception:
+        pass
+
+    return default_top_y, int(round(default_top_y + max(18.0 * scale_y, 0.72 * avg_pitch)))
+
+
 def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None, cursor_line: Optional[int] = None, dpi_factor: float = 1.0) -> Tuple[int, Dict[str, Any]]:
     """
     Accurately determines the line number on the very top of the editor document.
@@ -716,8 +750,6 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         return t or 0, {"source": "fast_bounds", "bottom": b}
 
     gutter = correct_gutter_sequence(gutter)
-    # The editor text content begins below the toolbar (at 1080p, text rows begin around y=295-350px)
-    doc_top_y = max(260, int(295 * (h / 1080.0)))
 
     pitches = []
     for i in range(len(gutter) - 1):
@@ -731,20 +763,22 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
 
     avg_pitch = float(np.median(pitches)) if pitches else max(16.0, 27.0 * (h / 1080.0))
 
+    top_row_y, max_top_row_y = detect_editor_first_row_y(img, gutter=gutter, avg_pitch=avg_pitch)
+    doc_top_y = max(260, int(round(top_row_y - 9.0 * (h / 1080.0))))
+
     y_first, ln_first = gutter[0]
-    top_row_y = 304.0 * (h / 1080.0)
     y_dist_above = max(0.0, float(y_first) - top_row_y)
-    if ln_first == 1 or y_dist_above <= avg_pitch * 0.65:
+    if ln_first == 1 or y_first <= max_top_row_y or y_dist_above <= avg_pitch * 0.72:
         first_gutter_row_offset = 0
         missing_lines_above = 0
         effective_top = ln_first
     else:
-        # When y_first > ~321px at 1080p, the visual rows above y_first have a blank gutter because
+        # When y_first > max_top_row_y, the visual rows above y_first have a blank gutter because
         # they are the wrapped continuation tail of line (ln_first - 1).
         first_gutter_row_offset = max(1, int(round(y_dist_above / avg_pitch)))
         missing_lines_above = 1 if ln_first > 1 else 0
-        if target_top is not None and target_top == ln_first:
-            # Target line is visible at y_first (> top row), so line (ln_first - 1)'s wrapped tail is still at the top
+        if target_top is not None and target_top == ln_first and first_gutter_row_offset > 2:
+            # Only treat target_top as not-yet-at-top if more than 2 wrapped continuation rows precede it
             effective_top = max(1, ln_first - 1)
         else:
             effective_top = ln_first
@@ -778,6 +812,8 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         "first_gutter_y": y_first,
         "first_gutter_row_offset": first_gutter_row_offset,
         "doc_top_y": doc_top_y,
+        "effective_top_row_y": round(top_row_y, 1),
+        "max_top_row_y": max_top_row_y,
         "missing_lines_above": missing_lines_above,
         "avg_pitch": avg_pitch,
         "effective_top": effective_top,

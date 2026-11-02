@@ -69,7 +69,13 @@ export function calculateNodeLiveStatus(
   targetTotalLines = 0
 ): NodeLiveStatus {
   const nodeData = dagStatus.dag?.nodes?.[nodeId] || {};
-  const isThisActive = activeRunningId === nodeId;
+  const backendActiveNode = dagStatus.dag?.current_active_node || dagStatus.active_node || '';
+  const isLoopActive = Boolean(dagStatus.loop_running || dagStatus.loop_diagnosis?.loop_running);
+  const isThisActive =
+    activeRunningId === nodeId ||
+    nodeData.status === 'active' ||
+    nodeData.status === 'running' ||
+    (isLoopActive && backendActiveNode === nodeId);
   const startedAt = nodeData.started_at || null;
   const finishedAt = nodeData.finished_at || null;
   const durationMs = typeof nodeData.duration_ms === 'number' ? nodeData.duration_ms : null;
@@ -194,6 +200,35 @@ export function calculateNodeLiveStatus(
       statusLabel = isThisActive ? 'RESCANNING' : (isDone ? 'COMPLETE' : 'READY');
       defaultInsight = isDone ? 'All frames rescanned sequentially top-to-bottom' : 'Sequential frame OCR alignment';
       color = isThisActive ? '#00ff9d' : (isDone ? '#388bfd' : '#8b949e');
+      break;
+    }
+    case 'markdown_tag_parser': {
+      isDone = !isError && nodeData.status === 'completed';
+      defaultEvaluator = 'CODESCAN Tag & VFS Evaluator';
+      const filesCount = nodeData.files_parsed ?? nodeData.vfs_file_count ?? 0;
+      metricLabel = isThisActive ? 'Parsing VFS...' : (isDone ? `${filesCount} files` : 'VFS Tags');
+      statusLabel = isThisActive ? 'PARSING' : (isError ? 'FAILED' : (isDone ? 'PARSED' : 'READY'));
+      defaultInsight = isDone ? `Parsed ${filesCount} VFS files from markdown` : 'Parses CODESCAN_FILE_START/END tags into VFS';
+      color = isThisActive ? '#38bdf8' : (isDone ? '#00ff9d' : '#38bdf8');
+      break;
+    }
+    case 'ast_compiler_validator': {
+      isDone = !isError && nodeData.status === 'completed';
+      defaultEvaluator = 'TypeScript AST memfs Evaluator';
+      const errCount = nodeData.diagnostics_count ?? nodeData.error_count ?? 0;
+      metricLabel = isThisActive ? 'Compiling AST...' : (isDone ? (errCount === 0 ? '0 TS Errors' : `${errCount} diags`) : 'TS Check');
+      statusLabel = isThisActive ? 'COMPILING' : (isError ? 'FAILED' : (isDone ? 'VALIDATED' : 'READY'));
+      defaultInsight = isDone ? `Validated VFS AST (${errCount} diagnostics)` : 'In-memory TypeScript AST & semantic validation';
+      color = isThisActive ? '#f59e0b' : (isDone ? '#00ff9d' : '#f59e0b');
+      break;
+    }
+    case 'sandbox_ide': {
+      isDone = !isError && nodeData.status === 'completed';
+      defaultEvaluator = 'Sandbox Materializer Evaluator';
+      metricLabel = isThisActive ? 'Materializing...' : (isDone ? 'IDE Ready' : 'Monaco IDE');
+      statusLabel = isThisActive ? 'MOUNTING' : (isError ? 'FAILED' : (isDone ? 'READY' : 'STANDBY'));
+      defaultInsight = isDone ? 'Sandbox materialized & ready in Monaco IDE' : 'Materializes VFS to disk & opens Monaco Sandbox';
+      color = isThisActive ? '#10b981' : (isDone ? '#00ff9d' : '#10b981');
       break;
     }
   }
