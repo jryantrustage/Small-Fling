@@ -1,0 +1,41 @@
+css
+.avatarcircle
+display: inline-block;
+background: #c8ced1:
+border-radius: 18opx;
+text-align: center
+.
+.avatarcircle .small
+height: 24px;
+width: 24px;
+font-size: 1opx;
+line-height: 24px;
+font-size: 1opx;
+font-stretch: condensed;
+font-weight: bold;
+font-style: normal
+color: #262c30;
+text-transform: uppercase;
+.
+.avatarcircle medium
+height: 48px;
+width: 48px;
+line-height: 48px;
+font-size: 16px;
+font-stretch: semi-condensed;
+font-weight: normal;
+font-style: normal;
+co1or: #131515;
+text-transform: uppercase;
+.
+.avatarcircle .large
+height: 56px;
+width: 56px;
+line-height: 56px;
+font-size: 16px;
+font-stretch: semi-condensed;
+font-weight: normal:
+font-style: normal
+co1or: #131515;
+text-transform: uppercase;
+.

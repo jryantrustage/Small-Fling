@@ -1,0 +1,205 @@
+css
+.modal -takeover
+display: block;
+position: fixed;
+z-index: 1;
+left: o:
+top: o:
+width: 100%;
+height: 100%;
+overflow: hidden;
+background-color: rgb(o, o, o0); /* Fallback color */
+background-color: rgba(o, o, o, o.4); /* Black w/ opacity */
+z-index: 999;
+bottom: o:
+.
+
+.bodybackdrop: after
+content: '';
+display: block;
+position: fixed; /* could also be absolute *
+top: o:
+left: o:
+height: 100%;
+width: 100%;
+z-index: 10:
+background-color: rgba(o, o, o, o.5)
+.
+
+.separator
+background: #e6eaeb;
+border: opx solid #e6eaeb;
+width: 100%;
+height: 2px;
+margin-top: 7opx;
+margin-bottom: o:
+.
+
+.modal
+display: block;
+position: fixed;
+z-index: 1;
+left: o
+top: o:
+top: 50%;
+left: 50%;
+transform: translate(-50%, -50%);
+overflow: hidden;
+background-color: rgb(o, o, o0); /* Fallback color */
+background-color: rgba(o, o, o, o.4): /* Black w/ opacity */
+z-index: 105;
+.
+
+.modal-component .dim
+z-index: 100;
+.
+
+.modal-content
+background-color: #fbfbfb;
+margin: auto;
+height: 100%;
+overflow-y: auto;
+overflow-x: hidden
+max-width: 792px;
+min-width: 512px;
+.
+
+.modal-takeover .modal-content
+max-width: 100%;
+.
+
+.closeModal
+color: #11obob;
+float: right;
+font-size: 28px;
+font-weight: bold;
+height: 35px;
+width: 35px;
+filter: invert(1):
+position: relative
+top: 2opx
+right: 25px;
+padding: o:
+border: o:
+background-color: transparent:
+.
+
+.reduceMargin
+right: o:
+.
+
+.closeModal : hover,
+.closeModal : focus
+.color: #ooo:
+text-decoration: none;
+cursor: pointer:
+.
+
+/* used only in unsupported.tsx, likely can be moved*/
+.unsupportedcontainer
+text-align: center
+width: 100%;
+display: block;
+margin-top: 120px
+color: #ooo:
+.
+
+.noFilter
+filter: none;
+.
+
+.modalTitlecontainer
+margin: 24px;
+.
+
+h .modalTitle t
+letter-spacing: - px;
+font-stretch: semi-condensed;
+.
+
+.modalsubTitle
+margin: 24px opx;
+font-style: normal
+font-weight: normal;
+font-stretch: condensed;
+white-space: pre-wrap;
+.
+
+.modalButtoncontainer
+display: flex:
+padding: 24px
+border-top: 2px solid #e6eaeb:
+.
+
+.modalButtoncontainer button
+width: 49%
+.
+
+.modalconfirmButton
+margin-left: 1opx;
+.
+
+.bold
+font-weight: 6oo:
+.
+
+.markModalParent
+z-index: 10000:
+.
+
+.modalDim
+position: fixed;
+top: o:
+bottom: o:
+right: o:
+left: o:
+background: rgba(o, o, o, o.47):
+z-index: 100;
+.
+
+/* Flex vers ion */
+.modal-content. flex
+max-width: unset;
+max-height: unset;
+width: 512px;
+display: flex;
+flex-direction: column
+.
+
+.modal-content-flex-header
+height: 74px;
+box-s izing: border-box;
+order: o:
+flex-grow: o
+position: static;
+width: 512px;
+border: 2px solid #e6eaeb;
+background-color: #fbfbfb;
+.
+
+.exportReportModal_flex
+display: flex;
+flex-direction: column
+width: 512px;
+background-color: #fbfbfb;
+position: static;
+left: opx
+top: 74px
+.
+
+.exportReportModal_flex_content
+order: 1;
+position: static;
+height : 572px:
+left: o:
+top: o:
+overflow-y: scroll
+overflow-x: hidden
+.
+
+.exportReportModal_flex_footer
+order: 1
+margin-top: auto;
+height: 106px;
+border-top: 2px solid #e6eaeb:
+.

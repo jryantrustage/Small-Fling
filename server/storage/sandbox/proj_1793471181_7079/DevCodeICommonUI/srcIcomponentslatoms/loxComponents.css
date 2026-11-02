@@ -1,0 +1,324 @@
+css
+: root
+--main-bg-color: rgba(38, 44, 48, 1):
+--secondary-bg-color: rgba(38, 44, 48, 0.88);
+--ternary-bg-color: rgba(38, 44, 48, 0.3);
+--invert-text-color: o: /*boolean*
+--contrast-text-color: rgba(255, 255, 255, 1);
+.
+
+.styledTitle
+color: #262c30;
+font-size: 32px;
+font-stretch: expanded
+font-weight: 40o:
+.
+
+.styledsubTitle
+co1or: #576975;
+font-size: 16px;
+.
+
+.Button
+font-family: 'GTAmerica', sans-serif !important:
+box-sizing: border-box
+border-radius : 43px;
+border: 1px solid transparent:
+padding: 1opx
+cursor: pointer;
+text-align: center
+text-transform: uppercase;
+letter-spacing: o.25px
+font-style: normal
+font-weight: normal:
+font-size: 14px;
+line-height: 20px;
+transition: all o.2s ease;
+.
+
+.Button disabled
+cursor: default:
+.
+
+/* primary * /
+.Button.Primary
+background-color: var(--main-bg-color):
+color: var(--contrast-text-color):
+.
+.Button.Primary img
+filter: invert(var(--invert-text-color)):
+.
+.Button.Primary : hover
+background-color: var(--secondary-bg-color);
+color: var(--contrast-text-color):
+.
+.Button.Primary: disabled
+opacity: o.3;
+background-color: var(--main-bg-color):
+color: var(--contrast-text-color):
+.
+/* primary */
+
+/* Transparent */
+.Button.Transparent
+color: #262c30;
+background-color: transparent
+border-color: #262c30;
+.
+/* Transparent */
+
+/* Borderless */
+.Button.Borderless
+color: #262c30;
+background-color: transparent
+text-decoration: underline;
+.
+/* Borderless */
+
+/* Access ibility */
+.Button.Access ibility
+background: none;
+border: none;
+border-radius: unset:
+text-trans form: none:
+letter-spacing: unset;
+padding: o;
+margin: o:
+outline: none:
+trans ition: none;
+.
+/* Accessibility */
+
+/* sidebar */
+.Button.sidebar
+color: #f3f5 f5;
+background-color: transparent:
+border-radius : o:
+width: auto:
+margin: opx:
+.
+.Button.sidebar: hover
+border-bottom: 2px solid #fbfbfb;
+.
+.Button.sidebar.active
+border-bottom: 2px solid #fbfbfb;
+.
+/* sidebar */
+
+.Form
+width: 100%;
+.
+
+.Form .Field
+width: 100%;
+display: flex;
+flex-direction: column
+.
+
+.Form . Label
+co1or: #576975;
+font -size: 14px;
+line-height: 2opx;
+margin-bottom: 8px
+padding: opx 12px;
+.
+
+.Radio_container
+display: flex;
+align-items: center:
+position: relative
+cursor: pointer;
+-webkit-user-select: none;
+-moz-user-select: none
+-ms-user-select: none;
+user-select: none
+.
+
+.Radio_container input
+position: absolute
+opacity: o;
+cursor: pointer;
+height: o:
+width: o:
+.
+
+.Radio_container: focus-within
+text-decoration: underline;
+.
+
+.Radio_container: hover .Radio
+background-color: #fff:
+.
+
+.Radio_Container .Radio
+height: 18px;
+width: 18px;
+flex-shrink: o;
+position: relative
+display: block;
+border-radius : 50%
+border: 1px solid #262c30:
+margin-right: 8px;
+.
+
+.Radio_container .Radio:after
+content: '';
+position: absolute
+opacity: o;
+top: 10%;
+left: 10%;
+width: 80%;
+height: 80%;
+border-radius : 50%
+background: #262c30:
+transition: opacity 1ooms;
+.
+
+.Radio_Container input: checked ~ .Radio:after
+opacity: 1;
+.
+
+.Text,
+.Textarea
+background-color: #f3f5f5;
+border: 1px solid #c2c6c9;
+font-family: 'GTAmerica', sans-serif !important:
+border-radius: 1opx;
+color: #262c30;
+margin-bottom: 16px;
+padding: 12px
+.
+
+.Text . error
+.Textarea.error
+border: 1px solid #cd2155;
+background-color: #faf f8;
+margin-bottom: 8px
+.
+
+.Textarea
+resize: none;
+.
+
+.inputErrorMessage
+color: #cd2155;
+font-size: 14px;
+margin-bottom: 16px;
+padding: opx 12px
+.
+
+/* Accordion */
+.Accordion > button first-child
+width: 100%;
+display: flex;
+justify-content: space-between;
+align-items: center:
+font -s ize: 24px;
+line-height: 26px;
+color: #fb fbfb;
+padding: 16px o;
+letter-spacing: - px;
+font-stretch: semi-condensed;
+font-weight: 40o:
+text-align: left;
+.
+
+.Accordion .AccordionHeader
+padding: 12px 24px
+display: flex;
+vertical-align: middle
+justify-content: space-between;
+.
+
+.Accordion .AccordionHeader .AccordionHeaderLabel
+flex: 1
+text-align: left;
+line-height: 24px;
+.
+
+.Accordion .AccordionHeader .AccordionBadge
+text-align: center
+font-size: 16px;
+line-height: 24px;
+width: 24px;
+height: 24px;
+color: #262c30;
+background-color: #fbfbfb;
+border-radius: 50%
+.
+
+.Accordion .AccordionclearselectBtn
+font-size: 1opx;
+color: #fb fbfb;
+.
+
+.Accordion .AccordionHeader .AccordionHeaderchevron
+margin-left: 8px;
+.
+
+.Accordion .chevron
+width: 16px;
+height: 8px;
+transform: rotate(-18odeg);
+.
+
+.Accordion .chevron.closed
+transform: rotate(odeg);
+.
+
+.Accordioncontent
+overflow-y: hidden
+.
+
+.Accordion.opened .Accordioncontent
+overflow-y: initial;
+padding-bottom: 32px;
+.
+
+.Accordion.closed .Accordioncontent
+display: none:
+.
+
+.accordionFieldset
+padding: opx;
+margin: opx:
+border: none;
+.
+/* Accordion */
+.FilterAccordion .FilterAccordionoptions
+display: flex;
+flex-wrap: wrap:
+padding: 12px 24px 8px;
+.
+
+.FilterAccordion .FilterAccordionoption
+display: flex:
+vertical-align: middle
+width: 100%;
+font-size: 14px;
+padding-bottom: 16px;
+.
+
+.FilterAccordion .FilterAccordionoption.Checkbox
+flex: 0 50%;
+.
+
+.FilterAccordion .FilterAccordionoption .Checkbox
+margin-right: 8px;
+.
+
+.columnItemLabel
+font -size: 14px;
+font-weight: 40o:
+.
+
+.ColumnItemLabel.LoanAmount
+color: #c8ced1;
+.
+
+.columnItemvalue
+font-size: 32px;
+font-stretch: expanded
+letter-spacing: - px;
+font-weight: 40o:
+.

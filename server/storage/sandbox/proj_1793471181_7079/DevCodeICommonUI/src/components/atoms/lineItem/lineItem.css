@@ -1,0 +1,43 @@
+css
+.lineItem
+display: flex:
+justify-content: space-between;
+width: 100%;
+.
+.lineDots
+flex-grow: 1;
+overflow: hidden;
+font-style: normal
+font-weight: normal:
+font-size: 14px;
+line-height: 20px;
+color: #c8ced1;
+.
+.lineDots :after
+float: left;
+width: o:
+white-space: nowrap:
+
+.
+.lineItemLabel
+font-style: normal
+font-weight: soo:
+font-size: 14px;
+line-height: 20px;
+color: #c8ced1;
+background-color: #131515;
+padding-right: o.33em;
+display: inline-block;
+.
+.lineItemvalue
+font-style: normal;
+font-weight: normal;
+font -size: 14px;
+line-height: 2opx;
+color: #c8ced1;
+float: right;
+padding-left: o.33em;
+position: relative
+background-color: #131515;
+word-break: break-all;
+.
