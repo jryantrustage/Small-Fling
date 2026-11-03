@@ -621,7 +621,7 @@ mockproductAccountFormData.ts
 typescript
 import React from 'react';
 import  scprosList  from './styles';
-import ( CheckedListProps } from './ types'
+import ( CheckedListProps ) from './ types'
 
 
 * Component which renders a list of text items with read-only checkboxes in front
@@ -638,7 +638,7 @@ ul>
 
 
 
-export t checkedList f:
+export t checkedList f;
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -712,7 +712,7 @@ export interface checkedListprops
 
 checked? : boolean
 
-* values for items
+* values for items;
 
 items: stringl:
 .
@@ -924,7 +924,7 @@ width: 20opx;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesICheckmarkHero\types.ts" type=".ts" size="274" lines="14" chars="274" -->
 typescript
-import ( Ioption } from 'core/entities/loanApplication';
+import ( Ioption ) from 'core/entities/loanApplication';
 
 export interface ICheckmarkHeroProps
 name: string:
@@ -935,7 +935,7 @@ options?: Ioption:
 
 label: string:
 onchange: (name: string, value: string) => void
-value: string:
+value: string:;
 .
 
 ```
@@ -1209,7 +1209,7 @@ export  CoreProductselector y:
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesICoreProductselector\index.ts" type=".ts" size="66" lines="3" chars="66" -->
 typescript
 export * from './CoreProductselector'
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -1775,7 +1775,7 @@ onchange(name, maskedInput)
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDatepicker\index.ts" type=".ts" size="57" lines="3" chars="57" -->
 typescript
 export * from './Datepicker';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -1788,13 +1788,13 @@ export * from . / types';
 typescript
 import styled from 'styled-components';
 import  Theme  from 'styles';
-import ( IDatePickeroverlaywrapperProps } from './types';
-import ( DisplayMode } from 'styles/themes/themeutility';
+import ( IDatePickeroverlaywrapperProps ) from './types';
+import ( DisplayMode ) from 'styles/themes/themeutility';
 import ( scutilityInput  from 'styles/utility';
-import ( scFlexError } from 'components/atoms/ErrorMessage/styles';
+import ( scFlexError ) from 'components/atoms/ErrorMessage/styles';
 
 export const sCDatePickeroverlaywrapper = styled.div<Pick<IDatePickeroverlaywrapperProps, 'displayMode'>＇
-$(Theme.getFontstyles(body2')
+$(Theme.getFontstyles(body2'')
 color: $t(t displayMode y)
 displayMode === DisplayMode.DARK ? Theme.getColor('contrastwhite') : Theme.getcolor('contrastBlack'):
 
@@ -1838,8 +1838,8 @@ margin-bottom: 5px
 $ (Theme.getFontstyles('strongi'))
 color: $t(t displayMode f) =
 displayMode === DisplayMode.DARk
-? Theme.getcolor(°contrastGreyscale04')
-: Theme.getcolor(°contrastGreyscaleo8'));
+? Theme.getcolor(°contrastGreyscale04'')
+: Theme.getcolor(°contrastGreyscaleo8''));
 font-size: 1opx;
 line-height: 16px;
 height: 2opx
@@ -1855,11 +1855,11 @@ font-size: 14px;
 margin-bottom: 16px;
 > .rdp-caption_label
 padding: o;
-$ (Theme.getFontstyles("body1'):
+$ (Theme.getFontstyles("body1'):"
 color: $ (t displayMode ) =>
 displayMode === DisplayMode.DARK ? Theme.getColor('contrastwhite') : Theme.getColor('contrastBlack'));
 .
-$ {Theme.getMediaQuery(Theme. SM, Theme.MD))
+$ {Theme.getMediaQuery(Theme. SM, Theme.MD)}
 font-size: 16px;
 .
 @media (max-width: 640px)
@@ -1897,7 +1897,7 @@ height: 2opx;
 justify-content: center;
 align-items: center;
 border: 1px solid transparent
-$ {Theme.getMediaQuery(Theme. MD))
+$ {Theme.getMediaQuery(Theme. MD)}
 font-size: 14px;
 .
 &: hover
@@ -1911,7 +1911,7 @@ font -size: 12px;
 font-size: 1opx;
 .
 
-$ {Theme.getMediaQuery(Theme. sM))
+$ {Theme.getMediaQuery(Theme. sM)}
 font-size: 14px;
 .
 .
@@ -1968,14 +1968,14 @@ displayMode === DisplayMode.DARK ? Theme.getColor('contrastBlack') : Theme.getco
 
 
 
-export const SCIconWrapper = styled.button< displayMode?: DisplayMode; isActive?: boolean }>'
+export const SCIconWrapper = styled.button< displayMode?: DisplayMode; isActive?: boolean }>''
 border: 1px solid;
 border-color: $((t displayMode, isActive ) =>
 if (displayMode === DisplayMode.DARK && isActive) (
-return Theme.getcolor('contrastwhite'):
+return Theme.getcolor('contrastwhite');
 .
 if (displayMode !== DisplayMode.DARK && isActive) (
-return Theme.getcolor('contrastBlack'):
+return Theme.getcolor('contrastBlack');
 .
 if (displayMode === DisplayMode.DARk)
 return Theme.getcolor('contrastGreyscaleo6');
@@ -2816,7 +2816,7 @@ return result.tojsDate():
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDateRangePicker\index.ts" type=".ts" size="62" lines="3" chars="62" -->
 typescript
 export * from './DateRangePicker'
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -3820,7 +3820,7 @@ export  DisplayExpandLink
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDisplayExpandLinklindex.ts" type=".ts" size="64" lines="3" chars="64" -->
 typescript
 export * from './DisplayExpandLink';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -3863,7 +3863,7 @@ export const scLabelButton = styled.button';
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDisplayExpandLinkitypes.ts" type=".ts" size="200" lines="g" chars="20o" -->
 typescript
-import ( DisplayMode } from 'styles/ themes';
+import ( DisplayMode ) from 'styles/ themes';
 
 export interface IDisplayExpandLinkprops (
 id: string:
@@ -3942,7 +3942,7 @@ export  Documentupload F;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDocumentuploadvindex.ts" type=".ts" size="61" lines="3" chars="61" -->
 typescript
 export * from './Documentupload';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -4161,7 +4161,7 @@ export interface IDownloadPdfLinkProps
 url: string:
 
 
-* @fieldLabel string for the label's display text
+* @fieldLabel string for the label's display text'
 
 fieldLabel?: string:
 .
@@ -4444,7 +4444,7 @@ import { sCDrawer, SCDrawerBody, SCDrawercloseButton, sCDrawercloseButtonwrapper
 export const Drawer = (t
 children,
 width = '38opx',
-offsetDrawerHeight = 72px',
+offsetDrawerHeight = 72px'',
 isExpanded,
 oncloseDrawer,
 : IDrawerpProps): Jsx.Element =>
@@ -4477,7 +4477,7 @@ e.preventDefault():
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDrawer\index.ts" type=".ts" size="53" lines="3" chars="53" -->
 typescript
 export * from './ Drawer';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -4677,7 +4677,7 @@ display: flex;
 flex-wrap: wrap:
 justify-content: space-between;
 
-export const scLabelIcon = styled.div';
+export const scLabelIcon = styled.div'';
 
 export const scselectwrap = styled.div
 width: 100%;
@@ -4921,9 +4921,9 @@ issticky? : boolean
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDynamicInputFieldIConfirmModalwrapper.tsx" type=".tsx" size="1411" -->
 typescript
-import ( useconfirmModal } from ‘hooks';
+import ( useconfirmModal } from ‘hooks'';
 import ( IGenerateInputFieldProps, generateInputField  from './helpers';
-import ( IValueRuleuses  from ‘core/entities/loanApplication';
+import ( IValueRuleuses  from ‘core/entities/loanApplication'';
 import ( useTypedTranslation  from 'i18n'
 
 
@@ -4932,7 +4932,7 @@ import ( useTypedTranslation  from 'i18n'
 export const ConfirmModalwrapper = (props: IGenerateInputFieldProps): Jsx.Element => (
 const openModal = useconfirmModal()
 const  t  = useTypedTranslationo)
-const  dataField, onchange  = props:
+const  dataField, onchange  = props;
 const ( valueRules  = dataField;
 const onchangeCaptured = async (name: string, value: string) => (
 const  helpText, helpTextTitle  =
@@ -6047,7 +6047,7 @@ return modifiedNotificationList;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\DynamicInputField\index.ts" type=".ts" size="64" lines="3" chars="64" -->
 typescript
 export * from './DynamicInputField';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -6641,7 +6641,7 @@ aria-label={t('DYNAMIC_NOTIFICATION_ARIA_CLOSE'))>
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIDynamicNotification\index.ts" type=".ts" size="107" lines="3" chars="107" -->
 typescript
 export * from './DynamicNotification'
-export ( NotificationDisplay } from 'core/entities/notification';
+export ( NotificationDisplay ) from 'core/entities/notification';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -6810,8 +6810,8 @@ import { NotificationDisplay, NotificationType } from 'core/entities/notificatio
 
 export enum IconvertPosition
 
-Bottom = - flex-end',
-Top = flex-start'
+Bottom = - flex-end'',
+Top = flex-start''
 .
 
 
@@ -6826,7 +6826,7 @@ limit? : number;
 
 * Specifies what notification display locations to listen to.
 
-display?: NotificationDisplay I string;
+display?: NotificationDisplay | string;
 
 * Determines vertical styling position of icon.
 
@@ -6897,8 +6897,8 @@ export t EditLink ;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\EditLinklindex.ts" type=".ts" size="55" lines="3" chars="55" -->
 typescript
-export * from ./EditLink';
-export * from . / types';
+export * from ./EditLink'';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -6909,7 +6909,7 @@ export * from . / types';
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\EditLinkistyles.ts" type=".ts" size="867" lines="38" chars="867" -->
 typescript
-import styled, ( css } from 'styled-components';
+import styled, ( css ) from 'styled-components';
 import ( Theme  from 'styles';
 
 export const scEditHeaderwrapper = styled.div
@@ -6925,7 +6925,7 @@ color: ${Theme.getcolor('contrastwhite'));
 $(Theme.getFontstyles('strongi')
 margin: 18px 0 28px;
 
-$ {Theme.getMediaQuery(Theme. sM))
+$ {Theme.getMediaQuery(Theme. sM)}
 font-size: 14px;
 line-height: 1.43;
 $ (t showAsGroupTitle ) =
@@ -6956,7 +6956,7 @@ font-weight: 4oo
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesVEditLinkitypes.ts" type=".ts" size="232" lines="11" chars="232" -->
 typescript
-import ( DisplayMode } from 'styles/ themes';
+import ( DisplayMode ) from 'styles/ themes';
 
 export interface IEditLinkprops
 id: string:
@@ -7310,7 +7310,7 @@ export * from . / types';
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\ErrorTooltip\styles.ts" type=".ts" size="1989" lines="89" chars="1989" -->
 typescript
 import styled,  css } from 'styled-components';
-import ( Tooltip, TooltipDirection, Tooltipsize } from 'components/atoms/Tooltip';
+import ( Tooltip, TooltipDirection, Tooltipsize ) from 'components/atoms/Tooltip';
 
 export const scErrorTooltipwrapper = styled.div
 position: relative
@@ -7656,8 +7656,8 @@ typescript
 import React from 'react';
 
 import  replace + from 'lodash';
-import ( Markdown } from 'components/molecules/Markdown';
-import IconDown, ( ReactCcomponent as IconDownComponent } from '. /svg/downArrow.svg';
+import ( Markdown ) from 'components/molecules/Markdown';
+import IconDown, ( ReactCcomponent as IconDownComponent ) from '. /svg/downArrow.svg';
 import  IFAQProps  from '. /types';
 import { SContainer, SCTitle, SCFAQItem, SCFAQButtonQuestion, SCFAQAnswer } from './styles';
 
@@ -7680,17 +7680,17 @@ return
 <sccontainer id={idy className={className>
 <scTitle className='faq-title'>(titlej</scTitle>
 (items .map((faqItem) =>
-const faqItemId = faqItem.id Il replace(replace(faqItem.question, · ', '-'), '?', '"):
+const faqItemId = faqItem.id Il replace(replace(faqItem.question, · ', '-'), '?', '"):"
 
 <sCFAQItem
 key={ faqitemIdy
 iconurl={IconDown)
 id='accordion-$ faqitemIdy'
 title={faqItem.question
-className=- faq- item'
+className=- faq- item''
 buttoncomponent=t
 sCFAQButtonQuestion
-className='faq-button-question
+className='faq-button-question'
 id='question-$ (faqitemIdy'
 aria-label={faqItem.question)>
 <IconDowncomponent /
@@ -7733,15 +7733,15 @@ export * from . / types';
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\FAQIstyles.ts" type=".ts" size="1374" lines="50" chars="1374" -->
 
-import ( SimpleAccordion } from 'components/molecules/SimpleAccordion';
+import ( SimpleAccordion ) from 'components/molecules/SimpleAccordion';
 import  Theme  from 'styles';
 import styled from 'styled-components';
 
-export const sccontainer = styled.div';
+export const sccontainer = styled.div'';
 
 export const scTitle = styled.div
 $(Theme.getFontstyles('title4'))
-color: $(Theme.getcolor('contrastBlack');
+color: $(Theme.getcolor('contrastBlack'));
 margin-bottom: 24px;
 
 
@@ -7775,7 +7775,7 @@ margin-right: 8px;
 
 
 export const scFAQAnswer = styled.div
-$ (Theme.getFontstyles("body3')
+$ (Theme.getFontstyles("body3'")
 color: $(Theme.getcolor('contrastGreyscale07'):
 margin-top: 8px;
 /** To make answer vertically aligned with question:
@@ -7843,7 +7843,7 @@ export + Footer f:
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\Footer\index.ts" type=".ts" size="27" lines="2" chars="27" -->
 typescript
-export * from . / Footer'
+export * from . / Footer''
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -7899,13 +7899,13 @@ export t scFooter ;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\Footer\types.ts" type=".ts" size="529" lines="21" chars="529" -->
 typescript
-import ( DisplayMode } from 'styles/themes';
+import ( DisplayMode ) from 'styles/themes';
 
 export interface IFooterProps
 
 * children to be rendered in the footer.
 
-children: Jsx.Element I Jsx.Element[] I string;
+children: Jsx.Element I Jsx.Element[] | string;
 
 * The current display mode -- makes use of the 'DisplayMode' enum.
 
@@ -8041,10 +8041,10 @@ font-weight: 5oo:
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\HeroReceiptItem\types.ts" type=".ts" size="342" lines="17" chars="342" -->
 typescript
-import ( DisplayMode } from 'styles/themes';
+import ( DisplayMode ) from 'styles/themes';
 
 export enum HeroReceiptItemsize
-LARGE = ‘large',
+LARGE = ‘large'',
 sMALL = 'small',
 .
 
@@ -8350,29 +8350,29 @@ color: $(Theme.getcolor('contrastBlack');
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\HeroSingleselectitypes.ts" type=".ts" size="729" lines="25" chars="729" -->
 typescript
-import ( Ioption } from 'core/entities/loanApplication';
-import ( DisplayMode } from 'styles/ themes';
+import ( Ioption ) from 'core/entities/loanApplication';
+import ( DisplayMode ) from 'styles/ themes';
 
 export interface IHerosingleselectProps (
--fieldcode'?: string:
-‘id': string;
+-fieldcode'?: string:'
+‘id': string';
 ‘options?: Ioption[];
 'error'?: string:
 'disabled'?: boolean;
 'displayMode'? : DisplayMode
-value'?: string:
+value'?: string:'
 'aria-describedby'?: string;
 ‘aria-invalid'?: boolean 丨 ‘true' 丨 'false' 丨'grammar' 丨 'spelling' | undefined;
-‘onchange': (name: string, value: string) => void;
-usecustomprops'?: boolean;
-className'?: string:
+‘onchange': (name: string, value: string) => void';
+usecustomprops'?: boolean';
+className'?: string:'
 .
 
 export enum optionType t
-CREDIT_CARD = ‘CREDIT-CARD-TYPES',
-PERSONAL_LOAN = ‘PERSONAL-LOAN-TERMS',
-RECREATIONAL_VEHICLE = ‘RECREATIONAL-VEHICLE',
-SIMPLE = ‘SIMPLE'
+CREDIT_CARD = ‘CREDIT-CARD-TYPES'',
+PERSONAL_LOAN = ‘PERSONAL-LOAN-TERMS'',
+RECREATIONAL_VEHICLE = ‘RECREATIONAL-VEHICLE'',
+SIMPLE = ‘SIMPLE''
 .
 
 ```
@@ -8579,9 +8579,9 @@ return <scKeyValueList id={key key={key) label={label) value={value} />;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\IFrame\IFrame.tsx" type=".tsx" size="4871" lines="155" chars="4871" -->
 typescript
 import ( APIContext, TenantContext, Windowontext  from 'context';
-import React, ( usecontext, useEffect, usestate } from 'react';
-import ( scIFramecontainer } from './styles';
-import ( IFrameProps } from './ types';
+import React, ( usecontext, useEffect, usestate ) from 'react';
+import ( scIFramecontainer ) from './styles';
+import ( IFrameProps ) from './ types';
 import ( get ) from 'lodash';
 import  spinner } from '../../atoms';
 
@@ -8591,9 +8591,9 @@ const HEIGHT_OFFSET = 16
 
 
 const MOBILE_WIDTH = 360
-const MOBILE_HEIGHT = 1350:
+const MOBILE_HEIGHT = 1350;
 const DEFAULT_WIDTH = · 100%
-const DEFAULT_HEIGHT = 1300:
+const DEFAULT_HEIGHT = 1300;
 
 const IFrame = (t
 
@@ -8606,18 +8606,18 @@ value.
 const  clientLog } = useContext(APIContext);
 const ( isMobile  = usecontext(Windowcontext);
 const tenant = usecontext(TenantContext)
-const contractNumber = tenant? .details?.contractNumber ?? ·';
-const tenantId = tenant? . details?.id ?? ';
+const contractNumber = tenant? .details?.contractNumber ?? ·'';
+const tenantId = tenant? . details?.id ?? '';
 const iFrameRule = valueRules.find( use }) => use === ‘sE_IFRAME');
 const [isFlowCompleted, setFlowCompleted] = usestate(false);
-const [loading, setLoading] = usestate(true):
+const [loading, setLoading] = usestate(true);
 if (liFrameRule)
 return <></>;
 .
 
 let parsedvalueMetaData
 try
-parsedValueMetaData = JsoN.parse(iFrameRule.valueMetaData ?? ');
+parsedValueMetaData = JsoN.parse(iFrameRule.valueMetaData ?? '');
 catch (err: unknown)
 // eslint-disable-next-line no-console
 console.error('Error in IFrame component during JsoN parse of valueMetaData', ( iFrameRule, err }):
@@ -8782,7 +8782,7 @@ margin: o -24px;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\IFrameltypes.ts" type=".ts" size="1266" lines="50" chars="1266" -->
 typescript
-import type ( IValueRule } from 'core/entities/loanApplication';
+import type ( IValueRule ) from 'core/entities/loanApplication';
 .
 export interface BaseIframevalue
 
@@ -8942,8 +8942,8 @@ fill: none;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\InfoIcon\types.ts" type=".ts" size="337" lines="11" chars="337" -->
 typescript
 export interface InfoIconProps extends Partial<React.HTMLAttributes<HTMLButtonElement> (
-modalTitle?: Jsx.Element I string:
-modalBody?: Jsx.Element I string;
+modalTitle?: Jsx.Element | string:
+modalBody?: Jsx.Element | string;
 darkMode? : boolean
 isHigherorderModal?: boolean;
 headerHasFocus? : boolean;
@@ -8961,7 +8961,7 @@ onModalclose? : () => void;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\InfoModal\index.ts" type=".ts" size="30" lines="2" chars="30" -->
 typescript
-export * from ./ InfoModal';
+export * from ./ InfoModal'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -9007,7 +9007,7 @@ export  InfoModal :
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\InfoModalTrigger\index.ts" type=".ts" size="63" lines="3" chars="63" -->
 typescript
 export * from './ InfoModalTrigger';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -9102,8 +9102,8 @@ text-decoration: underline
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\InfoModalTriggerItypes.ts" type=".ts" size="322" lines="10" chars="322" -->
 typescript
 export interface InfoModalTriggerProps extends Partial<React.HTMLAttributes<HTMLButtonElement>> (
-modalTitle?: Jsx.Element I string:
-modalBody?: Jsx.Element I string;
+modalTitle?: Jsx.Element | string:
+modalBody?: Jsx.Element | string;
 isHigherorderModal?: boolean;
 headerHasFocus? : boolean;
 cancelBtnText?: string
@@ -9120,8 +9120,8 @@ onModalclose? : () => void;
 .
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\InfoTooltiplindex.ts" type=".ts" size="58" lines="3" chars="58" -->
 typescript
-export * from ./InfoTooltip';
-export * from . / types';
+export * from ./InfoTooltip'';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -9315,7 +9315,7 @@ return css ;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\InfoTooltipltypes.ts" type=".ts" size="278" lines="12" chars="278" -->
 typescript
-import ( TooltipDirection, Tooltipsize } from 'components/atoms/Tooltip';
+import ( TooltipDirection, Tooltipsize ) from 'components/atoms/Tooltip';
 
 export interface InfoTooltipprops (
 id?: string:
@@ -9630,8 +9630,8 @@ disabled: inputProps.dataField.disabled Il inputProps.readonly
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\InputBlocksItypes.ts" type=".ts" size="1579" lines="53" chars="1579" -->
 typescript
 import ( INotification  from 'core/entities/notification';
-import ( IDataField ) from ‘core/entities/loanApplication';
-import ( IDynamicInputFieldProps } from 'components/molecules/DynamicInputField';
+import ( IDataField ) from ‘core/entities/loanApplication'';
+import ( IDynamicInputFieldProps ) from 'components/molecules/DynamicInputField';
 import ( Tenant  from 'context';
 
 export interface IuseInputField
@@ -9792,7 +9792,7 @@ export t KeyvalueList F;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\KeyValueList\styles.ts" type=".ts" size="4386" lines="153" chars="4386" -->
 typescript
-import styled, ( css, FlattenInterpolation, ThemeProps } from 'styled-components';
+import styled, ( css, FlattenInterpolation, ThemeProps ) from 'styled-components';
 import ( Theme  from 'styles/themes';
 import ( IKeyvalueListProps  from '. /types';
 import ( IPropsHook ) from 'styles/themes/themeutility';
@@ -9808,10 +9808,10 @@ justify-content: space-between;
 align-items: baseline;
 overflow: hidden;
 margin-bottom: $( id, value ): string =>
-id?.includes('MAILING-SAME-AS-CURR-ADDR') ＆＆ value === ‘No' ? ‘20px' : ‘4px'};
+id?.includes('MAILING-SAME-AS-CURR-ADDR') ＆＆ value === ‘No' ? ‘20px' : ‘4px''};
 max-width: 100%;
-$(Theme.getFontstyles("body1')
-$((t highlighted }): FlattenInterpolation<ThemeProps<IKeyValueListProps>> I undefined I false =>
+$(Theme.getFontstyles("body1'")
+$((t highlighted }): FlattenInterpolation<ThemeProps<IKeyValueListProps>> I undefined | false =>
 highlighted &&
 css
 padding: 1opx o:
@@ -10025,7 +10025,7 @@ alignEnd? : boolean
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesILeftRightNavButtons\index.ts" type=".ts" size="66" lines="3" chars="66" -->
 typescript
 export * from '. / LeftRightNavButtons'
-export * from . / types';
+export * from . / types'';
 .
 ```
 <!-- CODESCAN_FILE_END -->
@@ -10212,7 +10212,7 @@ color: $(Theme.getcolor('systemsecureBlueo1'));
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesILinkToImageltypes.ts" type=".ts" size="299" lines="14" chars="299" -->
 typescript
-import ( IExposition } from 'core/entities/loanApplication';
+import ( IExposition ) from 'core/entities/loanApplication';
 
 export interface ILinkToImageProps
 
@@ -10509,8 +10509,8 @@ darkMode? : boolean
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesVMarkdown\index.ts" type=".ts" size="55" lines="3" chars="55" -->
 typescript
-export * from ./ Markdown';
-export * from . / types';
+export * from ./ Markdown'';
+export * from . / types'';
 
 
 <!-- CODESCAN_FILE_END -->
@@ -10577,7 +10577,7 @@ export interface IMarkdownProps extends React.HTMLAttributes<HTMLDivElement> (
 
 * string to be formatted.
 
-text? : string I stringll:
+text? : string | stringll:
 .
 
 ```
@@ -10589,8 +10589,8 @@ text? : string I stringll:
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesVModal\index.ts" type=".ts" size="53" lines="3" chars="53" -->
 typescript
-export * from . / Modal';
-export * from ./styles'
+export * from . / Modal'';
+export * from ./styles''
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -10603,12 +10603,12 @@ export * from ./styles'
 typescript
 /* eslint import/no-unresolved: o */
 import * as React from 'react';
-import ( usecontext, useEffect, useRef } from 'react';
+import ( usecontext, useEffect, useRef ) from 'react';
 import FocusLock from 'react-focus-lock';
 import ( useTypedTranslation  from 'i18n'
 import ( Icon, IcoN_TYPEs } from 'components/atoms/Icon';
-import  usePrevious  from ‘hooks';
-import ( Historycontext, ModalContext } from 'context';
+import  usePrevious  from ‘hooks'';
+import ( Historycontext, ModalContext ) from 'context';
 import  IModalProps  from './types';
 import
 scModal,
@@ -10619,7 +10619,7 @@ sccloseButton,
 scBackground,
 scFooterwrapper,
 from './styles';
-import ( DisplayMode } from 'styles/themes';
+import ( DisplayMode ) from 'styles/themes';
 
 
 * Basic modal component. Displays a pop-up dialogue that accepts children.
@@ -10654,7 +10654,7 @@ const bodyRef = useRef<HTMLDivElement>(null);
 const modalRef = useRef<HTMLDivElement>(null);
 
 const ( t  = useTypedTranslation():
-const isInIframe = window.self I== window.top:
+const isInIframe = window.self I== window.top;
 const focusProps = React.useMemo(
 () =>
 header Has Focus
@@ -10672,7 +10672,7 @@ return ( 'aria-label': ariaTitle F;
 
 if (modalTitle)
 return
-‘aria-labelledby':'dialog-title',
+‘aria-labelledby':'dialog-title'',
 ```
 .
 
@@ -10795,10 +10795,10 @@ export + Modal f;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesVModal\styles.ts" type=".ts" size="3430" lines="117" chars="3430" -->
 typescript
-import styled, ( css } from 'styled-components';
+import styled, ( css ) from 'styled-components';
 import { ISCModalwindowProps, ISCModalContentwrapperProps, DarkModeCompatibleProps } from './types';
 import  Theme  from 'styles';
-import ( DisplayMode } from 'styles/themes';
+import ( DisplayMode ) from 'styles/themes';
 
 export const scModal = styled.div<( isInIframe: boolean y>
 position: fixed;
@@ -10819,13 +10819,13 @@ top: o:
 right: o:
 bottom: o:
 z-index: -1:
-opacity: $(Theme.getopacityvalue('80%*)
+opacity: $(Theme.getopacityvalue('80%*')
 background-color: $(Theme.getcolor('contrastBlack'));
 
 
 export const sCModalwindow = styled.div<IscModalwindowprops>
 position: absolute
-width: $((props): string => props.width Il '512px':
+width: $((props): string => props.width || '512px':
 max-height: 90%;
 overflow-y: clip:
 background-color: $((t displayMode, theme }): string =>
@@ -10877,7 +10877,7 @@ ${Theme.getFontstyles('title4'));
 
 
 export const sContentwrapper = styled.div<IsCModalcontentwrapperProps>
-padding: $(props): string => (props.hidePadding ? ‘o' : '40px 24px');
+padding: $(props): string => (props.hidePadding ? ‘o' : '40px 24px'');
 overflow-y: auto;
 
 
@@ -10898,7 +10898,7 @@ displayMode === DisplayMode. DARk
 : Theme.getcolor('contrastwhite')(t theme )
 
 
-export const sccloseButton = styled. button'
+export const sccloseButton = styled. button''
 position: absolute
 top: 22px
 right : 24px;
@@ -11042,7 +11042,7 @@ xL = -xL
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\molecules\ModalFooter\index.ts" type=".ts" size="58" lines="3" chars="58" -->
 typescript
 export * from './ModalFooter';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -11264,7 +11264,7 @@ typescript
 import React from 'react';
 import ( useTypedTranslation  from 'i18n'
 import ( Icon, IcoN_TYPEs } from 'components/atoms/Icon';
-import ( Ioption } from 'core/entities/loanApplication';
+import ( Ioption ) from 'core/entities/loanApplication';
 import ( scsRonlyLabel  from 'styles';
 import ( useMSRGlobalSearch  from '. /useMSRGlobalSearch';
 import
@@ -11278,8 +11278,8 @@ scsearchInputwrapper,
 scIconwrapper
 from '. /styles';
 import { IMSRGlobalSearchProps, SearchType } from './types';
-import ( isMasked, getMaskFieldType, getMaxLengthField } from './helpers';
-import ( IMSRGlobalSearchResultsProps } from '../MSRGlobalSearchResults/types'
+import ( isMasked, getMaskFieldType, getMaxLengthField ) from './helpers';
+import ( IMSRGlobalSearchResultsProps ) from '../MSRGlobalSearchResults/types'
 import ( MSRGlobalSearchResults  from '../MSRGlobalSearchResults';
 
 
@@ -11320,7 +11320,7 @@ getsearchplaceholder,
 = useMSRGlobalsearch(t tenantId, initialType, initialResults, onsubmitsearch );
 
 const dropdownId = 'globalsearch-search-type-dropdown';
-const dropdownLabelId = ‘$(dropdownIdy-label';
+const dropdownLabelId = ‘$(dropdownIdy-label'';
 const searchInputId = 'globalsearch-search-input';
 const cancelButtonId = 'cancel-search-button';
 const resultssectionProps: IMSRGlobalsearchResultsProps =
@@ -11344,8 +11344,8 @@ return (
 <scDropdownutility
 id= dropdownIdy
 value={searchTypey
-options={searchTypeoptions)
-className=-left'
+options={searchTypeoptions}
+className=-left''
 leftIcon=t
 <scIconwrapper>
 Icon name={ICoON_TYPES. SEARCH) size={14) />
@@ -11363,7 +11363,7 @@ value= searchvaluey
 onchange={updatesearchvalue
 onkeypPress=(handlekeyPress)
 placeholder=(getsearchPlaceholder(searchType)
-autocomplete='off
+autocomplete='off'
 
 
 <scsearchInput
@@ -11374,7 +11374,7 @@ onchange={(e: React.ChangeEvent<HTMLInputElement>) => updateSearchValue('input',
 onkeypPress=(handlekeyPress)
 placeholder=(getsearchPlaceholder(searchType)
 maxLength=getMaxLengthField(searchType)
-autocomplete='off
+autocomplete='off'
 
 
 sccancelButton
@@ -12213,7 +12213,7 @@ coreGlobalResult?: MemberViewModel[
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\PdfViewer\index.ts" type=".ts" size="30" lines="2" chars="30" -->
 typescript
-export * from ./Pdfviewer';
+export * from ./Pdfviewer'';
 
 
 <!-- CODESCAN_FILE_END -->
@@ -12319,7 +12319,7 @@ import  Theme  from 'styles';
 import styled from 'styled-components';
 import  CoreButton  from '../.. atoms';
 
-export const scDiv = styled.div';
+export const scDiv = styled.div'';
 
 export const scviewercontainer = styled.div
 width: 100%:
@@ -12331,7 +12331,7 @@ padding: 24px;
 .
 
 
-export const scviewerImage = styled. img'
+export const scviewerImage = styled. img''
 width: 100%;
 
 
@@ -12388,7 +12388,7 @@ scale? : number;
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\ProgressBar\index.ts" type=".ts" size="32" lines="2" chars="32" -->
 typescript
-export * from ./ProgressBar';
+export * from ./ProgressBar'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -12455,7 +12455,7 @@ background: $(Theme.getColor('G1'))
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\ProgressBar\types.ts" type=".ts" size="476" lines="25" chars="476" -->
 typescript
 
-* Properties interface for the ‘ProgressBar' component.
+* Properties interface for the ‘ProgressBar' component.'
 
 export interface IProgressBarProps
 
@@ -12629,7 +12629,7 @@ nextsegment?: boolean; // boolen
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\moleculesIReceiptListlindex.ts" type=".ts" size="59" lines="3" chars="59" -->
 typescript
 export * from './ReceiptList';
-export * from ./styles'
+export * from ./styles''
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -12771,7 +12771,7 @@ highlighted? : boolean;
 
 * Number denoting the value of the receipt item.
 
-value?: number I string:
+value?: number | string:
 .
 
 ```
@@ -12888,10 +12888,10 @@ return
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIResendMFALink\styles.ts" type=".ts" size="843" lines="39" chars="843" -->
 typescript
-import styled, ( css } from 'styled-components';
+import styled, ( css ) from 'styled-components';
 import t Theme  from 'styles';
 
-const Linkstyles = css'
+const Linkstyles = css''
 $(Theme.getFontstyles('link2')
 line-height: 1;
 text-transform: capitalize
@@ -12902,7 +12902,7 @@ cursor: pointer;
 .
 
 
-export const scResendLinkButton = styled.button'
+export const scResendLinkButton = styled.button''
 $ Linkstyles
 
 
@@ -12912,18 +12912,18 @@ align-items: center:
 margin: o auto;
 margin-top: 32px;
 
-$ (Theme.getFontstyles("body1')
+$ (Theme.getFontstyles("body1'")
 $ {Theme.getMediaQuery(Theme. SM, Theme.MD))
-$ {Theme.getFontstyles('body2'))
+$ {Theme.getFontstyles('body2')}
 .
 margin: o o o 8px:
 .
-button[ type button']
+button[ type button'']
 text-decoration: underline
 .
 
 
-export const scResendLinkcount = styled.span'
+export const scResendLinkcount = styled.span''
 $(Theme.getFontstyles('strong1'))
 
 
@@ -12942,7 +12942,7 @@ export interface IResendMFALinkProps
 duration? : number;
 linkcontent?: string:
 timercontent?: TranslationType
-handleResend?: () => Promise<void> I undefined;
+handleResend?: () => Promise<void> | undefined;
 .
 
 ```
@@ -13218,7 +13218,7 @@ placeholder={t(‘CONDITION_FACT_LABEL')
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\moleculesIRuleCondition\styles.tsx" type=".tsx" size="583" lines="29" chars="583" -->
 typescript
 import styled,  css } from 'styled-components';
-import ( CorecheckBox } from 'components/atoms/CorecheckBox';
+import ( CorecheckBox ) from 'components/atoms/CorecheckBox';
 import  Theme  from 'styles';
 
 export const scconditionInputwrapper = styled.div
@@ -13323,7 +13323,7 @@ isDisabled?: boolean;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesISearchlindex.ts" type=".ts" size="53" lines="3" chars="53" -->
 
 export * from './search';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -13334,11 +13334,11 @@ export * from . / types';
 
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\moleculesISearchISearch.tsx" type=".tsx" size="3927" lines="128" chars="3927" -->
 typescript
-import React, ( usestate } from 'react';
-import ( scutilityInputLabelwrap } from 'styles';
+import React, ( usestate ) from 'react';
+import ( scutilityInputLabelwrap ) from 'styles';
 import ( useTypedTranslation  from 'i18n'
 import ( Icon, IcoN_TYPEs } from 'components/atoms/Icon';
-import ( DynamicInputField } from 'components/molecules/DynamicInputField';
+import ( DynamicInputField ) from 'components/molecules/DynamicInputField';
 import ( Isearchprops  from '. /types';
 import { scsearchcontainer, scSearchButton, scsearchTerm } from './styles';
 import ( NonFilterKeys  from 'types/generics';
@@ -13368,7 +13368,7 @@ searchonchange = true.
 allowMultisearch,
 : IsearchProps): Jsx.Element => (
 
-const [inputValue, setInputvalue] = usestate(');
+const [inputValue, setInputvalue] = usestate('');
 const [searchTerms, setsearchTerms] = usestate<string[]>([]);
 
 const handlechange = (value: string) =>
@@ -13545,8 +13545,8 @@ allowMultisearch?: boolean
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIServiceListlindex.ts" type=".ts" size="85" lines="4" chars="85" -->
 typescript
 export * from './servicelist';
-export * from . / types';
-export * from ./styles'
+export * from . / types'';
+export * from ./styles''
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -13911,8 +13911,8 @@ import styled from 'styled-components';
 import ( LoxButton  from 'components/atoms';
 import  Theme  from 'styles';
 
-const neverMediaQuery = ‘@media (width: o) ';
-const alMediaQuery = @media all';
+const neverMediaQuery = ‘@media (width: o) '';
+const alMediaQuery = @media all'';
 
 export const scIconImgcontainer = styled. div
 display: flex:
@@ -14104,7 +14104,7 @@ arialabel?: string
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesISimpleAccordion\index.ts" type=".ts" size="62" lines="3" chars="62" -->
 typescript
 export * from './simpleAccordion';
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -14223,7 +14223,7 @@ export interface IsimpleAccordionProps
 id?: string:
 title?: string:
 className? : string
-content: string I Jsx.Element I Jsx.Element[] I null
+content: string | Jsx.Element I Jsx.Element[] I null
 buttoncomponent?: Jsx.Element
 expandedoverride?: boolean;
 onsetExpanded?: (expanded: boolean) => void;
@@ -14303,7 +14303,7 @@ de fs>
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesIStaticNotificationlindex.ts" type=".ts" size="65" lines="3" chars="65" -->
 typescript
 export * from './staticNotification';
-export * from . / types';
+export * from . / types'';
 .
 ```
 <!-- CODESCAN_FILE_END -->
@@ -14313,7 +14313,7 @@ export * from . / types';
 ### 713. ‘C:\DevCode\CommonUI\src\components\molecules\StaticNotification\StaticNotification.tsx
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\CommonUI\src\components\molecules\StaticNotification\StaticNotification.tsx" type=".tsx" size="1817" lines="46" chars="1817" -->
-   'typescript
+   'typescript'
 import React, { usestate } from 'react';
 import { TranslationType, useTypedTranslation } from 'i18n';
 import { ScStaticNotification, SCLeftSide, SCMessageContainer, ScTitle } from './styles';
@@ -14336,8 +14336,8 @@ return
 
          {!isclose ? (
            /** Allow for customization with className if provided, otherwise default to notification class */
-           <ScStaticNotification className={className Il 'notification'} colorScheme={NotificationType.ALERT}>
-              <SCLeftSide iconVertPosition={iconVertPosition} message=(message}>
+           <ScStaticNotification className={className || 'notification'} colorScheme={NotificationType.ALERT}>
+              <SCLeftSide iconVertPosition={iconVertPosition} message=(message)>
                  <SCIcon name={ICON_TYPES.EXCLAMATION} size={32} />
                  <SCMessageContainer>
                     {title && <ScTitle>{t(title as TranslationType)}</ScTitle>}
@@ -14463,7 +14463,7 @@ global? : boolean;
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\moleculesITabbedContainer\index.ts" type=".ts" size="62" lines="3" chars="62" -->
 typescript
 export * from './Tabbedcontainer'
-export * from . / types';
+export * from . / types'';
 
 ```
 <!-- CODESCAN_FILE_END -->
@@ -14705,8 +14705,8 @@ export * from '. / types';
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\srcIcomponents\moleculesITable\Pagination.tsx" type=".tsx" size="3148" lines="91" chars="3148" -->
 typescript
 import React from 'react';
-import ( CoreButton ) from ‘components/atoms';
-import ( Dropdown } from 'components/atoms/Dropdown';
+import ( CoreButton ) from ‘components/atoms'';
+import ( Dropdown ) from 'components/atoms/Dropdown';
 import ( useTypedTranslation  from 'i18n'
 import  range  from 'lodash';
 import ( scpagination ) from './styles';
@@ -14740,35 +14740,35 @@ pageLengthoptions.push(Number.MAX_SAFE_INTEGER);
 return (
 <scpagination issticky={isstickyy>
 CoreButton
-id={id ? ‘$(idy-previous-page-button' : 'previousPageButton'}
+id={id ? ‘$(idy-previous-page-button' : 'previousPageButton''}
 disabled={disabled l currentPage =-= oy
 issecondary
 onclick={() => setcurrentPage(currentPage - 1)>
-(t('GLOBAL_PREVIOus ))
+(t('GLOBAL_PREVIOus '))
 / CoreBut ton
 (Idisabled && numPages > o && (
 
 div>
 <Dropdown
 label={t( TABLE_PAGE_NUMBER'))
-id={id ? ‘'$(id,-page-number' : PageNumber'y
-name -PageNumber'
+id={id ? ‘'$(id,-page-number' : PageNumber'y'
+name -PageNumber''
 value=' $ (currentPage + y'y
 options={range(1, numPages + 1).map(num) => ({ label: ‘$(num)', value: ‘$(num)' })))
 triggerElement={t('TABLE_cURRENT_PAGE', ( currentPage: currentPage + 1, totalPages: numPages })
 onchange={(name: string, value: string) => (
-return setcurrentPage(Number.parseInt(value, 10) - 1):
+return setcurrentPage(Number.parseInt(value, 10) - 1);
 
 
 /div
 div>
 <Dropdown
-label={t( TABLE_PAGE_LENGTH'))
+label={t( TABLE_PAGE_LENGTH''))
 id={id ? ‘'$(id -page-length' : PageLength')
-name -PageLength'
+name -PageLength''
 value=' s (pagelengthy 'y
 options=(pageLengthoptions.map((numRows) => (t
-label: 's t
+label: 's t'
 numRows === Number.MAX_SAFE_INTEGER ？ t('TABLE_ALL_ROWS') : t('TABLE_NUM_ROWS', ( numRows })
 ```
 value: 's numRowsy'
@@ -14805,9 +14805,9 @@ export  Pagination y:
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\molecules\TableISimplePagination.tsx" type=".tsx" size="3178" lines="82" -->
 typescript
 import React from 'react';
-import ( IcoN_TYPEs, Icon } from 'components/atoms';
+import ( IcoN_TYPEs, Icon ) from 'components/atoms';
 import { scSimplePagination, SCPageNumberwrapper, scChevronButton, ScSimplePaginationwrapper } from './styles';
-import ( IsimplePagination } from '. /types';
+import ( IsimplePagination ) from '. /types';
 import { SimplePaginationNumberButton } from './SimplePaginationNumberButton';
 
 * @summary
@@ -14819,7 +14819,7 @@ const buildsimplePaginationBreadcrumb = () => (
 const numPagesArray = Array(numPages)
 .fill(undefined)
 . map((, i) => i);
-const leftArray = numPagesArray.slice(currentPage, currentPage + 3):
+const leftArray = numPagesArray.slice(currentPage, currentPage + 3);
 const rightArray = numPagesArray.slice(numPages - 3);
 
 if (currentPage < numPages - 6 && numPages > 6) (
@@ -14827,7 +14827,7 @@ return (
 <sCPageNumberwrapper
 (leftArray.map((num) =>(
 <simplePaginationNumberButton
-key={'simple-pagination-page-number-button-$ {num)')
+key={'simple-pagination-page-number-button-$ {num)'}
 num= (num)
 handleclick={() => setcurrentPage(num)
 isselected=(num === currentPage)
@@ -14930,9 +14930,9 @@ aria-label={'go to page $ (num + 1y' >
 <!-- CODESCAN_FILE_START path="C:\DevCodeICommonUI\src\components\moleculesITablelstyles.ts" type=".ts" size="4335" lines="173" chars="4335" -->
 typescript
 import styled,  css } from 'styled-components';
-import ( Theme } from 'styles/themes/themeutility';
-import ( sCMenu, sCTrigger } from 'components/atoms/Dropdown/styles';
-import ( Tablespacing } from 'components/molecules/Table/types';
+import ( Theme ) from 'styles/themes/themeutility';
+import ( sCMenu, sCTrigger ) from 'components/atoms/Dropdown/styles';
+import ( Tablespacing ) from 'components/molecules/Table/types';
 
 export const scTHead = styled.thead<( stickyHeader?: boolean j>'
 position: $(({ stickyHeader }) => (stickyHeader ? 'sticky' : 'relative'));
@@ -18528,30 +18528,30 @@ json
 "value":"s49.95 Monthly",
 "valueRules":
 .
-"use":"MODIFY_VALUE",
-"usevaluesList":
-.
-"fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
-"valueTransformer":"frequencyFromPayment",
-"joinFieldcode"
-
-.
-"fieldCode":"FIELD-DISPLAY-NEXT-BILLING-DATE",
-"valueTransformer":"nextDateFromFrequencycc",
-"joinFieldcode":"FIELD-PAYMENT-DATE"
-.
-.
-.
-
-"maxLength": 30.
-"dataFieldsize": 2
-"options":
-.
-"order": 1,
-"label": "s49.95 per Month",
-"value": "s49.95 Monthly"
-"hidden": false
-"disabled": false
+              "uSe": "MODIFY_VALUE",
+              "useValuesList": [
+                {
+                  "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                  "valueTransformer": "frequencyFromPayment",
+                  "joinFieldCode": ""
+                },
+                {
+                  "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                  "valueTransformer":"nextDateFromFrequencyCc",
+                  "joinFieldCode": "FIELD-PAYMENT-DATE"
+                }
+              ]
+            }
+          ],
+          "maxLength": 30,
+          "dataFieldsize": 2,
+          "options":[
+            {
+              "order": 1,
+              "label": "$49.95 per Month",
+              "value": "$49.95 Monthly",
+              "hidden": false,
+              "disabled": false
 
 .
 "order": 2,
@@ -32854,23 +32854,23 @@ multiSelectAccountServices: {
 
 type: ProductAccountFormSectionTypes.FOOTER,
 id: 'form-footer',
-value: 'Test form footer text here',
-},
+value: 'Test form footer text here'
+  },
 };
-export const mockProductAccountQuestionsArray: IProductAccountFormSection[] = [
-mockProductAccountQuestions.inputInitialDeposit,
-mockProductAccountQuestions.multiSelectAccountServices,
-mockProductAccountQuestions.hSSTermSelect,
+export const mockProductAccountQuestionsArray: IProductAccountFormSection
+  mockProductAccountQuestions.inputInitialDeposit,
+  mockProductAccountQuestions.multiSelectAccountServices,
+  mockProductAccountQuestions.hSSTermSelect,
 ];
 
 export const mockProductAccountQuestionsBySubProduct: Partial<
-Record<APISubProductTypes, IProductAccountFormSection[]>
+  Record<APISubProductTypes, IProductAccountFormSection[]>
 > = {
-[APISubProductTypes.CHECKING]: [mockProductAccountQuestions.inputInitialDeposit, mockProductAccountQuestions.footer],
-[APISubProductTypes.SAVINGS]: [],
-[APISubProductTypes.MONEY_MARKET]: [],
-[APISubProductTypes.SHARE_CERTIFICATE]: [],
-[APISubProductTypes.MEMBERSHIP_SHARE]: [],
+  [APISubProductTypes.CHECKING]: [mockProductAccountQuestions.inputInitialDeposit, mockProductAccountQuestions.footer],
+  [APISubProductTypes.SAVINGS]: [],
+  [APISubProductTypes.MONEY_MARKET]: [],
+  [APISubProductTypes.SHARE_CERTIFICATE]: [],
+  [APISubProductTypes.MEMBERSHIP_SHARE]: [],
 };
 
 ```

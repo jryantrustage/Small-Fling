@@ -1,0 +1,77 @@
+<svg width="12" height="14" viewBox="0 0 12 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path fill-rule="evenodd" clip-rule="evenodd" d="M3.04871 1.34106C1.94404 1.34106 1.02671 2.23573 1.00071 3.33906V10.4851C0.97671 11.6191 1.87004 12.5524 2.99338 12.5771H8.38204C9.49471 12.5371 10.3754 11.6191 10.368 10.4884V4.55973L7.27871 1.34106H3.05671H3.04871ZM3.05671 13.5771H2.97271C1.29805 13.5411 -0.0352878 12.1491 0.000712187 10.4744V3.32706C0.0400455 1.67306 1.40538 0.341064 3.04671 0.341064H3.05871H7.49138C7.62738 0.341064 7.75738 0.396398 7.85205 0.494398L11.2294 4.0124C11.318 4.10506 11.368 4.22973 11.368 4.3584V10.4851C11.3787 12.1577 10.0747 13.5171 8.39938 13.5771H3.05671Z" fill="#262C30"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M10.8644 4.9895H9.02841C7.80774 4.98616 6.81641 3.9915 6.81641 2.77283V0.833496C6.81641 0.557496 7.04041 0.333496 7.31641 0.333496C7.59241 0.333496 7.81641 0.557496 7.81641 0.833496V2.77283C7.81641 3.44216 8.36041 3.9875 9.02974 3.9895H10.8644C11.1404 3.9895 11.3644 4.2135 11.3644 4.4895C11.3644 4.7655 11.1404 4.9895 10.8644 4.9895Z" fill="#262C30"/>
+<path fill-rule="evenodd" clip-rule="evenodd" d="M5.42773 10.1335C5.15173 10.1335 4.92773 9.90953 4.92773 9.63353V5.6062C4.92773 5.3302 5.15173 5.1062 5.42773 5.1062C5.70373 5.1062 5.92773 5.3302 5.92773 5.6062V9.63353C5.92773 9.90953 5.70373 10.1335 5.42773 10.1335Z" fill="#262C30"/>
+<path fi1l-rule="evenodd" clip-rule="evenodd" d="M3.86507 7.67641c3.73774 7.67641 3.60974 7.62774 3.5124 7.53041c3.31707 7.33574 3.31574 7.01974
+<path fill-rule="evenodd" clip-rule="evenodd" d="M3.86507 7.67641C3.73774 7.67641 3.60974 7.62774 3.5124 7.53041C3.31707 7.33574 3.31574 7.01974 3.51107 6.82374L5.07374 5.25307C5.26174 5.06441 5.59507 5.06441 5.7824 5.25307L7.3464 6.82374C7.54107 7.01974 7.5404 7.33574 7.34507 7.53041C7.14907 7.72507 6.8324 7.72507 6.63774 7.52907L5.4284 6.31441L4.21907 7.52907C4.12174 7.62774 3.99307 7.67641 3.86507 7.67641Z" fill="#262C30"/>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* Helper function to generate data array for SimpleAccordionGroup
+* @param dataObject object that maps each accordion step (string) to content for that accordion
+* @param {string[]} orderedSteps array of ordered accordion step strings
+* @param {string} activeStep the active step of the accordion group
+* @returns
+*/
+export const useGenerateAccordionGroupData = (
+dataObject: Record<string, BaseAccordionGroupDataItem>,
+orderedSteps: Array<string | IStepData>,
+activeStep?: string
+): Array<ISimpleAccordionDataItem> => {
+const { t } = useTranslation();
+const getStringStep = (input: string | IStepData): string => (typeof input === 'string' ? input : input.step);
+const activeStepIndex = orderedSteps.findIndex((step) => getStringStep(step) === activeStep) || 0;
+/** Created array of SimpleAccordionGroup data items */
+const data = orderedSteps.map((step: string | IStepData, stepIndex: number) => {
+let accordionStage = AccordionStage.UNACTIVE;
+if (stepIndex === activeStepIndex) {
+accordionStage = AccordionStage.ACTIVE;
+} else if (stepIndex < activeStepIndex) {
+accordionStage = AccordionStage.COMPLETED;
+}
+const stringStep = getStringStep(step);
+const { accordionContent, ...contentRest } = dataObject[stringStep];
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,125 @@
+json
+.
+"segmentCode": "SEGMENT-TEST",
+"segmentTitle": "Test Segment Title",
+"segmentsubTitle": "",
+"arialabel":""
+"helpText": "",
+"progressItemcCode"::"PROGREss-ITEM-TEST",
+"iscomplete": false,
+"presentationorder": 1,
+"hidden": false,
+"required": true.
+"prefilled": false,
+"prefilisource":"",
+"exposition":
+.
+"order": 1
+"content":"sample exposition text"
+.
+
+"progressTo":
+.
+"destination":"SEGMENT-DESTINATION-HERE"
+.
+
+"f ieldGroups":
+.
+"helpText": "# Help Text Header.InHelp text content herelninNew Line Here",
+"groupCode":"GRouP-CODE-EXAMPLE",
+"groupTitle":"Group Title Here"
+"groupsubTitle:"
+"groupType":"basic",
+"arialabel":""
+"iscomplete": false.
+"presentationorder": 1
+"hidden": false,
+"disabled: false."
+"required: false."
+"exposition": [!,
+"dataFields":
+.
+"fieldCode":"FIELD-SELECT-EXAMPLE",
+"fieldLabel":"Field select Example",
+"arialabel": "",
+"helpText": "",
+"placeholder":"select Example Placeholder",
+"presentationorder": 1.
+"hidden": false.
+"usage": "input",
+"disabled": false,
+"required": false.
+"fieldType":"single-select",
+"maxLength": 10o,
+"options":
+.
+"label": "option 1",
+"value": "vALUE_1"
+
+.
+"label":"option 2",
+"value": "vALUE_2"
+
+.
+"label":"option 3",
+"value": "vALUE_3"
+
+.
+"label": "option 4",
+"value": "vALUE_4"
+
+.
+"label": "option 5",
+"value": "vALUE_5"
+.
+
+"default": ""
+"value":
+.
+.
+
+.
+"groupCode":"GRouP-suBMIT-CODE"
+"groupTitle":""
+"groupsubTitle":"",
+"groupType":"progress",
+"arialabel":""
+"helpText": "",
+"iscomplete": false
+"presentationorder": 2
+"hidden": false,
+"disabled: false."
+"required: false.
+"exposition": [!,
+"dataFields":
+.
+"fieldcode":"FIELD-suBMIT-CODE",
+"f ieldLabel":",
+"arialabel":"
+"helpText": ",
+"placeholder": "",
+"presentationorder": 1.
+"hidden": false
+"usage": "progress",
+"disabled": false,
+"required": false.
+"fieldType":"single-select",
+"maxLength": 30
+"default": "save",
+"value": "save"
+"options":
+.
+"order": 1,
+"label":"SAVE AND CONTINUE",
+"value": "save",
+"hidden": false
+"disabled": false
+.
+
+"exposition":
+.
+
+.
+
+"fieldGroupcount": 7
+.
