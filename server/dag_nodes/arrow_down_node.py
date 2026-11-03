@@ -218,10 +218,47 @@ class ArrowDownPagerNode(BaseDagNode):
                 pass
 
         matched = bool(nav_res.get("reached", False))
+        eof_reached = bool(nav_res.get("eof_reached", False))
+        offline_overlay_detected = bool(
+            nav_res.get("offline_overlay_detected", False)
+            or state.orchestration_state.get("offline_overlay_detected", False)
+        )
         actual_top = nav_res.get("actual_top")
         actual_bot = nav_res.get("actual_bottom") or ((actual_top + visible_span - 1) if actual_top else 0)
         total_arrows_pressed += int(nav_res.get("arrows_pressed", 0))
         page_keys_pressed = int(nav_res.get("page_keys_pressed", 0))
+
+        target_total_lines = int(
+            blackboard.total_lines
+            or state.latest_telemetry.get("target_total_lines")
+            or state.headless_telemetry_session.get("target_total_lines")
+            or state.dag_state["nodes"].get("init_end", {}).get("total_lines")
+            or proj_active.get("target_total_lines")
+            or 0
+        )
+
+        # Dual-situation EOF check on the last arrow:
+        # If previous bottom or actual bottom is at total_lines OR 1..4 lines short (e.g. 32,878 vs 32,881)
+        # while the 'Offline' markdown editor overlay is covering the last 3 lines, the scan is complete!
+        effective_bot = max(int(prev_bottom or 0), int(actual_bot or 0))
+        if not eof_reached and target_total_lines > 0 and effective_bot >= target_total_lines - 4:
+            from ocr_engine import detect_offline_editor_overlay, is_eof_reached_with_offline_awareness
+            if not offline_overlay_detected and snap_after:
+                off_res = detect_offline_editor_overlay(snap_after, use_ocr=True)
+                offline_overlay_detected = bool(off_res.get("detected"))
+            tail_txt = ""
+            if state.document_lines:
+                t_keys = sorted(state.document_lines.keys())[-6:]
+                tail_txt = "\n".join(str(state.document_lines.get(k, "")) for k in t_keys)
+            is_eof, _ = is_eof_reached_with_offline_awareness(
+                bottom_line=effective_bot,
+                total_lines=target_total_lines,
+                offline_detected=offline_overlay_detected,
+                tail_text=tail_txt,
+            )
+            if is_eof:
+                matched = True
+                eof_reached = True
 
         # Contiguous Overlap Continuity Guarantee:
         # If the viewport advanced past cur_top and settled with a small overlap (actual_top <= target_top)
@@ -251,6 +288,7 @@ class ArrowDownPagerNode(BaseDagNode):
                 "new_top_line": actual_top or cur_top,
                 "reached": False,
                 "advanced": False,
+                "eof_reached": False,
                 "evaluator": "Pacing & Alignment Evaluator",
                 "error": error_msg,
                 "telemetry_insight": f"Alignment failed: top is Line {actual_top}, expected Line {target_top} ⛔"
@@ -258,12 +296,30 @@ class ArrowDownPagerNode(BaseDagNode):
             raise RuntimeError(error_msg)
 
         settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top) else target_top
-        state.orchestration_state["cursor_line"] = new_cursor_line
+        state.orchestration_state["cursor_line"] = effective_bot if eof_reached else new_cursor_line
         state.orchestration_state["last_arrow_count"] = total_arrows_pressed
         state.orchestration_state["next_target_top"] = settled_top
+        state.orchestration_state["eof_reached"] = eof_reached
+        state.orchestration_state["offline_overlay_detected"] = offline_overlay_detected
         state.latest_telemetry["current_top_line"] = settled_top
+        if eof_reached and effective_bot > 0:
+            state.latest_telemetry["current_bottom_line"] = effective_bot
+            blackboard.bottom_line = effective_bot
         blackboard.top_line = settled_top
         blackboard.arrow_count = total_arrows_pressed
+
+        occluded_cnt = max(0, target_total_lines - effective_bot) if (eof_reached and target_total_lines > 0) else 0
+        if eof_reached:
+            insight_str = (
+                f"Last arrow verified at EOF: Line {effective_bot:,} of {target_total_lines:,} "
+                + (
+                    f"('Offline' editor overlay covers last {occluded_cnt} lines) — scan complete ✔"
+                    if occluded_cnt > 0
+                    else "(100% EOF reached) ✔"
+                )
+            )
+        else:
+            insight_str = f"Stepped {total_arrows_pressed} down/up arrows: target top Line {settled_top} verified ✔"
 
         state.dag_state["nodes"]["arrow_down"].update({
             "status": "completed",
@@ -275,8 +331,11 @@ class ArrowDownPagerNode(BaseDagNode):
             "new_top_line": settled_top,
             "reached": True,
             "advanced": True,
+            "eof_reached": eof_reached,
+            "offline_overlay_detected": offline_overlay_detected,
+            "occluded_tail_lines": occluded_cnt,
             "evaluator": "Pacing & Alignment Evaluator",
-            "telemetry_insight": f"Stepped {total_arrows_pressed} down/up arrows: target top Line {settled_top} verified ✔",
+            "telemetry_insight": insight_str,
             "error": None
         })
 
@@ -284,13 +343,14 @@ class ArrowDownPagerNode(BaseDagNode):
             state.dag_state["nodes"]["verification_trigger"].update({
                 "target_top_line": settled_top,
                 "target_top": settled_top,
-                "expected_top": settled_top
+                "expected_top": settled_top,
+                "eof_reached": eof_reached,
             })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Stepped {total_arrows_pressed} down arrows: Target top Ln {settled_top} verified ✔",
+            message=insight_str,
             data={
                 "arrow_count": total_arrows_pressed,
                 "step_count": total_arrows_pressed,
@@ -298,9 +358,12 @@ class ArrowDownPagerNode(BaseDagNode):
                 "target_top_line": settled_top,
                 "target_top": settled_top,
                 "new_top_line": settled_top,
-                "cursor_line": new_cursor_line,
+                "cursor_line": effective_bot if eof_reached else new_cursor_line,
                 "reached": True,
-                "advanced": True
+                "advanced": True,
+                "eof_reached": eof_reached,
+                "offline_overlay_detected": offline_overlay_detected,
+                "occluded_tail_lines": occluded_cnt,
             }
         )
 

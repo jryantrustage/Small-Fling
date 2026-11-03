@@ -60,41 +60,79 @@ class DocumentAssembleNode(BaseDagNode):
             print(f"[DocumentAssembleNode] File write note: {se}")
 
         is_complete = False
-        if total_lines_target > 0 and latest_bottom >= total_lines_target:
+        eof_reason = ""
+        n6_info = state.dag_state["nodes"].get("arrow_down", {})
+        eof_reached_flag = bool(n6_info.get("eof_reached") or state.orchestration_state.get("eof_reached"))
+        offline_flag = bool(
+            n6_info.get("offline_overlay_detected")
+            or state.orchestration_state.get("offline_overlay_detected")
+        )
+        effective_bottom = max(int(latest_bottom or 0), int(max_k or 0))
+        tail_txt = "\n".join(doc_lines[-6:]) if doc_lines else ""
+
+        from ocr_engine import is_eof_reached_with_offline_awareness
+        is_eof_dual, eof_reason = is_eof_reached_with_offline_awareness(
+            bottom_line=effective_bottom,
+            total_lines=total_lines_target,
+            offline_detected=(offline_flag or eof_reached_flag),
+            tail_text=tail_txt,
+        )
+
+        if total_lines_target > 0 and effective_bottom >= total_lines_target:
             is_complete = True
         elif total_lines_target > 0 and captured_count >= total_lines_target:
             is_complete = True
+        elif is_eof_dual or (eof_reached_flag and total_lines_target > 0 and effective_bottom >= total_lines_target - 4):
+            is_complete = True
 
         loop_iter = (state.dag_state["nodes"].get("document_assemble", {}).get("loop_iteration") or 0) + 1
-        pct = round((captured_count / total_lines_target * 100) if total_lines_target > 0 else 0, 1)
+        if is_complete:
+            pct = 100.0
+        else:
+            pct = round((max(captured_count, effective_bottom) / total_lines_target * 100) if total_lines_target > 0 else 0, 1)
 
         blackboard.is_complete = is_complete
         blackboard.lines_count = captured_count
 
+        occluded_shortfall = max(0, total_lines_target - effective_bottom) if (is_complete and total_lines_target > effective_bottom) else 0
+        complete_suffix = ""
+        if is_complete:
+            if occluded_shortfall > 0:
+                complete_suffix = f" • 100% COMPLETE at Ln {effective_bottom:,}/{total_lines_target:,} ('Offline' overlay covers last {occluded_shortfall} lines) ✔"
+            else:
+                complete_suffix = " • 100% COMPLETE ✔"
+
         state.dag_state["nodes"]["document_assemble"].update({
             "status": "completed",
             "total_captured_lines": captured_count,
+            "effective_bottom_line": effective_bottom,
             "completion_percent": pct,
             "is_complete": is_complete,
+            "offline_eof_completed": bool(is_complete and occluded_shortfall > 0),
+            "occluded_tail_lines": occluded_shortfall,
             "loop_iteration": loop_iter,
             "reconstructed_length": len(full_markdown),
             "evaluator": "Document Integrity Evaluator",
             "healing_step": None if is_complete else "Capturing next page slice",
-            "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + (" • 100% COMPLETE ✔" if is_complete else ""),
+            "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + complete_suffix,
             "error": None
         })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Document assemble: {captured_count} lines verified" + (" (COMPLETE ✔)" if is_complete else f" ({pct}%)"),
+            message=f"Document assemble: {captured_count} lines verified" + (complete_suffix if is_complete else f" ({pct}%)"),
             is_complete=is_complete,
             total_lines=total_lines_target,
             data={
                 "total_captured_lines": captured_count,
+                "effective_bottom_line": effective_bottom,
                 "total_lines_target": total_lines_target,
                 "completion_percent": pct,
                 "is_complete": is_complete,
+                "offline_eof_completed": bool(is_complete and occluded_shortfall > 0),
+                "occluded_tail_lines": occluded_shortfall,
+                "eof_reason": eof_reason,
                 "loop_iteration": loop_iter,
                 "reconstructed_length": len(full_markdown)
             }

@@ -430,14 +430,20 @@ class FrameOcrNode(BaseDagNode):
         state.save_persisted_state()
         state.update_dag_after_frame(fid, top_ln, bot_ln)
 
-        # Detect line wrap state
+        # Detect line wrap state and 'Offline' editor overlay
+        offline_overlay_detected = False
         try:
+            from ocr_engine import detect_offline_editor_overlay, _last_gutter_offline_info
             img_wrap = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
             wrap_info = detect_line_wrap_state(img_wrap, dpi_factor=dpi_factor)
             bottom_anchor_text = wrap_info.get("bottom_text_anchor", "")
             top_anchor_text = wrap_info.get("top_text_anchor", "")
             is_wrapped_page = wrap_info.get("is_wrapped_page", False)
             blackboard.latest_frame_bgr = img_wrap
+            offline_overlay_detected = bool(_last_gutter_offline_info.get("detected"))
+            if not offline_overlay_detected and img_wrap is not None:
+                off_chk = detect_offline_editor_overlay(img_wrap, use_ocr=False)
+                offline_overlay_detected = bool(off_chk.get("detected"))
         except Exception:
             bottom_anchor_text = ""
             top_anchor_text = ""
@@ -446,6 +452,7 @@ class FrameOcrNode(BaseDagNode):
         state.orchestration_state["bottom_text_anchor"] = bottom_anchor_text
         state.orchestration_state["top_text_anchor"] = top_anchor_text
         state.orchestration_state["is_wrapped_page"] = is_wrapped_page
+        state.orchestration_state["offline_overlay_detected"] = offline_overlay_detected
 
         target_top = bot_ln + 1 if (bot_ln > 0 and bot_ln >= top_ln) else ((top_ln or expected_top or 1) + lpp)
         state.orchestration_state["next_target_top"] = target_top

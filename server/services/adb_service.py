@@ -2533,13 +2533,28 @@ async def navigate_to_target_top_line(
          change or top/bottom caret unpinning occurs.
     """
     from services import state
-    from ocr_engine import detect_top_line_from_image, find_gutter_numbers_cluster
+    import db
+    from ocr_engine import (
+        detect_top_line_from_image,
+        find_gutter_numbers_cluster,
+        detect_offline_editor_overlay,
+        is_eof_reached_with_offline_awareness,
+    )
 
     target_top = max(1, int(target_top))
     ser = await get_active_adb_serial(serial)
     did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
     valid_d = sanitize_input_display_id(did)
     disp_pfx = f"-d {valid_d} " if valid_d else ""
+
+    active_proj = db.get_active_project() or {}
+    target_total_lines = int(
+        state.latest_telemetry.get("target_total_lines")
+        or state.headless_telemetry_session.get("target_total_lines")
+        or state.dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+        or active_proj.get("target_total_lines")
+        or 0
+    )
 
     prof = DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES.get("pixel_8", {"lines_per_page": 24}))
     page_span = int(
@@ -2695,6 +2710,60 @@ async def navigate_to_target_top_line(
         actual_bot = cur_bot
         if last_g and last_g >= cur_t and 4 <= (last_g - cur_t + 1) <= 75:
             page_span = last_g - cur_t + 1
+
+        # Dual-Situation EOF Detection (after down-arrow verification):
+        # 1. Standard EOF: actual_bot >= target_total_lines (e.g. 32,881 / 32,881)
+        # 2. 'Offline' Editor Overlay EOF: actual_bot is 1..4 lines short of target_total_lines
+        #    (specifically 3 lines short, e.g. 32,878 vs 32,881) while the '[icon] Offline' badge
+        #    is covering the bottom 3 gutter lines and down-arrow has been verified.
+        if (
+            target_top > 1
+            and target_total_lines > 0
+            and actual_bot >= target_total_lines - 4
+            and (total_arrows > 0 or total_page_keys > 0 or actual_bot >= target_total_lines)
+        ):
+            offline_det = bool(meta.get("offline_overlay_detected"))
+            offline_info = meta.get("offline_info") or {}
+            if not offline_det and actual_bot < target_total_lines:
+                offline_info = detect_offline_editor_overlay(img, use_ocr=True)
+                offline_det = bool(offline_info.get("detected"))
+
+            tail_lines_txt = ""
+            if state.document_lines:
+                tail_keys = sorted(state.document_lines.keys())[-6:]
+                tail_lines_txt = "\n".join(str(state.document_lines.get(k, "")) for k in tail_keys)
+
+            is_eof, eof_reason = is_eof_reached_with_offline_awareness(
+                bottom_line=actual_bot,
+                total_lines=target_total_lines,
+                offline_detected=offline_det,
+                tail_text=tail_lines_txt,
+            )
+            if is_eof:
+                occluded_cnt = max(0, target_total_lines - actual_bot)
+                state.orchestration_state["cursor_line"] = actual_bot
+                if total_arrows > 0 or total_page_keys > 0:
+                    state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * caret_span)
+                state.latest_telemetry["current_top_line"] = actual_top
+                state.latest_telemetry["current_bottom_line"] = actual_bot
+                actions_taken.append(f"EOF verified after DownArrow check: {eof_reason} ✔")
+                return {
+                    "status": "ok",
+                    "reached": True,
+                    "eof_reached": True,
+                    "offline_overlay_detected": offline_det,
+                    "offline_info": offline_info,
+                    "occluded_tail_lines": occluded_cnt,
+                    "eof_reason": eof_reason,
+                    "target_top": target_top,
+                    "actual_top": actual_top,
+                    "actual_bottom": actual_bot,
+                    "arrows_pressed": total_arrows,
+                    "page_keys_pressed": total_page_keys,
+                    "attempts": min(attempt, max_attempts),
+                    "snapshot_bytes": latest_snap,
+                    "actions_taken": actions_taken,
+                }
 
         # If this was the final post-keystroke verification check, break out
         if attempt > max_attempts:

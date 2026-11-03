@@ -183,6 +183,11 @@ class InitEndNode(BaseDagNode):
             )
 
         # Update state and blackboard
+        from ocr_engine import detect_offline_editor_overlay
+        offline_res = detect_offline_editor_overlay(snap_fixed or blackboard.current_image_bytes, use_ocr=True)
+        offline_detected_at_init = bool(offline_res.get("detected"))
+        offline_eof_line = total_lines if offline_detected_at_init else max(1, total_lines - 3)
+
         blackboard.total_lines = total_lines
         blackboard.top_line = top_line
         blackboard.bottom_line = total_lines
@@ -191,20 +196,32 @@ class InitEndNode(BaseDagNode):
         if pid and total_lines > 0:
             db.update_project_target_lines(pid, total_lines)
 
+        insight_msg = (
+            f"Calibrated {total_lines:,} total lines at EOF ('Offline' overlay present) ✔"
+            if offline_detected_at_init
+            else f"Calibrated {total_lines:,} total lines at EOF (or {offline_eof_line:,} if 'Offline' overlay appears) ✔"
+        )
         state.dag_state["nodes"]["init_end"].update({
             "status": "completed",
             "total_lines": total_lines,
+            "offline_eof_line": offline_eof_line,
+            "offline_overlay_detected": offline_detected_at_init,
             "evaluator": "EOF Gutter Evaluator",
-            "telemetry_insight": f"Calibrated {total_lines:,} total lines at EOF ✔",
+            "telemetry_insight": insight_msg,
             "error": None
         })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Calibrated {total_lines:,} total lines at EOF ✔",
+            message=insight_msg,
             total_lines=total_lines,
             top_line=top_line,
             bottom_line=total_lines,
-            data={"total_lines": total_lines, "top_line": top_line}
+            data={
+                "total_lines": total_lines,
+                "offline_eof_line": offline_eof_line,
+                "offline_overlay_detected": offline_detected_at_init,
+                "top_line": top_line,
+            }
         )

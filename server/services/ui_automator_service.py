@@ -79,41 +79,52 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     scale_y = (h / 1080.0) if h > 0 else 1.0
 
     results: Dict[str, Tuple[int, int]] = {
-        "pencil": (int(1660 * scale_x), int(236 * scale_y)),
-        "split": (int(1710 * scale_x), int(236 * scale_y)),
-        "preview": (int(1760 * scale_x), int(236 * scale_y)),
-        "theme_dropdown": (int(1850 * scale_x), int(236 * scale_y)),
+        "pencil": (int(1660 * scale_x), int(246 * scale_y)),
+        "split": (int(1710 * scale_x), int(246 * scale_y)),
+        "preview": (int(1760 * scale_x), int(246 * scale_y)),
+        "theme_dropdown": (int(1840 * scale_x), int(246 * scale_y)),
     }
 
-    # Search in secondary markdown toolbar strip (y: 120..280 on 1080p, x: >= 1550)
-    tb_y1, tb_y2 = int(120 * scale_y), int(280 * scale_y)
-    tb_x1, tb_x2 = int(1550 * scale_x), w
+    # Search inside the markdown formatting toolbar icon strip (y: 230..262 on 1080p, x: >= 1615),
+    # avoiding the top/bottom horizontal toolbar borders at y~217 and y~269.
+    tb_y1, tb_y2 = int(230 * scale_y), int(262 * scale_y)
+    tb_x1, tb_x2 = int(1615 * scale_x), min(w, int(1895 * scale_x))
 
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
         return results
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    is_dark = np.mean(gray) < 100
-    icons_mask = (gray > 45) if is_dark else (gray < 220)
+    is_dark = np.mean(gray) < 110
+    if is_dark:
+        # Use max(B, G, R) > 105 so both the blue active button and gray inactive buttons are captured
+        max_chan = np.max(crop, axis=2)
+        icons_mask = max_chan > 105
+    else:
+        min_chan = np.min(crop, axis=2)
+        icons_mask = min_chan < 200
+
     col_counts = np.sum(icons_mask, axis=0)
-    active_cols = np.where(col_counts > 2)[0]
+    active_cols = np.where(col_counts >= 2)[0]
 
     blobs = []
     if len(active_cols) > 0:
         cur = [active_cols[0]]
         for col in active_cols[1:]:
-            if col - cur[-1] <= 8:
+            if col - cur[-1] <= int(max(6, round(8 * scale_x))):
                 cur.append(col)
             else:
                 blobs.append((cur[0], cur[-1]))
                 cur = [col]
         blobs.append((cur[0], cur[-1]))
 
-    significant_blobs = [b for b in blobs if (b[1] - b[0]) >= 6]
+    significant_blobs = [b for b in blobs if (b[1] - b[0]) >= max(4, int(5 * scale_x))]
     centers = [tb_x1 + (b[0] + b[1]) // 2 for b in significant_blobs]
 
-    center_y = int(236 * scale_y)
+    row_counts = np.sum(icons_mask, axis=1)
+    active_rows = np.where(row_counts >= 2)[0]
+    center_y = int(tb_y1 + np.mean(active_rows)) if len(active_rows) > 0 else int(246 * scale_y)
+
     if len(centers) >= 2:
         results["pencil"] = (int(centers[0]), int(center_y))
         results["theme_dropdown"] = (int(centers[-1]), int(center_y))
@@ -125,10 +136,40 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     return results
 
 
+def _detect_active_toolbar_mode_button(img: np.ndarray) -> Optional[str]:
+    """Inspects the right-hand markdown toolbar to determine which mode icon ('pencil', 'split', 'preview') has the active blue pill highlight."""
+    if img is None or img.size == 0:
+        return None
+    h_i, w_i = img.shape[:2]
+    scale_x = (w_i / 1920.0) if w_i > 0 else 1.0
+    scale_y = (h_i / 1080.0) if h_i > 0 else 1.0
+    tb_y1 = int(205 * scale_y)
+    tb_y2 = int(280 * scale_y)
+    tb_x1 = int(1580 * scale_x)
+    crop_tb = img[tb_y1:tb_y2, tb_x1:]
+    if crop_tb.size == 0:
+        return None
+    hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
+    blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
+    conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    valid_conts = [c for c in conts if cv2.contourArea(c) >= 15]
+    valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+    for c in valid_conts:
+        bx, _, bw, _ = cv2.boundingRect(c)
+        norm_cx = (tb_x1 + bx + bw // 2) / scale_x
+        if norm_cx < 1685:
+            return "pencil"
+        elif 1685 <= norm_cx < 1735:
+            return "split"
+        elif norm_cx >= 1735:
+            return "preview"
+    return None
+
+
 async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[int] = None) -> Dict[str, Any]:
     """
-    Selects the editor toolbar with touch motion on the pencil icon to enable single-pane edit mode.
-    Suppresses the soft keyboard immediately after activation to keep document text fully visible.
+    Switches the Teams Markdown Editor from Read-Only / Preview / Split mode to single-pane Edit Mode
+    by locating and tapping the Pencil icon in the toolbar, then immediately suppressing the soft keyboard.
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -137,12 +178,13 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
         return {
             "success": True,
             "actions": ["Tapped pencil icon to enter single-pane edit mode (mock)"],
-            "target_coords": (1655, 190),
+            "target_coords": (1660, 246),
             "edit_mode_passed": True,
             "message": "Switched to single-pane Edit Mode ✔"
         }
 
     disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
     actions = []
 
     # 1. Capture current display screenshot to accurately inspect active mode
@@ -156,38 +198,14 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
             scale_x = (w_i / 1920.0) if w_i > 0 else 1.0
             scale_y = (h_i / 1080.0) if h_i > 0 else 1.0
 
-            # Detect current active toolbar button
-            tb_y1 = int(140 * scale_y)
-            tb_y2 = int(245 * scale_y)
-            tb_x1 = int(1450 * scale_x)
-            crop_tb = img[tb_y1:tb_y2, tb_x1:]
-            active_button = None
-            if crop_tb.size > 0:
-                hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
-                blue_mask = cv2.inRange(hsv_p, np.array([95, 50, 50]), np.array([135, 255, 255]))
-                conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                valid_conts = [c for c in conts if cv2.contourArea(c) >= 15]
-                valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
-                for c in valid_conts:
-                    bx, by, bw, bh = cv2.boundingRect(c)
-                    norm_cx = (tb_x1 + bx + bw // 2) / scale_x
-                    if norm_cx < 1685:
-                        active_button = "pencil"
-                        break
-                    elif 1685 <= norm_cx < 1735:
-                        active_button = "split"
-                        break
-                    elif norm_cx >= 1735:
-                        active_button = "preview"
-                        break
-
+            active_button = _detect_active_toolbar_mode_button(img)
             if active_button == "pencil":
                 actions.append("Pencil icon already active (single-pane Edit Mode verified)")
                 await dismiss_keyboard(ser, disp_id)
                 return {
                     "success": True,
                     "actions": actions,
-                    "target_coords": (int(1660 * scale_x), int(236 * scale_y)),
+                    "target_coords": (int(1660 * scale_x), int(246 * scale_y)),
                     "edit_mode_passed": True,
                     "message": "Editor is already in single-pane Edit Mode ✔"
                 }
@@ -195,7 +213,7 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
             icons = locate_toolbar_icons_cv(img)
             target_coords = icons.get("pencil")
             if target_coords:
-                actions.append(f"Located pencil edit icon at {target_coords} via toolbar vision engine")
+                actions.append(f"Located pencil edit icon at {target_coords} via toolbar vision engine (current mode: {active_button or 'read_only'})")
 
     # 2. UIAutomator fallback if CV locator did not find coordinates
     if not target_coords:
@@ -213,19 +231,40 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
     # 3. Default resolution-scaled coordinates fallback (Pencil icon in secondary toolbar)
     if not target_coords:
         disp_w, disp_h = await get_display_dimensions(ser, disp_id)
-        target_coords = (int(1660 * disp_w / 1920), int(236 * disp_h / 1080))
+        target_coords = (int(1660 * disp_w / 1920), int(246 * disp_h / 1080))
         actions.append(f"Using calibrated toolbar coordinates {target_coords} on display {disp_id}")
 
-    # 4. Dispatch touch motion directly on pencil icon
+    # 4. Dispatch touch motion directly on pencil icon to switch from Read-Only to Edit Mode
     x, y = target_coords
-    await run_adb_shell(f"input -d {disp_id} tap {x} {y}", ser)
-    actions.append(f"Dispatched touch motion on pencil icon at ({x}, {y}) on display {disp_id}")
-    await asyncio.sleep(0.35)
+    await run_adb_shell(f"input {disp_pfx}tap {x} {y}", ser)
+    actions.append(f"Dispatched touch tap on pencil icon at ({x}, {y}) on display {disp_id}")
+    await asyncio.sleep(0.45)
+    await dismiss_keyboard(ser, disp_id)
 
-    # 5. CRITICAL: Suppress soft keyboard if opened upon gaining editor focus
+    # 5. Verify pencil icon is now active; retry with mouse + touch tap if needed
+    snap_verify = await capture_external_screenshot(ser, bypass_lock=True)
+    edit_verified = False
+    if snap_verify:
+        img_v = cv2.imdecode(np.frombuffer(snap_verify, np.uint8), cv2.IMREAD_COLOR)
+        if img_v is not None:
+            edit_verified = (_detect_active_toolbar_mode_button(img_v) == "pencil")
+            if not edit_verified:
+                icons_v = locate_toolbar_icons_cv(img_v)
+                rx, ry = icons_v.get("pencil") or (x, y)
+                await run_adb_shell(f"input {disp_pfx}mouse tap {rx} {ry}; sleep 0.1; input {disp_pfx}tap {rx} {ry}", ser)
+                actions.append(f"Retried mouse+touch tap on pencil icon at ({rx}, {ry}) to enforce Edit Mode")
+                await asyncio.sleep(0.45)
+                await dismiss_keyboard(ser, disp_id)
+                snap_v2 = await capture_external_screenshot(ser, bypass_lock=True)
+                if snap_v2:
+                    img_v2 = cv2.imdecode(np.frombuffer(snap_v2, np.uint8), cv2.IMREAD_COLOR)
+                    if img_v2 is not None:
+                        edit_verified = (_detect_active_toolbar_mode_button(img_v2) == "pencil")
+
+    # 6. CRITICAL: Suppress soft keyboard if opened upon gaining editor focus
     await dismiss_keyboard(ser, disp_id)
     actions.append("Suppressed on-screen keyboard policy")
-    await asyncio.sleep(0.3)
+    await asyncio.sleep(0.25)
 
     # Update alignment status
     try:
@@ -239,7 +278,8 @@ async def enable_edit_mode(serial: Optional[str] = None, display_id: Optional[in
         "actions": actions,
         "target_coords": target_coords,
         "edit_mode_passed": True,
-        "message": "Switched to single-pane Edit Mode (split-screen duplicate text eliminated) ✔"
+        "edit_verified": edit_verified,
+        "message": "Switched from Read-Only to single-pane Edit Mode via Pencil icon ✔"
     }
 
 
@@ -376,10 +416,11 @@ async def prepare_markdown_editor_window(
 ) -> Dict[str, Any]:
     """
     Prepares a newly opened or floating Teams Markdown Editor window for OCR capture:
-    1. Maximizes the floating freeform window via its top-right '[]' Maximize control.
-    2. Enables single-pane Edit Mode via the toolbar Pencil icon and suppresses the soft keyboard.
-    3. Selects Dark Mode from the toolbar theme dropdown.
-    4. Dismisses any floating mini-modal / toast pop-ups and updates alignment status.
+    1. Waits for FilePreviewActivity / markdown viewer to open on the external display.
+    2. Maximizes the floating freeform window via its top-right '[]' Maximize control.
+    3. Selects Dark Mode from the toolbar theme dropdown (Moon/Sun icon).
+    4. Switches from Read-Only to Edit Mode via the toolbar Pencil icon and suppresses the soft keyboard.
+    5. Verifies both Dark Mode and Edit Mode are active, dismisses any mini-modals, and updates alignment status.
     """
     from services.adb_service import (
         maximize_floating_markdown_window,
@@ -393,25 +434,43 @@ async def prepare_markdown_editor_window(
     disp_id = display_id or await detect_external_display_id(ser)
     actions: List[str] = []
 
+    # 0. Wait up to 3.5s for FilePreviewActivity (Teams Markdown Editor) to be resumed on display
+    if "mock" not in str(ser).lower():
+        for _ in range(7):
+            act_chk = await run_adb_shell("dumpsys activity activities | grep -E 'topResumedActivity|resumedActivity|FilePreviewActivity'", ser, timeout=1.5)
+            if "filepreviewactivity" in (act_chk.get("stdout") or "").lower():
+                break
+            await asyncio.sleep(0.5)
+
     # 1. Maximize floating markdown editor window if in freeform mode
     max_res = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
     actions.extend(max_res.get("actions", []))
+    if max_res.get("was_floating"):
+        await asyncio.sleep(0.55)
 
-    # 2. Switch to single-pane Edit Mode (Pencil icon)
-    edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
-    actions.extend(edit_res.get("actions", []))
-
-    # 3. Switch to Dark Mode (Moon icon)
+    # 2. Select Dark Mode using automation (Moon/Sun theme dropdown)
     dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
     actions.extend(dark_res.get("actions", []))
 
-    # 4. Dismiss any floating mini-modals and suppress keyboard
+    # 3. Switch from Read-Only to Edit Mode using automation (Pencil icon)
+    edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
+    actions.extend(edit_res.get("actions", []))
+
+    # 4. Self-healing verification: if the theme dropdown only became active after leaving Read-Only mode,
+    #    re-apply Dark Mode and re-verify Edit Mode so both are guaranteed active.
+    if not dark_res.get("success", False):
+        dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
+        actions.extend(dark_res.get("actions", []))
+        edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
+        actions.extend(edit_res.get("actions", []))
+
+    # 5. Dismiss any floating mini-modals and suppress keyboard
     modal_res = await resolve_and_dismiss_mini_modals(serial=ser, display_id=disp_id, caller_node="prepare_markdown_editor")
     if modal_res.get("actions_taken"):
         actions.extend(modal_res["actions_taken"])
     await dismiss_keyboard(ser, disp_id)
 
-    # 5. Re-evaluate alignment status
+    # 6. Re-evaluate alignment status
     align = await check_and_update_alignment(ser)
     is_ready = bool(align.get("is_aligned") or (edit_res.get("success") and dark_res.get("success")))
 
@@ -423,7 +482,7 @@ async def prepare_markdown_editor_window(
         "file_name": align.get("file_name", ""),
         "alignment": align,
         "actions": actions,
-        "message": f"Markdown editor maximized, Edit Mode & Dark Mode active ({align.get('file_name') or 'ready'}) ✔"
+        "message": f"Markdown editor maximized, Dark Mode & Edit Mode (Pencil) active ({align.get('file_name') or 'ready'}) ✔"
     }
 
 
@@ -453,49 +512,76 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
     res, _ = ocr(crop)
 
     folder_name = ""
-    files: List[Dict[str, Any]] = []
+    raw_rows: List[List[Dict[str, Any]]] = []
     has_modified_by = False
 
     if res:
+        tokens = []
         for box, txt, score in res:
             pts = np.array(box)
             bx1 = x1_c + int(pts[:, 0].min())
             by1 = y1_c + int(pts[:, 1].min())
             bx2 = x1_c + int(pts[:, 0].max())
             by2 = y1_c + int(pts[:, 1].max())
-            bw, bh = bx2 - bx1, by2 - by1
-            cx, cy = (bx1 + bx2) // 2, (by1 + by2) // 2
-            clean = txt.strip()
+            clean = str(txt).strip()
             if not clean:
                 continue
-
             if "modified" in clean.lower() or "kb," in clean.lower():
                 has_modified_by = True
                 continue
+            tokens.append({
+                "x1": bx1, "y1": by1, "x2": bx2, "y2": by2,
+                "cy": (by1 + by2) / 2.0, "text": clean, "score": float(score)
+            })
 
-            # Folder title row in header (y ~ 130..185 in 1080p)
-            if by1 < int(190 * scale_y) and bx1 < int(900 * scale_x):
-                if not clean.lower().endswith(".md") and len(clean) >= 4 and "teams" not in clean.lower():
-                    folder_name = re.sub(r'CommonUl([_\-])', r'CommonUI\1', clean)
+        # Group tokens on the same horizontal row so split filenames (e.g. prefix + '_part3.md') are merged
+        tokens.sort(key=lambda t: (t["cy"], t["x1"]))
+        for tok in tokens:
+            if tok["y1"] < int(190 * scale_y) and tok["x1"] < int(900 * scale_x):
+                if not tok["text"].lower().endswith(".md") and len(tok["text"]) >= 4 and "teams" not in tok["text"].lower():
+                    folder_name = re.sub(r'CommonUl([_\-])', r'CommonUI\1', tok["text"])
                 continue
+            if tok["y1"] >= int(190 * scale_y):
+                placed = False
+                for r_group in raw_rows:
+                    avg_cy = sum(item["cy"] for item in r_group) / len(r_group)
+                    if abs(tok["cy"] - avg_cy) <= max(14.0, 18.0 * scale_y):
+                        r_group.append(tok)
+                        placed = True
+                        break
+                if not placed:
+                    raw_rows.append([tok])
 
-            # File rows in folder list (y >= 190 in 1080p)
-            if by1 >= int(190 * scale_y) and (
-                ".md" in clean.lower()
-                or ".markdown" in clean.lower()
-                or re.search(r'part\s*\d+', clean, re.IGNORECASE)
-            ):
-                mp = parse_multipart_markdown_filename(clean)
-                files.append({
-                    "file_name": mp.get("file_name") or clean,
-                    "raw_text": clean,
-                    "is_multipart": bool(mp.get("is_multipart")),
-                    "base_prefix": mp.get("base_prefix") or "",
-                    "part_number": mp.get("part_number"),
-                    "bbox": [bx1, by1, bw, bh],
-                    "tap_coords": [cx, cy],
-                    "score": round(float(score), 3)
-                })
+    files: List[Dict[str, Any]] = []
+    for r_group in raw_rows:
+        r_group.sort(key=lambda t: t["x1"])
+        merged_txt = "".join(
+            (t["text"] if idx == 0 or t["text"].startswith("_") or r_group[idx - 1]["text"].endswith("_") else f"_{t['text']}")
+            for idx, t in enumerate(r_group)
+        )
+        if (
+            ".md" in merged_txt.lower()
+            or ".markdown" in merged_txt.lower()
+            or re.search(r'part[_\-\s]*\d+', merged_txt, re.IGNORECASE)
+        ):
+            bx1 = min(t["x1"] for t in r_group)
+            by1 = min(t["y1"] for t in r_group)
+            bx2 = max(t["x2"] for t in r_group)
+            by2 = max(t["y2"] for t in r_group)
+            bw, bh = bx2 - bx1, by2 - by1
+            cx, cy = (bx1 + bx2) // 2, (by1 + by2) // 2
+            avg_score = sum(t["score"] for t in r_group) / len(r_group)
+            mp = parse_multipart_markdown_filename(merged_txt)
+            files.append({
+                "file_name": mp.get("file_name") or merged_txt,
+                "raw_text": merged_txt,
+                "is_multipart": bool(mp.get("is_multipart")),
+                "base_prefix": mp.get("base_prefix") or "",
+                "part_number": mp.get("part_number"),
+                "bbox": [bx1, by1, bw, bh],
+                "tap_coords": [cx, cy],
+                "score": round(float(avg_score), 3)
+            })
 
     files.sort(key=lambda f: f["bbox"][1])
     part_files = [f for f in files if f.get("is_multipart") and f.get("part_number") is not None]
@@ -556,8 +642,8 @@ async def exit_markdown_to_folder_list(
         back_x = int(bl + 33 * scale_x)
         back_y = int(bt + 95 * scale_y)
     else:
-        back_x = int(53 * scale_x)
-        back_y = int(152 * scale_y)
+        back_x = int(48 * scale_x)
+        back_y = int(151 * scale_y)
 
     # Refine Back Arrow ('<-') centroid from screenshot bright glyph pixels
     if snap:
@@ -579,7 +665,7 @@ async def exit_markdown_to_folder_list(
     # Tap the Back Arrow ('<-') to exit markdown editor back to folder list
     await run_adb_shell(f"input {disp_pfx}tap {back_x} {back_y}", ser, timeout=2.5)
     actions.append(f"Tapped Back Arrow ('<-') at ({back_x}, {back_y}) on display #{disp_id} to exit markdown view")
-    await asyncio.sleep(1.25)
+    await asyncio.sleep(1.35)
 
     snap_after = await capture_external_screenshot(ser, bypass_lock=True)
     folder_scan: Dict[str, Any] = {"is_folder_view": False, "files": []}
@@ -592,7 +678,7 @@ async def exit_markdown_to_folder_list(
         # Retry with mouse tap on Back Arrow
         await run_adb_shell(f"input {disp_pfx}mouse tap {back_x} {back_y}", ser, timeout=2.5)
         actions.append(f"Retried mouse tap on Back Arrow ('<-') at ({back_x}, {back_y})")
-        await asyncio.sleep(1.25)
+        await asyncio.sleep(1.35)
         snap_retry = await capture_external_screenshot(ser, bypass_lock=True)
         if snap_retry:
             img_retry = cv2.imdecode(np.frombuffer(snap_retry, np.uint8), cv2.IMREAD_COLOR)
@@ -611,16 +697,17 @@ async def select_and_open_next_markdown_part(
     serial: Optional[str] = None,
     display_id: Optional[int] = None,
     current_file_name: Optional[str] = None,
+    current_part_number: Optional[int] = None,
     target_part_number: Optional[int] = None,
     base_prefix: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Full automated multi-part bundle transition:
-    1. Exits the completed markdown editor view by clicking the Back Arrow ('<-') (Attachment 1).
-    2. Scans the Teams folder files list (Attachment 2) to discover all part files (e.g., part1..part3).
-    3. Selects and clicks the next part file in sequence (e.g., part2.md or part3.md).
-    4. Maximizes the newly opened floating markdown editor window (Attachment 3) via its '[]' button,
-       and switches to single-pane Edit Mode (Pencil) and Dark Mode (Moon).
+    1. Exits the completed markdown editor view by clicking the Back Arrow ('<-').
+    2. Scans the Teams folder files list to discover all part files (e.g., part1..part3).
+    3. Selects and clicks the file with the incremented part number (e.g., part 2 finishes -> part 3 is opened).
+    4. Maximizes the newly opened markdown editor window via automation, selects Dark Mode,
+       and switches from Read-Only to Edit Mode via the Pencil icon.
     """
     from alignment_engine import parse_multipart_markdown_filename
     ser = await get_active_adb_serial(serial)
@@ -632,8 +719,8 @@ async def select_and_open_next_markdown_part(
     actions: List[str] = []
 
     mp_info = parse_multipart_markdown_filename(current_file_name)
-    cur_part = mp_info.get("part_number") or 1
-    next_part = target_part_number if (target_part_number is not None and target_part_number > 0) else (cur_part + 1)
+    cur_part = int(current_part_number) if (current_part_number is not None and int(current_part_number) > 0) else (mp_info.get("part_number") or 1)
+    next_part = int(target_part_number) if (target_part_number is not None and int(target_part_number) > 0) else (cur_part + 1)
     prefix = (base_prefix or mp_info.get("base_prefix") or "").lower()
 
     # Step 1: Exit current markdown view to Teams folder files list
@@ -644,6 +731,23 @@ async def select_and_open_next_markdown_part(
     available_parts = folder_scan.get("available_parts", [])
     total_parts = folder_scan.get("total_parts", 0)
 
+    # Step 2: Locate the next part in sequence (e.g. part 2 finishes -> part 3 is opened)
+    candidates = [f for f in files if f.get("part_number") == next_part]
+    if not candidates and ser and "mock" not in str(ser).lower():
+        # Scroll folder list down slightly in case the next part is below the visible fold
+        await run_adb_shell(f"input {disp_pfx}swipe 600 760 600 320 260 >/dev/null 2>&1", ser, timeout=2.5)
+        await asyncio.sleep(0.85)
+        snap_scroll = await capture_external_screenshot(ser, bypass_lock=True)
+        if snap_scroll:
+            img_scroll = cv2.imdecode(np.frombuffer(snap_scroll, np.uint8), cv2.IMREAD_COLOR)
+            if img_scroll is not None:
+                scroll_scan = scan_folder_markdown_files_cv(img_scroll)
+                if scroll_scan.get("files"):
+                    files.extend(scroll_scan["files"])
+                    available_parts = sorted(set(available_parts) | set(scroll_scan.get("available_parts", [])))
+                    total_parts = max(total_parts, scroll_scan.get("total_parts", 0))
+                    candidates = [f for f in scroll_scan["files"] if f.get("part_number") == next_part]
+
     if not files:
         return {
             "status": "error",
@@ -653,8 +757,6 @@ async def select_and_open_next_markdown_part(
             "actions": actions
         }
 
-    # Step 2: Locate the next part in sequence (e.g. part2.md or part3.md)
-    candidates = [f for f in files if f.get("part_number") == next_part]
     if prefix and len(candidates) > 1:
         pref_cands = [f for f in candidates if prefix[:12] in (f.get("base_prefix") or "").lower()]
         if pref_cands:
@@ -682,6 +784,7 @@ async def select_and_open_next_markdown_part(
             "success": False,
             "has_next_part": False,
             "target_part_number": next_part,
+            "next_part_number": next_part,
             "available_parts": available_parts,
             "folder_scan": folder_scan,
             "actions": actions,
@@ -695,27 +798,30 @@ async def select_and_open_next_markdown_part(
     # Step 3: Tap the next markdown file in the folder list to open it
     await run_adb_shell(f"input {disp_pfx}tap {tx} {ty}", ser, timeout=2.5)
     actions.append(f"Selected and tapped '{target_filename}' at ({tx}, {ty}) in Teams folder list")
-    await asyncio.sleep(1.65)
+    await asyncio.sleep(1.85)
 
-    # Step 4: Maximize the newly opened markdown editor and switch to Edit Mode + Dark Mode
+    # Step 4: Maximize the newly opened markdown editor, select Dark Mode, and switch from Read-Only to Edit Mode (Pencil icon)
     prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
     actions.extend(prep_res.get("actions", []))
 
     opened_name = prep_res.get("file_name") or target_filename
+    resolved_total_parts = (total_parts or max(available_parts)) if available_parts else next_part
     return {
-        "status": "opened_next_part",
+        "status": "success",
+        "transition_state": "opened_next_part",
         "success": True,
         "bundle_completed": False,
         "has_next_part": True,
         "previous_part": cur_part,
         "part_number": next_part,
-        "total_parts": total_parts or max(available_parts) if available_parts else next_part,
+        "next_part_number": next_part,
+        "total_parts": resolved_total_parts,
         "available_parts": available_parts,
         "opened_file_name": opened_name,
         "project_name": re.sub(r'\.(md|markdown)$', '', opened_name, flags=re.IGNORECASE),
         "folder_scan": folder_scan,
         "prepare_result": prep_res,
         "actions": actions,
-        "message": f"Opened '{opened_name}' (Part {next_part} of {total_parts or '?'}), maximized editor, and enabled Edit + Dark Mode ✔"
+        "message": f"Opened '{opened_name}' (Part {next_part} of {resolved_total_parts or '?'}), maximized editor, selected Dark Mode, and switched to Edit Mode (Pencil) ✔"
     }
 

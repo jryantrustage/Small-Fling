@@ -393,12 +393,162 @@ def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bo
     is_at_home = any(ln == 1 for ln in top_nums[:4]) or first_ln <= 15
     return is_at_home, (1 if is_at_home else first_ln)
 
+_last_gutter_offline_info: Dict[str, Any] = {
+    "detected": False,
+    "offline_detected": False,
+    "text": "",
+    "confidence": 0.0,
+    "bbox": [],
+    "last_visible_line_above_pill": 0,
+    "occluded_lines_allowance": 3,
+}
+
+
+def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> Dict[str, Any]:
+    """
+    Detects the floating '[cloud-slash icon] Offline' badge in the bottom-left corner of the
+    Teams Markdown Editor (which appears after a file remains open for a period of time and
+    occludes the bottom 3 gutter line numbers, e.g. showing line 32878 as the last visible line
+    when total_lines is 32881).
+    """
+    global _last_gutter_offline_info
+    default_res = {
+        "detected": False,
+        "offline_detected": False,
+        "text": "",
+        "confidence": 0.0,
+        "bbox": [],
+        "last_visible_line_above_pill": 0,
+        "occluded_lines_allowance": 3,
+    }
+    try:
+        img = None
+        if isinstance(image_or_bytes, (str, Path)):
+            img = cv2.imread(str(image_or_bytes))
+        elif isinstance(image_or_bytes, (bytes, bytearray)):
+            if len(image_or_bytes) >= 1000:
+                img = cv2.imdecode(np.frombuffer(image_or_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        elif isinstance(image_or_bytes, np.ndarray):
+            img = image_or_bytes
+
+        if img is None or img.size == 0:
+            return default_res
+
+        h, w = img.shape[:2]
+        sx = w / 1920.0
+        sy = h / 1080.0
+
+        # 1. Fast CV check on the bottom-left pill area (y: 890..985, x: 16..158 at 1080p)
+        py1, py2 = max(0, int(round(935 * sy))), min(h, int(round(982 * sy)))
+        px1, px2 = max(0, int(round(20 * sx))), min(w, int(round(150 * sx)))
+        pill_crop = img[py1:py2, px1:px2]
+
+        by1, by2 = max(0, int(round(875 * sy))), min(h, int(round(915 * sy)))
+        bx1, bx2 = max(0, int(round(190 * sx))), min(w, int(round(300 * sx)))
+        bg_crop = img[by1:by2, bx1:bx2]
+
+        cv_pill_detected = False
+        if pill_crop.size > 0 and bg_crop.size > 0:
+            pill_med = np.median(pill_crop, axis=(0, 1))
+            bg_med = np.median(bg_crop, axis=(0, 1))
+            # Neutral dark-gray pill (~[41,41,41]) contrasting against editor bg (~[31,31,31])
+            luma_diff = float(np.mean(pill_med) - np.mean(bg_med))
+            is_neutral = abs(float(pill_med[0]) - float(pill_med[2])) <= 8.0
+            pill_gray = cv2.cvtColor(pill_crop, cv2.COLOR_BGR2GRAY)
+            bright_px = int(np.sum(pill_gray > 100))
+            if 5.5 <= luma_diff <= 32.0 and is_neutral and bright_px >= max(12, int(35 * sx * sy)):
+                cv_pill_detected = True
+
+        # 2. RapidOCR check on bottom-left gutter + pill ROI (y: 855..988, x: 5..235 at 1080p)
+        ocr_detected = False
+        matched_text = ""
+        matched_conf = 0.0
+        matched_bbox: List[int] = [px1, py1, max(1, px2 - px1), max(1, py2 - py1)]
+        last_vis_ln = 0
+
+        if use_ocr:
+            ocr = get_rapid_ocr()
+            if ocr is not None:
+                ry1, ry2 = max(0, int(round(855 * sy))), min(h, int(round(988 * sy)))
+                rx1, rx2 = max(0, int(round(5 * sx))), min(w, int(round(235 * sx)))
+                roi = img[ry1:ry2, rx1:rx2]
+                if roi.size > 0:
+                    res, _ = ocr(roi)
+                    if res:
+                        for box, txt, score in res:
+                            clean = str(txt).strip()
+                            low = clean.lower()
+                            pts = np.array(box)
+                            bx_min = rx1 + int(np.min(pts[:, 0]))
+                            by_min = ry1 + int(np.min(pts[:, 1]))
+                            bw_box = int(np.max(pts[:, 0]) - np.min(pts[:, 0]))
+                            bh_box = int(np.max(pts[:, 1]) - np.min(pts[:, 1]))
+                            if any(k in low for k in ("offline", "offlin", "ffline", "offl")):
+                                ocr_detected = True
+                                matched_text = clean
+                                matched_conf = float(score)
+                                matched_bbox = [bx_min, by_min, bw_box, bh_box]
+                            elif bx_min <= int(105 * sx):
+                                clean_num = clean.replace("B", "8").replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1")
+                                if m_n := re.match(r"^(\d+)$", clean_num):
+                                    val_n = int(m_n.group(1))
+                                    if 0 < val_n < 500000 and val_n > last_vis_ln:
+                                        last_vis_ln = val_n
+
+        detected = bool(ocr_detected or cv_pill_detected)
+        out = {
+            "detected": detected,
+            "offline_detected": detected,
+            "cv_pill_detected": cv_pill_detected,
+            "ocr_detected": ocr_detected,
+            "text": matched_text or ("Offline" if detected else ""),
+            "confidence": round(matched_conf if ocr_detected else (0.85 if cv_pill_detected else 0.0), 3),
+            "bbox": matched_bbox if detected else [],
+            "last_visible_line_above_pill": last_vis_ln,
+            "occluded_lines_allowance": 3 if detected else 0,
+        }
+        _last_gutter_offline_info = out
+        return out
+    except Exception as e:
+        print(f"[detect_offline_editor_overlay] warning: {e}")
+        return default_res
+
+
+def is_eof_reached_with_offline_awareness(
+    bottom_line: int,
+    total_lines: int,
+    offline_detected: bool = False,
+    tail_text: str = "",
+) -> Tuple[bool, str]:
+    """
+    Evaluates whether the markdown scan has reached the end of the file (EOF) under either situation:
+      1. Standard EOF: bottom_line >= total_lines
+      2. 'Offline' Editor Overlay EOF: the '[icon] Offline' badge in the bottom-left gutter covers
+         the last ~3 lines (so bottom_line is 1..4 lines short of total_lines, e.g. 32,878 vs 32,881).
+    """
+    b = int(bottom_line or 0)
+    t = int(total_lines or 0)
+    if t <= 0 or b <= 0:
+        return False, ""
+    if b >= t:
+        return True, f"Reached total lines ({b:,} / {t:,})"
+    shortfall = t - b
+    has_end_marker = "CODESCAN_FILE_END" in (tail_text or "")
+    if 1 <= shortfall <= 4 and (offline_detected or _last_gutter_offline_info.get("detected") or has_end_marker):
+        return (
+            True,
+            f"Reached last visible line {b:,} of {t:,} ({shortfall} lines short due to 'Offline' markdown editor overlay)",
+        )
+    return False, ""
+
+
 def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> List[Tuple[int, int]]:
     """
     Finds the vertical gutter column of line numbers in an editor image.
     Self-adapts whether the editor is fullscreen or has a sidebar open.
     Applies dpi_factor to scale scan slices and X-clustering tolerance.
     """
+    global _last_gutter_offline_info
     if img is None: return []
     h, w = img.shape[:2]
     ocr = get_rapid_ocr()
@@ -408,24 +558,39 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     scale_y = h / 1080.0
     norm_multiplier = max(0.4, scale_x * dpi_factor)
 
-    # Crop with extra vertical margin (275..970 at 1080p) so RapidOCR detector never misses
-    # the 1st row (y~303) or 24th row (y~923..943) due to border proximity.
+    # Crop with extra vertical margin (275..985 at 1080p) so RapidOCR detector never misses
+    # the 1st row (y~303), 24th row (y~923..943), or the bottom-left 'Offline' pill (y~955..975).
     crop_top_y = max(265, int(275 * scale_y))
-    crop_bot_y = min(h - 95, int(970 * scale_y))
+    crop_bot_y = min(h - 85, int(985 * scale_y))
 
     # Strict valid vertical bounds for unclipped editor lines (excludes toolbar above 295 and clipped 25th row at y>=948)
     valid_min_y = max(292, int(295 * scale_y))
     valid_max_y = min(h - 135, int(936 * scale_y))
+    offline_hit_in_gutter = False
+    offline_bbox_in_gutter: List[int] = []
+    offline_conf_in_gutter = 0.0
 
     def _parse_ocr_candidates(ocr_results, max_x: Optional[int] = None) -> List[Tuple[int, int, int]]:
+        nonlocal offline_hit_in_gutter, offline_bbox_in_gutter, offline_conf_in_gutter
         cands = []
         if not ocr_results:
             return cands
         for bbox, text, score in ocr_results:
             clean = text.strip()
+            low_clean = clean.lower()
             pts = np.array(bbox)
             x_min = int(np.min(pts[:, 0]))
             y_min = crop_top_y + int(np.min(pts[:, 1]))
+            if y_min >= int(840 * scale_y) and any(k in low_clean for k in ("offline", "offlin", "ffline")):
+                offline_hit_in_gutter = True
+                offline_conf_in_gutter = float(score)
+                offline_bbox_in_gutter = [
+                    x_min,
+                    y_min,
+                    int(np.max(pts[:, 0]) - np.min(pts[:, 0])),
+                    int(np.max(pts[:, 1]) - np.min(pts[:, 1])),
+                ]
+                continue
             if y_min < valid_min_y or y_min > valid_max_y:
                 continue
             if max_x is not None and x_min > max_x:
@@ -505,7 +670,35 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             valid.append((y_pos, num))
         elif valid and str(valid[-1][1])[:-2] + str(num) == str(valid[-1][1] + 1):
             valid.append((y_pos, valid[-1][1] + 1))
-    return valid if valid else best_gutter
+    final_gutter = valid if valid else best_gutter
+    last_vis = final_gutter[-1][1] if final_gutter else 0
+    if offline_hit_in_gutter:
+        _last_gutter_offline_info = {
+            "detected": True,
+            "offline_detected": True,
+            "ocr_detected": True,
+            "text": "Offline",
+            "confidence": round(offline_conf_in_gutter, 3),
+            "bbox": offline_bbox_in_gutter,
+            "last_visible_line_above_pill": last_vis,
+            "occluded_lines_allowance": 3,
+        }
+    else:
+        cv_chk = detect_offline_editor_overlay(img, use_ocr=False)
+        if cv_chk.get("detected"):
+            cv_chk["last_visible_line_above_pill"] = last_vis
+            _last_gutter_offline_info = cv_chk
+        else:
+            _last_gutter_offline_info = {
+                "detected": False,
+                "offline_detected": False,
+                "text": "",
+                "confidence": 0.0,
+                "bbox": [],
+                "last_visible_line_above_pill": last_vis,
+                "occluded_lines_allowance": 0,
+            }
+    return final_gutter
 
 
 def worker_detect_gutter_bounds(image_path: str, dpi_factor: float = 1.0) -> Tuple[int, int]:
@@ -820,7 +1013,9 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         "caret": caret_info,
         "gutter_count": len(gutter),
         "bottom_gutter_line": gutter[-1][1],
-        "bottom_gutter_y": gutter[-1][0]
+        "bottom_gutter_y": gutter[-1][0],
+        "offline_overlay_detected": bool(_last_gutter_offline_info.get("detected")),
+        "offline_info": dict(_last_gutter_offline_info),
     }
 
 def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top: Optional[int] = None) -> int:

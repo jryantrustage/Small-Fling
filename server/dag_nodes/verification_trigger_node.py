@@ -41,6 +41,7 @@ class VerificationTriggerNode(BaseDagNode):
         # If n6_info has stale error state (e.g. after manual recovery or last-attempt arrival),
         # inspect and self-heal against the live display before blocking!
         n6_info = state.dag_state["nodes"].get("arrow_down", {})
+        eof_reached = bool(n6_info.get("eof_reached") or state.orchestration_state.get("eof_reached"))
         expected_target_top = int(
             n6_info.get("target_top")
             or n6_info.get("target_top_line")
@@ -49,10 +50,13 @@ class VerificationTriggerNode(BaseDagNode):
             or 1
         )
         n6_needs_check = (
-            n6_info.get("status") in ("error", "prevented")
-            or n6_info.get("reached") is not True
-            or n6_info.get("advanced") is not True
-            or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
+            not eof_reached
+            and (
+                n6_info.get("status") in ("error", "prevented")
+                or n6_info.get("reached") is not True
+                or n6_info.get("advanced") is not True
+                or (n6_info.get("new_top_line") and n6_info.get("target_top") and n6_info.get("new_top_line") != n6_info.get("target_top"))
+            )
         )
 
         is_mock = bool(serial and "mock" in str(serial).lower())
