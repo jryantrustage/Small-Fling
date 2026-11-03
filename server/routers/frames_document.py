@@ -210,6 +210,8 @@ async def inspect_ocr_image(
     def _is_valid_entry(cand_lines, cand_bboxes):
         if not cand_lines or not cand_bboxes:
             return False
+        if not all(l.get("position_verified") is True and l.get("row_slice_text") is not None for l in cand_lines):
+            return False
         g_boxes = cand_bboxes.get("gutter_boxes", {})
         if not g_boxes:
             return False
@@ -238,8 +240,11 @@ async def inspect_ocr_image(
         )
     )
 
+    from ocr_engine import verify_and_repair_ocr_line_positions
+    ver_report: Dict[str, Any] = {}
+
     if can_use_cache:
-        if cache_key in _ocr_inspect_cache:
+        if cache_key in _ocr_inspect_cache and _is_valid_entry(_ocr_inspect_cache[cache_key].get("lines"), _ocr_inspect_cache[cache_key].get("bboxes")):
             entry = _ocr_inspect_cache[cache_key]
             lines = entry["lines"]
             bboxes = entry["bboxes"]
@@ -249,6 +254,7 @@ async def inspect_ocr_image(
             bot_ln = entry["bot_ln"]
             img_w = entry["img_w"]
             img_h = entry["img_h"]
+            ver_report = entry.get("line_position_verification") or {}
         elif cached_frame and _is_valid_entry(cached_frame.get("lines"), cached_frame.get("bounding_boxes")):
             lines = cached_frame.get("lines", [])
             bboxes = cached_frame.get("bounding_boxes", {})
@@ -256,6 +262,7 @@ async def inspect_ocr_image(
             extracted_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in lines)
             top_ln = cached_frame.get("top_line", min((l.get("line_number", 0) for l in lines), default=0))
             bot_ln = cached_frame.get("bottom_line", max((l.get("line_number", 0) for l in lines), default=0))
+            ver_report = cached_frame.get("line_position_verification") or {}
         else:
             lines = n4_state.get("lines", [])
             bboxes = n4_state.get("bounding_boxes", {})
@@ -263,6 +270,11 @@ async def inspect_ocr_image(
             extracted_text = n4_state.get("extracted_text", "")
             top_ln = min((l.get("line_number", 0) for l in lines), default=0)
             bot_ln = max((l.get("line_number", 0) for l in lines), default=0)
+            ver_report = n4_state.get("line_position_verification") or {}
+        if not ver_report:
+            ver_report = verify_and_repair_ocr_line_positions(lines, None, bboxes)
+            lines = ver_report.get("lines", lines)
+            bboxes = ver_report.get("bounding_boxes", bboxes)
     else:
         exp_top = cached_frame.get("top_line") if cached_frame else None
         res = await ocr_svc.scan_image_with_minicpm(ipath, expected_top=exp_top, live_capture=False)
@@ -274,6 +286,10 @@ async def inspect_ocr_image(
         bot_ln = res.get("bottom_line", 0)
         img_w = res.get("image_width", img_w)
         img_h = res.get("image_height", img_h)
+        ver_report = res.get("line_position_verification") or verify_and_repair_ocr_line_positions(lines, None, bboxes)
+        lines = ver_report.get("lines", lines)
+        bboxes = ver_report.get("bounding_boxes", bboxes)
+        extracted_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in lines)
 
         _ocr_inspect_cache[cache_key] = {
             "lines": lines,
@@ -283,7 +299,8 @@ async def inspect_ocr_image(
             "top_ln": top_ln,
             "bot_ln": bot_ln,
             "img_w": img_w,
-            "img_h": img_h
+            "img_h": img_h,
+            "line_position_verification": ver_report
         }
 
         if cached_frame:
@@ -291,9 +308,31 @@ async def inspect_ocr_image(
                 "lines": lines,
                 "bounding_boxes": bboxes,
                 "model_used": model_used,
-                "extracted_line_count": len(lines)
+                "extracted_line_count": len(lines),
+                "line_position_verification": ver_report
             })
-            state.save_persisted_state()
+        if hasattr(state, "document_lines"):
+            for l_item in lines:
+                ln_num = l_item.get("line_number")
+                if not ln_num:
+                    continue
+                blank_locked = bool(l_item.get("blank_locked", False))
+                final_txt = "" if blank_locked else (l_item.get("text") or "").rstrip("\r\n")
+                state.document_lines[int(ln_num)] = state.MasterLine(
+                    final_txt,
+                    line_number=int(ln_num),
+                    gutter_number=int(ln_num),
+                    is_blank=True if blank_locked else not bool(final_txt.strip()),
+                    blank_locked=blank_locked,
+                    status="verified",
+                    position_verified=True,
+                    frame_id=target_id,
+                    confidence=1.0 if blank_locked else l_item.get("confidence", 0.99),
+                    is_wrapped=False if blank_locked else bool(l_item.get("is_wrapped", False)),
+                    wrapped_line_count=1 if blank_locked else int(l_item.get("wrapped_line_count", 1)),
+                    updated_at=datetime.now().isoformat()
+                )
+        state.save_persisted_state()
 
     available = _get_available_ocr_images()
 
@@ -311,6 +350,7 @@ async def inspect_ocr_image(
         "extracted_text": extracted_text,
         "lines": lines,
         "bounding_boxes": bboxes,
+        "line_position_verification": ver_report,
         "available_images": available
     }
 
@@ -369,6 +409,7 @@ async def rescan_ocr_lines(
         current_bboxes = quick_scan.get("bounding_boxes", {})
 
     from services.ocr_service import rescan_lines_on_image_sync
+    from ocr_engine import verify_and_repair_ocr_line_positions
     updated_lines, rescanned = await asyncio.to_thread(
         rescan_lines_on_image_sync,
         ipath,
@@ -376,15 +417,21 @@ async def rescan_ocr_lines(
         current_lines,
         current_bboxes
     )
+    ver_report = verify_and_repair_ocr_line_positions(updated_lines, None, current_bboxes)
+    updated_lines = ver_report.get("lines", updated_lines)
+    current_bboxes = ver_report.get("bounding_boxes", current_bboxes)
 
     updated_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in updated_lines)
 
     if cache_key in _ocr_inspect_cache:
         _ocr_inspect_cache[cache_key]["lines"] = updated_lines
         _ocr_inspect_cache[cache_key]["extracted_text"] = updated_text
+        _ocr_inspect_cache[cache_key]["line_position_verification"] = ver_report
 
     if cached_frame:
         cached_frame["lines"] = updated_lines
+        cached_frame["bounding_boxes"] = current_bboxes
+        cached_frame["line_position_verification"] = ver_report
         state.save_persisted_state()
 
     for ln in rescanned:
@@ -437,7 +484,8 @@ async def rescan_ocr_lines(
         "image_id": target_id,
         "lines": updated_lines,
         "extracted_text": updated_text,
-        "bounding_boxes": current_bboxes
+        "bounding_boxes": current_bboxes,
+        "line_position_verification": ver_report
     }
 
 @router.get("/api/ocr/rescan-all-frames")

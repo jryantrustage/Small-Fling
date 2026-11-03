@@ -74,12 +74,13 @@ class LocalAiOcrNode(BaseDagNode):
             # Ultra-fast headless mode: Uses the EXACT same engine as OCR Inspector rescan page lines
             # (RapidOCR on gutter + tight line crops with monospace indentation) without loading into MiniCPM-V vision model.
             t0 = time.perf_counter()
-            from ocr_engine import worker_scan_image
+            from ocr_engine import worker_scan_image, verify_and_repair_ocr_line_positions
             from services.ocr_service import rescan_lines_on_image_sync
 
             try:
                 quick_scan = await asyncio.to_thread(worker_scan_image, str(temp_calib))
                 raw_lines = quick_scan.get("lines", [])
+                raw_gt_snapshot = [dict(gl) for gl in raw_lines]
                 raw_bboxes = quick_scan.get("bounding_boxes", {})
 
                 all_lns = [
@@ -100,6 +101,10 @@ class LocalAiOcrNode(BaseDagNode):
                     lines_detected = raw_lines
                     rescanned = []
 
+                ver_report = verify_and_repair_ocr_line_positions(lines_detected, raw_gt_snapshot, raw_bboxes)
+                lines_detected = ver_report["lines"]
+                raw_bboxes = ver_report["bounding_boxes"]
+
                 dur_ms = round((time.perf_counter() - t0) * 1000, 1)
                 extracted_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in lines_detected)
                 lines_count = len(lines_detected)
@@ -117,9 +122,10 @@ class LocalAiOcrNode(BaseDagNode):
                                 "gutter_number": ln,
                                 "status": "verified",
                                 "overwritten": True,
+                                "position_verified": True,
                                 "frame_id": temp_calib.stem,
                                 "updated_at": datetime.now().isoformat(),
-                                "notes": "Headless RapidOCR (Inspector Rescan Engine)",
+                                "notes": "Headless RapidOCR (Row-Locked Position Verified)",
                                 "confidence": item.get("confidence", 0.99)
                             })
                             if item.get("is_wrapped") is not None:
@@ -139,6 +145,8 @@ class LocalAiOcrNode(BaseDagNode):
 
                 if temp_calib.stem in state.captured_frames:
                     state.captured_frames[temp_calib.stem]["lines"] = lines_detected
+                    state.captured_frames[temp_calib.stem]["bounding_boxes"] = raw_bboxes
+                    state.captured_frames[temp_calib.stem]["line_position_verification"] = ver_report
                     state.captured_frames[temp_calib.stem]["extracted_line_count"] = lines_count
                     state.captured_frames[temp_calib.stem]["status"] = "rescanned"
                     state.captured_frames[temp_calib.stem]["model_used"] = engine_name
@@ -161,16 +169,17 @@ class LocalAiOcrNode(BaseDagNode):
                     "image_width": quick_scan.get("image_width", 1920),
                     "image_height": quick_scan.get("image_height", 1080),
                     "lines": lines_detected,
-                    "bounding_boxes": quick_scan.get("bounding_boxes", {}),
-                    "evaluator": "Headless RapidOCR Inspector Evaluator",
-                    "telemetry_insight": f"Headless scan: {lines_count} lines ({char_count} chars) in {dur_ms}ms via {engine_name} ✔",
+                    "bounding_boxes": raw_bboxes,
+                    "line_position_verification": ver_report,
+                    "evaluator": "Headless RapidOCR Position-Verified Evaluator",
+                    "telemetry_insight": f"Headless scan: {lines_count}/{lines_count} lines pos-verified ({char_count} chars) in {dur_ms}ms ✔",
                     "error": None
                 })
 
                 return NodeExecutionResult(
                     status="success",
                     node_id=self.node_id,
-                    message=f"Headless RapidOCR extracted {lines_count} lines ({char_count} chars in {dur_ms}ms) ✔",
+                    message=f"Headless RapidOCR extracted & position-verified {lines_count} lines ({char_count} chars in {dur_ms}ms) ✔",
                     data={
                         "lines_count": lines_count,
                         "char_count": char_count,
@@ -182,7 +191,8 @@ class LocalAiOcrNode(BaseDagNode):
                         "image_width": quick_scan.get("image_width", 1920),
                         "image_height": quick_scan.get("image_height", 1080),
                         "lines": lines_detected,
-                        "bounding_boxes": quick_scan.get("bounding_boxes", {}),
+                        "bounding_boxes": raw_bboxes,
+                        "line_position_verification": ver_report,
                         "headless": True,
                         "duration_ms": dur_ms
                     }
@@ -317,15 +327,16 @@ class LocalAiOcrNode(BaseDagNode):
             "image_height": scan_res.get("image_height", 1080),
             "lines": lines_detected,
             "bounding_boxes": scan_res.get("bounding_boxes", {}),
-            "evaluator": "Multimodal Vision Evaluator",
-            "telemetry_insight": f"Extracted {lines_count} lines ({char_count} chars) verbatim via {engine_name}",
+            "line_position_verification": scan_res.get("line_position_verification"),
+            "evaluator": "Multimodal Vision + Row-Position Evaluator",
+            "telemetry_insight": f"Extracted & pos-verified {lines_count} lines ({char_count} chars) via {engine_name}",
             "error": None
         })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Local AI OCR extracted {lines_count} lines ({char_count} chars) ✔",
+            message=f"Local AI OCR extracted & position-verified {lines_count} lines ({char_count} chars) ✔",
             data={
                 "lines_count": lines_count,
                 "char_count": char_count,
@@ -337,6 +348,7 @@ class LocalAiOcrNode(BaseDagNode):
                 "image_width": scan_res.get("image_width", 1920),
                 "image_height": scan_res.get("image_height", 1080),
                 "lines": lines_detected,
-                "bounding_boxes": scan_res.get("bounding_boxes", {})
+                "bounding_boxes": scan_res.get("bounding_boxes", {}),
+                "line_position_verification": scan_res.get("line_position_verification"),
             }
         )

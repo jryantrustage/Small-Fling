@@ -208,10 +208,10 @@ export const NODES_METADATA: NodeMeta[] = [
   {
     id: 'frame_ocr',
     step: '5',
-    shortName: 'Gutter OCR',
-    fullName: '5. GUTTER OCR & BOUNDS',
-    subhead: 'Lines & Bounds Reader',
-    desc: 'Extracts gutter line numbers, top/bottom bounds, and verifies target top position for next page.',
+    shortName: 'Line Pos Verify',
+    fullName: '5. GUTTER & LINE POSITION VERIFY',
+    subhead: '1:1 Row Position Verifier',
+    desc: 'Extracts gutter line numbers, verifies every OCR line maps 1:1 to its physical image row slice, and auto-repairs any shifted rows.',
     group: 'position_navigation',
     accentColor: '#8957e5',
     hasConfig: true

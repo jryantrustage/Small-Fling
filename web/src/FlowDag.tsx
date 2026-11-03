@@ -71,7 +71,7 @@ const RIBBON_STEPS: RibbonStepConfig[] = [
   // Phase II — Capture & OCR Loop
   { id: 'frame_acquire', stepNum: 3, label: '3. Screen Capture', phase: 2 },
   { id: 'local_ai_ocr', stepNum: 4, label: '4. AI OCR', phase: 2 },
-  { id: 'frame_ocr', stepNum: 5, label: '5. Gutter Verify', phase: 2 },
+  { id: 'frame_ocr', stepNum: 5, label: '5. Line Pos Verify', phase: 2 },
   { id: 'arrow_down', stepNum: 6, label: '6. Pacer Down', phase: 2 },
   { id: 'verification_trigger', stepNum: 7, label: '7. Trigger', phase: 2 },
   { id: 'document_assemble', stepNum: 8, label: '8. Assemble', phase: 2 },

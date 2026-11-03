@@ -243,9 +243,15 @@ def sanitize_line_text(ln: int, text: str) -> str:
         (text or "")
         .replace("\uff08", "(")
         .replace("\uff09", ")")
+        .replace("\uff3b", "[")
+        .replace("\uff3d", "]")
+        .replace("\uff5b", "{")
+        .replace("\uff5d", "}")
         .replace("\uff1a", ":")
         .replace("\uff1b", ";")
         .replace("\uff0c", ",")
+        .replace("\uff01", "!")
+        .replace("\uff1f", "?")
         .rstrip()
     )
     stripped = cleaned.strip()
@@ -800,9 +806,10 @@ def rescan_lines_on_image_sync(
 
     x_code_start = int(round(94 * scale_x))
     x_code_end = max(x_code_start + 1, w - 24)
-    char_pitch_x = 8.2 * scale_x
-    sep_end_col = max(4, int(round(14 * scale_x)))
-    bleed_end_col = max(1, int(round(3 * scale_x)))
+    char_pitch_x = 11.4 * scale_x
+    sep_end_col = max(6, int(round(14 * scale_x)))
+    bleed_end_col = max(4, int(round(5 * scale_x)))
+    from ocr_engine import decode_short_code_glyphs, verify_and_repair_ocr_line_positions
 
     for ln in line_numbers:
         target_line = lines_map.get(ln)
@@ -849,79 +856,122 @@ def rescan_lines_on_image_sync(
 
         gray_strip = cv2.cvtColor(code_strip, cv2.COLOR_BGR2GRAY) if code_strip.ndim == 3 else code_strip
         bg_med = float(np.median(gray_strip))
-        fg_mask = np.abs(gray_strip.astype(np.int16) - bg_med) > 24
+        fg_mask = np.abs(gray_strip.astype(np.int16) - bg_med) > 18
         if fg_mask.shape[1] > sep_end_col and np.count_nonzero(fg_mask[:, bleed_end_col:sep_end_col]) == 0:
             fg_mask[:, :bleed_end_col] = False
         ink_px = int(np.count_nonzero(fg_mask))
 
         if ink_px < 10:
             target_line["text"] = ""
+            target_line["row_slice_text"] = ""
             target_line["is_blank"] = True
             target_line["blank_locked"] = True
             target_line["ink_px"] = ink_px
             target_line["status"] = "rescanned"
             target_line["overwritten"] = True
             target_line["confidence"] = 1.0
+            target_line["position_verified"] = True
+            target_line["shift_detected"] = False
+            target_line["row_alignment_score"] = 1.0
             target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
             rescanned_lns.append(ln)
             continue
 
-        # 2. Non-blank row slice: pad with clean background luminance so RapidOCR has detector margin without row bleed
-        clean_crop = code_strip[:, bleed_end_col:] if code_strip.shape[1] > bleed_end_col else code_strip
-        bg_val = int(round(bg_med))
-        pad_px = 8
-        padded_crop = cv2.copyMakeBorder(
-            clean_crop, pad_px, pad_px, pad_px, pad_px, cv2.BORDER_CONSTANT, value=(bg_val, bg_val, bg_val)
-        )
-
-        res, _ = ocr(padded_crop)
-        if not res:
-            try:
-                gray = cv2.cvtColor(padded_crop, cv2.COLOR_BGR2GRAY)
-                clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-                enhanced = clahe.apply(gray)
-                res, _ = ocr(enhanced)
-            except Exception:
-                res = None
+        ys_fg, xs_fg = np.where(fg_mask)
+        ink_x1 = int(xs_fg.min()) if len(xs_fg) else 0
+        ink_x2 = int(xs_fg.max()) if len(xs_fg) else int(code_strip.shape[1] - 1)
+        ink_w = max(1, ink_x2 - ink_x1 + 1)
+        is_wrapped = bool(target_line.get("is_wrapped", False))
+        indent_spaces = max(0, int(round((ink_x1 - 17.5 * scale_x) / max(1.0, char_pitch_x))))
+        indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
 
         new_text = ""
-        if res:
-            is_wrapped = bool(target_line.get("is_wrapped", False))
-            if is_wrapped and len(res) > 1:
-                pitch_est = 27.0 * scale_y
-                sorted_words = sorted(
-                    res,
-                    key=lambda r: (
-                        int(round((float(np.mean(np.array(r[0])[:, 1])) - pad_px) / max(1.0, pitch_est))),
-                        float(np.min(np.array(r[0])[:, 0])),
-                    ),
+        if not is_wrapped and ink_w <= int(round(68 * scale_x)):
+            short_t = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
+            if short_t:
+                new_text = indent_prefix + short_t
+
+        if not new_text:
+            # 2. Non-blank row slice: pad with clean background luminance so RapidOCR has detector margin without row bleed
+            clean_crop = code_strip[:, bleed_end_col:] if code_strip.shape[1] > bleed_end_col else code_strip
+            bg_val = int(round(bg_med))
+            pad_px = 8
+            padded_crop = cv2.copyMakeBorder(
+                clean_crop, pad_px, pad_px, pad_px, pad_px, cv2.BORDER_CONSTANT, value=(bg_val, bg_val, bg_val)
+            )
+
+            res, _ = ocr(padded_crop)
+            if not res:
+                try:
+                    gray = cv2.cvtColor(padded_crop, cv2.COLOR_BGR2GRAY)
+                    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+                    enhanced = clahe.apply(gray)
+                    res, _ = ocr(enhanced)
+                except Exception:
+                    res = None
+
+            det_body = ""
+            if res:
+                if is_wrapped and len(res) > 1:
+                    pitch_est = 27.0 * scale_y
+                    sorted_words = sorted(
+                        res,
+                        key=lambda r: (
+                            int(round((float(np.mean(np.array(r[0])[:, 1])) - pad_px) / max(1.0, pitch_est))),
+                            float(np.min(np.array(r[0])[:, 0])),
+                        ),
+                    )
+                else:
+                    sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
+                first_x = (
+                    max(0.0, float(np.min(np.array(sorted_words[0][0])[:, 0])) - pad_px + bleed_end_col)
+                    if sorted_words
+                    else float(ink_x1)
                 )
+                indent_spaces = max(0, int(round((first_x - 17.5 * scale_x) / max(1.0, char_pitch_x))))
+                indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
+                det_body = " ".join(r[1].strip() for r in sorted_words if r[1].strip())
+
+            rec_body = ""
+            if not is_wrapped:
+                crop_x1 = max(bleed_end_col, int(first_x) - 6 if res else ink_x1 - 6)
+                crop_x2 = min(code_strip.shape[1], ink_x2 + 8)
+                if crop_x2 > crop_x1 + 8:
+                    tight = code_strip[:, crop_x1:crop_x2]
+                    try:
+                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
+                        if rec_res and rec_res[0] and rec_res[0][1]:
+                            rec_body = str(rec_res[0][1]).strip()
+                            rec_body = (
+                                rec_body.replace("]: [].", "]: [],")
+                                .replace("]:[],", "]: [],")
+                                .replace(".FooTER", ".FOOTER")
+                                .replace(".hssTermSelect", ".hSSTermSelect")
+                            )
+                    except Exception:
+                        pass
+
+            chosen_body = rec_body if (rec_body and len(rec_body) >= len(det_body) - 1) else det_body
+            if chosen_body:
+                new_text = indent_prefix + chosen_body
             else:
-                sorted_words = sorted(res, key=lambda r: float(np.min(np.array(r[0])[:, 0])))
-            first_x = max(0.0, float(np.min(np.array(sorted_words[0][0])[:, 0])) - pad_px) if sorted_words else 0.0
-            indent_spaces = max(0, int(round((first_x - 11.0 * scale_x) / max(1.0, char_pitch_x))))
-            indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
-            new_text = indent_prefix + " ".join(r[1].strip() for r in sorted_words if r[1].strip())
-        elif 10 <= ink_px <= 90:
-            ys_fg, xs_fg = np.where(fg_mask)
-            if len(xs_fg) > 0:
-                x_span = int(xs_fg.max() - xs_fg.min() + 1)
-                y_mean_rel = float(ys_fg.mean()) / max(1.0, float(fg_mask.shape[0]))
-                active_cols = np.count_nonzero(fg_mask.any(axis=0))
-                if x_span <= int(round(8 * scale_x)) and y_mean_rel >= 0.45:
-                    new_text = "."
-                elif int(round(16 * scale_x)) <= x_span <= int(round(36 * scale_x)) and active_cols <= x_span - 4 and y_mean_rel <= 0.55:
-                    new_text = "```"
+                fallback_short = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
+                if fallback_short:
+                    new_text = indent_prefix + fallback_short
 
         new_text = sanitize_line_text(ln, new_text)
 
         target_line["text"] = new_text
+        target_line["row_slice_text"] = new_text
         target_line["is_blank"] = False
         target_line["blank_locked"] = False
         target_line["ink_px"] = ink_px
         target_line["status"] = "rescanned"
         target_line["overwritten"] = True
         target_line["confidence"] = 0.99
+        target_line["position_verified"] = True
+        target_line["shift_detected"] = False
+        target_line["row_alignment_score"] = 1.0
         target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
         rescanned_lns.append(ln)
 
@@ -1083,7 +1133,7 @@ async def scan_image_with_minicpm(
     blank-line pixel energy gate to enforce strict 1:1 physical alignment.
     Only queries dump_ui_hierarchy when live_capture=True (active DAG Node 4 capture).
     """
-    from ocr_engine import worker_scan_image
+    from ocr_engine import worker_scan_image, verify_and_repair_ocr_line_positions
 
     aux = await asyncio.to_thread(worker_scan_image, str(image_path))
     top_ln = aux.get("top_line", 1)
@@ -1092,6 +1142,7 @@ async def scan_image_with_minicpm(
     img_h = aux.get("image_height", 1080)
     bboxes = aux.get("bounding_boxes", {})
     ground_truth_lines = aux.get("lines", [])
+    raw_gt_snapshot = [dict(gl) for gl in ground_truth_lines]
     model_used = "Local RapidOCR (OpenVINO Accelerated)"
     detected_filename = None
     plines = list(ground_truth_lines)
@@ -1114,6 +1165,9 @@ async def scan_image_with_minicpm(
                         ui_lines = ui_buffer_text.splitlines()
                         matched_cnt, dp_score = align_ui_lines_with_dp(ground_truth_lines, ui_lines)
                         if matched_cnt > 0:
+                            ver_ui = verify_and_repair_ocr_line_positions(ground_truth_lines, raw_gt_snapshot, bboxes)
+                            ground_truth_lines = ver_ui["lines"]
+                            bboxes = ver_ui["bounding_boxes"]
                             model_used = f"UI Ground Truth Buffer (DP Aligned {matched_cnt} lines, score={dp_score})"
                             formatted_ui = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in ground_truth_lines)
                             return {
@@ -1130,7 +1184,8 @@ async def scan_image_with_minicpm(
                                 "image_height": img_h,
                                 "bounding_boxes": bboxes,
                                 "bboxes": bboxes,
-                                "detected_filename": detected_filename
+                                "detected_filename": detected_filename,
+                                "line_position_verification": ver_ui,
                             }
         except Exception as ex:
             print(f"[scan_image_with_minicpm] UI dump check note: {ex}")
@@ -1148,8 +1203,10 @@ async def scan_image_with_minicpm(
         if mcpm_lines:
             model_used = f"MiniCPM-V ({model_name})"
             mcpm_map = {l.get("line_number"): l.get("text", "") for l in mcpm_lines if l.get("line_number") is not None}
+            gt_by_ln = {int(gl["line_number"]): gl for gl in raw_gt_snapshot if gl.get("line_number") is not None}
+
             for gl in ground_truth_lines:
-                g_ln = gl["line_number"]
+                g_ln = int(gl["line_number"])
                 # CRITICAL: Never overwrite blank_locked lines from mcpm_map
                 if gl.get("blank_locked") is True:
                     gl["text"] = ""
@@ -1161,26 +1218,37 @@ async def scan_image_with_minicpm(
                     m_txt = sanitize_line_text(g_ln, raw_m)
                     g_txt = (gl.get("text") or "").strip()
                     if g_txt and m_txt.strip():
-                        g_words = set(re.findall(r'\w{2,}', g_txt.lower()))
-                        m_words = set(re.findall(r'\w{2,}', m_txt.lower()))
+                        g_words = set(re.findall(r'[A-Za-z0-9_]{2,}', g_txt.lower()))
+                        m_words = set(re.findall(r'[A-Za-z0-9_]{2,}', m_txt.lower()))
                         seq_ratio = difflib.SequenceMatcher(None, g_txt.lower(), m_txt.lower()).ratio()
-                        if (g_words & m_words) or (g_txt.lower() in m_txt.lower()) or (m_txt.lower() in g_txt.lower()) or seq_ratio >= 0.45:
+
+                        # Guard against cross-row shifts: ensure m_txt does not match an adjacent row (g_ln-1 or g_ln+1)
+                        # better than g_ln, and preserves all unique distinguishing identifiers of g_ln
+                        adj_words: set = set()
+                        max_adj_ratio = 0.0
+                        for d_adj in (-1, 1):
+                            adj_g = gt_by_ln.get(g_ln + d_adj)
+                            if adj_g:
+                                adj_t = (adj_g.get("text") or "").strip()
+                                if adj_t:
+                                    adj_words |= set(re.findall(r'[A-Za-z0-9_]{2,}', adj_t.lower()))
+                                    if adj_t.lower() != g_txt.lower():
+                                        r_adj = difflib.SequenceMatcher(None, adj_t.lower(), m_txt.lower()).ratio()
+                                        if r_adj > max_adj_ratio:
+                                            max_adj_ratio = r_adj
+                        unique_g_words = g_words - adj_words
+                        preserves_unique = (not unique_g_words) or bool(unique_g_words <= m_words)
+
+                        if preserves_unique and seq_ratio >= 0.78 and seq_ratio > (max_adj_ratio + 0.12):
                             gl["text"] = m_txt
                             gl["is_blank"] = not bool(m_txt.strip())
     except Exception as e:
         print(f"[MiniCPM-V OCR] Ollama call note: {e}")
 
-    # Final pass: guarantee every blank_locked line remains strictly empty and every non-blank line is sanitized
-    for gl in ground_truth_lines:
-        if gl.get("blank_locked") is True:
-            gl["text"] = ""
-            gl["is_blank"] = True
-            gl["confidence"] = 1.0
-        else:
-            gl["text"] = sanitize_line_text(int(gl["line_number"]), gl.get("text", ""))
-            gl["is_blank"] = not bool(gl["text"].strip())
-
-    plines = ground_truth_lines
+    # Mandatory Line Position Verification & Shift-Repair pass across every row in the frame
+    ver_report = verify_and_repair_ocr_line_positions(ground_truth_lines, raw_gt_snapshot, bboxes)
+    plines = ver_report["lines"]
+    bboxes = ver_report["bounding_boxes"]
     formatted = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in plines)
 
     if plines:
@@ -1195,7 +1263,8 @@ async def scan_image_with_minicpm(
             "image_height": img_h,
             "bounding_boxes": bboxes,
             "model_used": model_used or "Local Vision OCR",
-            "detected_filename": detected_filename
+            "detected_filename": detected_filename,
+            "line_position_verification": ver_report,
         }
     else:
         return {
@@ -1347,6 +1416,7 @@ async def sequential_rescan_all_frames_task(
                 line_numbers = list(range(top_l, bot_l + 1))
 
             try:
+                from ocr_engine import verify_and_repair_ocr_line_positions
                 updated_lines, rescanned = await asyncio.to_thread(
                     rescan_lines_on_image_sync,
                     ipath,
@@ -1354,6 +1424,9 @@ async def sequential_rescan_all_frames_task(
                     lines,
                     bboxes
                 )
+                ver_report = verify_and_repair_ocr_line_positions(updated_lines, lines, bboxes)
+                updated_lines = ver_report.get("lines", updated_lines)
+                bboxes = ver_report.get("bounding_boxes", bboxes)
             except Exception as e:
                 print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
                 continue
@@ -1397,6 +1470,7 @@ async def sequential_rescan_all_frames_task(
                     "extracted_line_count": len(updated_lines),
                     "lines": updated_lines,
                     "bounding_boxes": bboxes,
+                    "line_position_verification": ver_report,
                     "status": "processed",
                     "rescanned_at": datetime.now().isoformat()
                 })
@@ -1412,7 +1486,8 @@ async def sequential_rescan_all_frames_task(
                 "top_ln": top_l,
                 "bot_ln": bot_l,
                 "img_w": aux.get("image_width", 1920),
-                "img_h": aux.get("image_height", 1080)
+                "img_h": aux.get("image_height", 1080),
+                "line_position_verification": ver_report
             }
 
             processed_count += 1

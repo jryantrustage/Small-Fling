@@ -244,7 +244,6 @@ function AppContent() {
     }
     setInspectorMode('ocr_inspect');
     setInspectorMaximized(false);
-    setFramesMinimized(false);
     // Auto-close Android device drawer and minimize lines panel so OCR inspector coordinates overlay has full width
     setShowStudioDrawer(false);
     setLinesMinimized(true);
@@ -252,7 +251,10 @@ function AppContent() {
   };
 
   const handleCloseInlineOcrInspector = () => {
-    setInspectorMode(selectedFrameId ? 'single' : 'live');
+    if (ocrInspectImageId && ocrInspectImageId !== 'dag_node3_capture_temp') {
+      setSelectedFrameId(ocrInspectImageId);
+    }
+    setInspectorMode(selectedFrameId || (ocrInspectImageId && ocrInspectImageId !== 'dag_node3_capture_temp') ? 'single' : 'live');
     setInspectorMaximized(false);
     setFramesMinimized(false);
   };
@@ -1784,7 +1786,7 @@ function AppContent() {
           const newF = msg.data?.frame_id ? msg.data : (msg.frame?.frame_id ? msg.frame : null);
           if (msg.type === 'new_frame' && newF) {
             setFrames(p => [...p.filter(f => f.frame_id !== newF.frame_id), newF]);
-            setSelectedFrameId(newF.frame_id);
+            setSelectedFrameId(curr => (curr ? curr : newF.frame_id));
             addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`, { frame_id: newF.frame_id, top_line: newF.top_line, bottom_line: newF.bottom_line, page_index: newF.page_index }, 'capture_entire_markdown');
             apiJson<any>('/api/document').then(d => { setDocumentData(d); if (d.token_stats) setTokenStats(d.token_stats); });
           } else if (msg.type === 'frame_deleted') {
@@ -1813,9 +1815,12 @@ function AppContent() {
               }
             }
           } else if (msg.type === 'project_switched' || msg.type === 'project_updated') {
+            const isDifferentProject = msg.type === 'project_switched' || (msg.project?.id && msg.project.id !== activeProjectRef.current?.id);
             setActiveProject(msg.project || null);
-            setInspectorMode('live');
-            setOcrInspectImageId('');
+            if (isDifferentProject) {
+              setInspectorMode('live');
+              setOcrInspectImageId('');
+            }
             fetchData();
           } else if (msg.type === 'document_updated') {
             const docObj = msg.data || msg.document;
@@ -2333,10 +2338,34 @@ function AppContent() {
       ),
     [frames]
   );
-  const activeFrame = useMemo(
-    () => (selectedFrameId ? frames.find(f => f.frame_id === selectedFrameId) : null) || sortedFrames[0] || null,
-    [frames, selectedFrameId, sortedFrames]
+  const effectiveSelectedFrameId = useMemo(
+    () =>
+      (inspectorMode === 'ocr_inspect' &&
+      ocrInspectImageId &&
+      ocrInspectImageId !== 'dag_node3_capture_temp' &&
+      frames.some((f) => f.frame_id === ocrInspectImageId)
+        ? ocrInspectImageId
+        : selectedFrameId) ||
+      (ocrInspectImageId &&
+      ocrInspectImageId !== 'dag_node3_capture_temp' &&
+      frames.some((f) => f.frame_id === ocrInspectImageId)
+        ? ocrInspectImageId
+        : null),
+    [inspectorMode, ocrInspectImageId, selectedFrameId, frames]
   );
+
+  const activeFrame = useMemo(
+    () => (effectiveSelectedFrameId ? frames.find(f => f.frame_id === effectiveSelectedFrameId) : null) || sortedFrames[0] || null,
+    [frames, effectiveSelectedFrameId, sortedFrames]
+  );
+
+  const activeFramePageNum = useMemo(() => {
+    if (!activeFrame || sortedFrames.length === 0) return 1;
+    const idx = sortedFrames.findIndex(f => f.frame_id === activeFrame.frame_id);
+    const hasPg1 = sortedFrames.some(f => f.page_index === 1);
+    if (idx === 0 && (!activeFrame.page_index || activeFrame.page_index > 1) && !hasPg1) return 1;
+    return activeFrame.page_index || (idx >= 0 ? idx + 1 : 1);
+  }, [activeFrame, sortedFrames]);
 
   const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;
@@ -2995,7 +3024,7 @@ function AppContent() {
               <aside
                 className="window-minimized-rail"
                 onClick={() => { setFramesMinimized(false); setInspectorMaximized(false); setLinesMaximized(false); setFramesMaximized(false); }}
-                title={`Click to restore Captured Frames panel (${frames.length} frames)`}
+                title={`Click to restore Captured Frames panel${activeFrame ? ` (Selected: Pg ${activeFramePageNum} • Ln ${activeFrame.top_line}→${activeFrame.bottom_line})` : ` (${frames.length} frames)`}`}
               >
                 <Camera size={15} color="#00ff9d" />
                 {frames.length > 0 && (
@@ -3004,10 +3033,12 @@ function AppContent() {
                     background: 'rgba(0, 255, 157, 0.15)', border: '1px solid rgba(0, 255, 157, 0.3)',
                     borderRadius: '10px', padding: '2px 4px', lineHeight: 1
                   }}>
-                    {frames.length}
+                    {activeFrame ? `Pg ${activeFramePageNum}` : frames.length}
                   </span>
                 )}
-                <span className="window-minimized-label">CAPTURED FRAMES</span>
+                <span className="window-minimized-label">
+                  {activeFrame ? `CAPTURED FRAMES (Pg ${activeFramePageNum}/${frames.length} • Ln ${activeFrame.top_line})` : 'CAPTURED FRAMES'}
+                </span>
                 <Maximize2 size={12} style={{ marginTop: 'auto' }} />
               </aside>
             ) : (
@@ -3170,7 +3201,7 @@ function AppContent() {
                   <VirtualizedFrameStrip
                     frames={sortedFrames}
                     totalLines={documentData.total_lines || documentData.max_line || 0}
-                    selectedFrameId={selectedFrameId}
+                    selectedFrameId={effectiveSelectedFrameId || activeFrame?.frame_id || null}
                     selectedFrameIds={selectedFrameIds}
                     apiBase={API_BASE}
                     devDisplayName={devDisplayName}
@@ -3178,9 +3209,8 @@ function AppContent() {
                     deletingFrameId={deletingFrameId}
                     onSelectFrame={(f) => {
                       setSelectedFrameId(f.frame_id);
-                      if (inspectorMode === 'ocr_inspect') {
-                        setOcrInspectImageId(f.frame_id);
-                      } else if (inspectorMode === 'live') {
+                      setOcrInspectImageId(f.frame_id);
+                      if (inspectorMode === 'live') {
                         setInspectorMode('single');
                       }
                       setInspectorMaximized(false);
@@ -3236,15 +3266,26 @@ function AppContent() {
               <div className="panel-header">
                 <div style={{ display: 'flex', gap: '3px', background: '#0d1117', padding: '2px', borderRadius: '6px', border: '1px solid #30363d' }}>
                   <button className={`btn btn-sm ${inspectorMode === 'live' ? 'btn-primary' : ''}`} onClick={() => { setInspectorMode('live'); setLiveMode('desktop'); setStreamKey(Date.now()); }} style={{ fontSize: '11px', padding: '3px 8px' }}><Monitor size={11} style={{ marginRight: '4px' }} /><span>Live Desktop</span></button>
-                  <button className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`} onClick={() => setInspectorMode('single')} style={{ fontSize: '11px', padding: '3px 8px' }}>Single Frame</button>
+                  <button
+                    className={`btn btn-sm ${inspectorMode === 'single' ? 'btn-primary' : ''}`}
+                    onClick={() => {
+                      if (ocrInspectImageId && ocrInspectImageId !== 'dag_node3_capture_temp') {
+                        setSelectedFrameId(ocrInspectImageId);
+                      }
+                      setInspectorMode('single');
+                    }}
+                    style={{ fontSize: '11px', padding: '3px 8px' }}
+                  >
+                    Single Frame{activeFrame ? ` (Pg ${activeFramePageNum})` : ''}
+                  </button>
                   <button
                     className={`btn btn-sm ${inspectorMode === 'ocr_inspect' ? 'btn-primary' : ''}`}
-                    onClick={() => handleOpenInlineOcrInspector(selectedFrameId || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
+                    onClick={() => handleOpenInlineOcrInspector(effectiveSelectedFrameId || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1].frame_id : 'dag_node3_capture_temp'))}
                     style={{ fontSize: '11px', padding: '3px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
                     title="Open OCR Full Inspector inline (Double-click any captured frame to inspect directly)"
                   >
                     <FileText size={11} />
-                    <span>OCR Inspector</span>
+                    <span>OCR Inspector{activeFrame ? ` (Pg ${activeFramePageNum})` : ''}</span>
                   </button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3518,6 +3559,8 @@ function AppContent() {
                       hasStudioPanel={true}
                       isStudioPanelOpen={showStudioDrawer && !studioMinimized}
                       onToggleStudioPanel={() => handleToggleStudio()}
+                      selectedPageNum={activeFramePageNum}
+                      totalPagesCount={sortedFrames.length}
                       onFocusInspector={() => {
                         setFramesMinimized(true);
                         setLinesMinimized(true);
@@ -3530,7 +3573,19 @@ function AppContent() {
                   </div>
                 ) : activeFrame ? (
                   <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}>
-                    <div className="gutter-line-callout top"><span className="gutter-callout-icon">▲</span><span className="gutter-callout-label">TOP GUTTER:</span><span className="gutter-callout-value">{activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Detecting...'}</span></div>
+                    <div className="gutter-line-callout top" style={{ justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span className="gutter-callout-icon">▲</span>
+                        <span className="gutter-callout-label">TOP GUTTER:</span>
+                        <span className="gutter-callout-value">{activeFrame.top_line > 0 ? `Line #${activeFrame.top_line}` : 'Detecting...'}</span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontFamily: 'monospace' }}>
+                        <span style={{ background: 'rgba(0, 255, 157, 0.16)', border: '1px solid #00ff9d', color: '#00ff9d', borderRadius: '4px', padding: '1px 7px', fontWeight: 800 }}>
+                          ✓ SELECTED: Pg {activeFramePageNum} / {sortedFrames.length} (Ln {activeFrame.top_line} → {activeFrame.bottom_line})
+                        </span>
+                        <span style={{ color: '#8b949e' }}>{activeFrame.filename || `${activeFrame.frame_id}.png`}</span>
+                      </div>
+                    </div>
                     <div
                       className="source-image-wrapper fit"
                       onDoubleClick={() => handleOpenInlineOcrInspector(activeFrame.frame_id)}

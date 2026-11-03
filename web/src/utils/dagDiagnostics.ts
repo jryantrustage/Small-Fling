@@ -159,10 +159,19 @@ export function calculateNodeLiveStatus(
     }
     case 'frame_ocr': {
       isDone = !isError && nodeData.status === 'completed';
-      defaultEvaluator = 'RapidOCR Gutter Evaluator';
-      metricLabel = healingStep || (isDone ? `Ln ${nodeData.top_line || 1}→${nodeData.bottom_line || 0}` : 'Gutter OCR');
-      statusLabel = isThisActive ? 'READING' : (isError ? 'FAILED' : (isDone ? 'PARSED' : 'READY'));
-      defaultInsight = isDone ? `Gutter bounds: Ln ${nodeData.top_line || 1}→${nodeData.bottom_line}` : 'Extracting line numbers from gutter column';
+      const repCnt = Number(nodeData.repaired_lines_count || 0);
+      defaultEvaluator = 'Gutter & Line Position Evaluator';
+      metricLabel = healingStep || (
+        isDone
+          ? (repCnt > 0
+              ? `Ln ${nodeData.top_line || 1}→${nodeData.bottom_line || 0} (${repCnt} Fixed)`
+              : `Ln ${nodeData.top_line || 1}→${nodeData.bottom_line || 0} Pos✔`)
+          : 'Row Pos Verify'
+      );
+      statusLabel = isThisActive ? 'VERIFYING' : (isError ? 'FAILED' : (isDone ? 'POS VERIFIED' : 'READY'));
+      defaultInsight = isDone
+        ? `Gutter & 1:1 Line Pos Verified: Ln ${nodeData.top_line || 1}→${nodeData.bottom_line}${repCnt > 0 ? ` (repaired ${repCnt} shifted)` : ''}`
+        : 'Verifying 1:1 line positions & gutter bounds';
       color = isError ? (healingStep ? '#ffa657' : '#ff7b72') : (isDone ? '#00ff9d' : '#8957e5');
       break;
     }

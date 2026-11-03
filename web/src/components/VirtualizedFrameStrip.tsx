@@ -26,6 +26,11 @@ export interface VirtualizedFrameStripProps {
 const MAX_VIRTUAL_SCROLL_HEIGHT_PX = 12_000_000;
 const COMPACT_ROW_HEIGHT = 54;
 
+// Persist scroll position & density mode across sidebar minimize/close/re-open cycles
+let persistedFrameStripScrollTop = 0;
+let persistedFrameStripCompact = false;
+let persistedLastScrolledFrameId: string | null = null;
+
 export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   frames,
   totalLines = 0,
@@ -46,16 +51,17 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   onDeleteFrame,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
+  const [scrollTop, setScrollTop] = useState<number>(() => persistedFrameStripScrollTop);
   const [viewportHeight, setViewportHeight] = useState(640);
   const [isFastScrolling, setIsFastScrolling] = useState(false);
   const [isThumbDragging, setIsThumbDragging] = useState(false);
-  const [isCompactMode, setIsCompactMode] = useState(false);
+  const [isCompactMode, setIsCompactMode] = useState<boolean>(() => persistedFrameStripCompact);
   const [jumpInput, setJumpInput] = useState('');
 
   const scrollHideTimerRef = useRef<number | null>(null);
   const lastScrollTimeRef = useRef<number>(0);
-  const lastScrollTopRef = useRef<number>(0);
+  const lastScrollTopRef = useRef<number>(persistedFrameStripScrollTop);
+  const didRestoreMountScrollRef = useRef<boolean>(false);
 
   const totalCount = frames.length;
   const activeRowHeight = isCompactMode ? COMPACT_ROW_HEIGHT : rowHeight;
@@ -127,9 +133,100 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
       }
       el.scrollTop = targetPhysicalTop;
       setScrollTop(targetPhysicalTop);
+      persistedFrameStripScrollTop = targetPhysicalTop;
     },
     [totalCount, activeRowHeight, scrollScale]
   );
+
+  // Selected frame lookup for persistent restoration & header badge
+  const selectedFrameInfo = useMemo(() => {
+    if (!selectedFrameId || totalCount === 0) return null;
+    const idx = frames.findIndex((f) => f.frame_id === selectedFrameId);
+    if (idx < 0) return null;
+    const f = frames[idx];
+    const isVeryFirst = idx === 0;
+    const pageNum =
+      isVeryFirst && (!f?.page_index || f.page_index > 1) && !hasPage1InSet
+        ? 1
+        : f?.page_index || idx + 1;
+    return {
+      index: idx,
+      frame: f,
+      pageNum,
+    };
+  }, [selectedFrameId, frames, totalCount, hasPage1InSet]);
+
+  // Restore scroll position & ensure the selected frame is visible when the Captured Frames sidebar is opened or selection changes
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || totalCount === 0) return;
+
+    const currentVpHeight = el.clientHeight > 0 ? el.clientHeight : viewportHeight;
+
+    // 1. On initial mount (when Captured Frames sidebar is opened), restore saved scrollTop or center the selected frame
+    if (!didRestoreMountScrollRef.current) {
+      didRestoreMountScrollRef.current = true;
+      if (selectedFrameInfo) {
+        const selLogicalTop = selectedFrameInfo.index * activeRowHeight;
+        const savedLogicalTop = persistedFrameStripScrollTop * scrollScale;
+        const isSelectedInSavedView =
+          persistedFrameStripScrollTop > 0 &&
+          selLogicalTop >= savedLogicalTop - activeRowHeight * 0.5 &&
+          selLogicalTop + activeRowHeight <= savedLogicalTop + currentVpHeight + activeRowHeight * 0.5;
+
+        if (isSelectedInSavedView) {
+          el.scrollTop = persistedFrameStripScrollTop;
+          setScrollTop(persistedFrameStripScrollTop);
+        } else {
+          const centeredLogicalTop = Math.max(
+            0,
+            selLogicalTop - Math.max(0, (currentVpHeight - activeRowHeight) * 0.35)
+          );
+          const targetPhysicalTop = scrollScale > 1 ? centeredLogicalTop / scrollScale : centeredLogicalTop;
+          el.scrollTop = targetPhysicalTop;
+          setScrollTop(targetPhysicalTop);
+          persistedFrameStripScrollTop = targetPhysicalTop;
+        }
+        persistedLastScrolledFrameId = selectedFrameId;
+        return;
+      }
+
+      if (persistedFrameStripScrollTop > 0) {
+        el.scrollTop = persistedFrameStripScrollTop;
+        setScrollTop(persistedFrameStripScrollTop);
+      }
+      return;
+    }
+
+    // 2. When selectedFrameId changes while the sidebar is open, keep it in view if outside current viewport
+    if (selectedFrameInfo && selectedFrameId !== persistedLastScrolledFrameId && !isThumbDragging) {
+      persistedLastScrolledFrameId = selectedFrameId;
+      const selLogicalTop = selectedFrameInfo.index * activeRowHeight;
+      const currentLogicalTop = el.scrollTop * scrollScale;
+      const isVisibleNow =
+        selLogicalTop >= currentLogicalTop &&
+        selLogicalTop + activeRowHeight <= currentLogicalTop + currentVpHeight;
+
+      if (!isVisibleNow) {
+        const centeredLogicalTop = Math.max(
+          0,
+          selLogicalTop - Math.max(0, (currentVpHeight - activeRowHeight) * 0.35)
+        );
+        const targetPhysicalTop = scrollScale > 1 ? centeredLogicalTop / scrollScale : centeredLogicalTop;
+        el.scrollTop = targetPhysicalTop;
+        setScrollTop(targetPhysicalTop);
+        persistedFrameStripScrollTop = targetPhysicalTop;
+      }
+    }
+  }, [
+    totalCount,
+    selectedFrameId,
+    selectedFrameInfo,
+    activeRowHeight,
+    scrollScale,
+    viewportHeight,
+    isThumbDragging,
+  ]);
 
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -143,6 +240,7 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
       lastScrollTopRef.current = nextTop;
 
       setScrollTop(nextTop);
+      persistedFrameStripScrollTop = nextTop;
 
       // Mark as fast scrolling when velocity > 1.8px/ms or thumb is being dragged
       if (velocityPxPerMs > 1.8 || isThumbDragging) {
@@ -304,9 +402,10 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
 
   // Toggle between Thumbnail mode (206px) and Compact mode (54px) while keeping the same focused frame in view
   const handleToggleCompactMode = useCallback(() => {
-    const currentIdx = indicatorInfo.focusIdx;
+    const currentIdx = selectedFrameInfo ? selectedFrameInfo.index : indicatorInfo.focusIdx;
     const nextCompact = !isCompactMode;
     setIsCompactMode(nextCompact);
+    persistedFrameStripCompact = nextCompact;
     window.requestAnimationFrame(() => {
       const el = containerRef.current;
       if (!el) return;
@@ -320,8 +419,9 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
       const nextTop = (currentIdx * nextRowH) / nextScale;
       el.scrollTop = nextTop;
       setScrollTop(nextTop);
+      persistedFrameStripScrollTop = nextTop;
     });
-  }, [indicatorInfo.focusIdx, isCompactMode, rowHeight, totalCount, viewportHeight]);
+  }, [selectedFrameInfo, indicatorInfo.focusIdx, isCompactMode, rowHeight, totalCount, viewportHeight]);
 
   const badgeTopPx = Math.max(
     64,
@@ -437,6 +537,54 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
               <span>{isCompactMode ? 'Thumb' : 'Compact'}</span>
             </button>
           </div>
+
+          {selectedFrameInfo && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '6px',
+                marginTop: '3px',
+                padding: '3px 7px',
+                borderRadius: '5px',
+                background: 'rgba(0, 255, 157, 0.12)',
+                border: '1px solid rgba(0, 255, 157, 0.4)',
+                fontSize: '10px',
+                fontFamily: 'var(--font-mono, monospace)',
+                color: '#00ff9d',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                const el = containerRef.current;
+                const vpH = el && el.clientHeight > 0 ? el.clientHeight : viewportHeight;
+                const centeredIdx = Math.max(
+                  0,
+                  selectedFrameInfo.index - Math.floor(vpH / activeRowHeight / 3)
+                );
+                scrollToFrameIndex(centeredIdx, false);
+              }}
+              title="Click to center the currently selected frame in the Captured Frames list"
+              data-testid="selected-frame-status-pill"
+            >
+              <span style={{ fontWeight: 800, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                ✓ Selected: Pg {selectedFrameInfo.pageNum}/{totalCount} • Ln {selectedFrameInfo.frame.top_line}→{selectedFrameInfo.frame.bottom_line}
+              </span>
+              <span
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  background: 'rgba(0, 255, 157, 0.2)',
+                  color: '#f0f6fc',
+                  flexShrink: 0,
+                }}
+              >
+                Center ⌖
+              </span>
+            </div>
+          )}
         </div>
       )}
 

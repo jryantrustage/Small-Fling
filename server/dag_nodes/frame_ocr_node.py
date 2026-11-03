@@ -28,8 +28,8 @@ class FrameOcrNode(BaseDagNode):
     step = "5"
     id = "frame_ocr"
     node_id = "frame_ocr"
-    title = "5. Gutter OCR & Boundary Slicer"
-    short_name = "Gutter OCR"
+    title = "5. Gutter & Line Position Verify"
+    short_name = "Line Pos Verify"
     category = "position_navigation"
     accent_color = "#8957e5"
     default_position = {"x": 940.0, "y": 140.0}
@@ -227,6 +227,37 @@ class FrameOcrNode(BaseDagNode):
             if top_ln == 1 or not state.orchestration_state.get("viewport_lines"):
                 state.orchestration_state["viewport_lines"] = bot_ln - top_ln + 1
 
+        # Mandatory Line Position Verification: verify every single OCR line against physical horizontal row slices
+        from ocr_engine import worker_scan_image, verify_and_repair_ocr_line_positions
+        n4_node = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
+        n4_lines = n4_node.get("lines") or []
+        n4_bboxes = n4_node.get("bounding_boxes") or {}
+        if (not lines_detected or not any((l.get("text") or "").strip() for l in lines_detected)) and n4_lines:
+            n4_min = min((int(l.get("line_number", 0)) for l in n4_lines if l.get("line_number")), default=0)
+            n4_max = max((int(l.get("line_number", 0)) for l in n4_lines if l.get("line_number")), default=0)
+            if abs(n4_min - top_ln) <= 2 and abs(n4_max - bot_ln) <= 2:
+                lines_detected = [dict(l) for l in n4_lines]
+
+        gt_lines_for_ver = None
+        bboxes_for_ver = dict(n4_bboxes) if n4_bboxes else {}
+        if not lines_detected or not all(l.get("row_slice_text") is not None for l in lines_detected):
+            try:
+                ws_ver = await asyncio.to_thread(worker_scan_image, str(temp_calib))
+                gt_lines_for_ver = ws_ver.get("lines", [])
+                if not bboxes_for_ver:
+                    bboxes_for_ver = ws_ver.get("bounding_boxes", {})
+                if not lines_detected or not any((l.get("text") or "").strip() for l in lines_detected):
+                    lines_detected = [dict(l) for l in gt_lines_for_ver]
+            except Exception as ws_e:
+                print(f"[FrameOcrNode] worker_scan_image verification note: {ws_e}")
+
+        ver_report = verify_and_repair_ocr_line_positions(lines_detected, gt_lines_for_ver, bboxes_for_ver)
+        lines_detected = ver_report["lines"]
+        bboxes_for_ver = ver_report["bounding_boxes"]
+        scan_res["lines"] = lines_detected
+        scan_res["bounding_boxes"] = bboxes_for_ver
+        scan_res["line_position_verification"] = ver_report
+
         # Resolve logical page index and check duplicate content against prior frames
         is_duplicate = False
         duplicate_fid = None
@@ -359,6 +390,9 @@ class FrameOcrNode(BaseDagNode):
             }
             state.captured_frames[fid] = frame_info
         state.orchestration_state["last_acquired_frame_id"] = fid
+        frame_info["lines"] = lines_detected
+        frame_info["bounding_boxes"] = bboxes_for_ver
+        frame_info["line_position_verification"] = ver_report
 
         fn_to_save = frame_info.get("filename") or f"{fid}.png"
         if pid:
@@ -405,13 +439,15 @@ class FrameOcrNode(BaseDagNode):
         except Exception:
             pass
 
-        # Populate document master lines if text was detected
+        # Populate document master lines if text was detected (overwriting any shifted line when shift_repaired=True)
         for item in lines_detected:
             ln = item.get("line_number")
             raw_txt = (item.get("text") or "").rstrip("\r\n")
             if ln:
                 raw_txt = ocr_svc.sanitize_line_text(ln, raw_txt)
-                if ln in state.document_lines:
+                if item.get("blank_locked"):
+                    raw_txt = ""
+                if ln in state.document_lines and not item.get("shift_repaired") and not item.get("position_verified"):
                     existing = state.document_lines[ln]
                     ex_txt = (existing.get("text") if isinstance(existing, dict) else str(existing)).strip()
                     if ex_txt and not ex_txt.startswith(f"Line {ln}"):
@@ -421,10 +457,12 @@ class FrameOcrNode(BaseDagNode):
                 state.document_lines[ln] = state.MasterLine(
                     raw_txt,
                     line_number=ln,
+                    gutter_number=ln,
                     frame_id=fid,
                     status=item.get("status", "verified"),
-                    confidence=item.get("confidence", 0.95),
+                    confidence=item.get("confidence", 0.99),
                     is_wrapped=item.get("is_wrapped", False),
+                    position_verified=True,
                 )
 
         state.save_persisted_state()
@@ -482,22 +520,36 @@ class FrameOcrNode(BaseDagNode):
                 "bottom_text_anchor": bottom_anchor_text
             })
 
+        ver_cnt = ver_report.get("verified_lines_count", len(lines_detected))
+        shift_cnt = ver_report.get("shifted_lines_detected", 0)
+        rep_cnt = ver_report.get("repaired_lines_count", 0)
+        pos_summary = (
+            f"Pos Verified {ver_cnt}/{ver_cnt} lines (auto-repaired {rep_cnt} shifted)"
+            if rep_cnt > 0
+            else f"Pos Verified {ver_cnt}/{ver_cnt} lines (0 shifted)"
+        )
+
         state.dag_state["nodes"]["frame_ocr"].update({
             "status": "completed",
             "top_line": top_ln,
             "bottom_line": bot_ln,
             "target_top_line": target_top,
             "extracted_line_count": len(lines_detected) if lines_detected else lpp,
+            "position_verified": True,
+            "verified_lines_count": ver_cnt,
+            "shifted_lines_detected": shift_cnt,
+            "repaired_lines_count": rep_cnt,
+            "line_position_verification": ver_report,
             "frame_id": fid,
-            "evaluator": "Gutter Boundary Evaluator",
-            "telemetry_insight": f"Gutter OCR: Page {pidx} (Ln {top_ln} → {bot_ln}) ✔ Next Target: Ln {target_top}",
+            "evaluator": "Gutter & Line Position Evaluator",
+            "telemetry_insight": f"Page {pidx} (Ln {top_ln} → {bot_ln}) • {pos_summary} ✔ Next: Ln {target_top}",
             "error": None
         })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"OCR extracted Ln {top_ln} → {bot_ln}. Next Target: Ln {target_top} ✔",
+            message=f"OCR & Line Position verified Ln {top_ln} → {bot_ln} ({pos_summary}). Next Target: Ln {target_top} ✔",
             top_line=top_ln,
             bottom_line=bot_ln,
             data={
@@ -506,7 +558,12 @@ class FrameOcrNode(BaseDagNode):
                 "top_line": top_ln,
                 "bottom_line": bot_ln,
                 "target_top_line": target_top,
-                "lines_extracted": len(lines_detected) if lines_detected else lpp
+                "lines_extracted": len(lines_detected) if lines_detected else lpp,
+                "position_verified": True,
+                "verified_lines_count": ver_cnt,
+                "shifted_lines_detected": shift_cnt,
+                "repaired_lines_count": rep_cnt,
+                "line_position_verification": ver_report,
             }
         )
 

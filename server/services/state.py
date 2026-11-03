@@ -1658,10 +1658,25 @@ def update_headless_telemetry_session(
 
     target = headless_telemetry_session.get("target_total_lines", 0) or latest_telemetry.get("target_total_lines", 0)
     if target > 0:
+        from ocr_engine import is_eof_reached_with_offline_awareness
         headless_telemetry_session["target_total_lines"] = target
-        pct = round(min(100.0, (max(cur_b, doc_len) / target) * 100), 1)
+        tail_txt = ""
+        if cur_b > 0 and document_lines:
+            tail_txt = "\n".join(str(document_lines.get(k, "")) for k in range(max(1, cur_b - 6), cur_b + 1))
+        offline_det = bool(
+            orchestration_state.get("offline_overlay_detected")
+            or dag_state.get("nodes", {}).get("frame_ocr", {}).get("offline_overlay_detected")
+            or dag_state.get("nodes", {}).get("arrow_down", {}).get("offline_overlay_detected")
+        )
+        is_eof, _ = is_eof_reached_with_offline_awareness(
+            bottom_line=max(cur_b, doc_len),
+            total_lines=target,
+            offline_detected=offline_det,
+            tail_text=tail_txt,
+        )
+        pct = 100.0 if is_eof else round(min(100.0, (max(cur_b, doc_len) / target) * 100), 1)
         headless_telemetry_session["completion_percent"] = pct
-        if cur_b >= target or doc_len >= target:
+        if is_eof or cur_b >= target or doc_len >= target:
             headless_telemetry_session["total_lines_reached"] = True
         else:
             headless_telemetry_session["finish_status_message"] = (
@@ -1873,13 +1888,16 @@ def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, 
         return {"pruned_count": 0, "pruned_frame_ids": [], "frontier_bottom_line": max_bot}
 
     pruned_ids: List[str] = []
+    frontier_top = int(frontier_frame.get("top_line", 0) or 0) if frontier_frame else 0
     for f in sorted_f[frontier_idx + 1:]:
         fid = f.get("frame_id")
         if not fid or fid == exclude_frame_id:
             continue
         f_bot = int(f.get("bottom_line", 0) or 0)
-        # If a frame after the frontier regressed more than 10 lines behind max_bot, prune it
-        if f_bot < max_bot - 10:
+        f_top = int(f.get("top_line", 0) or 0)
+        # If a frame after the frontier regressed more than 10 lines behind max_bot
+        # OR is an exact duplicate retry of the frontier frame (e.g. repeated EOF captures), prune it
+        if f_bot < max_bot - 10 or (f_bot == max_bot and frontier_top > 0 and f_top == frontier_top):
             pruned_ids.append(fid)
             captured_frames.pop(fid, None)
             try:
@@ -1938,8 +1956,23 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         or proj.get("target_total_lines")
         or 0
     )
-    is_complete = bool(target_lines > 0 and frontier_line >= target_lines)
-    pct = round(min(100.0, (frontier_line / max(1, target_lines)) * 100.0), 1) if target_lines > 0 else 0.0
+    from ocr_engine import is_eof_reached_with_offline_awareness
+    tail_txt = ""
+    if frontier_line > 0 and document_lines:
+        tail_txt = "\n".join(str(document_lines.get(k, "")) for k in range(max(1, frontier_line - 6), frontier_line + 1))
+    offline_det = bool(
+        orchestration_state.get("offline_overlay_detected")
+        or dag_state.get("nodes", {}).get("frame_ocr", {}).get("offline_overlay_detected")
+        or dag_state.get("nodes", {}).get("arrow_down", {}).get("offline_overlay_detected")
+    )
+    is_eof, _ = is_eof_reached_with_offline_awareness(
+        bottom_line=frontier_line,
+        total_lines=target_lines,
+        offline_detected=offline_det,
+        tail_text=tail_txt,
+    )
+    is_complete = bool(target_lines > 0 and (frontier_line >= target_lines or is_eof))
+    pct = 100.0 if is_complete else (round(min(100.0, (frontier_line / max(1, target_lines)) * 100.0), 1) if target_lines > 0 else 0.0)
 
     sorted_f = sorted(
         captured_frames.values(),
@@ -2260,20 +2293,67 @@ multipart_bundle_state: Dict[str, Any] = {
 }
 
 
+def _extract_canonical_filename_from_project_or_lines(proj: Dict[str, Any], lines_dict: Optional[Dict[int, Any]] = None) -> str:
+    """
+    Resolves the canonical markdown filename (e.g., 'CommonUI_develop_26-10-29-2-26pm_part2.md')
+    from alignment status, project description ('File: ...'), lines 1..10 of document_lines, or project name.
+    """
+    align_fn = (latest_alignment_status or {}).get("file_name") or ""
+    if align_fn and re.search(r"_part\d+\.md$", align_fn, re.IGNORECASE):
+        return align_fn
+
+    desc = str((proj or {}).get("description") or "")
+    m_desc = re.search(r"([A-Za-z0-9_\-.]+_part\d+\.(?:md|markdown|txt))", desc, re.IGNORECASE)
+    if m_desc:
+        return m_desc.group(1)
+    m_desc_file = re.search(r"File:\s*([A-Za-z0-9_\-.]+\.(?:md|markdown|txt))", desc, re.IGNORECASE)
+    if m_desc_file:
+        return m_desc_file.group(1)
+
+    src_lines = lines_dict if lines_dict is not None else document_lines
+    if src_lines:
+        for ln_num in range(1, 10):
+            raw_v = src_lines.get(ln_num, "")
+            txt = raw_v.get("text", "") if isinstance(raw_v, dict) else str(raw_v or "")
+            # Matches header like: '# CommonUI_develop_26-10-29-2-26pm (Part 2 of 3)'
+            m_hdr = re.search(r"^#\s*([A-Za-z0-9_\-.]+)\s*\(\s*Part\s*(\d+)(?:\s*of\s*(\d+))?\s*\)", txt.strip(), re.IGNORECASE)
+            if m_hdr:
+                prefix = m_hdr.group(1).strip()
+                p_num = int(m_hdr.group(2))
+                return f"{prefix}_part{p_num}.md"
+
+    return align_fn or str((proj or {}).get("name") or "")
+
+
 def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Synchronizes multipart_bundle_state with the latest alignment status and active project name.
+    Synchronizes multipart_bundle_state with the latest alignment status, project description,
+    document header lines, and active project name.
     """
     global multipart_bundle_state
     from alignment_engine import parse_multipart_markdown_filename
 
     align = alignment_status or latest_alignment_status or {}
     proj = db.get_active_project() or {}
-    candidate_name = align.get("file_name") or proj.get("name") or ""
+    canonical_fn = _extract_canonical_filename_from_project_or_lines(proj, document_lines)
+    candidate_name = align.get("file_name") or canonical_fn or proj.get("name") or ""
 
     mp_info = align.get("multipart_info")
     if not mp_info or not mp_info.get("is_multipart"):
+        mp_info = parse_multipart_markdown_filename(canonical_fn or candidate_name)
+    if (not mp_info or not mp_info.get("is_multipart")) and candidate_name != canonical_fn:
         mp_info = parse_multipart_markdown_filename(candidate_name)
+
+    # Check document header lines 1..10 for total_parts (e.g., '(Part 2 of 3)' or 'Part: **2 of 3**')
+    detected_total_parts = None
+    if document_lines:
+        for ln_num in range(1, 10):
+            raw_v = document_lines.get(ln_num, "")
+            txt = raw_v.get("text", "") if isinstance(raw_v, dict) else str(raw_v or "")
+            m_tot = re.search(r"Part[:\s*]*(\d+)\s+of\s+(\d+)", txt, re.IGNORECASE)
+            if m_tot:
+                detected_total_parts = int(m_tot.group(2))
+                break
 
     if mp_info and mp_info.get("is_multipart"):
         multipart_bundle_state["is_multipart"] = True
@@ -2283,18 +2363,21 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
             multipart_bundle_state["current_part"] = mp_info["part_number"]
         if mp_info.get("total_parts") is not None:
             multipart_bundle_state["total_parts"] = mp_info["total_parts"]
+        elif detected_total_parts is not None:
+            multipart_bundle_state["total_parts"] = detected_total_parts
         if mp_info.get("next_part_number") is not None:
             multipart_bundle_state["next_part_number"] = mp_info["next_part_number"]
         if mp_info.get("next_file_name"):
             multipart_bundle_state["next_file_name"] = mp_info["next_file_name"]
     else:
-        # Check if any project in DB is part of a multipart bundle
         if candidate_name:
             parsed_proj = parse_multipart_markdown_filename(candidate_name)
             if parsed_proj.get("is_multipart"):
                 multipart_bundle_state["is_multipart"] = True
                 multipart_bundle_state["base_prefix"] = parsed_proj.get("base_prefix") or multipart_bundle_state.get("base_prefix", "")
                 multipart_bundle_state["current_part"] = parsed_proj.get("part_number")
+                if detected_total_parts is not None:
+                    multipart_bundle_state["total_parts"] = detected_total_parts
                 multipart_bundle_state["next_part_number"] = parsed_proj.get("next_part_number")
                 multipart_bundle_state["next_file_name"] = parsed_proj.get("next_file_name")
 
@@ -2342,8 +2425,10 @@ def export_project_markdown_to_disk(
 
     full_markdown = "\n".join(doc_lines)
 
+    canonical_fn = _extract_canonical_filename_from_project_or_lines(proj_info, lines_dict)
     raw_name = (
         explicit_file_name
+        or canonical_fn
         or proj_info.get("name")
         or latest_alignment_status.get("file_name")
         or f"exported_project_{target_pid or 'current'}"

@@ -20,15 +20,33 @@ export interface OcrLineItem {
   line_number: number;
   gutter_number?: number;
   text: string;
+  row_slice_text?: string;
   bbox?: BoundingBox;
   gutter_bbox?: BoundingBox;
   is_blank?: boolean;
+  blank_locked?: boolean;
   is_wrapped?: boolean;
   wrapped_line_count?: number;
   confidence?: number;
   status?: string;
   overwritten?: boolean;
   rescanned_at?: string;
+  position_verified?: boolean;
+  shift_detected?: boolean;
+  shift_repaired?: boolean;
+  shifted_from_line?: number | null;
+  row_alignment_score?: number;
+}
+
+export interface LinePositionVerificationReport {
+  position_verified?: boolean;
+  total_lines?: number;
+  verified_lines_count?: number;
+  shifted_lines_detected?: number;
+  repaired_lines_count?: number;
+  shifted_lines?: number[];
+  repaired_lines?: number[];
+  summary?: string;
 }
 
 export interface AvailableOcrImage {
@@ -66,6 +84,7 @@ export interface OcrInspectionData {
     line_boxes?: Record<number | string, BoundingBox>;
     gutter_boxes?: Record<number | string, BoundingBox>;
   };
+  line_position_verification?: LinePositionVerificationReport;
   available_images?: AvailableOcrImage[];
 }
 
@@ -90,6 +109,8 @@ export interface Dag4OcrFullInspectorModalProps {
   isStudioPanelOpen?: boolean;
   onToggleStudioPanel?: () => void;
   onFocusInspector?: () => void;
+  selectedPageNum?: number;
+  totalPagesCount?: number;
 }
 
 export type OcrModalMode = 'inline' | 'fullscreen' | 'standard' | 'reduced';
@@ -142,7 +163,9 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
   hasStudioPanel,
   isStudioPanelOpen,
   onToggleStudioPanel,
-  onFocusInspector
+  onFocusInspector,
+  selectedPageNum,
+  totalPagesCount
 }) => {
   // Window display modes: 'fullscreen' (100vw x 100vh), 'standard' (wide floating), 'reduced' (compact floating), 'inline' (docked in container)
   const [modalMode, setModalMode] = useState<OcrModalMode>(inline ? 'inline' : 'fullscreen');
@@ -1011,6 +1034,28 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                 }}>
                   {activeCount} LINES MAPPED
                 </span>
+                {inspectData?.line_position_verification && (
+                  <span
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.14)',
+                      border: '1px solid rgba(56, 189, 248, 0.45)',
+                      color: '#38bdf8',
+                      padding: '1px 8px',
+                      borderRadius: '10px',
+                      fontSize: '10px',
+                      fontWeight: 800
+                    }}
+                    title={
+                      inspectData.line_position_verification.summary ||
+                      'Every OCR line verified 1:1 against its physical horizontal row slice'
+                    }
+                  >
+                    ✓ {inspectData.line_position_verification.verified_lines_count ?? activeCount}/{activeCount} POSITIONS VERIFIED
+                    {(inspectData.line_position_verification.repaired_lines_count || 0) > 0
+                      ? ` • ${inspectData.line_position_verification.repaired_lines_count} SHIFT FIXED`
+                      : ' • 0 SHIFTED'}
+                  </span>
+                )}
               </div>
               <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '1px' }}>
                 Source Gutter Bounding Boxes • Selective Line Rescan Overwrite • Interactive Live Connectors
@@ -1162,6 +1207,20 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
             >
               <ImageIcon size={13} color="#58a6ff" />
               <span style={{ color: '#58a6ff', fontWeight: 800 }}>IMAGE:</span>
+              {selectedPageNum ? (
+                <span
+                  style={{
+                    color: '#090d13',
+                    background: '#00ff9d',
+                    fontSize: '10px',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    fontWeight: 900
+                  }}
+                >
+                  Pg {selectedPageNum}{totalPagesCount ? ` / ${totalPagesCount}` : ''}
+                </span>
+              ) : null}
               <span style={{ color: '#f0f6fc', fontWeight: 700 }}>
                 {inspectData?.image_name || selectedImageId}
               </span>
@@ -1756,7 +1815,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                       ? 'rgba(255, 166, 87, 0.24)'
                       : (isSelected ? 'rgba(0, 255, 157, 0.22)' : (isHovered ? 'rgba(56, 189, 248, 0.16)' : 'rgba(13, 17, 23, 0.45)'));
 
-                    const pillWidth = Math.max(gBox.width, 36);
+                    const pillWidth = Math.max(gBox.width, 74);
                     const pillHeight = Math.max(gBox.height, 22);
 
                     return (
@@ -1821,32 +1880,35 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                           filter={isHovered || isSelected ? 'url(#neonGlowCyan)' : undefined}
                         />
 
-                        {/* Optional Badges on Source Image */}
-                        {showGutterBadges && (
-                          <g transform={`translate(${Math.max(4, box.x - 28)}, ${box.y + box.height / 2})`}>
-                            <rect
-                              x={-18}
-                              y={-9}
-                              width={24}
-                              height={18}
-                              rx={3}
-                              fill={isFlagged ? '#ffa657' : (isHovered || isSelected ? '#00ff9d' : '#161b22')}
-                              stroke={isFlagged ? '#ffa657' : (isHovered || isSelected ? '#00ff9d' : '#38bdf8')}
-                              strokeWidth={1}
-                            />
-                            <text
-                              x={-6}
-                              y={3}
-                              fill={isFlagged || isHovered || isSelected ? '#0d1117' : '#e6edf3'}
-                              fontSize={10}
-                              fontWeight={900}
-                              textAnchor="middle"
-                              fontFamily="monospace"
-                            >
-                              {ln}
-                            </text>
-                          </g>
-                        )}
+                        {/* Optional Badges on Source Image (shown only when Gutter Boxes are hidden to avoid duplicate overlapping numbers) */}
+                        {showGutterBadges && !showGutterBoxes && (() => {
+                          const badgeW = Math.max(28, String(ln).length * 7 + 8);
+                          return (
+                            <g transform={`translate(${Math.max(4, box.x - badgeW - 6)}, ${box.y + box.height / 2})`}>
+                              <rect
+                                x={0}
+                                y={-9}
+                                width={badgeW}
+                                height={18}
+                                rx={3}
+                                fill={isFlagged ? '#ffa657' : (isHovered || isSelected ? '#00ff9d' : '#161b22')}
+                                stroke={isFlagged ? '#ffa657' : (isHovered || isSelected ? '#00ff9d' : '#38bdf8')}
+                                strokeWidth={1}
+                              />
+                              <text
+                                x={badgeW / 2}
+                                y={3}
+                                fill={isFlagged || isHovered || isSelected ? '#0d1117' : '#e6edf3'}
+                                fontSize={10}
+                                fontWeight={900}
+                                textAnchor="middle"
+                                fontFamily="monospace"
+                              >
+                                {ln}
+                              </text>
+                            </g>
+                          );
+                        })()}
                       </g>
                     );
                   })}
@@ -1872,7 +1934,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                       const isFlagged = selectedLinesToOverwrite.has(ln);
                       const isHovered = ln === (hoveredLineNumber ?? selectedLineNumber);
 
-                      const pillWidth = Math.max(gBox.width, 36);
+                      const pillWidth = Math.max(gBox.width, 74);
                       const pillHeight = Math.max(gBox.height, 22);
 
                       return (
@@ -1893,14 +1955,12 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                             pointerEvents: 'auto',
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center',
+                            justifyContent: 'space-between',
                             gap: '3px',
                             background: isFlagged
-                              ? 'rgba(255, 166, 87, 0.38)'
-                              : (isHovered ? 'rgba(56, 189, 248, 0.28)' : 'rgba(9, 13, 19, 0.22)'),
-                            border: `1px solid ${isFlagged ? '#ffa657' : (isHovered ? '#38bdf8' : 'rgba(56, 189, 248, 0.35)')}`,
-                            backdropFilter: 'blur(2px)',
-                            WebkitBackdropFilter: 'blur(2px)',
+                              ? 'rgba(45, 28, 10, 0.94)'
+                              : (isHovered ? 'rgba(13, 25, 38, 0.95)' : 'rgba(13, 17, 23, 0.92)'),
+                            border: `1px solid ${isFlagged ? '#ffa657' : (isHovered ? '#38bdf8' : 'rgba(56, 189, 248, 0.45)')}`,
                             borderRadius: '4px',
                             cursor: 'pointer',
                             boxShadow: isFlagged
@@ -1908,7 +1968,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                               : (isHovered ? '0 0 8px rgba(56, 189, 248, 0.4)' : 'none'),
                             transition: 'all 0.12s ease',
                             userSelect: 'none',
-                            padding: '0 2px'
+                            padding: '0 5px'
                           }}
                           title={`Line ${ln}: Click to ${isFlagged ? 'unflag' : 'flag for selective OCR rescan and overwrite'}`}
                         >
@@ -1949,7 +2009,7 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                     const gBox = line.gutter_bbox || inspectData.bounding_boxes?.gutter_boxes?.[ln];
                     const cBox = line.bbox || inspectData.bounding_boxes?.line_boxes?.[ln];
 
-                    const pillWidth = gBox ? Math.max(gBox.width, 36) : 36;
+                    const pillWidth = gBox ? Math.max(gBox.width, 74) : 74;
                     const pillHeight = gBox ? Math.max(gBox.height, 22) : 22;
                     const anchorX = gBox ? gBox.x : (cBox ? Math.max(0, cBox.x - pillWidth - 10) : 10);
                     const anchorY = gBox ? gBox.y : (cBox ? cBox.y : 40);
@@ -2303,6 +2363,32 @@ export const Dag4OcrFullInspectorModal: React.FC<Dag4OcrFullInspectorModalProps>
                             title="Flagged to be overwritten on selective OCR rescan"
                           >
                             ⚡ FLAGGED
+                          </span>
+                        )}
+
+                        {line.shift_repaired && (
+                          <span
+                            style={{
+                              fontSize: '9px', fontWeight: 800, padding: '1px 5px',
+                              background: 'rgba(56, 189, 248, 0.2)', border: '1px solid #38bdf888',
+                              color: '#38bdf8', borderRadius: '3px', whiteSpace: 'nowrap'
+                            }}
+                            title={`Row shift auto-repaired from physical horizontal row slice ${ln}${line.shifted_from_line ? ` (was shifted from Ln ${line.shifted_from_line})` : ''}`}
+                          >
+                            Pos Fixed ✓
+                          </span>
+                        )}
+
+                        {!line.shift_repaired && line.position_verified && (
+                          <span
+                            style={{
+                              fontSize: '8.5px', fontWeight: 800, padding: '1px 4px',
+                              background: 'rgba(0, 255, 157, 0.12)', border: '1px solid rgba(0, 255, 157, 0.35)',
+                              color: '#00ff9d', borderRadius: '3px', whiteSpace: 'nowrap'
+                            }}
+                            title={`Line ${ln} position verified 1:1 against physical image row slice`}
+                          >
+                            1:1 ✓
                           </span>
                         )}
 

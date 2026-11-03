@@ -838,7 +838,21 @@ async def align_viewport_for_auto_resume(
 
         actual_top = int(nav_res.get("actual_top") or expected_top)
         actual_bot = int(nav_res.get("actual_bottom") or 0)
-        done_msg = f"🔄 Auto-Resume Positioned at Line {actual_top:,} (target Line {expected_top:,} = last line {last_bot:,} + 1) ✔"
+        eof_reached = bool(nav_res.get("eof_reached"))
+        offline_det = bool(nav_res.get("offline_overlay_detected"))
+        occluded_cnt = int(nav_res.get("occluded_tail_lines", 0) or 0)
+        if eof_reached:
+            state.orchestration_state["offline_overlay_detected"] = offline_det
+            state.dag_state.get("nodes", {}).get("arrow_down", {})["eof_reached"] = True
+            state.dag_state.get("nodes", {}).get("arrow_down", {})["offline_overlay_detected"] = offline_det
+            done_msg = (
+                f"🏁 Auto-Resume verified EOF at Line {actual_bot:,} "
+                f"({occluded_cnt} tail line(s) covered by 'Offline' overlay) ✔"
+                if offline_det and occluded_cnt > 0
+                else f"🏁 Auto-Resume verified EOF at Line {actual_bot:,} ✔"
+            )
+        else:
+            done_msg = f"🔄 Auto-Resume Positioned at Line {actual_top:,} (target Line {expected_top:,} = last line {last_bot:,} + 1) ✔"
         state.latest_telemetry["status_message"] = done_msg
         state.record_diagnostics_trace_event(
             event_type="LOOP_AUTO_RECOVERED",
@@ -847,7 +861,7 @@ async def align_viewport_for_auto_resume(
             actual_top_line=actual_top,
             actual_bottom_line=actual_bot,
             reason=f"Auto-resumed project where it left off (last frame bottom Line {last_bot})",
-            recovery_action=f"Aligned viewport top from Line {cur_top or '?'} to Line {actual_top} before next capture & OCR",
+            recovery_action=done_msg,
         )
         await emit_dag_telemetry_event(
             category="PACER", message=done_msg, dag="position_navigation", node_id="frame_acquire", serial=active_serial
@@ -858,6 +872,9 @@ async def align_viewport_for_auto_resume(
             "actual_top": actual_top,
             "actual_bottom": actual_bot,
             "last_bottom_line": last_bot,
+            "eof_reached": eof_reached,
+            "offline_overlay_detected": offline_det,
+            "occluded_tail_lines": occluded_cnt,
         }
     except Exception as ex:
         print(f"[align_viewport_for_auto_resume] warning: {ex}")
@@ -1545,13 +1562,85 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                 heal_fn = _get_orch_attr("auto_heal_pipeline_environment", auto_heal_pipeline_environment)
                 await heal_fn(active_serial, disp_id, "frame_acquire")
 
+            align_res: Dict[str, Any] = {}
             if has_existing_progress:
-                await align_viewport_for_auto_resume(
+                align_res = await align_viewport_for_auto_resume(
                     serial=active_serial,
                     disp_id=disp_id,
                     override_resume_top_line=resume_from_line,
                 )
                 resume_from_line = None
+
+                from ocr_engine import is_eof_reached_with_offline_awareness
+                last_bot_pre = int(resume_info.get("last_bottom_line") or 0)
+                tail_txt_pre = ""
+                if last_bot_pre > 0 and state.document_lines:
+                    tail_txt_pre = "\n".join(
+                        str(state.document_lines.get(k, "")) for k in range(max(1, last_bot_pre - 6), last_bot_pre + 1)
+                    )
+                is_eof_pre, _ = is_eof_reached_with_offline_awareness(
+                    bottom_line=last_bot_pre,
+                    total_lines=target_lines_pre,
+                    offline_detected=bool(
+                        align_res.get("offline_overlay_detected")
+                        or state.orchestration_state.get("offline_overlay_detected")
+                    ),
+                    tail_text=tail_txt_pre,
+                )
+                if align_res.get("eof_reached") or is_eof_pre:
+                    # Project is already at EOF (or 3 lines short with 'Offline' overlay); finalize & transition to next part
+                    await _run_node_safe("document_assemble", {"serial": active_serial, "fast_loop": True, "skip_env_heal": True})
+                    export_rec = state.export_project_markdown_to_disk()
+                    comp_msg = (
+                        f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! "
+                        f"EOF verified at Line {last_bot_pre:,} of {target_lines_pre:,}."
+                    )
+                    state.latest_telemetry["status_message"] = comp_msg
+                    state.record_diagnostics_trace_event(
+                        event_type="LAST_LINE_OCR_COMPLETED",
+                        top_line=int(align_res.get("actual_top") or resume_info.get("last_top_line") or 1),
+                        bottom_line=last_bot_pre,
+                        target_top_line=target_lines_pre,
+                        node_id="document_assemble",
+                        reason=comp_msg,
+                        recovery_action=f"Exported markdown to {export_rec.get('export_path')}",
+                    )
+                    await state.ws_manager.broadcast({
+                        "type": "markdown_part_exported",
+                        "export": export_rec,
+                        "multipart_state": state.multipart_bundle_state,
+                    })
+                    mp_state = state.sync_multipart_state_from_alignment()
+                    if mp_state.get("is_multipart") and mp_state.get("auto_chain_enabled", True) and state.capture_loop_running:
+                        await emit_dag_telemetry_event(
+                            category="SYSTEM",
+                            message=(
+                                f"📂 Multi-Part Markdown Part {mp_state.get('current_part')} complete! "
+                                f"Exiting via Back Arrow to open Part {mp_state.get('next_part_number')}..."
+                            ),
+                            dag="verify_assemble",
+                            serial=active_serial,
+                        )
+                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
+                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                            await asyncio.sleep(0.35)
+                            continue
+                        elif trans_res.get("bundle_completed"):
+                            comp_bundle_msg = (
+                                f"🏆 Multi-Part Bundle Complete! All parts exported "
+                                f"({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
+                            )
+                            state.latest_telemetry["status_message"] = comp_bundle_msg
+                            await emit_dag_telemetry_event(
+                                category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial
+                            )
+                    if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
+                        try:
+                            await execute_dag_group_post_capture_analyzer(project_id=state.get_current_project_id())
+                        except Exception as pca_err:
+                            print(f"[CaptureLoop] Post-capture analyzer note: {pca_err}")
+                    stop_reason_logged = True
+                    break
 
             is_headless = bool(getattr(state, "headless_mode", False) or state.dag_state.get("headless_mode"))
             if is_headless or state.headless_telemetry_session.get("status") == "STOPPED":
@@ -1726,7 +1815,31 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                     if hasattr(state, "ws_manager") and state.ws_manager:
                         await state.ws_manager.broadcast({"type": "headless_telemetry_progress", "telemetry": session})
 
-                total_reached = bool(target_lines > 0 and (bot_l >= target_lines or doc_count >= target_lines))
+                from ocr_engine import is_eof_reached_with_offline_awareness
+                tail_txt_loop = ""
+                if bot_l > 0 and state.document_lines:
+                    tail_txt_loop = "\n".join(
+                        str(state.document_lines.get(k, "")) for k in range(max(1, bot_l - 6), bot_l + 1)
+                    )
+                is_eof_loop, _ = is_eof_reached_with_offline_awareness(
+                    bottom_line=max(bot_l, doc_count),
+                    total_lines=target_lines,
+                    offline_detected=bool(
+                        state.orchestration_state.get("offline_overlay_detected")
+                        or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("offline_overlay_detected")
+                        or state.dag_state.get("nodes", {}).get("arrow_down", {}).get("offline_overlay_detected")
+                    ),
+                    tail_text=tail_txt_loop,
+                )
+                total_reached = bool(
+                    target_lines > 0
+                    and (
+                        bot_l >= target_lines
+                        or doc_count >= target_lines
+                        or is_eof_loop
+                        or res.get("node6", {}).get("eof_reached")
+                    )
+                )
                 n8 = res.get("node8", {})
                 if n8.get("is_complete") or total_reached:
                     export_rec = state.export_project_markdown_to_disk()
@@ -2038,7 +2151,8 @@ async def transition_to_next_multipart_project(
 
     mp_state = state.sync_multipart_state_from_alignment()
     active_proj = db.get_active_project() or {}
-    cur_file = state.latest_alignment_status.get("file_name") or active_proj.get("name") or ""
+    canonical_fn = state._extract_canonical_filename_from_project_or_lines(active_proj, state.document_lines)
+    cur_file = state.latest_alignment_status.get("file_name") or canonical_fn or active_proj.get("name") or ""
     cur_part = mp_state.get("current_part")
     if explicit_next_part is not None and explicit_next_part > 1:
         cur_part = explicit_next_part - 1
@@ -2075,13 +2189,33 @@ async def transition_to_next_multipart_project(
         or state.latest_alignment_status.get("file_name")
         or f"{base_prefix or 'Document'}_part{trans_res.get('next_part_number', 2)}.md"
     )
-    next_part_num = trans_res.get("next_part_number")
+    next_part_num = trans_res.get("next_part_number") or trans_res.get("part_number")
     tot_parts = trans_res.get("total_parts") or state.multipart_bundle_state.get("total_parts")
+
+    # Reset headless telemetry session target so Part N+1 calibrates its own total_lines in DAG Group 1
+    state.headless_telemetry_session["target_total_lines"] = 0
+    state.headless_telemetry_session["total_lines_reached"] = False
+    state.orchestration_state["offline_overlay_detected"] = False
 
     new_proj = await create_project(
         ProjectCreateRequest(
             name=opened_file,
-            description=f"Multi-Part Bundle Part {next_part_num}{f' of {tot_parts}' if tot_parts else ''} ({opened_file})",
+            description=f"File: {opened_file} (Multi-Part Bundle Part {next_part_num}{f' of {tot_parts}' if tot_parts else ''})",
+            target_total_lines=0,
+            device_model=active_proj.get("device_model"),
+            device_name=active_proj.get("device_name"),
+            device_serial=active_proj.get("device_serial") or ser,
+            target_dpi=active_proj.get("target_dpi"),
+            display_width=active_proj.get("display_width"),
+            display_height=active_proj.get("display_height"),
+            display_id=active_proj.get("display_id") or disp_id,
+            lines_per_page=active_proj.get("lines_per_page"),
+            step_size=active_proj.get("step_size"),
+            scroll_padding_lines=active_proj.get("scroll_padding_lines"),
+            arrow_count_init=active_proj.get("arrow_count_init"),
+            arrow_count_step=active_proj.get("arrow_count_step"),
+            settle_delay_ms=active_proj.get("settle_delay_ms"),
+            lock_device=bool(active_proj.get("lock_device", True)),
         )
     )
 

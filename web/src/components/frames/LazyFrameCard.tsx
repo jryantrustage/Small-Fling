@@ -203,7 +203,13 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = React.memo(({
       className={`frame-card ${isActive ? 'active' : ''}`}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
-      style={{ cursor: 'pointer' }}
+      style={{
+        cursor: 'pointer',
+        borderColor: isActive ? '#00ff9d' : undefined,
+        borderWidth: isActive ? '2px' : undefined,
+        boxShadow: isActive ? '0 0 14px rgba(0, 255, 157, 0.35)' : undefined,
+        background: isActive ? 'rgba(0, 255, 157, 0.08)' : undefined,
+      }}
       title="Click to select & view frame in active tab • Double-click to inspect in OCR Inspector"
     >
       <div className="frame-card-preview">
@@ -243,7 +249,22 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = React.memo(({
           </div>
         )}
 
-        <span className="frame-badge">Pg {displayPageNum}</span>
+        <span
+          className="frame-badge"
+          style={
+            isActive
+              ? {
+                  background: '#00ff9d',
+                  color: '#090d13',
+                  fontWeight: 900,
+                  border: '1px solid #00ff9d',
+                  boxShadow: '0 0 10px rgba(0, 255, 157, 0.6)',
+                }
+              : undefined
+          }
+        >
+          {isActive ? `✓ Pg ${displayPageNum} • SELECTED` : `Pg ${displayPageNum}`}
+        </span>
         {frame.token_usage && frame.token_usage.total_tokens ? (
           <span className="frame-token-badge">
             <Coins size={9} /> {frame.token_usage.total_tokens}

@@ -32812,3 +32812,66 @@ optionDescription: 'Debit cards are mailed out and should be received in approxi
 
 
 
+
+fieldCode: AOXConsumerSelections.SELECTED_TERM,
+fieldLabel: 'Select a Term',
+fieldType: FieldTypeValues.HERO_SINGLE_SELECT,
+label: 'Select a Term',
+options: generateHssSampleProps([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+fieldDescription: '',
+value: '2',
+presentationOrder: 3,
+required: true,
+},
+};
+
+export const mockProductAccountQuestions: Record<string, IProductAccountFormSection> = {
+inputInitialDeposit: {
+type: ProductAccountFormSectionTypes.QUESTION,
+id: 'set-initial-deposit',
+title: 'Set Initial Deposit',
+description:
+'Enter the amount you’d like to deposit into your new account. You’ll have a chance to edit this before submitting your application.\n\nDividends compound daily and are credited to your account monthly.',
+descriptionLink: 'set-initial-deposit-link.com',
+dataFields: [mockProductAccountFormFields[FieldTypeValues.DOLLAR_AMOUNT]],
+},
+multiSelectAccountServices: {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+type: ProductAccountFormSectionTypes.FOOTER,
+id: 'form-footer',
+value: 'Test form footer text here',
+},
+};
+export const mockProductAccountQuestionsArray: IProductAccountFormSection[] = [
+mockProductAccountQuestions.inputInitialDeposit,
+mockProductAccountQuestions.multiSelectAccountServices,
+mockProductAccountQuestions.hSSTermSelect,
+];
+
+export const mockProductAccountQuestionsBySubProduct: Partial<
+Record<APISubProductTypes, IProductAccountFormSection[]>
+> = {
+[APISubProductTypes.CHECKING]: [mockProductAccountQuestions.inputInitialDeposit, mockProductAccountQuestions.footer],
+[APISubProductTypes.SAVINGS]: [],
+[APISubProductTypes.MONEY_MARKET]: [],
+[APISubProductTypes.SHARE_CERTIFICATE]: [],
+[APISubProductTypes.MEMBERSHIP_SHARE]: [],
+};
+
+```
+<!-- CODESCAN_FILE_END -->
