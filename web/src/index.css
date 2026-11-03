@@ -140,6 +140,152 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .panel-header { padding: 8px 12px; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; font-family: var(--font-mono); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .panel-sub-bar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(13, 17, 23, 0.6); border-bottom: 1px solid var(--border-color); flex-wrap: wrap; }
 .frames-list { flex: 1; overflow-y: auto; padding: 12px; margin-right: 6px; display: flex; flex-direction: column; gap: 10px; }
+.frames-list.virtualized-frame-strip {
+  display: block;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overflow-anchor: none;
+  padding: 8px 10px;
+  min-height: 0;
+}
+.virtualized-frame-inner {
+  display: block;
+  flex-shrink: 0;
+  position: relative;
+  width: 100%;
+}
+.frame-strip-scrubber-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 10px;
+  background: rgba(13, 17, 23, 0.92);
+  border-bottom: 1px solid #21262d;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+.frame-strip-scrubber-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+.scrubber-step-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #c9d1d9;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.12s ease;
+}
+.scrubber-step-btn:hover {
+  border-color: #58a6ff;
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.12);
+}
+.frame-strip-range-slider {
+  flex: 1;
+  min-width: 50px;
+  height: 6px;
+  accent-color: #00ff9d;
+  cursor: pointer;
+  background: #21262d;
+  border-radius: 3px;
+}
+.frame-strip-jump-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+  width: 100%;
+}
+.scrubber-position-readout {
+  font-size: 10px;
+  color: #8b949e;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.scrubber-position-readout strong {
+  color: #00ff9d;
+  font-weight: 700;
+}
+.scrubber-jump-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.scrubber-jump-input {
+  width: 66px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #0d1117;
+  color: #f0f6fc;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  outline: none;
+}
+.scrubber-jump-input:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.3);
+}
+.scrubber-jump-go-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #58a6ff;
+  cursor: pointer;
+  padding: 0;
+}
+.scrubber-jump-go-btn:hover {
+  background: rgba(88, 166, 255, 0.18);
+  border-color: #58a6ff;
+}
+.scrubber-density-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #8b949e;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.12s ease;
+}
+.scrubber-density-btn:hover {
+  border-color: #58a6ff;
+  color: #f0f6fc;
+}
+.scrubber-density-btn.active {
+  background: rgba(0, 255, 157, 0.14);
+  border-color: rgba(0, 255, 157, 0.45);
+  color: #00ff9d;
+}
 .frame-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; gap: 6px; }
 .frame-card:hover { border-color: var(--border-highlight); background: var(--bg-card-hover); }
 .frame-card.active { border-color: var(--color-primary); box-shadow: 0 0 10px var(--color-primary-glow); background: rgba(0, 255, 157, 0.04); }

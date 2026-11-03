@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, ChevronsUp, ChevronsDown, List, LayoutGrid, CornerDownLeft } from 'lucide-react';
 import { LazyFrameCard, type FrameItem } from './frames/LazyFrameCard';
 
 export interface VirtualizedFrameStripProps {
@@ -22,6 +22,10 @@ export interface VirtualizedFrameStripProps {
   onDeleteFrame: (frameId: string, e: React.MouseEvent) => void;
 }
 
+// Cap virtual scroll container height well below Chromium's ~16.7M px layout limit
+const MAX_VIRTUAL_SCROLL_HEIGHT_PX = 12_000_000;
+const COMPACT_ROW_HEIGHT = 54;
+
 export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   frames,
   totalLines = 0,
@@ -32,7 +36,7 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   reprocessingFrameId,
   deletingFrameId,
   rowHeight = 206,
-  overscan = 15,
+  overscan = 10,
   onSelectFrame,
   onDoubleClickFrame,
   onToggleSelectFrame,
@@ -46,11 +50,30 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   const [viewportHeight, setViewportHeight] = useState(640);
   const [isFastScrolling, setIsFastScrolling] = useState(false);
   const [isThumbDragging, setIsThumbDragging] = useState(false);
+  const [isCompactMode, setIsCompactMode] = useState(false);
+  const [jumpInput, setJumpInput] = useState('');
+
   const scrollHideTimerRef = useRef<number | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const lastScrollTimeRef = useRef<number>(0);
+  const lastScrollTopRef = useRef<number>(0);
 
   const totalCount = frames.length;
+  const activeRowHeight = isCompactMode ? COMPACT_ROW_HEIGHT : rowHeight;
+
   const hasPage1InSet = useMemo(() => frames.some((sf) => sf.page_index === 1), [frames]);
+
+  // Compute virtual height & scaling factor so even 50,000+ frames map 0..100% across a single scrollbar drag
+  const rawTotalHeight = totalCount * activeRowHeight;
+  const totalVirtualHeight = Math.max(
+    viewportHeight,
+    Math.min(MAX_VIRTUAL_SCROLL_HEIGHT_PX, rawTotalHeight)
+  );
+  const maxRawScroll = Math.max(1, rawTotalHeight - viewportHeight);
+  const maxVirtualScroll = Math.max(1, totalVirtualHeight - viewportHeight);
+  const scrollScale = rawTotalHeight > MAX_VIRTUAL_SCROLL_HEIGHT_PX ? maxRawScroll / maxVirtualScroll : 1;
+
+  // Logical (unscaled) scroll offset in row coordinates
+  const logicalScrollTop = scrollTop * scrollScale;
 
   // Measure viewport height with ResizeObserver
   useEffect(() => {
@@ -71,7 +94,6 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
   useEffect(() => {
     return () => {
       if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
-      if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -83,44 +105,104 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
       if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
       scrollHideTimerRef.current = window.setTimeout(() => {
         setIsFastScrolling(false);
-      }, 450);
+      }, 220);
     };
     window.addEventListener('mouseup', handleWindowUp);
     return () => window.removeEventListener('mouseup', handleWindowUp);
   }, [isThumbDragging]);
 
-  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const nextTop = e.currentTarget.scrollTop;
-    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
-    rafRef.current = window.requestAnimationFrame(() => {
-      setScrollTop(nextTop);
-    });
-    setIsFastScrolling(true);
-    if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
-    scrollHideTimerRef.current = window.setTimeout(() => {
-      if (!isThumbDragging) {
-        setIsFastScrolling(false);
+  const scrollToFrameIndex = useCallback(
+    (targetIdx: number, markFast = false) => {
+      const el = containerRef.current;
+      if (!el || totalCount === 0) return;
+      const clampedIdx = Math.max(0, Math.min(totalCount - 1, targetIdx));
+      const targetLogicalTop = clampedIdx * activeRowHeight;
+      const targetPhysicalTop = scrollScale > 1 ? targetLogicalTop / scrollScale : targetLogicalTop;
+      if (markFast) {
+        setIsFastScrolling(true);
+        if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
+        scrollHideTimerRef.current = window.setTimeout(() => {
+          setIsFastScrolling(false);
+        }, 260);
       }
-    }, 650);
-  }, [isThumbDragging]);
+      el.scrollTop = targetPhysicalTop;
+      setScrollTop(targetPhysicalTop);
+    },
+    [totalCount, activeRowHeight, scrollScale]
+  );
+
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const nextTop = e.currentTarget.scrollTop;
+      const now = performance.now();
+      const dt = Math.max(1, now - lastScrollTimeRef.current);
+      const dy = Math.abs(nextTop - lastScrollTopRef.current);
+      const velocityPxPerMs = dy / dt;
+
+      lastScrollTimeRef.current = now;
+      lastScrollTopRef.current = nextTop;
+
+      setScrollTop(nextTop);
+
+      // Mark as fast scrolling when velocity > 1.8px/ms or thumb is being dragged
+      if (velocityPxPerMs > 1.8 || isThumbDragging) {
+        setIsFastScrolling(true);
+      }
+      if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
+      scrollHideTimerRef.current = window.setTimeout(() => {
+        if (!isThumbDragging) {
+          setIsFastScrolling(false);
+        }
+      }, 220);
+    },
+    [isThumbDragging]
+  );
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     // Detect click on the 14px vertical scrollbar track/thumb along the right edge
-    if (e.clientX >= rect.right - 18) {
+    if (e.clientX >= rect.right - 20) {
       setIsThumbDragging(true);
       setIsFastScrolling(true);
     }
   }, []);
 
-  // Windowed virtual scroller indices (overscan = 15)
-  const startIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  // Shift+Wheel or Alt+Wheel accelerates scrolling by 12x for rapid traversal of 10,000+ pages
+  const handleWheel = useCallback(
+    (e: React.WheelEvent<HTMLDivElement>) => {
+      if (e.shiftKey || e.altKey) {
+        const el = containerRef.current;
+        if (!el) return;
+        e.preventDefault();
+        const multiplier = e.altKey && e.shiftKey ? 30 : 12;
+        const nextTop = Math.max(
+          0,
+          Math.min(el.scrollHeight - el.clientHeight, el.scrollTop + e.deltaY * multiplier)
+        );
+        el.scrollTop = nextTop;
+        setScrollTop(nextTop);
+        setIsFastScrolling(true);
+        if (scrollHideTimerRef.current) window.clearTimeout(scrollHideTimerRef.current);
+        scrollHideTimerRef.current = window.setTimeout(() => {
+          setIsFastScrolling(false);
+        }, 250);
+      }
+    },
+    []
+  );
+
+  // Windowed virtual scroller indices
+  const effectiveOverscan = isFastScrolling || isThumbDragging ? 4 : overscan;
+  const startIndex = Math.max(0, Math.floor(logicalScrollTop / activeRowHeight) - effectiveOverscan);
   const endIndex = Math.min(
     totalCount - 1,
-    Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan
+    Math.ceil((logicalScrollTop + viewportHeight) / activeRowHeight) + effectiveOverscan
   );
+
+  // Offset applied so items in visibleSlice always align with the physical scroll position
+  const sliceAnchorOffsetPx = scrollTop - logicalScrollTop;
 
   const visibleSlice = useMemo(() => {
     if (totalCount === 0 || endIndex < startIndex) return [];
@@ -132,16 +214,15 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
     return items;
   }, [frames, totalCount, startIndex, endIndex]);
 
-  // Compute current indicator frame & line for floating badge
+  // Compute current indicator frame & line for floating badge and scrubber bar
   const indicatorInfo = useMemo(() => {
     if (totalCount === 0) {
-      return { pageNum: 1, lineNum: 1, totalLinesCount: totalLines || 0, ratio: 0 };
+      return { focusIdx: 0, pageNum: 1, lineNum: 1, totalLinesCount: totalLines || 0, ratio: 0 };
     }
-    const maxScroll = Math.max(1, totalCount * rowHeight - viewportHeight);
-    const ratio = Math.max(0, Math.min(1, scrollTop / maxScroll));
+    const ratio = Math.max(0, Math.min(1, scrollTop / maxVirtualScroll));
     const focusIdx = Math.min(
       totalCount - 1,
-      Math.max(0, Math.floor((scrollTop + viewportHeight * 0.35) / rowHeight))
+      Math.max(0, Math.floor((logicalScrollTop + viewportHeight * 0.25) / activeRowHeight))
     );
     const currentFrame = frames[focusIdx] || frames[0];
     const isVeryFirst = focusIdx === 0;
@@ -157,29 +238,214 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
       lineNum
     );
     return {
+      focusIdx,
       pageNum,
       lineNum,
       totalLinesCount: effectiveTotalLines,
       ratio,
     };
-  }, [frames, totalCount, rowHeight, scrollTop, viewportHeight, totalLines, hasPage1InSet]);
+  }, [
+    frames,
+    totalCount,
+    activeRowHeight,
+    scrollTop,
+    logicalScrollTop,
+    maxVirtualScroll,
+    viewportHeight,
+    totalLines,
+    hasPage1InSet,
+  ]);
 
-  const totalVirtualHeight = Math.max(viewportHeight, totalCount * rowHeight);
+  // Handle direct Page# or Line# (e.g. "100" or "L5000") jump
+  const handleJumpSubmit = useCallback(
+    (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      const raw = jumpInput.trim();
+      if (!raw || totalCount === 0) return;
+
+      const isLineQuery = /^l(n|ine)?\s*\d+/i.test(raw);
+      const numericVal = parseInt(raw.replace(/[^0-9]/g, ''), 10);
+      if (isNaN(numericVal) || numericVal <= 0) return;
+
+      let targetIdx = -1;
+      if (isLineQuery) {
+        // Find frame covering this line number
+        targetIdx = frames.findIndex(
+          (f) => f.top_line <= numericVal && f.bottom_line >= numericVal
+        );
+        if (targetIdx === -1) {
+          targetIdx = frames.findIndex((f) => f.top_line >= numericVal);
+        }
+      } else {
+        // Try matching by page_index first
+        targetIdx = frames.findIndex((f) => f.page_index === numericVal);
+        if (targetIdx === -1) {
+          if (numericVal <= totalCount) {
+            targetIdx = numericVal - 1;
+          } else {
+            // Fallback: user typed a line number larger than page count
+            targetIdx = frames.findIndex(
+              (f) => f.top_line <= numericVal && f.bottom_line >= numericVal
+            );
+          }
+        }
+      }
+
+      if (targetIdx < 0) targetIdx = totalCount - 1;
+      scrollToFrameIndex(targetIdx, false);
+      const targetFrame = frames[targetIdx];
+      if (targetFrame) {
+        onSelectFrame(targetFrame);
+      }
+      setJumpInput('');
+    },
+    [jumpInput, totalCount, frames, scrollToFrameIndex, onSelectFrame]
+  );
+
+  // Toggle between Thumbnail mode (206px) and Compact mode (54px) while keeping the same focused frame in view
+  const handleToggleCompactMode = useCallback(() => {
+    const currentIdx = indicatorInfo.focusIdx;
+    const nextCompact = !isCompactMode;
+    setIsCompactMode(nextCompact);
+    window.requestAnimationFrame(() => {
+      const el = containerRef.current;
+      if (!el) return;
+      const nextRowH = nextCompact ? COMPACT_ROW_HEIGHT : rowHeight;
+      const nextRawTotal = totalCount * nextRowH;
+      const nextVirtTotal = Math.max(viewportHeight, Math.min(MAX_VIRTUAL_SCROLL_HEIGHT_PX, nextRawTotal));
+      const nextScale =
+        nextRawTotal > MAX_VIRTUAL_SCROLL_HEIGHT_PX
+          ? Math.max(1, nextRawTotal - viewportHeight) / Math.max(1, nextVirtTotal - viewportHeight)
+          : 1;
+      const nextTop = (currentIdx * nextRowH) / nextScale;
+      el.scrollTop = nextTop;
+      setScrollTop(nextTop);
+    });
+  }, [indicatorInfo.focusIdx, isCompactMode, rowHeight, totalCount, viewportHeight]);
+
   const badgeTopPx = Math.max(
-    12,
-    Math.min(viewportHeight - 44, Math.round(indicatorInfo.ratio * (viewportHeight - 56)) + 12)
+    64,
+    Math.min(viewportHeight - 44, Math.round(indicatorInfo.ratio * (viewportHeight - 96)) + 64)
   );
 
   return (
     <div
       className="virtualized-strip-wrapper"
-      style={{ position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      style={{
+        position: 'relative',
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
     >
+      {/* Fast Page Scrubber, Step Controls, Direct Jump & Compact Density Bar */}
+      {totalCount > 0 && (
+        <div className="frame-strip-scrubber-bar" data-testid="frame-strip-scrubber-bar">
+          <div className="frame-strip-scrubber-row">
+            <button
+              type="button"
+              className="scrubber-step-btn"
+              title="Jump to Page 1 (Top)"
+              onClick={() => scrollToFrameIndex(0, false)}
+            >
+              <ChevronsUp size={11} />
+              <span>1</span>
+            </button>
+            <button
+              type="button"
+              className="scrubber-step-btn"
+              title="Back 100 Pages"
+              onClick={() => scrollToFrameIndex(indicatorInfo.focusIdx - 100, true)}
+            >
+              -100
+            </button>
+            <input
+              type="range"
+              className="frame-strip-range-slider"
+              min={0}
+              max={Math.max(0, totalCount - 1)}
+              value={indicatorInfo.focusIdx}
+              title={`Scrub Pages 1 .. ${totalCount} (Current: Page ${indicatorInfo.pageNum}, Line ${indicatorInfo.lineNum})`}
+              onChange={(e) => {
+                const idx = parseInt(e.target.value, 10);
+                if (!isNaN(idx)) {
+                  scrollToFrameIndex(idx, true);
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="scrubber-step-btn"
+              title="Forward 100 Pages"
+              onClick={() => scrollToFrameIndex(indicatorInfo.focusIdx + 100, true)}
+            >
+              +100
+            </button>
+            <button
+              type="button"
+              className="scrubber-step-btn"
+              title={`Jump to Last Page (${totalCount})`}
+              onClick={() => scrollToFrameIndex(totalCount - 1, false)}
+            >
+              <span>{totalCount}</span>
+              <ChevronsDown size={11} />
+            </button>
+          </div>
+
+          <div className="frame-strip-jump-row">
+            <span
+              className="scrubber-position-readout"
+              title="Hold Shift+Wheel or Alt+Wheel for 12x turbo scroll"
+            >
+              Pg <strong>{indicatorInfo.pageNum}</strong>/{totalCount} • Ln{' '}
+              <strong>{indicatorInfo.lineNum}</strong>
+            </span>
+
+            <form className="scrubber-jump-form" onSubmit={handleJumpSubmit}>
+              <input
+                type="text"
+                className="scrubber-jump-input"
+                placeholder="Pg# or L#"
+                value={jumpInput}
+                onChange={(e) => setJumpInput(e.target.value)}
+                title="Enter a Page number (e.g. 100) or Line number (e.g. L5000) and press Enter"
+                data-testid="frame-strip-jump-input"
+              />
+              <button
+                type="submit"
+                className="scrubber-jump-go-btn"
+                title="Jump to Page or Line"
+              >
+                <CornerDownLeft size={10} />
+              </button>
+            </form>
+
+            <button
+              type="button"
+              className={`scrubber-density-btn ${isCompactMode ? 'active' : ''}`}
+              onClick={handleToggleCompactMode}
+              title={
+                isCompactMode
+                  ? 'Switch to Thumbnail Cards (206px)'
+                  : 'Switch to Compact List Mode (54px — 3.8x faster scrolling)'
+              }
+              data-testid="frame-strip-density-toggle"
+            >
+              {isCompactMode ? <LayoutGrid size={11} /> : <List size={11} />}
+              <span>{isCompactMode ? 'Thumb' : 'Compact'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       <div
         ref={containerRef}
         className="frames-list virtualized-frame-strip pane-scrollable-with-buffer"
         onScroll={handleScroll}
         onMouseDown={handleMouseDown}
+        onWheel={handleWheel}
         data-testid="virtualized-frame-strip"
       >
         {totalCount === 0 ? (
@@ -196,6 +462,8 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
               position: 'relative',
               width: '100%',
               height: `${totalVirtualHeight}px`,
+              minHeight: `${totalVirtualHeight}px`,
+              flexShrink: 0,
             }}
           >
             {visibleSlice.map(({ frame: f, index: idx }) => {
@@ -211,6 +479,8 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
                   ? 1
                   : f.page_index || idx + 1;
 
+              const itemTopPx = Math.round(idx * activeRowHeight + sliceAnchorOffsetPx);
+
               return (
                 <div
                   key={f.frame_id}
@@ -220,9 +490,9 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
                     top: 0,
                     left: 0,
                     right: 0,
-                    height: `${rowHeight}px`,
-                    transform: `translateY(${idx * rowHeight}px)`,
-                    paddingBottom: '8px',
+                    height: `${activeRowHeight}px`,
+                    transform: `translateY(${itemTopPx}px)`,
+                    paddingBottom: isCompactMode ? '4px' : '8px',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'flex-start',
@@ -230,7 +500,7 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
                     boxSizing: 'border-box',
                   }}
                 >
-                  {hasGap && prevFrame && (
+                  {!isCompactMode && hasGap && prevFrame && (
                     <div className="gap-alert-tag" style={{ padding: '1px 6px', fontSize: '9.5px' }}>
                       <AlertCircle size={10} />
                       <span>
@@ -247,6 +517,8 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
                     reprocessingFrameId={reprocessingFrameId}
                     deletingFrameId={deletingFrameId}
                     defaultVisible={true}
+                    isFastScrolling={isFastScrolling || isThumbDragging}
+                    compact={isCompactMode}
                     onClick={() => onSelectFrame(f)}
                     onDoubleClick={(e) => onDoubleClickFrame(f, e)}
                     onToggleSelect={(e) => onToggleSelectFrame(f.frame_id, e)}
@@ -271,7 +543,8 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
         >
           <span className="fast-scroll-badge-dot" />
           <span>
-            Page {indicatorInfo.pageNum} • Line {indicatorInfo.lineNum} / {indicatorInfo.totalLinesCount}
+            Page {indicatorInfo.pageNum} / {totalCount} • Line {indicatorInfo.lineNum} /{' '}
+            {indicatorInfo.totalLinesCount}
           </span>
         </div>
       )}
@@ -280,4 +553,3 @@ export const VirtualizedFrameStrip: React.FC<VirtualizedFrameStripProps> = ({
 };
 
 export default VirtualizedFrameStrip;
-

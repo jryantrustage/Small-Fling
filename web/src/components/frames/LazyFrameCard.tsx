@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Coins, ArrowDown, RotateCw, MoveVertical, ListTree, Trash2, Image as ImageIcon } from 'lucide-react';
 
+const loadedThumbnailCache = new Set<string>();
+
 export interface FrameItem {
   frame_id: string;
   project_id?: string;
@@ -26,6 +28,8 @@ export interface LazyFrameCardProps {
   reprocessingFrameId: string | null;
   deletingFrameId: string | null;
   defaultVisible?: boolean;
+  isFastScrolling?: boolean;
+  compact?: boolean;
   onClick: () => void;
   onDoubleClick: (e: React.MouseEvent) => void;
   onToggleSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -35,7 +39,7 @@ export interface LazyFrameCardProps {
   onDelete: (e: React.MouseEvent) => void;
 }
 
-export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
+export const LazyFrameCard: React.FC<LazyFrameCardProps> = React.memo(({
   frame,
   isSelected,
   isActive,
@@ -44,6 +48,8 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
   reprocessingFrameId,
   deletingFrameId,
   defaultVisible = false,
+  isFastScrolling = false,
+  compact = false,
   onClick,
   onDoubleClick,
   onToggleSelect,
@@ -52,15 +58,32 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
   onOpenTrace,
   onDelete,
 }) => {
-  const [isVisible, setIsVisible] = useState(defaultVisible);
+  // Always use JIT WebP thumbnail endpoint in list views; never transmit full-resolution PNGs
+  const thumbUrl = `${apiBase}/api/frames/${encodeURIComponent(frame.frame_id)}/thumbnail?w=384&h=216&q=80&fmt=webp`;
+  const isAlreadyCached = loadedThumbnailCache.has(thumbUrl);
+
+  const [isVisible, setIsVisible] = useState<boolean>(() => isAlreadyCached || (defaultVisible && !isFastScrolling));
   const [imgError, setImgError] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (defaultVisible) {
+    if (compact) return;
+    if (loadedThumbnailCache.has(thumbUrl)) {
       setIsVisible(true);
       return;
     }
+    if (defaultVisible) {
+      if (!isFastScrolling) {
+        setIsVisible(true);
+        return;
+      }
+      // Defer image network request during high-velocity scrollbar scrubbing so intermediate frames don't flood HTTP pool
+      const timer = window.setTimeout(() => {
+        setIsVisible(true);
+      }, 75);
+      return () => window.clearTimeout(timer);
+    }
+
     const el = cardRef.current;
     if (!el) return;
 
@@ -70,7 +93,6 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
           if (entry.isIntersecting) {
             setIsVisible(true);
           } else {
-            // Unload image when scrolled far out of view to keep memory minimal
             setIsVisible(false);
           }
         });
@@ -85,10 +107,94 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
     return () => {
       observer.disconnect();
     };
-  }, [defaultVisible]);
+  }, [defaultVisible, isFastScrolling, compact, thumbUrl]);
 
-  // Always use JIT WebP thumbnail endpoint in list views; never transmit full-resolution PNGs
-  const thumbUrl = `${apiBase}/api/frames/${encodeURIComponent(frame.frame_id)}/thumbnail?w=384&h=216&q=80&fmt=webp`;
+  if (compact) {
+    return (
+      <div
+        ref={cardRef}
+        id={`frame-card-${frame.frame_id}`}
+        className={`frame-card frame-card-compact ${isActive ? 'active' : ''}`}
+        onClick={onClick}
+        onDoubleClick={onDoubleClick}
+        style={{
+          cursor: 'pointer',
+          padding: '6px 8px',
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '6px',
+          height: '48px',
+          minHeight: '48px',
+        }}
+        title="Click to select & view frame • Double-click to inspect in OCR Inspector"
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '13px', height: '13px', accentColor: '#1f6feb', cursor: 'pointer', flexShrink: 0 }}
+            title="Select frame"
+          />
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              fontWeight: 700,
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: isActive ? 'rgba(0, 255, 157, 0.18)' : 'rgba(255, 255, 255, 0.06)',
+              color: isActive ? '#00ff9d' : '#f0f6fc',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              flexShrink: 0,
+            }}
+          >
+            Pg {displayPageNum}
+          </span>
+          <span
+            className="frame-lines-badge"
+            style={{ fontSize: '10.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
+            Ln {frame.top_line}→{frame.bottom_line}
+          </span>
+          <span
+            className={`frame-status-dot ${
+              frame.status === 'processed' ? 'processed' : frame.status === 'queued' ? 'queued' : 'error'
+            }`}
+            style={{ margin: 0, flexShrink: 0 }}
+          />
+          <span style={{ fontSize: '9.5px', color: '#8b949e', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+            {frame.extracted_line_count > 0 ? `${frame.extracted_line_count}ln` : frame.status}
+          </span>
+        </div>
+
+        <div className="frame-card-actions-group" style={{ marginTop: 0, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="frame-card-action-btn frame-card-trace-btn"
+            onClick={onOpenTrace}
+            title="View frame trace"
+            style={{ width: '20px', height: '20px' }}
+          >
+            <ListTree size={11} />
+          </button>
+          <button
+            type="button"
+            className="frame-card-action-btn frame-card-delete-btn"
+            onClick={onDelete}
+            disabled={deletingFrameId === frame.frame_id}
+            title="Delete frame"
+            style={{ width: '20px', height: '20px' }}
+          >
+            <Trash2 size={11} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -119,6 +225,9 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
             height={216}
             loading="lazy"
             decoding="async"
+            onLoad={() => {
+              loadedThumbnailCache.add(thumbUrl);
+            }}
             onError={() => {
               setImgError(true);
             }}
@@ -129,7 +238,7 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
               <ImageIcon size={14} color="#30363d" />
             </div>
             <span style={{ fontSize: '9px', color: '#484f58', fontFamily: 'monospace' }}>
-              Pg {displayPageNum}
+              Pg {displayPageNum} • Ln {frame.top_line}→{frame.bottom_line}
             </span>
           </div>
         )}
@@ -234,4 +343,5 @@ export const LazyFrameCard: React.FC<LazyFrameCardProps> = ({
       </div>
     </div>
   );
-};
+});
+LazyFrameCard.displayName = 'LazyFrameCard';

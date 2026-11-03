@@ -492,15 +492,33 @@ def _purge_project_data(project_id: str, new_status: str) -> bool:
 def abort_project(project_id: str) -> bool: return _purge_project_data(project_id, "aborted")
 def clear_project_data(project_id: str) -> bool: return _purge_project_data(project_id, "active")
 
-def get_frames(project_id: Optional[str]) -> List[Dict[str, Any]]:
-    if not project_id: return []
-    rows = _execute("SELECT * FROM frames WHERE project_id = ? ORDER BY page_index ASC, created_at ASC, top_line ASC;", (project_id,), fetchall=True)
+def get_frames(project_id: Optional[str], include_boxes: bool = False) -> List[Dict[str, Any]]:
+    if not project_id:
+        return []
+    if include_boxes:
+        sql = "SELECT * FROM frames WHERE project_id = ? ORDER BY page_index ASC, created_at ASC, top_line ASC;"
+    else:
+        sql = """
+        SELECT frame_id, project_id, filename, top_line, bottom_line, page_index,
+               file_size, status, extracted_line_count, custom_offset_y,
+               token_usage_json, model_used, created_at, arrow_count
+        FROM frames
+        WHERE project_id = ?
+        ORDER BY page_index ASC, created_at ASC, top_line ASC;
+        """
+    rows = _execute(sql, (project_id,), fetchall=True)
     res = []
     for r in rows:
         d = dict(r)
-        for k, col in [("token_usage", "token_usage_json"), ("bounding_boxes", "bounding_boxes_json")]:
-            try: d[k] = json.loads(d.get(col) or "{}")
-            except Exception: d[k] = {}
+        try:
+            d["token_usage"] = json.loads(d.pop("token_usage_json", None) or "{}")
+        except Exception:
+            d["token_usage"] = {}
+        if include_boxes:
+            try:
+                d["bounding_boxes"] = json.loads(d.pop("bounding_boxes_json", None) or "{}")
+            except Exception:
+                d["bounding_boxes"] = {}
         res.append(d)
     return res
 

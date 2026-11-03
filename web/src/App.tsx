@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   Camera, Cloud, Zap, Smartphone, Key, Cpu,
@@ -1079,7 +1079,30 @@ function AppContent() {
         try {
           const fList: FrameData[] = await framesRes.json();
           if (Array.isArray(fList)) {
-            setFrames(fList);
+            setFrames(prev => {
+              if (
+                prev.length === fList.length &&
+                prev.length > 0 &&
+                prev[0].frame_id === fList[0].frame_id &&
+                prev[prev.length - 1].frame_id === fList[fList.length - 1].frame_id &&
+                prev[prev.length - 1].bottom_line === fList[fList.length - 1].bottom_line &&
+                prev[prev.length - 1].status === fList[fList.length - 1].status &&
+                prev.every((pf, idx) => {
+                  const nf = fList[idx];
+                  return (
+                    pf.frame_id === nf.frame_id &&
+                    pf.status === nf.status &&
+                    pf.top_line === nf.top_line &&
+                    pf.bottom_line === nf.bottom_line &&
+                    pf.extracted_line_count === nf.extracted_line_count &&
+                    pf.custom_offset_y === nf.custom_offset_y
+                  );
+                })
+              ) {
+                return prev;
+              }
+              return fList;
+            });
             setSelectedFrameId(curr => (curr && fList.some(f => f.frame_id === curr)) ? curr : (fList[fList.length - 1]?.frame_id ?? null));
           }
         } catch {}
@@ -2300,8 +2323,20 @@ function AppContent() {
     }
   };
 
-  const sortedFrames = [...frames].sort((a, b) => (a.page_index || 0) - (b.page_index || 0) || (a.created_at || '').localeCompare(b.created_at || '') || (a.top_line || 0) - (b.top_line || 0));
-  const activeFrame = (selectedFrameId ? frames.find(f => f.frame_id === selectedFrameId) : null) || sortedFrames[0] || null;
+  const sortedFrames = useMemo(
+    () =>
+      [...frames].sort(
+        (a, b) =>
+          (a.page_index || 0) - (b.page_index || 0) ||
+          (a.created_at || '').localeCompare(b.created_at || '') ||
+          (a.top_line || 0) - (b.top_line || 0)
+      ),
+    [frames]
+  );
+  const activeFrame = useMemo(
+    () => (selectedFrameId ? frames.find(f => f.frame_id === selectedFrameId) : null) || sortedFrames[0] || null,
+    [frames, selectedFrameId, sortedFrames]
+  );
 
   const filteredLines = (documentData?.lines || []).filter(l => {
     if (filterMode === 'issues' && l.status !== 'issue' && l.status !== 'gap' && l.status !== 'missing' && l.status !== 'unaligned' && l.status !== 'flagged') return false;

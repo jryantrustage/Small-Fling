@@ -873,9 +873,9 @@ async def purge_all_frames():
     return {"status": "success", "purged_count": purged_files, "message": f"Successfully purged {purged_files} frame images."}
 
 @router.get("/api/frames")
-async def get_frames():
+async def get_frames(include_boxes: bool = Query(False, description="Include full bounding_boxes JSON per frame")):
     pid = state.get_current_project_id()
-    db_frames = db.get_frames(pid) if pid else []
+    db_frames = db.get_frames(pid, include_boxes=include_boxes) if pid else []
     if pid:
         db_ids = {f.get("frame_id") for f in db_frames}
         # Purge any leaked frames in memory that belong to other projects
@@ -888,6 +888,11 @@ async def get_frames():
                 # Untagged or orphaned frame
                 state.captured_frames.pop(fid, None)
         return db_frames
+    if not include_boxes:
+        return [
+            {k: v for k, v in f.items() if k not in ("bounding_boxes", "bounding_boxes_json", "token_usage_json")}
+            for f in state.captured_frames.values()
+        ]
     return list(state.captured_frames.values())
 
 @router.get("/api/frames/{frame_id}/image")

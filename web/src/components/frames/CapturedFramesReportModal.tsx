@@ -44,6 +44,8 @@ export const CapturedFramesReportModal: React.FC<CapturedFramesReportModalProps>
     }
   }, [isOpen, fetchReport]);
 
+  if (!isOpen) return null;
+
   const sortedFrames = [...frames].sort((a, b) => 
     (a.page_index || 0) - (b.page_index || 0) || 
     (a.created_at || '').localeCompare(b.created_at || '') || 

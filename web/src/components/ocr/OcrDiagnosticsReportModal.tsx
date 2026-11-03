@@ -44,6 +44,8 @@ export const OcrDiagnosticsReportModal: React.FC<OcrDiagnosticsReportModalProps>
     }
   }, [isOpen, fetchReport]);
 
+  if (!isOpen) return null;
+
   const docLines = documentData?.lines || [];
   const totalMasterLines = docLines.length;
   const verifiedLines = docLines.filter((l: any) => l.status === 'verified' || l.status === 'ok');
