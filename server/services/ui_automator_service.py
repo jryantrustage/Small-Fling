@@ -127,9 +127,13 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
 
     if len(centers) >= 2:
         results["pencil"] = (int(centers[0]), int(center_y))
-        results["theme_dropdown"] = (int(centers[-1]), int(center_y))
+        if len(centers) >= 3 and (centers[-1] - centers[-2]) <= max(28, int(42 * scale_x)):
+            # Combine the Sun/Moon glyph and its dropdown chevron into the button center
+            results["theme_dropdown"] = (int((centers[-2] + centers[-1]) // 2), int(center_y))
+        else:
+            results["theme_dropdown"] = (int(centers[-1]), int(center_y))
         if len(centers) >= 3:
-            results["preview"] = (int(centers[-2]), int(center_y))
+            results["preview"] = (int(centers[1] if len(centers) == 3 else centers[-2]), int(center_y))
         if len(centers) >= 4:
             results["split"] = (int(centers[1]), int(center_y))
 
@@ -370,7 +374,7 @@ async def select_dark_mode(serial: Optional[str] = None, display_id: Optional[in
 
     # 6. Fallback coordinates for Dark Mode menu item if OCR didn't hit (Row 1 of popup menu relative to anchor)
     if not dark_mode_coords:
-        dark_mode_coords = (int(1730 * scale_x), int(285 * scale_y))
+        dark_mode_coords = (max(40, ax - int(140 * scale_x)), ay + max(48, int(57 * scale_y)))
         actions.append(f"Using calibrated 'Dark Mode' menu row at {dark_mode_coords}")
 
     # 7. Touch motion to select 'Dark Mode'
@@ -418,8 +422,8 @@ async def prepare_markdown_editor_window(
     Prepares a newly opened or floating Teams Markdown Editor window for OCR capture:
     1. Waits for FilePreviewActivity / markdown viewer to open on the external display.
     2. Maximizes the floating freeform window via its top-right '[]' Maximize control.
-    3. Selects Dark Mode from the toolbar theme dropdown (Moon/Sun icon).
-    4. Switches from Read-Only to Edit Mode via the toolbar Pencil icon and suppresses the soft keyboard.
+    3. Switches from Read-Only to Edit Mode via the toolbar Pencil icon FIRST (unlocking the theme dropdown).
+    4. Selects Dark Mode from the toolbar theme dropdown (Moon/Sun icon).
     5. Verifies both Dark Mode and Edit Mode are active, dismisses any mini-modals, and updates alignment status.
     """
     from services.adb_service import (
@@ -446,23 +450,23 @@ async def prepare_markdown_editor_window(
     max_res = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
     actions.extend(max_res.get("actions", []))
     if max_res.get("was_floating"):
-        await asyncio.sleep(0.55)
+        await asyncio.sleep(0.9)
 
-    # 2. Select Dark Mode using automation (Moon/Sun theme dropdown)
-    dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
-    actions.extend(dark_res.get("actions", []))
-
-    # 3. Switch from Read-Only to Edit Mode using automation (Pencil icon)
+    # 2. Switch from Read-Only to Edit Mode FIRST using automation (Pencil icon)
+    #    (In Read-Only / Preview mode, the Sun/Moon theme dropdown is disabled until Edit Mode is enabled!)
     edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
     actions.extend(edit_res.get("actions", []))
 
-    # 4. Self-healing verification: if the theme dropdown only became active after leaving Read-Only mode,
-    #    re-apply Dark Mode and re-verify Edit Mode so both are guaranteed active.
+    # 3. Select Dark Mode using automation (Moon/Sun theme dropdown)
+    dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
+    actions.extend(dark_res.get("actions", []))
+
+    # 4. Self-healing verification: re-verify Edit Mode & Dark Mode if needed
     if not dark_res.get("success", False):
-        dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
-        actions.extend(dark_res.get("actions", []))
         edit_res = await enable_edit_mode(serial=ser, display_id=disp_id)
         actions.extend(edit_res.get("actions", []))
+        dark_res = await select_dark_mode(serial=ser, display_id=disp_id)
+        actions.extend(dark_res.get("actions", []))
 
     # 5. Dismiss any floating mini-modals and suppress keyboard
     modal_res = await resolve_and_dismiss_mini_modals(serial=ser, display_id=disp_id, caller_node="prepare_markdown_editor")

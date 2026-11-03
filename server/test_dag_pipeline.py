@@ -6,6 +6,8 @@ import cv2, numpy as np, io
 client = TestClient(main.app)
 
 def test_dag_and_calibration_lifecycle():
+    import db
+    prev_active = db.get_active_project()
     # 1. Create a new project
     proj_res = client.post(
         "/api/projects",
@@ -58,6 +60,8 @@ def test_dag_and_calibration_lifecycle():
         assert dag_nodes["frame_acquire"]["status"] in ("active", "idle", "ready")
     finally:
         client.delete(f"/api/projects/{proj_id}")
+        if prev_active and prev_active.get("id"):
+            client.post(f"/api/projects/{prev_active['id']}/activate")
 
 
 def test_editor_cursor_focused_classifier_and_troubleshooting():
@@ -84,6 +88,8 @@ def test_editor_cursor_focused_classifier_and_troubleshooting():
 
 
 def test_dag_group_segmentation_and_runner():
+    import db
+    prev_active = db.get_active_project()
     # 1. Create project
     proj_res = client.post("/api/projects", json={"name": "DAG Group Test", "description": "Group Test", "target_total_lines": 0})
     assert proj_res.status_code == 200
@@ -133,6 +139,8 @@ def test_dag_group_segmentation_and_runner():
         assert cfg4_res.json()["config"]["min_confidence"] == 0.85
     finally:
         client.delete(f"/api/projects/{proj_id}")
+        if prev_active and prev_active.get("id"):
+            client.post(f"/api/projects/{prev_active['id']}/activate")
 
 
 def test_single_node_concurrency_and_preemption():

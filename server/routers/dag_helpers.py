@@ -235,8 +235,13 @@ async def auto_heal_pipeline_environment(
         print(f"[auto_heal] Keyboard check note: {ke}")
 
     try:
-        from services.adb_service import is_editor_full_screen
-        await is_editor_full_screen(serial, disp_id, image_bytes=snap_bytes)
+        from services.adb_service import is_editor_full_screen, maximize_floating_markdown_window
+        fs_res = await is_editor_full_screen(serial, disp_id, image_bytes=snap_bytes)
+        if not fs_res.get("is_fullscreen", True):
+            issues_observed.append(fs_res.get("reason") or "Markdown editor is in floating window mode")
+            max_res = await maximize_floating_markdown_window(serial, disp_id, image_bytes=snap_bytes)
+            actions_taken.extend(max_res.get("actions", ["Maximized floating Markdown editor window"]))
+            snap_bytes = None
     except Exception as fse:
         print(f"[auto_heal] Fullscreen check note: {fse}")
 
@@ -977,11 +982,10 @@ async def execute_dag_group_initialize(
         await dismiss_keyboard(active_serial, disp_id)
 
         try:
-            from services.adb_service import check_view_mode_and_theme, is_editor_full_screen
+            from services.adb_service import is_editor_full_screen
             from services.ui_automator_service import prepare_markdown_editor_window
             fs_check = await is_editor_full_screen(active_serial, disp_id)
-            vm_check = await check_view_mode_and_theme(active_serial)
-            if not fs_check.get("is_fullscreen", True) or vm_check.get("view_mode_issue") or vm_check.get("theme_issue"):
+            if not fs_check.get("is_fullscreen", True):
                 init_group["progress"] = {"percent": 12, "stage": "Maximizing Markdown Editor & enforcing Edit + Dark Mode...", "status": "running"}
                 await state.ws_manager.broadcast({
                     "type": "project_init_progress", "stage": "Maximizing Markdown Editor & enforcing Edit + Dark Mode...", "percent": 12, "status": "running", "dag": state.dag_state
@@ -1078,7 +1082,8 @@ async def execute_dag_group_initialize(
                 if not home_img.exists():
                     home_img = state.FRAMES_DIR / f"calib_home_{active_pid}.png"
                 if home_img.exists():
-                    scan_res = await state.scan_image_in_process(home_img)
+                    from ocr_engine import worker_scan_image
+                    scan_res = await asyncio.to_thread(worker_scan_image, str(home_img))
                     lines = scan_res.get("lines", [])
                     detected_fn = scan_res.get("detected_filename")
                     if not detected_fn:

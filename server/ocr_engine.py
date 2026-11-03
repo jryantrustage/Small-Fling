@@ -135,6 +135,8 @@ def extract_numbers_from_slice(crop: np.ndarray, max_x_min: Optional[int] = None
     for bbox, text, score in res:
         clean = text.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
         clean = re.sub(r'(\d)\s+(\d)', r'\1\2', clean)
+        if re.match(r'^\d+\.\d+', clean):
+            continue
         if m := re.search(r'^(\d+)', clean):
             try:
                 n = int(m.group(1))
@@ -268,12 +270,18 @@ def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: 
                 interp = int(round(n_p + (n_n - n_p) * ((y_pos - y_p) / max(1.0, float(y_n - y_p)))))
                 cleaned.append((y_pos, max(n_p + 1, min(n_n - 1, interp))))
 
-    # 4. Only prepend Line 1 if Line 2 is on the 2nd visual row and narrow single-digit '1' was missed
-    if cleaned and cleaned[0][1] == 2:
-        first_y, _ = cleaned[0]
-        if (min_content_y + 18) <= first_y <= (min_content_y + 52):
-            proj_y = max(min_content_y, int(round(first_y - row_pitch)))
-            cleaned.insert(0, (proj_y, 1))
+    # 4. Prepend narrow single-digit lines (1..9) when DBNet first locks onto a 2-digit number (<= 12) lower down
+    if cleaned and 2 <= cleaned[0][1] <= 12:
+        first_y, first_num = cleaned[0]
+        top_row_est = float(min_content_y) + 9.0
+        rows_above = int(round((float(first_y) - top_row_est) / max(1.0, float(row_pitch))))
+        if 1 <= rows_above < first_num:
+            top_ln = max(1, first_num - rows_above)
+            prepended = [
+                (max(min_content_y, int(round(float(first_y) - (first_num - ln) * row_pitch))), ln)
+                for ln in range(top_ln, first_num)
+            ]
+            cleaned = prepended + cleaned
 
     return cleaned
 
@@ -435,19 +443,23 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
             return default_res
 
         h, w = img.shape[:2]
-        sx = w / 1920.0
-        sy = h / 1080.0
+        dpi_scale = (h / 1080.0) if h < 720 else 1.0
+        sx = dpi_scale
+        sy = dpi_scale
 
-        # 1. Fast CV check on the bottom-left pill area (y: 890..985, x: 16..158 at 1080p)
-        py1, py2 = max(0, int(round(935 * sy))), min(h, int(round(982 * sy)))
+        # 1. Fast CV check on the bottom-left pill/badge area (fixed offset from bottom h: h-145..h-104)
+        # Detects both '[cloud-slash] Offline' pill (x: 20..150) and '[cloud-check]' sync icon (x: 20..66)
+        py1, py2 = max(0, h - int(round(145 * sy))), min(h, h - int(round(104 * sy)))
         px1, px2 = max(0, int(round(20 * sx))), min(w, int(round(150 * sx)))
         pill_crop = img[py1:py2, px1:px2]
+        icon_crop = img[py1:py2, max(0, int(round(22 * sx))):min(w, int(round(66 * sx)))]
 
-        by1, by2 = max(0, int(round(875 * sy))), min(h, int(round(915 * sy)))
+        by1, by2 = max(0, h - int(round(205 * sy))), min(h, h - int(round(165 * sy)))
         bx1, bx2 = max(0, int(round(190 * sx))), min(w, int(round(300 * sx)))
         bg_crop = img[by1:by2, bx1:bx2]
 
         cv_pill_detected = False
+        cv_icon_detected = False
         if pill_crop.size > 0 and bg_crop.size > 0:
             pill_med = np.median(pill_crop, axis=(0, 1))
             bg_med = np.median(bg_crop, axis=(0, 1))
@@ -458,8 +470,16 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
             bright_px = int(np.sum(pill_gray > 100))
             if 5.5 <= luma_diff <= 32.0 and is_neutral and bright_px >= max(12, int(35 * sx * sy)):
                 cv_pill_detected = True
+            elif icon_crop.size > 0:
+                icon_p75 = np.percentile(icon_crop, 75, axis=(0, 1))
+                icon_luma_diff = float(np.mean(icon_p75) - np.mean(bg_med))
+                icon_neutral = abs(float(icon_p75[0]) - float(icon_p75[2])) <= 8.0
+                icon_gray = cv2.cvtColor(icon_crop, cv2.COLOR_BGR2GRAY)
+                icon_bright_px = int(np.sum(icon_gray > 100))
+                if 5.0 <= icon_luma_diff <= 32.0 and icon_neutral and icon_bright_px >= max(10, int(25 * sx * sy)):
+                    cv_icon_detected = True
 
-        # 2. RapidOCR check on bottom-left gutter + pill ROI (y: 855..988, x: 5..235 at 1080p)
+        # 2. RapidOCR check on bottom-left gutter + pill ROI
         ocr_detected = False
         matched_text = ""
         matched_conf = 0.0
@@ -469,7 +489,7 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
         if use_ocr:
             ocr = get_rapid_ocr()
             if ocr is not None:
-                ry1, ry2 = max(0, int(round(855 * sy))), min(h, int(round(988 * sy)))
+                ry1, ry2 = max(0, h - int(round(225 * sy))), min(h, h - int(round(92 * sy)))
                 rx1, rx2 = max(0, int(round(5 * sx))), min(w, int(round(235 * sx)))
                 roi = img[ry1:ry2, rx1:rx2]
                 if roi.size > 0:
@@ -496,16 +516,19 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
                                         last_vis_ln = val_n
 
         detected = bool(ocr_detected or cv_pill_detected)
+        badge_detected = bool(detected or cv_icon_detected)
         out = {
             "detected": detected,
             "offline_detected": detected,
+            "badge_detected": badge_detected,
             "cv_pill_detected": cv_pill_detected,
+            "cv_icon_detected": cv_icon_detected,
             "ocr_detected": ocr_detected,
-            "text": matched_text or ("Offline" if detected else ""),
-            "confidence": round(matched_conf if ocr_detected else (0.85 if cv_pill_detected else 0.0), 3),
-            "bbox": matched_bbox if detected else [],
+            "text": matched_text or ("Offline" if detected else ("Synced" if cv_icon_detected else "")),
+            "confidence": round(matched_conf if ocr_detected else (0.85 if badge_detected else 0.0), 3),
+            "bbox": matched_bbox if badge_detected else [],
             "last_visible_line_above_pill": last_vis_ln,
-            "occluded_lines_allowance": 3 if detected else 0,
+            "occluded_lines_allowance": 3 if detected else (1 if cv_icon_detected else 0),
         }
         _last_gutter_offline_info = out
         return out
@@ -554,18 +577,19 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     ocr = get_rapid_ocr()
     if ocr is None: return []
 
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
-    norm_multiplier = max(0.4, scale_x * dpi_factor)
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    scale_x = dpi_scale
+    scale_y = dpi_scale
+    norm_multiplier = max(0.4, (w / 1920.0) * dpi_factor)
 
-    # Crop with extra vertical margin (275..985 at 1080p) so RapidOCR detector never misses
-    # the 1st row (y~303), 24th row (y~923..943), or the bottom-left 'Offline' pill (y~955..975).
+    # Crop with extra vertical margin (275..h-85) so RapidOCR detector never misses
+    # the 1st row (y~300), bottom unoccluded row (y~h-157), or the bottom-left 'Offline' pill (y~h-140..h-104).
     crop_top_y = max(265, int(275 * scale_y))
-    crop_bot_y = min(h - 85, int(985 * scale_y))
+    crop_bot_y = min(h - 85, h - int(round(95 * scale_y)))
 
-    # Strict valid vertical bounds for unclipped editor lines (excludes toolbar above 295 and clipped 25th row at y>=948)
+    # Strict valid vertical bounds for unclipped editor lines above the bottom-left badge (excludes toolbar <=292 and badge >=h-142)
     valid_min_y = max(292, int(295 * scale_y))
-    valid_max_y = min(h - 135, int(936 * scale_y))
+    valid_max_y = min(h - int(round(138 * scale_y)), int(938 * scale_y))
     offline_hit_in_gutter = False
     offline_bbox_in_gutter: List[int] = []
     offline_conf_in_gutter = 0.0
@@ -596,8 +620,8 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             if max_x is not None and x_min > max_x:
                 continue
             clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
-            clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num)
-            if m := re.search(r'^(\d+)', clean_num):
+            clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num).strip()
+            if m := re.match(r'^(\d{1,6})$', clean_num):
                 try:
                     num = int(m.group(1))
                     if 0 < num < 500000:
@@ -672,10 +696,42 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             valid.append((y_pos, valid[-1][1] + 1))
     final_gutter = valid if valid else best_gutter
     last_vis = final_gutter[-1][1] if final_gutter else 0
+    cv_chk = detect_offline_editor_overlay(img, use_ocr=False)
+
+    # Check if the final EOF row (e.g. '---' after blank line / CODESCAN_FILE_END) is sitting at
+    # y = last_y + row_pitch (~h-131) with its gutter number occluded by the bottom-left [Cloud-Check] / [Offline] badge
+    if len(final_gutter) >= 2 and (cv_chk.get("badge_detected") or cv_chk.get("detected") or offline_hit_in_gutter):
+        last_y, last_num = final_gutter[-1]
+        pitches = [
+            (final_gutter[i + 1][0] - final_gutter[i][0]) / max(1, final_gutter[i + 1][1] - final_gutter[i][1])
+            for i in range(len(final_gutter) - 1)
+            if 0 < (final_gutter[i + 1][1] - final_gutter[i][1]) <= 4
+            and 16.0 * dpi_scale <= (final_gutter[i + 1][0] - final_gutter[i][0]) / max(1, final_gutter[i + 1][1] - final_gutter[i][1]) <= 34.0 * dpi_scale
+        ]
+        row_pitch = float(np.median(pitches)) if pitches else (27.0 * dpi_scale)
+        next_y = int(round(last_y + row_pitch))
+        if (h - int(round(172 * dpi_scale))) <= last_y <= (h - int(round(142 * dpi_scale))) and next_y <= (h - int(round(118 * dpi_scale))):
+            x_chk1 = int(round(98 * dpi_scale))
+            x_chk2 = min(w - 24, int(round(420 * dpi_scale)))
+            strip_prev = img[max(0, last_y):min(h, last_y + int(round(0.82 * row_pitch))), x_chk1:x_chk2]
+            strip_next = img[max(0, next_y):min(h, next_y + int(round(0.82 * row_pitch))), x_chk1:x_chk2]
+            if strip_prev.size > 0 and strip_next.size > 0:
+                g_prev = cv2.cvtColor(strip_prev, cv2.COLOR_BGR2GRAY) if strip_prev.ndim == 3 else strip_prev
+                g_next = cv2.cvtColor(strip_next, cv2.COLOR_BGR2GRAY) if strip_next.ndim == 3 else strip_next
+                fg_prev = np.abs(g_prev.astype(np.int16) - int(np.median(g_prev))) > 18
+                fg_next = np.abs(g_next.astype(np.int16) - int(np.median(g_next))) > 18
+                if int(np.count_nonzero(fg_prev)) < 10 and int(np.count_nonzero(fg_next)) >= 10:
+                    ys_n, xs_n = np.where(fg_next)
+                    if len(xs_n) > 0 and (xs_n.max() - xs_n.min() + 1) <= int(round(68 * dpi_scale)):
+                        if decode_short_code_glyphs(fg_next[:, int(xs_n.min()):int(xs_n.max()) + 1]) == "---":
+                            final_gutter.append((next_y, last_num + 1))
+                            last_vis = last_num + 1
+
     if offline_hit_in_gutter:
         _last_gutter_offline_info = {
             "detected": True,
             "offline_detected": True,
+            "badge_detected": True,
             "ocr_detected": True,
             "text": "Offline",
             "confidence": round(offline_conf_in_gutter, 3),
@@ -684,14 +740,14 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             "occluded_lines_allowance": 3,
         }
     else:
-        cv_chk = detect_offline_editor_overlay(img, use_ocr=False)
-        if cv_chk.get("detected"):
+        if cv_chk.get("detected") or cv_chk.get("badge_detected"):
             cv_chk["last_visible_line_above_pill"] = last_vis
             _last_gutter_offline_info = cv_chk
         else:
             _last_gutter_offline_info = {
                 "detected": False,
                 "offline_detected": False,
+                "badge_detected": False,
                 "text": "",
                 "confidence": 0.0,
                 "bbox": [],
@@ -721,13 +777,38 @@ def worker_detect_last_line(image_path: str, dpi_factor: float = 1.0) -> int:
     """Worker function to rapidly and accurately detect the last line number on screen (used after Ctrl+End)."""
     img = cv2.imread(image_path)
     if img is None: return 0
-    _, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
-    if bot > 0:
-        return bot
     gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
-    if gutter:
-        return gutter[-1][1]
-    return 0
+    _, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
+    if gutter and gutter[-1][1] > bot:
+        bot = gutter[-1][1]
+    if len(gutter) >= 2:
+        h, w = img.shape[:2]
+        dpi_scale = (h / 1080.0) if h < 720 else 1.0
+        last_y, last_num = gutter[-1]
+        pitches = [
+            (gutter[i + 1][0] - gutter[i][0]) / max(1, gutter[i + 1][1] - gutter[i][1])
+            for i in range(len(gutter) - 1)
+            if 0 < (gutter[i + 1][1] - gutter[i][1]) <= 4
+            and 16.0 * dpi_scale <= (gutter[i + 1][0] - gutter[i][0]) / max(1, gutter[i + 1][1] - gutter[i][1]) <= 34.0 * dpi_scale
+        ]
+        row_pitch = float(np.median(pitches)) if pitches else (27.0 * dpi_scale)
+        next_y = int(round(last_y + row_pitch))
+        # If last_y is right above the bottom-left badge and next_y has visible non-wrapped content at EOF
+        if (h - int(round(172 * dpi_scale))) <= last_y <= (h - int(round(142 * dpi_scale))) and next_y <= (h - int(round(118 * dpi_scale))):
+            x_chk1 = int(round(98 * dpi_scale))
+            x_chk2 = max(x_chk1 + 1, w - 32)
+            strip_prev_right = img[max(0, last_y):min(h, last_y + int(round(0.82 * row_pitch))), int(w * 0.78):x_chk2]
+            strip_next = img[max(0, next_y):min(h, next_y + int(round(0.82 * row_pitch))), x_chk1:x_chk2]
+            if strip_next.size > 0:
+                g_next = cv2.cvtColor(strip_next, cv2.COLOR_BGR2GRAY) if strip_next.ndim == 3 else strip_next
+                fg_next = np.abs(g_next.astype(np.int16) - int(np.median(g_next))) > 18
+                prev_wrapped = False
+                if strip_prev_right.size > 0:
+                    g_pr = cv2.cvtColor(strip_prev_right, cv2.COLOR_BGR2GRAY) if strip_prev_right.ndim == 3 else strip_prev_right
+                    prev_wrapped = int(np.count_nonzero(np.abs(g_pr.astype(np.int16) - int(np.median(g_pr))) > 18)) >= 12
+                if not prev_wrapped and int(np.count_nonzero(fg_next)) >= 10:
+                    bot = max(bot, last_num + 1)
+    return bot
 
 def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[bool, int]:
     """Worker function to verify that line 1 is visible at top of gutter (used after Ctrl+Home)."""
@@ -1129,6 +1210,8 @@ def decode_short_code_glyphs(fg_mask: np.ndarray) -> str:
             merged.append((cs, ce))
 
     if len(merged) == 3 and (ys_all.max() - ys_all.min() + 1) <= 7:
+        if int(ys_all.min()) >= int(sh * 0.38):
+            return "---"
         return "```"
 
     tokens: List[str] = []
@@ -1419,8 +1502,9 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     if img is None:
         raise FileNotFoundError(f"Image not found: {image_path}")
     h, w = img.shape[:2]
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    scale_x = dpi_scale
+    scale_y = dpi_scale
 
     ocr_boxes: List[Dict[str, Any]] = []
     ocr = get_rapid_ocr()
@@ -1446,21 +1530,44 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             print(f"[worker_scan_image] RapidOCR error: {e}")
 
     # 1. Left Gutter ROI & Editor Boundaries:
-    # Gutter ROI: x: 0..92px (scaled by w / 1920.0), y: 280..960px (scaled by h / 1080.0)
     gutter_roi_y1 = max(0, int(round(280 * scale_y)))
-    gutter_roi_y2 = min(h, int(round(960 * scale_y)))
-    gutter_roi_x_max = int(round(92 * scale_x))
+    gutter_roi_y2 = min(h, h - int(round(95 * scale_y)))
 
-    # Strict unclipped editor line vertical bounds (excludes top toolbar <=292 and bottom clipped/status bar >=944)
+    # Strict unclipped editor line vertical bounds above the bottom-left badge (excludes top toolbar <=292 and badge >=h-135)
     ed_top = max(gutter_roi_y1, int(round(295 * scale_y)))
     ed_bot = min(gutter_roi_y2, int(round(943 * scale_y)), h - int(round(135 * scale_y)))
 
+    # Dynamically detect the right edge of right-aligned gutter digits (e.g. x=73 for 3-digit files, x=96 for 5-digit files)
+    # followed by the >=8px empty vertical separator channel before code column 0
+    gutter_right = int(round(90 * scale_x))
+    try:
+        sep_probe_w = min(w, int(round(140 * scale_x)))
+        probe_strip = img[ed_top:ed_bot, 0:sep_probe_w]
+        if probe_strip.size > 0:
+            probe_gray = cv2.cvtColor(probe_strip, cv2.COLOR_BGR2GRAY) if probe_strip.ndim == 3 else probe_strip
+            probe_bg = int(np.median(probe_gray))
+            probe_fg = np.abs(probe_gray.astype(np.int16) - probe_bg) > 20
+            col_counts = probe_fg.sum(axis=0)
+            min_gx = int(round(52 * scale_x))
+            max_gx = min(sep_probe_w - 10, int(round(102 * scale_x)))
+            gap_w = max(5, int(round(8 * scale_x)))
+            found_gr = 0
+            for x_col in range(min_gx, max_gx):
+                if col_counts[x_col] >= 3 and np.all(col_counts[x_col + 1 : x_col + 1 + gap_w] <= 1):
+                    found_gr = x_col
+            if found_gr > 0:
+                gutter_right = found_gr
+    except Exception:
+        pass
+
     gx_min = max(14, int(round(20 * scale_x)))
-    gx_max = gutter_roi_x_max
-    x_code_start = int(round(94 * scale_x))
+    gx_max = gutter_right + int(round(4 * scale_x))
+    gutter_roi_x_max = gx_max
+    x_code_start = gutter_right + int(round(6 * scale_x))
+    code_col0_x = float(gutter_right) + 15.0 * scale_x
     x_code_end = max(x_code_start + 1, w - 24)
     content_min_x = x_code_start
-    content_max_x = min(x_code_end, int(round(1896 * scale_x)))
+    content_max_x = max(content_min_x + 1, w - 24)
 
     def _clean_gutter_digits(s: str) -> str:
         c = s.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
@@ -1488,16 +1595,17 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             clean_g = _clean_gutter_digits(txt)
             if clean_g.isdigit() and 0 < int(clean_g) < 500000:
                 raw_gutter_pairs.append((cy, int(clean_g), b))
-            elif m := re.match(r'^(\d{1,6})\s+(.+)$', txt):
+            elif m := re.match(r'^(\d{1,6})\s*(.+)$', txt):
                 g_num = int(m.group(1))
                 c_txt = m.group(2).strip()
                 raw_gutter_pairs.append((cy, g_num, {**b, "width": max(24, gx_max - bx)}))
                 if c_txt:
+                    new_x = max(content_min_x, bx + 28)
                     content_boxes.append({
                         **b,
-                        "x": max(content_min_x, bx + 28),
+                        "x": new_x,
                         "text": c_txt,
-                        "width": max(30, bw - 28),
+                        "width": max(30, (bx + bw) - new_x),
                     })
             elif (bx + bw) >= content_min_x:
                 content_boxes.append(b)
@@ -1622,7 +1730,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
 
         # Determine top_ln and bot_ln strictly within valid line-center viewport bounds [min_center_y, max_center_y]
         min_center_y = 300.0 * scale_y
-        max_center_y = 940.0 * scale_y
+        max_center_y = min(940.0 * scale_y, float(h) - 140.0 * scale_y)
 
         first_ln = valid_pairs[0][1]
         first_cy = y_v0
@@ -1633,6 +1741,27 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         last_cy = y_v0 + v_offsets[-1] * pitch_y
         rows_below = max(0, int(np.floor((max_center_y - last_cy) / pitch_y + 0.18)))
         bottom_line = max(top_line, last_ln + rows_below)
+
+        # Check if the final EOF row (e.g. '---' after blank line / CODESCAN_FILE_END) sits at last_cy + pitch_y
+        # with its left gutter number occluded by the bottom-left [Cloud-Check] / [Offline] badge
+        next_cy = last_cy + pitch_y
+        if rows_below == 0 and (float(h) - 168.0 * scale_y) <= last_cy <= (float(h) - 134.0 * scale_y) and next_cy <= (float(h) - 110.0 * scale_y):
+            sy1_prev = max(0, int(round(last_cy - 0.42 * pitch_y)))
+            sy2_prev = min(h, int(round(last_cy + 0.42 * pitch_y)))
+            sy1_next = max(0, int(round(next_cy - 0.42 * pitch_y)))
+            sy2_next = min(h, int(round(next_cy + 0.42 * pitch_y)))
+            strip_prev = img[sy1_prev:sy2_prev, x_code_start : min(w - 24, x_code_start + int(round(340 * scale_x)))]
+            strip_next = img[sy1_next:sy2_next, x_code_start : min(w - 24, x_code_start + int(round(340 * scale_x)))]
+            if strip_prev.size > 0 and strip_next.size > 0:
+                g_prev = cv2.cvtColor(strip_prev, cv2.COLOR_BGR2GRAY) if strip_prev.ndim == 3 else strip_prev
+                g_next = cv2.cvtColor(strip_next, cv2.COLOR_BGR2GRAY) if strip_next.ndim == 3 else strip_next
+                fg_prev = np.abs(g_prev.astype(np.int16) - int(np.median(g_prev))) > 18
+                fg_next = np.abs(g_next.astype(np.int16) - int(np.median(g_next))) > 18
+                if int(np.count_nonzero(fg_prev)) < 10 and int(np.count_nonzero(fg_next)) >= 10:
+                    ys_n, xs_n = np.where(fg_next)
+                    if len(xs_n) > 0 and (xs_n.max() - xs_n.min() + 1) <= int(round(68 * scale_x)):
+                        if decode_short_code_glyphs(fg_next[:, int(xs_n.min()) : int(xs_n.max()) + 1]) == "---":
+                            bottom_line = max(bottom_line, last_ln + 1)
 
         # Build exact y_center(ln) for every integer line ln in range(top_line, bottom_line + 1):
         # When no wrapped lines exist on the page, v_offsets[k] == valid_pairs[k][1] - first_ln,
@@ -1795,11 +1924,12 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         first_ink_abs_x = x_code_start + ink_x1
         first_word_x = matched_words[0]["x"] if matched_words else first_ink_abs_x
         indent_ref_x = first_word_x if (matched_words and first_word_x >= first_ink_abs_x) else first_ink_abs_x
-        indent_spaces = max(0, int(round((indent_ref_x - (x_code_start + 17.5 * scale_x)) / max(1.0, char_pitch_x))))
+        indent_spaces = max(0, int(round((indent_ref_x - code_col0_x) / max(1.0, char_pitch_x))))
         indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
 
+        has_alnum_word = any(re.search(r"[A-Za-z0-9]{2,}", b.get("text", "")) for b in matched_words)
         short_decoded = ""
-        if not is_wrapped and ink_w <= int(round(68 * scale_x)):
+        if not is_wrapped and not has_alnum_word and ink_w <= int(round(68 * scale_x)):
             short_decoded = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
 
         if short_decoded:

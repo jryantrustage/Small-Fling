@@ -1160,10 +1160,11 @@ async def enforce_markdown_only_on_desktop(
 
     # 3. Check if FilePreviewActivity is resident specifically on Phone Display (Display 0)
     # Only remove Markdown viewer (FilePreviewActivity), NEVER knock user out of Teams login or main app
-    ext_md_tasks = set(ext_info.get("file_preview_tasks", []))
+    ext_md_tasks_list = list(ext_info.get("file_preview_tasks", []))
+    ext_md_tasks = set(ext_md_tasks_list)
     phone_md_tasks = [t for t in disp0_info.get("file_preview_tasks", []) if t not in ext_md_tasks]
 
-    if phone_md_tasks and not ext_md_tasks:
+    if phone_md_tasks and not ext_md_tasks_list:
         # Send HOME keyevent to phone display (Display 0) only if Markdown preview is stuck on phone
         await run_adb_shell("input -d 0 keyevent 3", ser, timeout=1.5)
         actions.append("Dispatched HOME keyevent to phone display #0 to background FilePreviewActivity")
@@ -1171,7 +1172,8 @@ async def enforce_markdown_only_on_desktop(
         await asyncio.sleep(0.1)
 
     # 4. Check status on External Desktop Display
-    is_ext_md_resumed = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", [])) or len(ext_md_tasks) > 0
+    is_top_resumed_md = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", []))
+    is_ext_md_resumed = is_top_resumed_md or len(ext_md_tasks_list) > 0
     is_any_md_open = "FilePreviewActivity" in out
 
     if not is_ext_md_resumed and not is_any_md_open:
@@ -1183,10 +1185,11 @@ async def enforce_markdown_only_on_desktop(
         )
         actions.append(f"Launched / focused Teams on desktop display #{ext_id}")
         await asyncio.sleep(0.3)
-    elif ext_md_tasks:
-        # Ensure resident Markdown editor task has focus without reloading
-        top_tid = next(iter(ext_md_tasks))
+    elif ext_md_tasks_list and not is_top_resumed_md:
+        # Only bring topmost FilePreviewActivity task to front if it is NOT already the topResumedActivity on ext_id
+        top_tid = ext_md_tasks_list[0]
         await run_adb_shell(f"cmd activity task to-front {top_tid} >/dev/null 2>&1", ser, timeout=1.5)
+        actions.append(f"Focused topmost FilePreviewActivity task #{top_tid} on display #{ext_id}")
 
     # 5. Silently assure virtual keyboard is closed on desktop display without touching phone
     await dismiss_keyboard(ser, ext_id)
@@ -1230,11 +1233,10 @@ async def ensure_editor_content_focused(
 ) -> Dict[str, Any]:
     """
     Guarantees active input focus and blinking cursor on the Teams editor content:
-      1. Brings Teams task to the foreground on the external display via `cmd activity task to-front`
-      2. Repositions the physical keyboard assistant overlay to the title bar if visible
-      3. Taps safe editor content coordinates (x=450, y=360) on external display
-      4. Silently enforces keyboard suppression policy
-      5. Settle delay to let focus register
+      1. Brings topmost Teams FilePreviewActivity task to the foreground ONLY if not already topResumedActivity
+      2. Suppresses soft IMEs before tapping so touch input never pops up handwriting/soft keyboard
+      3. Taps safe editor content coordinates on external display
+      4. Settle delay to let focus register
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -1243,33 +1245,40 @@ async def ensure_editor_content_focused(
     ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
     actions = []
 
-    # 1. Bring Teams FilePreviewActivity Task to front and focus
+    # 1. Check if FilePreviewActivity is already the topResumedActivity on ext_id;
+    #    ONLY call task focus / to-front if it is NOT already the focused top activity!
     try:
         task_res = await run_adb_shell("dumpsys activity activities", ser, timeout=2.5)
         stdout = task_res.get("stdout", "")
-        m_t = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
-        if not m_t:
-            m_t = re.search(r'Task\{[0-9a-fA-F]+\s+#(\d+)\b[^\}]*com\.microsoft\.teams', stdout)
-        if m_t:
-            tid = m_t.group(1)
-            await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser, timeout=1.0)
-            actions.append(f"Focused Teams FilePreviewActivity task #{tid} on display {ext_id}")
+        parsed = parse_activities_by_display(stdout)
+        ext_info = parsed.get(ext_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
+        is_top_resumed_md = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", []))
+        ext_md_tasks_list = list(ext_info.get("file_preview_tasks", []))
+        if not is_top_resumed_md:
+            if ext_md_tasks_list:
+                tid = ext_md_tasks_list[0]
+                await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.0)
+                actions.append(f"Brought topmost FilePreviewActivity task #{tid} to front on display {ext_id}")
+            else:
+                m_t = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u\d+\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
+                if m_t:
+                    tid = m_t.group(1)
+                    await run_adb_shell(f"cmd activity task to-front {tid} >/dev/null 2>&1", ser, timeout=1.0)
+                    actions.append(f"Focused Teams FilePreviewActivity task #{tid} on display {ext_id}")
     except Exception as te:
         actions.append(f"Task focus note: {te}")
 
-    # 2. Reposition physical keyboard assistant overlay if it appeared over content
-    overlay_moved = await reposition_keyboard_assistant_overlay(ser, ext_id)
-    if overlay_moved:
-        actions.append("Repositioned keyboard assistant overlay into top title bar")
+    # 2. Suppress soft keyboard policy BEFORE tapping canvas so touch tap never opens Gboard/handwriting pad
+    await dismiss_keyboard(ser, ext_id)
 
     # 3. Tap safe editor content coordinates to guarantee input connection focus
     disp_w, disp_h = await get_display_dimensions(ser, ext_id)
-    focus_x = min(disp_w // 8, 250) if disp_w > 0 else 250
-    focus_y = min(disp_h // 3, 360) if disp_h > 0 else 360
+    focus_x = int(disp_w * 0.25) if disp_w > 0 else 320
+    focus_y = int(disp_h * 0.38) if disp_h > 0 else 380
     await run_adb_shell(f"input -d {ext_id} tap {focus_x} {focus_y} >/dev/null 2>&1", ser, timeout=1.0)
     actions.append(f"Tapped editor content canvas at ({focus_x}, {focus_y}) on display {ext_id}")
 
-    # 4. Suppress soft keyboard policy
+    # 4. Suppress soft keyboard policy after tap
     await dismiss_keyboard(ser, ext_id)
     actions.append("Dismissed soft keyboard")
 
@@ -1357,27 +1366,25 @@ async def is_ime_visible(serial: Optional[str] = None, force_check: bool = False
         out = chk.get("stdout", "")
         has_visible_window = False
 
-        # In Desktop Mode on external display, Gboard suggestion bar is active at y < 150 (height ~78px)
-        # Check actual touchable window geometry from WindowManager to ensure only real occluding keyboards are flagged
+        # Inspect all InputMethod windows in WindowManager (Android 14/15/16 uses 'touchable region=' or 'touchableRegion=')
         win_chk = await run_adb_shell("dumpsys window windows", ser, timeout=2.0)
         win_out = win_chk.get("stdout", "")
-        m = re.search(r'InputMethod.*?touchableRegion=SkRegion\(\((\d+),(\d+),(\d+),(\d+)\)\)', win_out)
-        if m:
-            l, t, r, b = map(int, m.groups())
-            height = b - t
-            # Real virtual keyboard occludes the screen: height > 200 and bottom of screen (b > 700)
-            has_visible_window = (height > 200 and b > 700)
-        elif "mInputShown=true" in out:
-            # Fallback: if in desktop mode (Display #2 active), suggestion strip is non-occluding
-            has_visible_window = not ("Display #2" in win_out)
-        else:
-            for line in out.splitlines():
-                line_str = line.strip()
-                if "mImeWindowVis=" in line_str:
-                    val_part = line_str.split("mImeWindowVis=")[1].split()[0]
-                    if any(v in val_part for v in ["1", "2", "3", "0x1", "0x2", "0x3"]):
-                        has_visible_window = not ("Display #2" in win_out)
-                        break
+        found_ime_blk = False
+        for m_blk in re.finditer(r'Window\{[^\}]*InputMethod[^\}]*\}:.*?(?=Window\{|\Z)', win_out, re.DOTALL):
+            blk = m_blk.group(0)
+            if "mViewVisibility=0x0" not in blk:
+                continue
+            m_tr = re.search(r'touchable\s*region=SkRegion\(\((\d+),(\d+),(\d+),(\d+)\)\)', blk, re.IGNORECASE)
+            if m_tr:
+                found_ime_blk = True
+                l, t, r, b = map(int, m_tr.groups())
+                height = b - t
+                if height > 200 and b > 600:
+                    has_visible_window = True
+                    break
+        if not found_ime_blk:
+            if "mInputShown=true" in out and "mViewVisibility=0x0" in win_out:
+                has_visible_window = not ("Display #2" in win_out)
 
         _ime_visible_cache = {"val": has_visible_window, "ts": now}
         return has_visible_window
@@ -1401,11 +1408,18 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
             )
             return True
 
-        # Enforce hardware keyboard IME suppression on external desktop displays
-        await run_adb_shell("settings put secure show_ime_with_hard_keyboard 0", ser, timeout=1.5)
+        # Enforce hardware keyboard IME suppression and disable soft IME popups on external desktop displays
+        # so touch taps in the markdown editor never trigger Gboard handwriting pad or voice IME bar.
+        await run_adb_shell(
+            "settings put secure show_ime_with_hard_keyboard 0; "
+            "settings put secure accessibility_soft_keyboard_mode 1; "
+            "ime disable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME >/dev/null 2>&1; "
+            "ime disable com.google.android.tts/com.google.android.apps.speech.tts.googletts.settings.asr.voiceime.VoiceInputMethodService >/dev/null 2>&1",
+            ser,
+            timeout=1.8
+        )
 
-        # Check if IME is actually visible on screen!
-        # If NOT visible, do not dispatch keyevents to prevent unnecessary interruption
+        # Check if IME is still visible on screen!
         if not await is_ime_visible(ser, force_check=True):
             _ime_visible_cache["val"] = False
             _ime_visible_cache["ts"] = time.time()
@@ -1418,13 +1432,6 @@ async def dismiss_keyboard(serial: Optional[str] = None, display_id: Optional[in
 
         await run_adb_shell(f"input {d_arg}keyevent 111 >/dev/null 2>&1", ser, timeout=1.0)
         still_visible = await is_ime_visible(ser, force_check=True)
-        if still_visible:
-            disp_w, disp_h = await get_display_dimensions(ser, did)
-            nav_x = int(1730 * (disp_w / 1920.0))
-            nav_y = int(1060 * (disp_h / 1080.0))
-            await run_adb_shell(f"input {d_arg}tap {nav_x} {nav_y} >/dev/null 2>&1", ser, timeout=1.0)
-            still_visible = await is_ime_visible(ser, force_check=True)
-
         _ime_visible_cache["val"] = still_visible
         _ime_visible_cache["ts"] = time.time()
         return not still_visible
@@ -1582,15 +1589,15 @@ async def is_editor_full_screen(
     bounds = [0, 0, disp_w, disp_h]
 
     if tid is not None:
-        # Match task header line for FilePreviewActivity
-        m_head = re.search(rf'\*\s+Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}', search_block if search_block else stdout)
+        # Match task header line for FilePreviewActivity (with or without leading '*')
+        m_head = re.search(rf'(?:\*\s+)?Task\{{[0-9a-fA-F]+\s+#{tid}\b[^}}]*?mode=(?P<mode>\w+)[^}}]*?\}}', search_block if search_block else stdout)
         if m_head:
             mode = m_head.group("mode").lower()
 
             # Isolate the task block to avoid picking up stale mGlobalConfig from other tasks
             task_pos = m_head.start()
             target_str = search_block if search_block else stdout
-            next_task = re.search(r'\n\s*\* Task\{', target_str[task_pos + 1:])
+            next_task = re.search(r'\n\s*(?:\*\s+)?Task\{', target_str[task_pos + 1:])
             task_block = target_str[task_pos : task_pos + 1 + next_task.start()] if next_task else target_str[task_pos:]
 
             # Check direct bounds in task block: bounds=[l,t][r,b] or mBounds=Rect(l, t - r, b)
@@ -1625,18 +1632,20 @@ async def is_editor_full_screen(
 
             def _resolve_maximize_btn(bnds: list, img_b: Optional[bytes]) -> list:
                 bl, bt, br, bb = bnds
-                # Default Android 15 Desktop Mode freeform caption bar Maximize [] button offset from top-right
-                mx = max(40, int(br - 122 * (disp_w / 1920.0)))
-                my = max(15, int(bt + 32 * (disp_h / 1080.0)))
+                # In Android Desktop Mode (210-220 DPI), the freeform window caption bar icons
+                # ('_' at br-191, '[]' Maximize at br-117, 'X' Close at br-43) are positioned at
+                # fixed dp offsets from the window's top-right corner (br, bt), NOT scaled by disp_w/1920!
+                mx = max(40, int(br - 117))
+                my = max(15, int(bt + 31))
                 if img_b and len(img_b) > 2000:
                     try:
                         cv_im = cv2.imdecode(np.frombuffer(img_b, np.uint8), cv2.IMREAD_COLOR)
                         if cv_im is not None:
                             hi, wi = cv_im.shape[:2]
-                            x1 = max(0, min(wi - 10, int(br - 165 * (wi / 1920.0))))
-                            x2 = max(x1 + 10, min(wi, int(br - 80 * (wi / 1920.0))))
-                            y1 = max(0, min(hi - 10, int(bt + 8 * (hi / 1080.0))))
-                            y2 = max(y1 + 10, min(hi, int(bt + 58 * (hi / 1080.0))))
+                            x1 = max(0, min(wi - 10, int(br - 155)))
+                            x2 = max(x1 + 10, min(wi, int(br - 80)))
+                            y1 = max(0, min(hi - 10, int(bt + 8)))
+                            y2 = max(y1 + 10, min(hi, int(bt + 56)))
                             roi = cv_im[y1:y2, x1:x2]
                             if roi.size > 0:
                                 gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
@@ -1756,21 +1765,21 @@ async def maximize_floating_markdown_window(
         await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser)
         await asyncio.sleep(0.15)
 
-    max_btn = fs_status.get("maximize_button") or [1529, 141]
+    max_btn = fs_status.get("maximize_button") or [1523, 139]
     mx, my = int(max_btn[0]), int(max_btn[1])
     disp_pfx = f"-d {did} " if (did and did > 0) else ""
 
     # Click the Maximize [] button on the floating window title bar
     await run_adb_shell(f"input {disp_pfx}tap {mx} {my}", ser, timeout=2.5)
     actions.append(f"Tapped floating window Maximize [] control at ({mx}, {my}) on display #{did}")
-    await asyncio.sleep(0.55)
+    await asyncio.sleep(0.95)
 
     fs_after = await is_editor_full_screen(ser, did)
     if not fs_after.get("is_fullscreen", True):
         # Fallback: try mouse tap on the Maximize [] control
         await run_adb_shell(f"input {disp_pfx}mouse tap {mx} {my}", ser, timeout=2.5)
         actions.append(f"Dispatched fallback mouse tap on Maximize [] control at ({mx}, {my})")
-        await asyncio.sleep(0.55)
+        await asyncio.sleep(0.85)
         fs_after = await is_editor_full_screen(ser, did)
 
     await dismiss_keyboard(ser, did)
@@ -2188,6 +2197,10 @@ async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Option
     elif m_phys := re.search(r'Physical density:\s*(\d+)', out):
         current_dpi = int(m_phys.group(1))
 
+    # Avoid unnecessary wm density surface recreation if display is already within calibrated 190..240 DPI range
+    if 190 <= current_dpi <= 240 and abs(current_dpi - target_dpi) <= 20:
+        target_dpi = current_dpi
+
     if current_dpi != target_dpi:
         await run_adb_shell(f"wm density {target_dpi} -d {did}", ser, timeout=2.0)
         current_dpi = target_dpi
@@ -2294,7 +2307,7 @@ async def enforce_device_characteristics(
         prof = DEVICE_PROFILES.get("pixel_10" if "10" in model_key else "pixel_8", DEVICE_PROFILES["pixel_8"])
         target_dpi = prof.get("default_dpi", 220)
 
-    # 3. Strictly enforce wm density <target_dpi> -d <did>
+    # 3. Enforce wm density <target_dpi> -d <did> only when outside calibrated tolerance
     check_res = await run_adb_shell(f"wm density -d {did}", ser, timeout=1.8)
     out_dpi = check_res.get("stdout", "")
     current_dpi = 160
@@ -2303,6 +2316,9 @@ async def enforce_device_characteristics(
     elif m_phys := re.search(r'Physical density:\s*(\d+)', out_dpi):
         val = int(m_phys.group(1))
         if val > 0: current_dpi = val
+
+    if 190 <= current_dpi <= 240 and abs(current_dpi - target_dpi) <= 20:
+        target_dpi = current_dpi
 
     if current_dpi != target_dpi:
         await run_adb_shell(f"wm density {target_dpi} -d {did}", ser, timeout=2.5)

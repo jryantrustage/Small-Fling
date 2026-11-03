@@ -64,20 +64,38 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
         except Exception:
             pass
 
-        # 1. Dispatch Ctrl+End: keycode 113 + 123
+        # 1. Dispatch Ctrl+End: keycode 113 + 123 and verify physical EOF stability
+        disp_id = await detect_external_display_id(serial) or 3
+        d_arg = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
         await send_hid_keycombination(113, 123, serial)
         await asyncio.sleep(0.6)
-        end_bytes = await capture_external_screenshot(serial)
-        if end_bytes:
-            calib_path = state.FRAMES_DIR / f"calib_end_{project_id}.png"
-            with open(calib_path, "wb") as f:
-                f.write(end_bytes)
-            total_lines = await state.detect_last_line_in_process(calib_path)
-            top_line = await state.detect_top_line_in_process(calib_path)
-            if total_lines <= 0 or top_line <= 0:
-                res_scan = await state.scan_image_in_process(calib_path)
-                if total_lines <= 0: total_lines = res_scan.get("bottom_line", 0)
-                if top_line <= 0: top_line = res_scan.get("top_line", 0)
+        calib_path = state.FRAMES_DIR / f"calib_end_{project_id}.png"
+        prev_bot = -1
+        for _ in range(4):
+            end_bytes = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
+            if end_bytes:
+                with open(calib_path, "wb") as f:
+                    f.write(end_bytes)
+                b_cur = await state.detect_last_line_in_process(calib_path)
+                t_cur = await state.detect_top_line_in_process(calib_path)
+                if b_cur <= 0 or t_cur <= 0:
+                    res_scan = await state.scan_image_in_process(calib_path)
+                    if b_cur <= 0: b_cur = res_scan.get("bottom_line", 0)
+                    if t_cur <= 0: t_cur = res_scan.get("top_line", 0)
+                if b_cur > total_lines:
+                    total_lines = b_cur
+                if t_cur > 0:
+                    top_line = t_cur
+                if b_cur > 0 and b_cur == prev_bot:
+                    break
+                if b_cur > 0:
+                    prev_bot = b_cur
+            try:
+                await run_adb_shell(f"input {d_arg}keyevent 93 93 20 20 20 20 20 20 20 20 >/dev/null 2>&1", serial, timeout=2.5)
+            except Exception:
+                pass
+            await send_hid_keycombination(113, 123, serial)
+            await asyncio.sleep(0.45)
 
         # Auto-fix viewport immediately: close soft keyboard and reflow 1080p desktop layout
         await auto_fix_viewport(serial)

@@ -75,6 +75,7 @@ class InitEndNode(BaseDagNode):
         top_line = 0
         prev_bot = -1
         stable_count = 0
+        d_arg = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
 
         for sample_idx in range(6):
             snap = await capture_external_screenshot(serial, max_cache_age_s=0.0, bypass_lock=True)
@@ -85,6 +86,9 @@ class InitEndNode(BaseDagNode):
                 blackboard.current_image_bytes = snap
 
                 t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
+                last_eof_ln = await state.detect_last_line_in_process(calib, dpi_factor=dpi_factor)
+                if last_eof_ln > b_sample:
+                    b_sample = last_eof_ln
                 if b_sample <= 0:
                     scan_res = await state.scan_image_in_process(calib)
                     b_sample = scan_res.get("bottom_line", 0)
@@ -104,7 +108,17 @@ class InitEndNode(BaseDagNode):
                     stable_count = 1
                     prev_bot = b_sample
 
-            await asyncio.sleep(0.35)
+            # Actively drive viewport to physical EOF in case initial Ctrl+End stopped one lazy-render chunk short (e.g. 780 vs 810)
+            try:
+                await run_adb_shell(
+                    f"input {d_arg}keyevent 93 93 20 20 20 20 20 20 20 20 >/dev/null 2>&1",
+                    serial,
+                    timeout=2.5,
+                )
+            except Exception:
+                pass
+            await send_hid_keycombination(113, 123, serial=serial, caller_node="init_end_verify")
+            await asyncio.sleep(0.45)
 
         # Dismiss soft keyboard to reveal bottom-most lines
         await dismiss_keyboard(serial, disp_id)
@@ -113,6 +127,9 @@ class InitEndNode(BaseDagNode):
             with open(calib, "wb") as f:
                 f.write(snap_fixed)
             t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
+            last_fix = await state.detect_last_line_in_process(calib, dpi_factor=dpi_factor)
+            if last_fix > b_fix:
+                b_fix = last_fix
             if b_fix > total_lines:
                 total_lines = b_fix
             if t_fix > 0:

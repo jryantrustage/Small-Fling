@@ -1833,7 +1833,11 @@ def get_next_expected_top_line(exclude_frame_id: Optional[str] = None) -> int:
     """
     Returns the single authoritative forward capture frontier (next expected top line) across
     all captured frames and document_lines so Node 3, Node 5, Node 6, and auto-recovery never disagree.
+    When exclude_frame_id is provided (e.g. Node 5 checking the expected top line for the current
+    acquired frame after Node 4 has already written its lines to document_lines), lines belonging
+    solely to exclude_frame_id are excluded so Node 5 never double-scrolls.
     """
+    excluded_frame = captured_frames.get(exclude_frame_id) if exclude_frame_id else None
     other_frames = [
         f for f in captured_frames.values()
         if (not exclude_frame_id or f.get("frame_id") != exclude_frame_id)
@@ -1850,10 +1854,22 @@ def get_next_expected_top_line(exclude_frame_id: Optional[str] = None) -> int:
             return int(dag_state.get("nodes", {}).get("frame_ocr", {}).get("target_top_line") or 1)
         other_frames = acq_frames
     max_frame_bot = max(((f.get("bottom_line", 0) or 0) for f in other_frames), default=0)
-    max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
+    if exclude_frame_id:
+        # Exclude document_lines written by the excluded frame itself
+        ex_top = int(excluded_frame.get("top_line", 0) or 0) if excluded_frame else 0
+        doc_keys = [
+            ln for ln, entry in document_lines.items()
+            if (not isinstance(entry, dict) or entry.get("frame_id") != exclude_frame_id)
+            and (ex_top <= 0 or ln < ex_top or ln <= max_frame_bot)
+        ]
+        max_doc_ln = max(doc_keys, default=0)
+    else:
+        max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
     frontier = max(max_frame_bot, max_doc_ln)
     if frontier > 0:
         return int(frontier) + 1
+    if exclude_frame_id and excluded_frame and not other_frames:
+        return 1
     return int(dag_state.get("nodes", {}).get("frame_ocr", {}).get("target_top_line") or 1)
 
 
