@@ -182,7 +182,7 @@ async def auto_heal_pipeline_environment(
     node = state.dag_state["nodes"].get(node_id, {})
 
     try:
-        active_pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
+        active_pin = getattr(config, "DEVICE_PIN", "2992") or "2992"
         awake_res = await configure_display_awake_policies(serial, pin=active_pin)
         if awake_res.get("keyguard_unlocked"):
             actions_taken.append(f"Unlocked device keyguard with PIN {active_pin}")
@@ -1209,6 +1209,18 @@ async def _execute_dag_group_capture_markdown_impl(serial: Optional[str] = None)
         _save_dag2_loop_record(loop_idx, loop_start_ms, int(time.time() * 1000), max(1, int((time.perf_counter() - loop_t0) * 1000)), "error", loop_nodes, failed_node="frame_acquire", error_reason=err_msg)
         return {"status": "error", "node_id": "frame_acquire", "error": err_msg, "message": err_msg, "result": n3_res}
 
+    if n3_res.get("eof_already_captured"):
+        n8_res = await _run_node_safe("document_assemble", opts)
+        capture_group["status"] = "completed"
+        return {
+            "status": "success",
+            "group": "capture_entire_markdown",
+            "node3": n3_res,
+            "node6": {"eof_reached": True},
+            "node7": {"allowed": True},
+            "node8": {**n8_res, "is_complete": True},
+        }
+
     opts["skip_env_heal"] = True
 
     # Node 4: local_ai_ocr
@@ -1593,7 +1605,14 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                     tail_text=tail_txt_pre,
                 )
                 if align_res.get("eof_reached") or is_eof_pre:
-                    # Project is already at EOF (or 3 lines short with 'Offline' overlay); finalize & transition to next part
+                    # Project is already at EOF (or 3 lines short with 'Offline' overlay); reconcile total lines, mark completed & transition
+                    eof_ln_pre = max(last_bot_pre, int(align_res.get("actual_bottom") or 0))
+                    reconciled_pre = state.reconcile_eof_total_lines_and_complete_project(
+                        actual_eof_line=eof_ln_pre,
+                        eof_reason="EOF verified during auto-resume",
+                    )
+                    target_lines_pre = int(reconciled_pre.get("target_total_lines") or eof_ln_pre or target_lines_pre)
+                    last_bot_pre = target_lines_pre
                     await _run_node_safe("document_assemble", {"serial": active_serial, "fast_loop": True, "skip_env_heal": True})
                     export_rec = state.export_project_markdown_to_disk()
                     comp_msg = (
@@ -1610,6 +1629,9 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                         reason=comp_msg,
                         recovery_action=f"Exported markdown to {export_rec.get('export_path')}",
                     )
+                    if reconciled_pre.get("project"):
+                        await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_pre["project"]})
+                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
                     await state.ws_manager.broadcast({
                         "type": "markdown_part_exported",
                         "export": export_rec,
@@ -1774,6 +1796,31 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                 rec_opts = {"serial": active_serial, "fast_loop": True, "allow_concurrent": False, "skip_env_heal": True}
                                 n7_rec = await _run_node_safe("verification_trigger", rec_opts)
                                 n8_rec = await _run_node_safe("document_assemble", rec_opts)
+                                if nav_rec.get("eof_reached") or n8_rec.get("is_complete"):
+                                    rec_bot_eof = int(nav_rec.get("actual_bottom") or max(state.document_lines.keys(), default=0))
+                                    reconciled_rec = state.reconcile_eof_total_lines_and_complete_project(
+                                        actual_eof_line=rec_bot_eof,
+                                        eof_reason=nav_rec.get("eof_reason") or "Physical EOF verified during recovery",
+                                    )
+                                    corr_tot = int(reconciled_rec.get("target_total_lines") or rec_bot_eof)
+                                    export_rec = state.export_project_markdown_to_disk()
+                                    comp_msg = f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! Target document lines ({corr_tot:,}) reached at Line {corr_tot:,}."
+                                    state.latest_telemetry["status_message"] = comp_msg
+                                    state.record_diagnostics_trace_event(
+                                        event_type="LAST_LINE_OCR_COMPLETED",
+                                        top_line=settled_t,
+                                        bottom_line=corr_tot,
+                                        target_top_line=corr_tot,
+                                        node_id="document_assemble",
+                                        reason=comp_msg,
+                                        recovery_action=f"Exported markdown to {export_rec.get('export_path')}",
+                                    )
+                                    if reconciled_rec.get("project"):
+                                        await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_rec["project"]})
+                                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
+                                    await state.ws_manager.broadcast({"type": "markdown_part_exported", "export": export_rec, "multipart_state": state.multipart_bundle_state})
+                                    stop_reason_logged = True
+                                    break
                                 if n8_rec.get("status") != "error":
                                     state.record_diagnostics_trace_event(
                                         event_type="LOOP_AUTO_RECOVERED", node_id=failed_node, target_top_line=settled_t,
@@ -1789,6 +1836,32 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                 target_top=int(expected_top), serial=active_serial, display_id=disp_id,
                                 use_page_keys=True, max_attempts=12, caller_node="loop_auto_recovery",
                             )
+                            if nav_rec.get("eof_reached"):
+                                rec_bot_eof = int(nav_rec.get("actual_bottom") or max(state.document_lines.keys(), default=0))
+                                reconciled_rec = state.reconcile_eof_total_lines_and_complete_project(
+                                    actual_eof_line=rec_bot_eof,
+                                    eof_reason=nav_rec.get("eof_reason") or "Physical EOF verified during recovery",
+                                )
+                                corr_tot = int(reconciled_rec.get("target_total_lines") or rec_bot_eof)
+                                await _run_node_safe("document_assemble", {"serial": active_serial, "fast_loop": True, "skip_env_heal": True})
+                                export_rec = state.export_project_markdown_to_disk()
+                                comp_msg = f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! Target document lines ({corr_tot:,}) reached at Line {corr_tot:,}."
+                                state.latest_telemetry["status_message"] = comp_msg
+                                state.record_diagnostics_trace_event(
+                                    event_type="LAST_LINE_OCR_COMPLETED",
+                                    top_line=int(nav_rec.get("actual_top") or 1),
+                                    bottom_line=corr_tot,
+                                    target_top_line=corr_tot,
+                                    node_id="document_assemble",
+                                    reason=comp_msg,
+                                    recovery_action=f"Exported markdown to {export_rec.get('export_path')}",
+                                )
+                                if reconciled_rec.get("project"):
+                                    await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_rec["project"]})
+                                await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
+                                await state.ws_manager.broadcast({"type": "markdown_part_exported", "export": export_rec, "multipart_state": state.multipart_bundle_state})
+                                stop_reason_logged = True
+                                break
                             state.record_diagnostics_trace_event(
                                 event_type="LOOP_AUTO_RECOVERED", node_id=failed_node, target_top_line=int(expected_top),
                                 reason=f"Re-verified viewport at Line {nav_rec.get('actual_top') or expected_top}; retrying capture cycle",
@@ -1847,13 +1920,23 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                 )
                 n8 = res.get("node8", {})
                 if n8.get("is_complete") or total_reached:
+                    reconciled_loop = state.reconcile_eof_total_lines_and_complete_project(
+                        actual_eof_line=max(int(bot_l or 0), int(doc_count or 0)),
+                        eof_reason="100% EOF reached",
+                    )
+                    corr_tot_loop = int(reconciled_loop.get("target_total_lines") or bot_l or target_lines or doc_count)
+                    target_lines = corr_tot_loop
+                    bot_l = corr_tot_loop
                     export_rec = state.export_project_markdown_to_disk()
-                    comp_msg = f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! Target document lines ({target_lines or doc_count}) reached at Line {bot_l}."
+                    comp_msg = f"🎉 100% Markdown Captured & Exported ({export_rec.get('file_name')})! Target document lines ({target_lines:,}) reached at Line {bot_l:,}."
                     state.latest_telemetry["status_message"] = comp_msg
                     state.record_diagnostics_trace_event(
                         event_type="LAST_LINE_OCR_COMPLETED", top_line=top_l, bottom_line=bot_l, target_top_line=target_lines,
                         node_id="document_assemble", reason=comp_msg, recovery_action=f"Exported markdown to {export_rec.get('export_path')}",
                     )
+                    if reconciled_loop.get("project"):
+                        await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_loop["project"]})
+                    await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
                     await state.ws_manager.broadcast({"type": "markdown_part_exported", "export": export_rec, "multipart_state": state.multipart_bundle_state})
 
                     mp_state = state.sync_multipart_state_from_alignment()

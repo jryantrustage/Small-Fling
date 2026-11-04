@@ -507,10 +507,16 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   };
 
   const loopDiag = dagStatus?.loop_diagnosis;
+  const isProjectCompleted = Boolean(
+    loopDiag &&
+      (loopDiag.is_complete ||
+        loopDiag.status === 'COMPLETED' ||
+        (loopDiag.target_total_lines > 0 && loopDiag.frontier_line >= loopDiag.target_total_lines))
+  );
   const showAttentionBanner = Boolean(
     loopDiag &&
       !loopDiag.loop_running &&
-      !loopDiag.is_complete &&
+      !isProjectCompleted &&
       (loopDiag.manual_attention_required ||
         loopDiag.headless_status === 'STOPPED' ||
         loopDiag.orchestration_status === 'PAUSED')
@@ -525,6 +531,48 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         <span className="dag-phase-divider">➔</span>
         {renderPhaseGroup(3, 'Phase III — Post-Capture Analyzer & Sandbox', '#38bdf8')}
       </div>
+
+      {/* Project Completed Banner */}
+      {isProjectCompleted && loopDiag && !loopDiag.loop_running && (
+        <div
+          className="loop-completed-banner"
+          data-testid="loop-completed-banner"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            padding: '7px 14px',
+            marginTop: '6px',
+            borderRadius: '6px',
+            background: 'rgba(0, 255, 157, 0.08)',
+            border: '1px solid rgba(0, 255, 157, 0.35)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+            <Check size={16} color="#00ff9d" style={{ flexShrink: 0 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 800,
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  background: 'rgba(0, 255, 157, 0.2)',
+                  border: '1px solid #00ff9d',
+                  color: '#00ff9d',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                ✔ PROJECT COMPLETED — 100% EOF VERIFIED
+              </span>
+              <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#f0f6fc', fontFamily: 'var(--font-mono)' }}>
+                Total Lines: {loopDiag.target_total_lines.toLocaleString()} / {loopDiag.target_total_lines.toLocaleString()} (100%) • {loopDiag.captured_frames_count?.toLocaleString() || 0} Frames Captured
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Loop Stopped / Manual Attention Required Alert & One-Click Resume Banner */}
       {showAttentionBanner && loopDiag && (

@@ -402,6 +402,12 @@ def update_project_target_lines(project_id: str, target_total_lines: int) -> boo
         conn.commit()
     return True
 
+def update_project_status(project_id: str, status: str) -> bool:
+    with get_connection() as conn:
+        conn.cursor().execute("UPDATE projects SET status = ?, updated_at = ? WHERE id = ?;", ((status or "active").strip(), datetime.now().isoformat(), project_id))
+        conn.commit()
+    return True
+
 def update_project_description(project_id: str, description: str) -> bool:
     with get_connection() as conn:
         conn.cursor().execute("UPDATE projects SET description = ?, updated_at = ? WHERE id = ?;", (description.strip(), datetime.now().isoformat(), project_id))

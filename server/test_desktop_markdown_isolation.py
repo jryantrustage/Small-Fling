@@ -78,7 +78,7 @@ async def test_detect_auth_screen_type_mock():
 @pytest.mark.asyncio
 async def test_auto_handle_pin_authentication_mock():
     """Verify auto_handle_pin_authentication behaves correctly in mock mode."""
-    res = await auto_handle_pin_authentication(serial="mock:9999", ext_display_id=11, pin="1213")
+    res = await auto_handle_pin_authentication(serial="mock:9999", ext_display_id=11, pin="2992")
     assert res["status"] == "mock"
     assert res["auth_detected"] is False
     assert res["pin_submitted"] is False

@@ -37,11 +37,11 @@ test.describe('PIN & Security Settings and Qualifier Controls Suite', () => {
     await expect(toggleBtn).toBeVisible();
     await expect(toggleBtn).toContainText('DISABLED (SAFE)');
 
-    // 8. Verify Device PIN input exists and contains 1213
+    // 8. Verify Device PIN input exists and contains 2992
     const pinInput = page.locator('#device-pin-input');
     await expect(pinInput).toBeVisible();
     const pinVal = await pinInput.inputValue();
-    expect(pinVal).toMatch(/1213/);
+    expect(pinVal).toMatch(/2992/);
 
     // 9. Verify Manual Control button exists
     const enterPinBtn = page.locator('#enter-pin-now-btn');
@@ -90,8 +90,8 @@ test.describe('PIN & Security Settings and Qualifier Controls Suite', () => {
     const pinInput = page.locator('#device-pin-input');
     const saveBtn = page.locator('#save-device-pin-btn');
 
-    // Fill PIN 1213
-    await pinInput.fill('1213');
+    // Fill PIN 2992
+    await pinInput.fill('2992');
     await saveBtn.click();
     await page.waitForTimeout(600);
 

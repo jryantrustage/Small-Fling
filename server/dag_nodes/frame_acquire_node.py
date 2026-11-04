@@ -162,6 +162,42 @@ class FrameAcquireNode(BaseDagNode):
                 b_det = int(nav_res["actual_bottom"])
             if t_det <= 0 or b_det <= 0:
                 t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
+            if nav_res.get("eof_reached") and b_det > 0 and expected_top > b_det:
+                reconciled = state.reconcile_eof_total_lines_and_complete_project(
+                    actual_eof_line=b_det,
+                    project_id=pid,
+                    eof_reason=nav_res.get("eof_reason") or f"Physical EOF verified at Line {b_det:,}",
+                )
+                corr_tot = int(reconciled.get("target_total_lines") or b_det)
+                blackboard.is_complete = True
+                blackboard.total_lines = corr_tot
+                blackboard.top_line = t_det or 1
+                blackboard.bottom_line = corr_tot
+                msg_eof = f"EOF verified at Line {corr_tot:,} (corrected DAG 1 total lines to {corr_tot:,}) — project completed ✔"
+                state.dag_state["nodes"]["frame_acquire"].update({
+                    "status": "completed",
+                    "is_active": False,
+                    "top_line": t_det or 1,
+                    "bottom_line": corr_tot,
+                    "telemetry_insight": msg_eof,
+                    "error": None,
+                })
+                return NodeExecutionResult(
+                    status="success",
+                    node_id=self.node_id,
+                    message=msg_eof,
+                    top_line=t_det or 1,
+                    bottom_line=corr_tot,
+                    total_lines=corr_tot,
+                    is_complete=True,
+                    data={
+                        "eof_already_captured": True,
+                        "eof_reached": True,
+                        "top_line": t_det or 1,
+                        "bottom_line": corr_tot,
+                        "total_lines": corr_tot,
+                    },
+                )
 
         if is_auto_resume:
             state.orchestration_state["auto_resume_pending"] = False

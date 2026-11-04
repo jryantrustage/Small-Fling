@@ -82,8 +82,18 @@ class DocumentAssembleNode(BaseDagNode):
             is_complete = True
         elif total_lines_target > 0 and captured_count >= total_lines_target:
             is_complete = True
-        elif is_eof_dual or (eof_reached_flag and total_lines_target > 0 and effective_bottom >= total_lines_target - 4):
+        elif is_eof_dual or eof_reached_flag:
             is_complete = True
+
+        if is_complete and effective_bottom > 0:
+            reconciled = state.reconcile_eof_total_lines_and_complete_project(
+                actual_eof_line=effective_bottom,
+                project_id=blackboard.project_id,
+                eof_reason=eof_reason or f"EOF reached at Line {effective_bottom:,}",
+            )
+            total_lines_target = int(reconciled.get("target_total_lines") or effective_bottom)
+            effective_bottom = total_lines_target
+            blackboard.total_lines = total_lines_target
 
         loop_iter = (state.dag_state["nodes"].get("document_assemble", {}).get("loop_iteration") or 0) + 1
         if is_complete:

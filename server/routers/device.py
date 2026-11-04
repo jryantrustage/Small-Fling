@@ -427,7 +427,7 @@ async def device_unlock_and_awake_endpoint(req: Request):
     data = {}
     try: data = await req.json()
     except Exception: pass
-    pin = data.get("pin", "1213")
+    pin = data.get("pin") or getattr(config, "DEVICE_PIN", "2992") or "2992"
     serial = data.get("serial")
     res = await adb.configure_display_awake_policies(serial, pin=pin)
     return {"status": "ok", "details": res}

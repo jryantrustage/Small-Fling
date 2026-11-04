@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
         pass
 
 app = FastAPI(title="MatrixCapture Frame & Verification Server", version="2.5.0", lifespan=lifespan)
-# Reload trigger: 2026-10-04-v3
+# Reload trigger: 2026-11-04-v4
 
 app.add_middleware(
     CORSMiddleware,

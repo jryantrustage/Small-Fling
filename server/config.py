@@ -49,7 +49,7 @@ TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
 # Automated PIN Entry: defaults to true when DEVICE_PIN is configured to handle sudden authentication
 AUTO_ENTER_PIN: bool = bool(_persisted_auto_pin if "auto_enter_pin" in _persisted_cfg else os.environ.get("AUTO_ENTER_PIN", "true").lower() in ("true", "1", "yes"))
-DEVICE_PIN: str = os.environ.get("DEVICE_PIN", "").strip() or _persisted_device_pin or "1213"
+DEVICE_PIN: str = _persisted_device_pin or os.environ.get("DEVICE_PIN", "").strip() or "2992"
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip()
@@ -69,6 +69,17 @@ def update_config(api_key: Optional[str] = None, auto_enter_pin: Optional[bool] 
         AUTO_ENTER_PIN = bool(auto_enter_pin)
     if device_pin is not None:
         DEVICE_PIN = device_pin.strip()
+        os.environ["DEVICE_PIN"] = DEVICE_PIN
+        try:
+            env_path = PROJECT_ROOT / ".env"
+            if env_path.exists():
+                env_txt = env_path.read_text(encoding="utf-8")
+                import re
+                if re.search(r"^DEVICE_PIN=", env_txt, flags=re.MULTILINE):
+                    env_txt = re.sub(r"^DEVICE_PIN=.*$", f"DEVICE_PIN={DEVICE_PIN}", env_txt, flags=re.MULTILINE)
+                    env_path.write_text(env_txt, encoding="utf-8")
+        except Exception:
+            pass
     try:
         data = {
             "api_key": GEMINI_API_KEY,

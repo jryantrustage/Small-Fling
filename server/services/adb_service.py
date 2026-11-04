@@ -865,7 +865,7 @@ async def auto_handle_pin_authentication(
     the numeric PIN is NEVER typed into a username or email field!
     """
     import config
-    active_pin = pin or getattr(config, "DEVICE_PIN", "1213") or "1213"
+    active_pin = pin or getattr(config, "DEVICE_PIN", "2992") or "2992"
     auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", True)
 
     if not auto_pin_enabled and not force:
@@ -2727,41 +2727,74 @@ async def navigate_to_target_top_line(
         if last_g and last_g >= cur_t and 4 <= (last_g - cur_t + 1) <= 75:
             page_span = last_g - cur_t + 1
 
-        # Dual-Situation EOF Detection (after down-arrow verification):
+        # Check whether the viewport actually moved on the previous attempt
+        viewport_moved = (
+            prev_top is not None
+            and (cur_t != prev_top or (prev_first_y is not None and abs(first_y - prev_first_y) >= 14))
+        )
+        if prev_top is not None:
+            if viewport_moved:
+                stall_count = 0
+                caret_pos = "bottom" if last_dir == "down" else "top"
+            else:
+                stall_count += 1
+
+        tail_lines_txt = ""
+        if state.document_lines:
+            tail_keys = sorted(state.document_lines.keys())[-8:]
+            tail_lines_txt = "\n".join(str(state.document_lines.get(k, "")) for k in tail_keys)
+
+        # Physical scroll-stall at EOF when DAG 1 total_lines overestimated the true document length:
+        # If target_top > cur_t and downward scrolling stalled across multiple attempts (even after refocus/PageDown)
+        # while the file end marker ('CODESCAN_FILE_END') or 'Offline' badge is present at the bottom.
+        scroll_stalled_at_bottom = bool(
+            target_top > cur_t
+            and (total_arrows > 0 or total_page_keys > 0)
+            and (
+                stall_count >= 3
+                or (stall_count >= 2 and "CODESCAN_FILE_END" in tail_lines_txt and target_top >= actual_bot)
+            )
+        )
+
+        # Multi-Situation EOF Detection (after down-arrow verification):
         # 1. Standard EOF: actual_bot >= target_total_lines (e.g. 32,881 / 32,881)
         # 2. 'Offline' Editor Overlay EOF: actual_bot is 1..4 lines short of target_total_lines
         #    (specifically 3 lines short, e.g. 32,878 vs 32,881) while the '[icon] Offline' badge
         #    is covering the bottom 3 gutter lines and down-arrow has been verified.
+        # 3. Physical Scroll-Stall EOF: downward scrolling stalls at actual_bot when DAG 1 total_lines
+        #    was inaccurate, automatically correcting DAG 1 total_lines and completing the project.
         if (
             target_top > 1
-            and target_total_lines > 0
-            and actual_bot >= target_total_lines - 4
-            and (total_arrows > 0 or total_page_keys > 0 or actual_bot >= target_total_lines)
+            and (
+                (target_total_lines > 0 and actual_bot >= target_total_lines - 4 and (total_arrows > 0 or total_page_keys > 0 or actual_bot >= target_total_lines))
+                or scroll_stalled_at_bottom
+            )
         ):
             offline_det = bool(meta.get("offline_overlay_detected"))
             offline_info = meta.get("offline_info") or {}
-            if not offline_det and actual_bot < target_total_lines:
+            if not offline_det and (actual_bot < target_total_lines or scroll_stalled_at_bottom):
                 offline_info = detect_offline_editor_overlay(img, use_ocr=True)
-                offline_det = bool(offline_info.get("detected"))
-
-            tail_lines_txt = ""
-            if state.document_lines:
-                tail_keys = sorted(state.document_lines.keys())[-6:]
-                tail_lines_txt = "\n".join(str(state.document_lines.get(k, "")) for k in tail_keys)
+                offline_det = bool(offline_info.get("detected") or offline_info.get("badge_detected"))
 
             is_eof, eof_reason = is_eof_reached_with_offline_awareness(
                 bottom_line=actual_bot,
                 total_lines=target_total_lines,
                 offline_detected=offline_det,
                 tail_text=tail_lines_txt,
+                scroll_stalled_at_bottom=scroll_stalled_at_bottom,
             )
             if is_eof:
-                occluded_cnt = max(0, target_total_lines - actual_bot)
-                state.orchestration_state["cursor_line"] = actual_bot
+                reconciled = state.reconcile_eof_total_lines_and_complete_project(
+                    actual_eof_line=actual_bot,
+                    eof_reason=eof_reason,
+                )
+                corrected_total = int(reconciled.get("target_total_lines") or actual_bot)
+                occluded_cnt = max(0, corrected_total - actual_bot)
+                state.orchestration_state["cursor_line"] = corrected_total
                 if total_arrows > 0 or total_page_keys > 0:
                     state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * caret_span)
                 state.latest_telemetry["current_top_line"] = actual_top
-                state.latest_telemetry["current_bottom_line"] = actual_bot
+                state.latest_telemetry["current_bottom_line"] = corrected_total
                 actions_taken.append(f"EOF verified after DownArrow check: {eof_reason} ✔")
                 return {
                     "status": "ok",
@@ -2771,9 +2804,10 @@ async def navigate_to_target_top_line(
                     "offline_info": offline_info,
                     "occluded_tail_lines": occluded_cnt,
                     "eof_reason": eof_reason,
+                    "corrected_total_lines": corrected_total,
                     "target_top": target_top,
                     "actual_top": actual_top,
-                    "actual_bottom": actual_bot,
+                    "actual_bottom": corrected_total,
                     "arrows_pressed": total_arrows,
                     "page_keys_pressed": total_page_keys,
                     "attempts": min(attempt, max_attempts),
@@ -2853,18 +2887,6 @@ async def navigate_to_target_top_line(
                 visual_rows_diff = 1
             else:
                 visual_rows_diff = max(lines_above, int(round(lines_above * avg_rows_per_line)))
-
-        # Check whether the viewport actually moved on the previous attempt
-        viewport_moved = (
-            prev_top is not None
-            and (cur_t != prev_top or (prev_first_y is not None and abs(first_y - prev_first_y) >= 14))
-        )
-        if prev_top is not None:
-            if viewport_moved:
-                stall_count = 0
-                caret_pos = "bottom" if last_dir == "down" else "top"
-            else:
-                stall_count += 1
 
         # If stalled twice, tap inside the safe code area (never x=80 y=305 which can hit Undo/Redo if toolbar shifted)
         if stall_count >= 2:

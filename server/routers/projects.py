@@ -43,6 +43,32 @@ async def list_projects():
 async def get_active_project():
     return db.get_active_project()
 
+@router.post("/api/projects/active/reconcile-eof")
+async def reconcile_active_project_eof_endpoint(req: Request):
+    data = {}
+    try:
+        data = await req.json()
+    except Exception:
+        pass
+    actual_eof_line = int(data.get("actual_eof_line") or 0)
+    project_id = data.get("project_id") or state.get_current_project_id()
+    reason = data.get("reason") or "Physical EOF verified"
+    res = state.reconcile_eof_total_lines_and_complete_project(
+        actual_eof_line=actual_eof_line,
+        project_id=project_id,
+        eof_reason=reason,
+    )
+    export_rec = state.export_project_markdown_to_disk(project_id=project_id)
+    if res.get("project") and hasattr(state, "ws_manager") and state.ws_manager:
+        await state.ws_manager.broadcast({"type": "project_updated", "project": res["project"]})
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "telemetry": state.latest_telemetry,
+            "diagnosis": state.get_loop_diagnosis(),
+        })
+    return {"status": "ok", **res, "export": export_rec, "diagnosis": state.get_loop_diagnosis()}
+
 async def perform_full_project_calibration(project_id: str, requested_target: int = 0) -> Tuple[int, bool, int]:
     """
     Executes automated HID Ctrl+End -> External Screencap -> Gutter OCR ->
@@ -76,19 +102,20 @@ async def perform_full_project_calibration(project_id: str, requested_target: in
             if end_bytes:
                 with open(calib_path, "wb") as f:
                     f.write(end_bytes)
-                b_cur = await state.detect_last_line_in_process(calib_path)
-                t_cur = await state.detect_top_line_in_process(calib_path)
+                t_cur, b_cur = await state.detect_gutter_bounds_in_process(calib_path)
+                last_cur = await state.detect_last_line_in_process(calib_path)
+                if last_cur > b_cur and (t_cur <= 0 or (last_cur - t_cur) <= 75):
+                    b_cur = last_cur
                 if b_cur <= 0 or t_cur <= 0:
                     res_scan = await state.scan_image_in_process(calib_path)
                     if b_cur <= 0: b_cur = res_scan.get("bottom_line", 0)
                     if t_cur <= 0: t_cur = res_scan.get("top_line", 0)
-                if b_cur > total_lines:
+                if b_cur > 0 and (t_cur <= 0 or (0 <= (b_cur - t_cur) <= 75)):
                     total_lines = b_cur
-                if t_cur > 0:
-                    top_line = t_cur
-                if b_cur > 0 and b_cur == prev_bot:
-                    break
-                if b_cur > 0:
+                    if t_cur > 0:
+                        top_line = t_cur
+                    if b_cur == prev_bot:
+                        break
                     prev_bot = b_cur
             try:
                 await run_adb_shell(f"input {d_arg}keyevent 93 93 20 20 20 20 20 20 20 20 >/dev/null 2>&1", serial, timeout=2.5)

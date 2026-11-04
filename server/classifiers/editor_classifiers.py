@@ -1049,7 +1049,7 @@ class PinCodeRequestedClassifier(BaseClassifier):
 
     async def fix(self, context: ClassifierContext) -> FixResult:
         import config
-        pin = getattr(config, "DEVICE_PIN", "1213") or "1213"
+        pin = getattr(config, "DEVICE_PIN", "2992") or "2992"
         auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", False)
         force_entry = bool(context.metadata.get("force_enter_pin", False))
 

@@ -296,6 +296,14 @@ class ArrowDownPagerNode(BaseDagNode):
             raise RuntimeError(error_msg)
 
         settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top) else target_top
+        if eof_reached and effective_bot > 0:
+            reconciled = state.reconcile_eof_total_lines_and_complete_project(
+                actual_eof_line=effective_bot,
+                eof_reason=nav_res.get("eof_reason") or f"EOF reached at Line {effective_bot:,}",
+            )
+            effective_bot = int(reconciled.get("target_total_lines") or effective_bot)
+            target_total_lines = effective_bot
+            blackboard.total_lines = effective_bot
         state.orchestration_state["cursor_line"] = effective_bot if eof_reached else new_cursor_line
         state.orchestration_state["last_arrow_count"] = total_arrows_pressed
         state.orchestration_state["next_target_top"] = settled_top

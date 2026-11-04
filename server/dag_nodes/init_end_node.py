@@ -75,6 +75,7 @@ class InitEndNode(BaseDagNode):
         top_line = 0
         prev_bot = -1
         stable_count = 0
+        valid_samples = []
         d_arg = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
 
         for sample_idx in range(6):
@@ -87,7 +88,7 @@ class InitEndNode(BaseDagNode):
 
                 t_sample, b_sample = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
                 last_eof_ln = await state.detect_last_line_in_process(calib, dpi_factor=dpi_factor)
-                if last_eof_ln > b_sample:
+                if last_eof_ln > b_sample and (t_sample <= 0 or (last_eof_ln - t_sample) <= 75):
                     b_sample = last_eof_ln
                 if b_sample <= 0:
                     scan_res = await state.scan_image_in_process(calib)
@@ -95,18 +96,20 @@ class InitEndNode(BaseDagNode):
                     if t_sample <= 0:
                         t_sample = scan_res.get("top_line", 0)
 
-                if b_sample > total_lines:
+                is_valid_span = bool(b_sample > 0 and (t_sample <= 0 or (0 <= (b_sample - t_sample) <= 75)))
+                if is_valid_span:
+                    valid_samples.append((t_sample, b_sample))
                     total_lines = b_sample
-                if t_sample > 0:
-                    top_line = t_sample
+                    if t_sample > 0:
+                        top_line = t_sample
 
-                if b_sample > 0 and b_sample == prev_bot:
-                    stable_count += 1
-                    if stable_count >= 2:
-                        break
-                elif b_sample > 0:
-                    stable_count = 1
-                    prev_bot = b_sample
+                    if b_sample == prev_bot:
+                        stable_count += 1
+                        if stable_count >= 2:
+                            break
+                    else:
+                        stable_count = 1
+                        prev_bot = b_sample
 
             # Actively drive viewport to physical EOF in case initial Ctrl+End stopped one lazy-render chunk short (e.g. 780 vs 810)
             try:
@@ -128,12 +131,14 @@ class InitEndNode(BaseDagNode):
                 f.write(snap_fixed)
             t_fix, b_fix = await state.detect_gutter_bounds_in_process(calib, dpi_factor=dpi_factor)
             last_fix = await state.detect_last_line_in_process(calib, dpi_factor=dpi_factor)
-            if last_fix > b_fix:
+            if last_fix > b_fix and (t_fix <= 0 or (last_fix - t_fix) <= 75):
                 b_fix = last_fix
-            if b_fix > total_lines:
-                total_lines = b_fix
-            if t_fix > 0:
-                top_line = t_fix
+            if b_fix > 0 and (t_fix <= 0 or (0 <= (b_fix - t_fix) <= 75)):
+                # Trust settled final EOF reading if consistent or if no multi-sample consensus conflicted by an outlier
+                if prev_bot <= 0 or abs(b_fix - prev_bot) <= 45 or b_fix > prev_bot:
+                    total_lines = b_fix
+                    if t_fix > 0:
+                        top_line = t_fix
 
         # Evaluate if stuck on line 1 or partial scroll
         is_stuck = False

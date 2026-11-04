@@ -1,10 +1,10 @@
 """
 Automated Test Suite for PIN Code Requested Qualifier and Auto-Remediation.
 Verifies:
-  1. PIN is loaded from .env (DEVICE_PIN=1213).
+  1. PIN is loaded from .env (DEVICE_PIN=2992).
   2. PinCodeRequestedClassifier detects when PIN prompt is active.
   3. PinCodeRequestedClassifier detects clean state when no PIN prompt.
-  4. Fix method executes remediation using stored PIN (1213).
+  4. Fix method executes remediation using stored PIN (2992).
   5. Integration with DAG Node 5 / verification_trigger: blocking trigger decision when active.
   6. Integration with ClassifierRegistry and priority ordering.
 """
@@ -19,10 +19,10 @@ from services import state
 
 
 def test_pin_loaded_from_env():
-    """Verify PIN code 1213 is stored and retrievable via .env and config."""
-    assert config.DEVICE_PIN == "1213"
+    """Verify PIN code 2992 is stored and retrievable via .env and config."""
+    assert config.DEVICE_PIN == "2992"
     pin = os.environ.get("DEVICE_PIN", config.DEVICE_PIN)
-    assert pin == "1213"
+    assert pin == "2992"
 
 
 @pytest.mark.asyncio
@@ -48,7 +48,7 @@ async def test_pin_classifier_detection_simulated():
 
 @pytest.mark.asyncio
 async def test_pin_classifier_fix_with_stored_pin():
-    """Verify classifier fix respects safety toggle and executes when authorized using PIN 1213."""
+    """Verify classifier fix respects safety toggle and executes when authorized using PIN 2992."""
     classifier = PinCodeRequestedClassifier()
 
     # 1. When AUTO_ENTER_PIN is False (Safe Mode default), verify fix is blocked to prevent lockouts
@@ -60,13 +60,13 @@ async def test_pin_classifier_fix_with_stored_pin():
     assert safe_res.metadata.get("blocked_by_safety") is True
     assert "disabled in Settings" in safe_res.message
 
-    # 2. When explicitly forced (manual user trigger from gear settings) or enabled, verify PIN 1213 entry succeeds
+    # 2. When explicitly forced (manual user trigger from gear settings) or enabled, verify PIN 2992 entry succeeds
     ctx_forced = ClassifierContext(serial="mock:9999", metadata={"mock_pin_requested": True, "force_enter_pin": True})
     fix_res = await classifier.fix(ctx_forced)
     assert fix_res.success is True
     assert fix_res.classifier_id == "pin_code_requested"
-    assert "1213" in fix_res.message
-    assert any("1213" in action for action in fix_res.actions_taken)
+    assert "2992" in fix_res.message
+    assert any("2992" in action for action in fix_res.actions_taken)
 
     # Restore config setting
     config.AUTO_ENTER_PIN = original_setting
@@ -155,5 +155,5 @@ async def test_pin_vs_username_password_differentiation_classifier():
 
     res_fix_pin = await classifier.fix(ctx_pin)
     assert res_fix_pin.success is True
-    assert "1213" in res_fix_pin.message
+    assert "2992" in res_fix_pin.message
 

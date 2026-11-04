@@ -286,7 +286,7 @@ def correct_gutter_sequence(gutter_items: List[Tuple[int, int]], min_content_y: 
     return cleaned
 
 def clean_slice_numbers(nums: List[int]) -> List[int]:
-    """Helper to detect and fix digit-truncation outliers in a slice of line numbers."""
+    """Helper to detect and fix digit-truncation or high-spike outliers in a slice of line numbers."""
     if not nums or len(nums) < 2:
         return nums
     res = list(nums)
@@ -300,6 +300,11 @@ def clean_slice_numbers(nums: List[int]) -> List[int]:
         expected_last = res[-2] + 1
         if str(expected_last).startswith(str(res[-1])) or res[-2] - res[-1] >= 5:
             res[-1] = expected_last
+    # Check if last element is a corrupted high outlier spike (e.g. 34177, 37901 -> 34178)
+    elif len(res) >= 3 and 0 < (res[-2] - res[-3]) <= 4 and (res[-1] - res[-2]) > 8:
+        res[-1] = res[-2] + 1
+    elif len(res) == 2 and res[-2] > 0 and (res[-1] - res[-2]) > 45:
+        res.pop()
     return res
 
 def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[int, int]:
@@ -339,9 +344,13 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     if top_nums and bot_nums:
         t, b = top_nums[0], bot_nums[-1]
         if b > 0 and t > 0 and (b - t) > 75:
-            if str(b - 57).startswith(str(t)) or (b - t > 100):
+            bot_seq_valid = len(bot_nums) >= 2 and 0 < (bot_nums[-1] - bot_nums[-2]) <= 3
+            top_seq_valid = len(top_nums) >= 2 and 0 < (top_nums[1] - top_nums[0]) <= 3
+            if bot_seq_valid and not top_seq_valid and str(b - 57).startswith(str(t)):
                 t = max(1, b - 57)
-        if 0 < t <= b:
+            elif top_seq_valid and not bot_seq_valid:
+                b = bot_nums[-2] if (len(bot_nums) >= 2 and 0 <= bot_nums[-2] - t <= 75) else top_nums[-1]
+        if 0 < t <= b and (b - t) <= 75:
             return t, b
 
     # 2. Secondary: sidebar open (gutter around x ~ 300 scaled by norm_multiplier)
@@ -361,9 +370,13 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
         if top_nums2 and bot_nums2:
             t2, b2 = top_nums2[0], bot_nums2[-1]
             if b2 > 0 and t2 > 0 and (b2 - t2) > 75:
-                if str(b2 - 57).startswith(str(t2)) or (b2 - t2 > 100):
+                bot2_seq_valid = len(bot_nums2) >= 2 and 0 < (bot_nums2[-1] - bot_nums2[-2]) <= 3
+                top2_seq_valid = len(top_nums2) >= 2 and 0 < (top_nums2[1] - top_nums2[0]) <= 3
+                if bot2_seq_valid and not top2_seq_valid and str(b2 - 57).startswith(str(t2)):
                     t2 = max(1, b2 - 57)
-            if 0 < t2 <= b2:
+                elif top2_seq_valid and not bot2_seq_valid:
+                    b2 = bot_nums2[-2] if (len(bot_nums2) >= 2 and 0 <= bot_nums2[-2] - t2 <= 75) else top_nums2[-1]
+            if 0 < t2 <= b2 and (b2 - t2) <= 75:
                 return t2, b2
 
     if gutter:
@@ -452,6 +465,8 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
         py1, py2 = max(0, h - int(round(145 * sy))), min(h, h - int(round(104 * sy)))
         px1, px2 = max(0, int(round(20 * sx))), min(w, int(round(150 * sx)))
         pill_crop = img[py1:py2, px1:px2]
+        pill_tight = img[py1:py2, max(0, int(round(20 * sx))):min(w, int(round(115 * sx)))]
+        pill_text_zone = img[py1:py2, max(0, int(round(60 * sx))):min(w, int(round(115 * sx)))]
         icon_crop = img[py1:py2, max(0, int(round(22 * sx))):min(w, int(round(66 * sx)))]
 
         by1, by2 = max(0, h - int(round(205 * sy))), min(h, h - int(round(165 * sy)))
@@ -470,7 +485,15 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
             bright_px = int(np.sum(pill_gray > 100))
             if 5.5 <= luma_diff <= 32.0 and is_neutral and bright_px >= max(12, int(35 * sx * sy)):
                 cv_pill_detected = True
-            elif icon_crop.size > 0:
+            elif pill_tight.size > 0 and pill_text_zone.size > 0:
+                tight_p72 = np.percentile(pill_tight, 72, axis=(0, 1))
+                tight_luma_diff = float(np.mean(tight_p72) - np.mean(bg_med))
+                tight_neutral = abs(float(tight_p72[0]) - float(tight_p72[2])) <= 8.0
+                text_gray = cv2.cvtColor(pill_text_zone, cv2.COLOR_BGR2GRAY)
+                text_bright_px = int(np.sum(text_gray > 95))
+                if 5.0 <= tight_luma_diff <= 32.0 and tight_neutral and bright_px >= max(18, int(28 * sx * sy)) and text_bright_px >= max(8, int(12 * sx * sy)):
+                    cv_pill_detected = True
+            if not cv_pill_detected and icon_crop.size > 0:
                 icon_p75 = np.percentile(icon_crop, 75, axis=(0, 1))
                 icon_luma_diff = float(np.mean(icon_p75) - np.mean(bg_med))
                 icon_neutral = abs(float(icon_p75[0]) - float(icon_p75[2])) <= 8.0
@@ -489,7 +512,7 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
         if use_ocr:
             ocr = get_rapid_ocr()
             if ocr is not None:
-                ry1, ry2 = max(0, h - int(round(225 * sy))), min(h, h - int(round(92 * sy)))
+                ry1, ry2 = max(0, h - int(round(225 * sy))), min(h, h - int(round(85 * sy)))
                 rx1, rx2 = max(0, int(round(5 * sx))), min(w, int(round(235 * sx)))
                 roi = img[ry1:ry2, rx1:rx2]
                 if roi.size > 0:
@@ -508,12 +531,26 @@ def detect_offline_editor_overlay(image_or_bytes: Any, use_ocr: bool = True) -> 
                                 matched_text = clean
                                 matched_conf = float(score)
                                 matched_bbox = [bx_min, by_min, bw_box, bh_box]
-                            elif bx_min <= int(105 * sx):
+                            elif bx_min <= int(105 * sx) and by_min <= h - int(round(135 * sy)):
                                 clean_num = clean.replace("B", "8").replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1")
                                 if m_n := re.match(r"^(\d+)$", clean_num):
                                     val_n = int(m_n.group(1))
                                     if 0 < val_n < 500000 and val_n > last_vis_ln:
                                         last_vis_ln = val_n
+                    if not ocr_detected and (cv_pill_detected or cv_icon_detected):
+                        pill_roi = img[max(0, h - int(round(150 * sy))):min(h, h - int(round(90 * sy))), max(0, int(round(12 * sx))):min(w, int(round(165 * sx)))]
+                        if pill_roi.size > 0:
+                            pill_up = cv2.resize(pill_roi, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+                            res_up, _ = ocr(pill_up)
+                            if res_up:
+                                for box, txt, score in res_up:
+                                    clean = str(txt).strip()
+                                    low = clean.lower()
+                                    if any(k in low for k in ("offline", "offlin", "ffline", "offl")):
+                                        ocr_detected = True
+                                        matched_text = clean
+                                        matched_conf = float(score)
+                                        break
 
         detected = bool(ocr_detected or cv_pill_detected)
         badge_detected = bool(detected or cv_icon_detected)
@@ -542,26 +579,42 @@ def is_eof_reached_with_offline_awareness(
     total_lines: int,
     offline_detected: bool = False,
     tail_text: str = "",
+    scroll_stalled_at_bottom: bool = False,
 ) -> Tuple[bool, str]:
     """
-    Evaluates whether the markdown scan has reached the end of the file (EOF) under either situation:
+    Evaluates whether the markdown scan has reached the end of the file (EOF) under any of:
       1. Standard EOF: bottom_line >= total_lines
       2. 'Offline' Editor Overlay EOF: the '[icon] Offline' badge in the bottom-left gutter covers
          the last ~3 lines (so bottom_line is 1..4 lines short of total_lines, e.g. 32,878 vs 32,881).
+      3. Physical Scroll-Stall EOF: downward scrolling physically stops advancing at bottom_line
+         while the file end marker ('CODESCAN_FILE_END') or bottom-left 'Offline' badge is present,
+         indicating DAG 1's initial total_lines estimate was higher than the actual document length.
     """
     b = int(bottom_line or 0)
     t = int(total_lines or 0)
-    if t <= 0 or b <= 0:
+    if b <= 0:
         return False, ""
-    if b >= t:
+    if t > 0 and b >= t:
         return True, f"Reached total lines ({b:,} / {t:,})"
-    shortfall = t - b
+    shortfall = (t - b) if t > 0 else 0
     has_end_marker = "CODESCAN_FILE_END" in (tail_text or "")
-    if 1 <= shortfall <= 4 and (offline_detected or _last_gutter_offline_info.get("detected") or has_end_marker):
+    has_offline_or_badge = bool(
+        offline_detected
+        or _last_gutter_offline_info.get("detected")
+        or _last_gutter_offline_info.get("badge_detected")
+    )
+    if t > 0 and 1 <= shortfall <= 4 and (has_offline_or_badge or has_end_marker):
         return (
             True,
             f"Reached last visible line {b:,} of {t:,} ({shortfall} lines short due to 'Offline' markdown editor overlay)",
         )
+    if scroll_stalled_at_bottom and (has_offline_or_badge or has_end_marker):
+        if t > 0 and t != b:
+            return (
+                True,
+                f"Physical EOF reached at Line {b:,} (downward scroll stalled at file end; correcting DAG 1 total lines from {t:,} to {b:,})",
+            )
+        return True, f"Physical EOF reached at Line {b:,}"
     return False, ""
 
 
@@ -778,8 +831,12 @@ def worker_detect_last_line(image_path: str, dpi_factor: float = 1.0) -> int:
     img = cv2.imread(image_path)
     if img is None: return 0
     gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
-    _, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
-    if gutter and gutter[-1][1] > bot:
+    t_b, bot = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
+    if len(gutter) >= 2:
+        g_top, g_bot = gutter[0][1], gutter[-1][1]
+        if 0 < g_top <= g_bot and (g_bot - g_top) <= 75:
+            bot = g_bot
+    elif gutter and gutter[-1][1] > bot:
         bot = gutter[-1][1]
     if len(gutter) >= 2:
         h, w = img.shape[:2]

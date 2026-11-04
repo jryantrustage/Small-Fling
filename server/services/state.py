@@ -1758,13 +1758,36 @@ def sync_resume_frontier_state(
     next_top = (last_bot + 1) if last_bot > 0 else 1
 
     proj = db.get_active_project() or {}
-    target_total = int(
-        proj.get("target_total_lines")
-        or latest_telemetry.get("target_total_lines")
-        or headless_telemetry_session.get("target_total_lines")
-        or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
-        or 0
-    )
+    proj_target = int(proj.get("target_total_lines") or 0)
+    proj_is_completed = str(proj.get("status") or "").lower() == "completed"
+    if last_bot <= 0 and proj_target == 0:
+        target_total = 0
+        latest_telemetry["target_total_lines"] = 0
+        headless_telemetry_session["target_total_lines"] = 0
+        project_diagnostics_trace["target_total_lines"] = 0
+        project_diagnostics_trace["is_completed"] = False
+        orchestration_state["eof_reached"] = False
+        orchestration_state["status"] = "IDLE"
+        orchestration_state["manual_attention_required"] = False
+        orchestration_state["halt_reason"] = None
+        dag_state.get("nodes", {}).get("init_end", {}).update({
+            "total_lines": 0,
+            "status": "idle",
+        })
+        dag_state.get("nodes", {}).get("document_assemble", {}).update({
+            "is_complete": False,
+            "completion_percent": 0.0,
+            "total_captured_lines": 0,
+            "status": "idle",
+        })
+    else:
+        target_total = int(
+            proj_target
+            or latest_telemetry.get("target_total_lines")
+            or headless_telemetry_session.get("target_total_lines")
+            or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+            or 0
+        )
 
     if target_total > 0:
         latest_telemetry["target_total_lines"] = target_total
@@ -1772,6 +1795,7 @@ def sync_resume_frontier_state(
         dag_state.get("nodes", {}).get("init_end", {}).update({
             "total_lines": target_total,
             "status": "completed",
+            "telemetry_insight": f"Calibrated {target_total:,} total lines at EOF ✔",
         })
 
     if last_bot > 0:
@@ -1781,7 +1805,11 @@ def sync_resume_frontier_state(
         if target_total > 0:
             init_grp["progress"] = {
                 "percent": 100,
-                "stage": f"Project Ready • Resuming from Line {next_top:,} of {target_total:,} ✔",
+                "stage": (
+                    f"Project Completed • {target_total:,} of {target_total:,} lines verified (100%) ✔"
+                    if (proj_is_completed or last_bot >= target_total)
+                    else f"Project Ready • Resuming from Line {next_top:,} of {target_total:,} ✔"
+                ),
                 "status": "completed",
                 "total_lines": target_total,
                 "verified": True,
@@ -1801,6 +1829,7 @@ def sync_resume_frontier_state(
             "target_top": next_top,
             "target_top_line": next_top,
             "new_top_line": next_top,
+            "eof_reached": bool(proj_is_completed or (target_total > 0 and last_bot >= target_total)),
         })
         dag_state.get("nodes", {}).get("verification_trigger", {}).update({
             "target_top": next_top,
@@ -1808,6 +1837,28 @@ def sync_resume_frontier_state(
             "expected_top": next_top,
             "remaining_lines": max(0, target_total - last_bot) if target_total > 0 else 0,
         })
+        if proj_is_completed or (target_total > 0 and last_bot >= target_total):
+            cap_cnt = len(document_lines) or target_total
+            dag_state.get("nodes", {}).get("document_assemble", {}).update({
+                "status": "completed",
+                "total_captured_lines": cap_cnt,
+                "effective_bottom_line": target_total,
+                "completion_percent": 100.0,
+                "is_complete": True,
+                "healing_step": None,
+                "telemetry_insight": f"Master document: {cap_cnt:,}/{target_total:,} lines stitched (100.0%) • 100% COMPLETE ✔",
+                "error": None,
+            })
+            orchestration_state["eof_reached"] = True
+            orchestration_state["status"] = "COMPLETED"
+            orchestration_state["manual_attention_required"] = False
+            orchestration_state["halt_reason"] = None
+            project_diagnostics_trace["is_completed"] = True
+            project_diagnostics_trace["current_status"] = "COMPLETED"
+            project_diagnostics_trace["last_stop_reason"] = None
+            headless_telemetry_session["status"] = "COMPLETED"
+            headless_telemetry_session["completion_percent"] = 100.0
+            headless_telemetry_session["total_lines_reached"] = True
         latest_telemetry["current_top_line"] = last_top
         latest_telemetry["current_bottom_line"] = last_bot
         latest_telemetry["current_page"] = max(1, last_page)
@@ -1952,6 +2003,143 @@ def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, 
     }
 
 
+def reconcile_eof_total_lines_and_complete_project(
+    actual_eof_line: int = 0,
+    project_id: Optional[str] = None,
+    eof_reason: str = "",
+) -> Dict[str, Any]:
+    """
+    Reconciles the project's target_total_lines and DAG 1 (init_end) total_lines with the true
+    physical EOF line count when EOF is reached (correcting any DAG 1 over/under-estimation or
+    'Offline' overlay shortfall) and marks the project as completed across SQLite, DAG state,
+    and telemetry.
+    """
+    pid = project_id or get_current_project_id()
+    max_doc_ln = max(document_lines.keys(), default=0) if document_lines else 0
+    max_frame_bot = max(((f.get("bottom_line", 0) or 0) for f in captured_frames.values()), default=0) if captured_frames else 0
+    corrected_total = max(int(actual_eof_line or 0), int(max_doc_ln or 0), int(max_frame_bot or 0))
+    if corrected_total <= 0:
+        proj_cur = db.get_project(pid) if pid else (db.get_active_project() or {})
+        corrected_total = int((proj_cur or {}).get("target_total_lines") or 0)
+
+    prev_target = int(
+        dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+        or latest_telemetry.get("target_total_lines")
+        or headless_telemetry_session.get("target_total_lines")
+        or 0
+    )
+
+    if corrected_total > 0:
+        if pid:
+            try:
+                db.update_project_target_lines(pid, corrected_total)
+                db.update_project_status(pid, "completed")
+            except Exception as dbe:
+                print(f"[reconcile_eof_total_lines_and_complete_project] DB update note: {dbe}")
+
+        offline_flag = bool(
+            orchestration_state.get("offline_overlay_detected")
+            or dag_state.get("nodes", {}).get("frame_ocr", {}).get("offline_overlay_detected")
+            or dag_state.get("nodes", {}).get("arrow_down", {}).get("offline_overlay_detected")
+        )
+        was_corrected = bool(prev_target > 0 and prev_target != corrected_total)
+        init_insight = (
+            f"Calibrated {corrected_total:,} total lines at EOF (corrected from {prev_target:,} via EOF verification) ✔"
+            if was_corrected
+            else f"Calibrated {corrected_total:,} total lines at EOF ✔"
+        )
+        if "init_end" in dag_state.get("nodes", {}):
+            dag_state["nodes"]["init_end"].update({
+                "status": "completed",
+                "total_lines": corrected_total,
+                "offline_eof_line": corrected_total,
+                "offline_overlay_detected": offline_flag,
+                "evaluator": "EOF Gutter Evaluator",
+                "telemetry_insight": init_insight,
+                "error": None,
+            })
+        if "initialize" in dag_state.get("groups", {}):
+            dag_state["groups"]["initialize"]["status"] = "completed"
+            prog = dag_state["groups"]["initialize"].setdefault("progress", {})
+            prog["total_lines"] = corrected_total
+            prog["status"] = "completed"
+            prog["percent"] = 100
+
+        latest_telemetry["target_total_lines"] = corrected_total
+        latest_telemetry["current_bottom_line"] = corrected_total
+        latest_telemetry["status_message"] = (
+            f"🎉 100% COMPLETE: Project verified at EOF Line {corrected_total:,} / {corrected_total:,}"
+            + (f" (corrected DAG 1 total lines from {prev_target:,})" if was_corrected else "")
+        )
+
+        headless_telemetry_session["target_total_lines"] = corrected_total
+        headless_telemetry_session["current_bottom_line"] = corrected_total
+        headless_telemetry_session["total_lines_reached"] = True
+        headless_telemetry_session["completion_percent"] = 100.0
+        headless_telemetry_session["status"] = "COMPLETED"
+
+        orchestration_state["eof_reached"] = True
+        orchestration_state["status"] = "COMPLETED"
+        orchestration_state["manual_attention_required"] = False
+        orchestration_state["halt_reason"] = None
+        orchestration_state["cursor_line"] = corrected_total
+
+        project_diagnostics_trace["target_total_lines"] = corrected_total
+        project_diagnostics_trace["is_completed"] = True
+        project_diagnostics_trace["current_status"] = "COMPLETED"
+        project_diagnostics_trace["last_stop_reason"] = None
+
+        if "frame_acquire" in dag_state.get("nodes", {}):
+            dag_state["nodes"]["frame_acquire"].update({
+                "status": "completed",
+                "is_active": False,
+                "error": None,
+            })
+        if "arrow_down" in dag_state.get("nodes", {}):
+            dag_state["nodes"]["arrow_down"].update({
+                "status": "completed",
+                "eof_reached": True,
+                "reached": True,
+                "advanced": True,
+                "occluded_tail_lines": 0,
+                "error": None,
+                "telemetry_insight": f"Last arrow verified at EOF: Line {corrected_total:,} of {corrected_total:,} (100% EOF reached) ✔",
+            })
+        if "document_assemble" in dag_state.get("nodes", {}):
+            cap_cnt = len(document_lines) or corrected_total
+            dag_state["nodes"]["document_assemble"].update({
+                "status": "completed",
+                "total_captured_lines": cap_cnt,
+                "effective_bottom_line": corrected_total,
+                "completion_percent": 100.0,
+                "is_complete": True,
+                "occluded_tail_lines": 0,
+                "healing_step": None,
+                "telemetry_insight": f"Master document: {cap_cnt:,}/{corrected_total:,} lines stitched (100.0%) • 100% COMPLETE ✔",
+                "error": None,
+            })
+        for grp_id in ("capture_entire_markdown", "position_navigation", "verify_assemble"):
+            if grp_id in dag_state.get("groups", {}):
+                dag_state["groups"][grp_id]["status"] = "completed"
+
+        if pid:
+            try:
+                db.save_project_telemetry(pid, latest_telemetry, dag_state)
+            except Exception:
+                pass
+
+    updated_proj = db.get_project(pid) if pid else db.get_active_project()
+    return {
+        "project_id": pid,
+        "previous_total_lines": prev_target,
+        "target_total_lines": corrected_total,
+        "corrected": bool(prev_target > 0 and prev_target != corrected_total),
+        "status": "completed",
+        "eof_reason": eof_reason,
+        "project": updated_proj,
+    }
+
+
 def get_loop_diagnosis() -> Dict[str, Any]:
     """
     Computes a structured diagnostic snapshot explaining the current state of the markdown replication loop,
@@ -1987,7 +2175,15 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         offline_detected=offline_det,
         tail_text=tail_txt,
     )
-    is_complete = bool(target_lines > 0 and (frontier_line >= target_lines or is_eof))
+    explicitly_completed = bool(
+        str(proj.get("status") or "").lower() == "completed"
+        or project_diagnostics_trace.get("is_completed")
+        or orchestration_state.get("eof_reached")
+        or dag_state.get("nodes", {}).get("document_assemble", {}).get("is_complete")
+    )
+    is_complete = bool(explicitly_completed or (target_lines > 0 and (frontier_line >= target_lines or is_eof)))
+    if is_complete and frontier_line > 0 and target_lines != frontier_line:
+        target_lines = frontier_line
     pct = 100.0 if is_complete else (round(min(100.0, (frontier_line / max(1, target_lines)) * 100.0), 1) if target_lines > 0 else 0.0)
 
     sorted_f = sorted(
@@ -2010,7 +2206,7 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         if (f.get("bottom_line", 0) or 0) < frontier_line - 10
     ]
 
-    last_stop_reason = (
+    last_stop_reason = None if is_complete else (
         orchestration_state.get("halt_reason")
         or project_diagnostics_trace.get("last_stop_reason")
         or (headless_telemetry_session.get("finish_status_message") if headless_telemetry_session.get("status") == "STOPPED" else None)
@@ -2020,7 +2216,7 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         last_stop_reason = status_msg
 
     root_cause_cat = "none"
-    recommended_action = "Pipeline is healthy."
+    recommended_action = f"Project completed (100% verified at Line {frontier_line:,} / {target_lines:,})." if is_complete else "Pipeline is healthy."
     if not is_running and not is_complete and frontier_line > 0:
         rsn_low = (last_stop_reason or "").lower()
         if "settled at line" in rsn_low or "navigation alignment" in rsn_low or "arrow_down" in rsn_low:
@@ -2065,6 +2261,9 @@ def get_loop_diagnosis() -> Dict[str, Any]:
     return {
         "loop_running": is_running,
         "status": status_str,
+        "is_complete": is_complete,
+        "headless_status": "COMPLETED" if is_complete else headless_telemetry_session.get("status"),
+        "orchestration_status": status_str,
         "manual_attention_required": manual_attention,
         "can_resume": bool(not is_running and not is_complete),
         "halt_reason": None if is_running else last_stop_reason,

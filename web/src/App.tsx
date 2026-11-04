@@ -201,7 +201,7 @@ function AppContent() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [autoEnterPin, setAutoEnterPin] = useState(false);
-  const [devicePinInput, setDevicePinInput] = useState('1213');
+  const [devicePinInput, setDevicePinInput] = useState('2992');
   const [showPinPassword, setShowPinPassword] = useState(false);
   const [isSavingPin, setIsSavingPin] = useState(false);
   const [isCheckingPinPrompt, setIsCheckingPinPrompt] = useState(false);

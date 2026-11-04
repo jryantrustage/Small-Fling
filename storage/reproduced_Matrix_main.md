@@ -1626,7 +1626,7 @@ color: whiteColor,
 
 
 
-  'javascript
+  'javascript'
 import {
   primaryColor,
   warningColor,
@@ -1851,7 +1851,7 @@ hexToRgb(successColor[0]) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(successColor[0]) +
-          0.2)'.
+          0.2)'.'
 },
 
 warning: {
@@ -1873,7 +1873,7 @@ hexToRgb(warningColor[0]) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(warningColor[0]) +
-          0.2)'.
+          0.2)'.'
 },
 },
 danger: {
@@ -1895,7 +1895,7 @@ hexToRgb(dangerColor[0]) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(dangerColor[0]) +
-          0.2)'.
+          0.2)'.'
 },
 },
 rose: {
@@ -2043,7 +2043,7 @@ hexToRgb(pinterestColor) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(pinterestColor) +
-          0.2)'.
+          0.2)'.'
 },
 },
 youtube: {
@@ -2115,7 +2115,7 @@ hexToRgb(grayColor[6]) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(grayColor[6]) +
-          0.2)'.
+          0.2)'.'
 },
 },
 behance: {
@@ -2139,7 +2139,7 @@ hexToRgb(behanceColor) +
 hexToRgb(blackColor) +
 ', 0.12), 0 8px 10px -5px rgba(' +
 hexToRgb(behanceColor) +
-         .0.2)'.
+         .0.2)'.'
 },
 },
 dribbble: {
@@ -2378,7 +2378,7 @@ export default buttonstyle;
 ### 19. 'C:\DevCode\AstroUI\src\assets\jss\material-dashboard-pro- reactlcomponentslcardAvatarstyle.js
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\assets\jss\material-dashboard-pro- react\componentslcardAvatarstyle.js" type=".js" size="1316" lines="59" chars="1316" -->
-  'javascript
+  'javascript'
 import {
   blackColor,
   hexToRgb,
@@ -2611,7 +2611,7 @@ color: whiteColor,
 '&:first-child': {
 borderRadius: 'calc(.25rem - 1px) calc(.25rem - 1px) 0 0',
 },
-seCardHeader' :
+seCardHeader' :'
 {
 '&:not($cardHeaderIcon):not($cardHeaderImage):not($cardHeaderText)': {
 borderRadius: '3px',
@@ -2783,7 +2783,7 @@ dangerCardHeader,
 } from 'assets/jss/material-dashboard-pro-react.js';
 const cardIconstyle = {
   cardIcon: {
-&$warningCardHeader,&$successCardHeader,&$dangerCardHeader,&$infoCardHeader,&$primaryCardHeader,&$ro seCardHeader':
+&$warningCardHeader,&$successCardHeader,&$dangerCardHeader,&$infoCardHeader,&$primaryCardHeader,&$ro seCardHeader':'
       {
         borderRadius: '3px',
         backgroundColor: grayColor[o],
@@ -3865,7 +3865,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
 hexToRgb(primaryColor[0]) +
-          0.4)'.
+          0.4)'.'
 },
 },
 info: {
@@ -3877,7 +3877,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
 hexToRgb(successColor[0]) +
-          0.4)'.
+          0.4)'.'
 },
 },
 success: {
@@ -3903,7 +3903,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
 hexToRgb(warningColor[0]) +
-         .0.4)'.
+         .0.4)'.'
 },
 },
 danger: {
@@ -4052,7 +4052,7 @@ hexToRgb(successColor[0]) +
 hexToRgb(successColor[0]) +
 ', 0.12), 0 2px 4px -1px rgba(' +
 hexToRgb(successColor[0]) +
-         .0.2)'.
+         .0.2)'.'
 },
 '&:hover,&:focus': {
 zIndex: '2',
@@ -4558,7 +4558,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
 hexToRgb(successColor[0]) +
-        0.4)'.
+        0.4)'.'
 },
 danger: {
 backgroundColor: dangerColor[0],
@@ -4872,7 +4872,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
       hexToRgb(primaryColor[o]) +
-        0.4)'.
+        0.4)'.'
 },
   warning: {
 backgroundColor: roseColor[0],
@@ -4890,7 +4890,7 @@ boxShadow:
 hexToRgb(blackColor) +
 ', 0.14), 0 7px 10px -5px rgba(' +
 hexToRgb(dangerColor[0]) +
-        0.4)'.
+        0.4)'.'
 },
 success: {
 backgroundColor: successColor[0],
@@ -4908,16 +4908,16 @@ hexToRgb(successColor[0]) +
       hexToRgb(blackColor) +
       ', 0.14), 0 7px 10px -5px rgba(' +
       hexToRgb(infoColor[O]) +
-       .0.4)',
+       .0.4)'',
   },
   rose: {
     backgroundColor: roseColor[o],
     boxShadow:
       '0 4px 20px 0px rgba(' +
       hexToRgb(blackColor) +
-       , 0.14), 0 7px 10px -5px rgba(' +
+       , 0.14), 0 7px 10px -5px rgba(' +'
       hexToRgb(roseColor[O]) +
-       .0.4)',
+       .0.4)'',
   },
   footer: {
     padding: '0 15px',
@@ -4971,7 +4971,7 @@ transitionProperty: 'top, bottom, width',
 transitionDuration: '.2s, .2s, .35s',
     transitionTimingFunction: 'linear, linear, ease',
     [theme.breakpoints.up('md')]: {
-      width: ‘calc(100% - ${drawerwidth}px)',
+      width: ‘calc(100% - ${drawerwidth}px)'',
     },
     overflow: 'auto',
     position: 'relative',
@@ -5397,7 +5397,7 @@ blackColor,
 hexToRgb,
 } from 'assets/jss/material-dashboard-pro-react.js';
 import customSelectStyle from 'assets/jss/material-dashboard-pro-react/customSelectStyle.js';
-react/customcheckboxRadioSwitch.js';
+react/customcheckboxRadioSwitch.js'';
 
 const extendedFormsStyle = {
 ...customCheckboxRadioSwitch,
@@ -5835,7 +5835,7 @@ export default regularFormsStyle;
 ### 57. 'C:\DevCode\AstrouI\src\assets\jss\material-dashboard-pro-reactlviewslsweetAlertstyle.ts'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\assets\jss\material-dashboard-pro- reactlviews\sweetAlertstyle.ts" type=".ts" size="481" lines="25" chars="481" -->
--'typescript
+-'typescript'
 import { grayColor } from 'assets/jss/material-dashboard-pro-react.js';
 
 import buttonStyle from 'assets/jss/material-dashboard-pro-react/components/buttonStyle';
@@ -5869,7 +5869,7 @@ export default sweetAlertstyle;
 ### 58. 'C:\DevCode\AstrouI\src\assets\jss\material-dashboard-pro-reactlviewsluserProfilestyles.js'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\assets\jss\material-dashboard-pro- reactlviewsluserProfilestyles.js" type=".js" size="538" lines="30" chars="538" -->
-   'javascript
+   'javascript'
 import {
   cardTitle,
   grayColor,
@@ -13442,7 +13442,7 @@ ref={ref}
           },
           className,
         }}
-        {...getRootProps(other))
+        {...getRootProps(other)}
       >
         {renderInput(
           id,
@@ -13516,8 +13516,8 @@ className={clsx(classes.popper, {
             groupedoptions.length > 0 ? (
               <ListboxComponent
                 className={classes.listbox}
-                {...getlistboxProps())
-                {...Listboxprops)
+                {...getlistboxProps()}
+                {...Listboxprops}
               >
 
 
@@ -13697,7 +13697,7 @@ closeText: PropTypes.string,
   [>>
    * The label to display when the tags are truncated ('limitTags').
    >
-   * @param (number} more The number of truncated tags.
+   * @param (number) more The number of truncated tags.
    * @returns {ReactNode}
    * @default (more) => '+$(more}"
    >[
@@ -14022,7 +14022,7 @@ export type Value<T, Multiple, DisableClearable, FreeSolo> = Multiple extends
    >[
   debug?: boolean;
   [>>
-   * If 'true', the input can't be cleared.
+   * If 'true', the input can't be cleared.'
    * @default false
    >[
   disableClearable?: DisableClearable;
@@ -14100,7 +14100,7 @@ groupBy?: (option: T) => string;
 handleHomeEndKeys?: boolean;
   [>>
 * This prop is used to help implement the accessibility logic.
-* If you don't provide this prop. It falls back to a randomly generated id.
+* If you don't provide this prop. It falls back to a randomly generated id.'
    >[
 id?: string;
   [>>
@@ -14395,9 +14395,9 @@ onOpen,
 
 : `${typeof optionLabel} (${optionLabel})`;
 console.error(
-`Material-UI: The \`getOptionLabel\` method of ${componentName} returned ${erroneousReturn} instead of a string for ${JSON.stringify(
+`Material-UI: The \`getOptionLabel\` method of ${componentName} returned ${erroneousReturn} instead of a string for ${JSON.stringify(`
 option,
-)}.`,
+)}.``,
         };
 }
 return optionLabel;
@@ -15369,7 +15369,7 @@ const disabled = getOptionDisabled ? getOptionDisabled(option) : false;
     value,
     dirty.
     popupopen,
-    focused: focused Il focusedTag !== -1,
+    focused: focused || focusedTag !== -1,
     anchorEl,
     setAnchorEl,
     focusedTag,
@@ -15388,13 +15388,13 @@ const disabled = getOptionDisabled ? getOptionDisabled(option) : false;
    typescript
 export interface UseControlledProps<T = unknown> {
   [>>
-   * This prop contains the component value when it's controlled.
+   * This prop contains the component value when it's controlled.'
    >[
-  controlled: T I undefined;
+  controlled: T | undefined;
   [>>
    * The default value when uncontrolled.
    >[
-  default: T I undefined;
+  default: T | undefined;
   [>>
 * The component name displayed in warnings.
    >[
@@ -15579,7 +15579,7 @@ export default function useId(idoverride) {
     if (defaultId == null){
       // Fallback to this default id when possible.
       // Use the random value for client-side rendering only.
-      I/ We can't use it server-side.
+      I/ We can't use it server-side.'
       setDefaultId('mui-${Math.round(Math.random() * 1e5)}');
     }
   },[defaultIdj);
@@ -15635,7 +15635,7 @@ import { makeStyles } from '@material-ui/core/styles';
 
 636 [classes.cardBackground]: background,
     [classes.cardPricingColor]:
-      (pricing && color !== undefined) Il (pricing && background !== undefined),
+      (pricing && color !== undefined) || (pricing && background !== undefined),
     [classes[color]]: color,
     [classes.cardPricing]: pricing,
     [classes.cardProduct]: product,
@@ -16005,7 +16005,7 @@ CardIcon.propTypes = {
 ### 106. 'C:\DevCode\AstroUI\src\components\Card\CardSection.tsx'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Card\CardSection.tsx" type=".tsx" size="834" lines="35"chars="834" -->
--'typescript
+-'typescript'
 import React from 'react';
 
 o11 import GridContainer from 'components/Grid/GridContainer';
@@ -16134,7 +16134,7 @@ return <div className={classes.clearfix} />;
 ### 109. 'C:\DevCode\AstroUI\src\components\ComponentFactory\ComponentFactory.tsx"
 
 <!-- CODESCAN_FILE_START path="C: \DevCode\AstroUI\src\components\ComponentFactory\ComponentFactory.tsx" type=".tsx" size="1848" 1ines="71" chars="1848" -->
--'typescript
+-'typescript'
 import React from 'react';
 import  ImageUploader } from 'commonui';
 import { nonHookTypedTranslation } from 'i18n';
@@ -16273,7 +16273,7 @@ export const productOptionTypes = new ProductOptionTypes();
 ### 113. 'C:\DevCode\AstroUI\src\components\CoreProduct\Iconstants\RateTypes.js'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\constants\RateTypes.js" type=".js" size="328" lines="7" chars="328" -->
-  'javascript
+  'javascript'
 export const RATES_TYPE_CARD = 'Card';
 export const RATES_TYPE_AUTO = 'Auto';
 export const RATES_TYPE_PERSONAL_LOANS = 'Personal Loans';
@@ -16553,7 +16553,7 @@ const columns = [
 ### 115.'C:\DevCode\AstrouI\src\components\CoreProduct\CustomSectionlapi\dimensionCustomFetch.ts'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\api\dimensionCustomFetch.ts" type=".ts" size="1499" lines="56" chars="1499" -->
-  'typescript
+  'typescript'
 import { SectionTableConfig } from '../CustomSectionTable';
 import customSectionTableCellMap from '../CustomSectionTableCell';
 import  CustomSectionstate, SectionSetstate } from '../types';
@@ -16755,7 +16755,7 @@ if (!dimensionSpec) {
 
 $JSoN.stringify(
 { productType, productId },
-)}`,
+)}``,
     };
 }
 
@@ -16766,9 +16766,9 @@ dimensionSpec,
 
   if (!tableConfig) {
 throw new Error(
-`Dimension Specification was not provided when trying to upload product to rates service: ${JSON.stringify(
+`Dimension Specification was not provided when trying to upload product to rates service: ${JSON.stringify(`
 { productType, productId },
-)}`,
+)}``,
     };
 }
 }
@@ -16953,9 +16953,9 @@ dimensionData = set.metadataJSON.dimensionSpec;
     if (isProductOption) {
 if (!set.specificationJSON)
 throw new Error(
-`Set ${i} did not have specificationJSON field.  ${JSON.stringify(
+`Set ${i} did not have specificationJSON field.  ${JSON.stringify(`
 sets,
-)}`,
+)}``,
         };
 initialState[i] = utils.formatServiceObject(set.specificationJSON);
 } else {
@@ -17183,7 +17183,7 @@ const SCContentContainer = styled.div`
 flex-direction: column;
 margin-top: 8px;
 border-top: 1px solid ${Theme.getColor('contrastGreyscale04')};
-`;
+``;
 
 const SCAccordionButton = styled(AccordionArrowWithText)`
 cursor: pointer;
@@ -17349,7 +17349,7 @@ export default DeleteBtn;
 ### 124. `C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\components\GenericBtn.tsx`
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\components\GenericBtn.tsx" type=".tsx" size="407" lines="24" chars="407" -->
--'typescript
+-'typescript'
 import React from 'react';
 import Button from 'components/CustomButtons/Button';
 
@@ -17362,7 +17362,7 @@ interface Props {
 const AddBtn: React.FC<Props> = ({ id, label, onclick }) => {
   return(
     <Button
-      id={id ?? ‘generic-btn-${label}'}
+      id={id ?? ‘generic-btn-${label}''}
       round
       color="primary"
       onclick={onlick}
@@ -17949,7 +17949,7 @@ categoryHeader: 'Model Year',
 titleFN: (data) =>
 `${data.modelYearLow}${data.andOlder ? ' and older' : ''} - ${
 data.modelYearHigh
-}${data.andNewer ? ' and newer' : ''}`,
+}${data.andNewer ? ' and newer' : ''}``,
 };
 },
 },
@@ -18033,7 +18033,7 @@ return `Age ${dim.start} and Newer`;
       return {
         dimensionName: 'ModelYear',
         valueUnits: 'year',
-        start: -',
+        start: -'',
         end: -,
         andLower: false,
         andHigher: false,
@@ -18144,7 +18144,7 @@ return {};
 ### 132. `C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\configuration\dimensionEntryPanelConfigMap.ts`
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\lcomponents\CoreProduct\CustomSection\dimensions\configurationldimensionE ntryPanelConfigMap.ts" type=".ts" size="6954" lines="235" chars="6954" -->
-*'typescript
+*'typescript'
 import { indexOfGapDecimal, indexOfGapNumber } from '../../utils';
 import * as v from '../../validations';
 import  Dimension, DimensionName } from '../Dimensions';
@@ -18154,7 +18154,7 @@ const DUPLICATE_MSG = (v: string) => 'Please remove duplicate value '${v}'';
 const VALID_NUM_MSG = 'Must be a valid number or decimal';
 
 export interface FieldValidationResult {
-  [dimensionKey: string]: string I undefined;
+  [dimensionKey: string]: string | undefined;
 }
 
 type ExcludeValue = 'row' | 'column' | 'extra';
@@ -18345,16 +18345,16 @@ export const isEntryPanelDisabled = (
       const nextDim = dims[i + 1];
       if (!nextDim) continue;
       const nextstart =
-        !nextDim.start Il nextDim.start ===  ? Infinity : +nextDim.start;
+        !nextDim.start || nextDim.start ===  ? Infinity : +nextDim.start;
       if (currentEnd > nextstart) {
-        return 'Line ${i + 1}: ${title} end ${
+        return 'Line ${i + 1}: ${title} end ${'
 dim.end
-} is greater than next ${title} start value ${nextDim.start}`;
+} is greater than next ${title} start value ${nextDim.start}``;
 }
 if (currentEnd === nextStart) {
 return `Line ${i + 1}: ${title} end ${
 dim.end
-} must be less than the next ${title} start value ${nextDim.start}`;
+} must be less than the next ${title} start value ${nextDim.start}``;
 }
 const gapIndex = indexOfGapDecimal(dims, gapIncrement);
 if (gapIndex !== undefined) {
@@ -18370,9 +18370,9 @@ const previousEnd =
 ? Infinity
 : +previousDim.end;
 if (currentStart !== previousEnd) {
-return `Line ${
+return `Line ${`
           { > ;
-}: ${title} end ranges are exclusive, meaning the start of a range must equal the end of the previous range to prevent gaps`;
+}: ${title} end ranges are exclusive, meaning the start of a range must equal the end of the previous range to prevent gaps``;
 }
 }
 }
@@ -18688,7 +18688,7 @@ onClick={andOlderOnClick}
             id={id2}
             label={'Model Year End'}
             value={dimension.end ?? ''}
-            onChange={(v) => onChange('end', v))
+            onChange={(v) => onChange('end', v)}
             errorMsg={errors?.end)
             disabled={dimension.andHigher ?? false}
           [>
@@ -18768,7 +18768,7 @@ export default Purpose;
 ###139 C:\DevCode\AstroUI\srcIcomponents\CoreProduct\CustomSection\dimensions\DimensionEntryPanels\Rate.tsx
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionEntryPanels\Rat e.tsx" type=".tsx" size="585" lines="28" chars="585" -->
--*'typescript
+-*'typescript'
 import React from 'react';
 import { EntryPanelProps } from './types';
 import Grid from '@material-ui/core/Grid';
@@ -18842,7 +18842,7 @@ export default TermLengthPanel;
 ### 141. `C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionEntryPanels\types.ts`
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionEntryPanels\types.ts" type=".ts" size="409" lines="14" chars="409" -->
-  'typescript
+  'typescript'
 import  FieldValidationResult } from '../configuration/dimensionEntryPanelConfigMap';
 import { Dimension } from '../Dimensions';
 
@@ -18850,7 +18850,7 @@ export interface EntryPanelProps {
   id: string;
   id2: string;
   dimension: Dimension;
-  onChange: (dataKey: keyof Dimension, value: string I boolean) => void;
+  onChange: (dataKey: keyof Dimension, value: string | boolean) => void;
   errors?: FieldValidationResult;
   preconfiguredConstants?: string[];
   lineIndex: number;
@@ -19053,7 +19053,7 @@ screen.getByText(partialErrorMsg, { exact: false });
 ### 143. `C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionControlPanel.tsx`
 
 <!-- CODESCAN_FILE_START -->
-path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionControlPanel.ts
+path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\DimensionControlPanel.ts"
 
 
 
@@ -19841,7 +19841,7 @@ export default DimensionEntryPanel;
 ### 145.'C:\DevCode\AstrouI\src\components\CoreProductICustomSectionldimensions\DimensionFilter.tsx'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstrouI\src\componentslCoreProduct\CustomSection\dimensions\DimensionFilter.tsx" type=".tsx" size="3320" lines="109" chars="3320" -->
-   'typescript
+   'typescript'
 import React from 'react';
 import { createstyles, makestyles, Theme } from '@material-ui/core/styles';
 import InputLabel from '@material-ui/core/InputLabel';
@@ -19907,10 +19907,10 @@ className={classes.formControl}
 >
 <InputLabel htmlFor="age-simple">{displayName}</InputLabel>
 <Select
-                   value={filters[name] ?? -'}
+                   value={filters[name] ?? -''}
                    onChange={(e) => {
                      const { value } = e.target;
-                     if (value === ') {
+                     if (value === ') {'
                        removeFilter(name);
 } else {
 setFilter(name, value as string);
@@ -19959,7 +19959,7 @@ onClick={() => clearFilters()}
 ### 146. 'C:\DevCode\AstrouI\src\components\CoreProduct\CustomSectionldimensions\Dimensions.ts'
 
 <!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\Dimensions.ts" type=".ts" size="1583" 1ines="64" chars="1583" -->
-*'typescript
+*'typescript'
 import { Rows, SectionTableConfig } from '../CustomSectionTable';
 import { ProductTableColumnDictionary } from './ProductTableColumnDictionary';
 
@@ -20107,8 +20107,8 @@ export default getDimensionChipFactory;
 ### 148. `C:\DevCode\AstroUI\src\components\CoreProduct\CustomSection\dimensions\ProductTableColumnDictionary.ts`
 
 <!-- CODESCAN_FILE_START -->
-path="C:\DevCode\AstroUI\src\lcomponents\CoreProduct\CustomSection\dimensions\ProductTableColumnDictio
-nary.ts" type=".ts" size="1695" lines="84" chars="1695" -->
+path="C:\DevCode\AstroUI\src\lcomponents\CoreProduct\CustomSection\dimensions\ProductTableColumnDictio"
+nary.ts" type=".ts" size="1695" lines="84" chars="1695" -->"
 export const IS_DEFAULT_COLUMN_FIELD_KEY = 'isDefault';
 export interface ProductTableColumnDictionary
   title?: string;
@@ -20189,7 +20189,7 @@ andNewer: false,
   loanAmountLow: '',
   loanAmountHigh: -',
 
-  fixedAmount: ',
+  fixedAmount: '',
 };
 
 ```
@@ -20577,7 +20577,7 @@ paddingLeft: '5px',
         <div style={{ display: 'flex' }}>
           iprefix && (
             <div style={{ paddingTop: '32px', paddingRight: '10px' }}>
-              (prefix}
+              (prefix)
            k/div>
           ]}
           <CustomInput
@@ -33158,3 +33158,1004 @@ import CardHeader from 'components/Card/CardHeader';
 import CardText from 'components/Card/CardText';
 import { IEligibilityDocuments } from 'components/Membership/types';
 import { Icon, ICON_TYPES, CoreCheckBox, DynamicInputField } from 'commonui';
+import { SCIconButton, SCButton, SCDocument, SCDocuments } from './styles';
+
+const useStyles = makeStyles(styles);
+
+const EligiblityDocuments = ({
+addCustomIdentification,
+setCustomIdentification,
+setIdentification,
+setDeleteCustomIdentification,
+identificationDocuments,
+customIdentificationDocuments,
+}: IEligibilityDocuments): JSX.Element => {
+const classes = useStyles();
+return (
+<Card>
+      <CardHeader color="cuna1" text>
+        <CardText color="cuna1">
+          <h4
+            id="eligibility-identification-card-header"
+            className={classes.cardTitle}
+          >
+            Membership Identification
+          </h4>
+        </CardText>
+      </CardHeader>
+      <CardBody>
+        <SCDocuments>
+          <div>Membership requirements</div>
+          <div>
+            {identificationDocuments.map(({ enabled, id, name }) => (
+              <SCDocument key={id}>
+                <CoreCheckBox
+                  ariaLabel={name}
+                  id={id}
+                  checked={!!enabled}
+                  onChange={(checked) => {
+                    setIdentification(id, checked);
+
+
+
+
+
+
+
+
+
+
+
+
+
+setCustomIdentification(index, {
+enabled: checked,
+                      }};
+}}
+                  [>
+<DynamicInputField
+validateAllFields
+error={errors}
+dataField={{
+disabled: !enabled,
+fieldType: 'text',
+fieldCode: `elegibility-custom-identification-name${index}`,
+fieldLabel: `Custom ID ${index + 1}:`,
+}}
+value={name}
+onChange={(_, newValue) => {
+setCustomIdentification(index, { name: newValue });
+}}
+                  [>
+<SCIconButton
+id={`${index}_delete`}
+aria-label="Delete custom identification document"
+title="Delete"
+color="red"
+onClick={() => {
+setDeleteCustomIdentification(index);
+}}
+>
+<Icon size={14} name={ICON_TYPES.CLOSE} />
+</SCIconButton>
+</SCDocument>
+              },
+            }}
+<SCButton
+id="createCustomDocumentButton"
+role="createCustomDocumentButton"
+onClick={addCustomIdentification}
+>
++ ADD
+</SCButton>
+</div>
+</SCDocuments>
+</CardBody>
+</Card>
+
+
+
+
+
+
+
+
+
+
+
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Membership\EligibilityQuestion.tsx" type=".tsx" size="3452" lines="114" chars="3452" -->
+```typescript
+import { makeStyles } from '@material-ui/core/styles';
+import Switch from '@material-ui/core/Switch';
+import styles from 'assets/jss/material-dashboard-pro-react/views/regularFormsStyle';
+import { DynamicInputField, FieldType } from 'commonui';
+import { SCOptionInput, SCQuestion } from 'components/Membership/styles';
+import { IEligibilityQuestion } from 'components/Membership/types';
+import React from 'react';
+
+const useStyles = makeStyles(styles);
+
+const EligibilityQuestion = ({
+allowedFieldTypes = [
+FieldType.SINGLE_SELECT,
+FieldType.SINGLE_QUESTION,
+FieldType.TEXT,
+],
+categoryId,
+model,
+
+
+
+  const switchclasses = {
+    switchBase: classes.switchBase,
+    checked: classes.switchChecked,
+    thumb: classes.switchIcon,
+    track: classes.switchBar,
+  };
+  const {
+    enabled,
+    id: modelId,
+    value,
+    customValue,
+    responseoptions,
+    errors,
+    fieldType,
+  } = model;
+  return(
+    <scQuestion id={'eligibility-question-container-${modelId}'}>
+      <div>
+        <Switch
+          id={'eligibility-question-switch-${modelId}'}
+          checked={!!enabled}
+          classes={switchclasses}
+          onChange={({ target ) =>
+            setQuestionProperty(categoryId, modelId, {
+              enabled: target.checked,
+            }]
+          }
+        [>
+      </div>
+      <div>
+        <DynamicInputField
+          validateAllFields
+          dataField={{
+            disabled: !enabled,
+            placeholder: 'Please select the field type',
+            fieldType: 'single-select',
+            fieldCode:'${modelId}-fieldType',
+            fieldLabel: 'Field Type',
+            options: allowedFieldTypes.map((value) => (({
+              value,
+              label: value,
+            }]},
+          }}
+          value={fieldType as string}
+onChange={(_, newValue) => {
+setQuestionProperty(categoryId, modelId, { fieldType: newValue });
+}}
+        [>
+<DynamicInputField
+validateAllFields
+dataField={{
+disabled: !enabled,
+placeholder: 'Please customize the question',
+fieldType: 'text',
+fieldCode: modelId,
+fieldLabel: value,
+}}
+key={modelId}
+value={customValue}
+onChange={(_, newValue) => {
+setQuestionProperty(categoryId, modelId, { customValue: newValue });
+}}
+        [>
+{fieldType !== 'text' && (
+<SCOptionInput>
+            <DynamicInputField
+error={!!enabled && !!errors && errors.length > 0 ? errors : ''}
+validateAllFields
+dataField={{
+disabled: !enabled,
+placeholder: 'Option 1\nOption 2\nOption 3\nOption 4',
+fieldType: 'textarea',
+fieldCode: `responseOptions-${modelId}`,
+fieldLabel:
+'Configure available options. Values should be seperated by new line',
+}}
+key={modelId}
+value={responseOptions}
+onChange={(_, newValue) => {
+setQuestionProperty(categoryId, modelId, {
+responseOptions: newValue,
+                }};
+}}
+/>
+</SCOptionInput>
+        }}
+</div>
+</SCQuestion>
+  ];
+};
+
+export default EligibilityQuestion;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 446. `C:\DevCode\AstroUI\src\components\Membership\EligibilityQuestionCategory.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Membership\EligibilityQuestionCategory.tsx" type=".tsx" size="3916" lines="121" chars="3916" -->
+```typescript
+import React, { useState } from 'react';
+import { SimpleAccordion, DynamicInputField, FieldType } from 'commonui';
+import EligibilityQuestion from './EligibilityQuestion';
+import { IEligibilityQuestionCategory } from 'components/Membership/types';
+import {
+SCTitle,
+SCCategory,
+SCLine,
+SCGroupCategory,
+} from 'components/Membership/styles';
+import { CategorySystemNames } from './types';
+
+const CategoryGroupHelpText =
+'# If set to true\n Will render a radio option with the category label. When selected, all configured questions will be rendered. The answers will be associated to that category.\n' +
+'# If set to false\n Will render a radio option for each individual question configured. The answer will be associated to that category.';
+
+const EligibilityQuestionCategory = ({
+model,
+setQuestionProperty,
+setCategoryProperty,
+}: IEligibilityQuestionCategory): JSX.Element => {
+const {
+enabled,
+id: categoryId,
+name,
+systemName,
+questions,
+areQuestionsGrouped,
+} = model;
+const [expanded, setExpanded] = useState<boolean>(!!enabled);
+const isZipCodeCategory =
+systemName === CategorySystemNames.RESIDENCY_ZIP_CODE;
+
+  [>>
+* If we are rendering the zip code category, only allow the admin to configure 1 question
+   >[
+const questionsToRender = isZipCodeCategory ? [questions[0]] : questions;
+
+  return (
+<SCCategory>
+<SimpleAccordion
+id={categoryId}
+title={systemName}
+content={
+<div>
+<DynamicInputField
+validateAllFields
+dataField={{
+disabled: false,
+placeholder: 'Please customize the category label',
+fieldType: 'text',
+fieldCode: `${categoryId}-name`,
+fieldLabel: 'Category Label',
+}}
+key={`${categoryId}_name`}
+value={name}
+onChange={(_, newValue) => {
+setCategoryProperty(categoryId, {
+name: newValue,
+                }};
+}}
+/>
+<SCGroupCategory>
+<DynamicInputField
+validateAllFields
+dataField={{
+disabled: false,
+helpText: CategoryGroupHelpText,
+fieldType: 'boolean',
+fieldCode: `${categoryId}-group`,
+fieldLabel: 'Group Category',
+options: ['true', 'false'].map((value) => ({
+value,
+label: value,
+                  }}],
+}}
+key={`${categoryId}_group`}
+value={areQuestionsGrouped.toString()}
+onChange={(_, newValue) => {
+setCategoryProperty(categoryId, {
+areQuestionsGrouped: JSON.parse(newValue),
+                  }};
+}}
+/>
+</SCGroupCategory>
+<SCLine />
+{questionsToRender.map((item) => (
+<EligibilityQuestion
+allowedFieldTypes={
+isZipCodeCategory
+? [FieldType.ZIP_CODE]
+                     ; [
+FieldType.SINGLE_SELECT,
+FieldType.SINGLE_QUESTION,
+FieldType.TEXT,
+]
+}
+model={item}
+key={item.id}
+setQuestionProperty={setQuestionProperty}
+categoryId={categoryId}
+/>
+            }]}
+</div>
+}
+onSetExpanded={setExpanded}
+expandedOverride={expanded}
+buttonComponent={
+<SCTitle
+expanded={expanded}
+expandedText={systemName}
+collapsedText={systemName}
+          [>
+}
+/>
+</SCCategory>
+  ];
+};
+
+export default EligibilityQuestionCategory;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 447. `C:\DevCode\AstroUI\src\components\Membership\styles.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Membership\styles.ts" type=".ts" size="1914" lines="113" chars="1914" -->
+```typescript
+import { AccordionArrowWithText, CoreButton, Theme } from 'commonui';
+import styled from 'styled-components';
+import { SCActionButton } from '../TableStyles';
+
+const SCQuestion = styled.div`
+display: flex;
+padding: 15px;
+min-width: 600px;
+> div {
+width: 100%;
+}
+> div:first-child {
+width: 250px;
+}
+input {
+margin-bottom: 10px;
+}
+`;
+
+const SCOptionInput = styled.div`
+margin-top: 20px;
+textarea {
+white-space: break-spaces;
+}
+`;
+
+const SCTitle = styled(AccordionArrowWithText)`
+font-size: 16px;
+color: #576975;
+`;
+
+const SCSection = styled.div`
+padding: 20px;
+margin-bottom: 20px;
+box-shadow: 0px 1px 3px 0px rgba(0, 0, 0, 0.2),
+0px 1px 1px 0px rgba(0, 0, 0, 0.14), 0px 2px 1px -1px rgba(0, 0, 0, 0.12);
+`;
+const SCCategory = SCSection;
+
+const SCIconButton = styled(SCActionButton)`
+height: 30px;
+min-width: 30px;
+path {
+stroke: white;
+}
+`;
+
+const SCButton = styled(CoreButton)`
+padding: 10px;
+min-width: 200px;
+`;
+
+const SCDocuments = styled(SCSection)`
+${Theme.getFontStyles('body2')}
+> div:first-child {
+${Theme.getFontStyles('body1')}
+margin-bottom: 20px;
+}
+`;
+
+const SCDocument = styled.div`
+display: flex;
+align-items: center;
+margin-bottom: 10px;
+> div,
+input {
+margin-right: 10px;
+}
+> div {
+display: flex;
+align-items: center;
+}
+`;
+
+const SCDetail = styled.div`
+input {
+width: 500px;
+}
+`;
+
+const SCLine = styled.div`
+margin-top: 10px;
+border-top: 1px solid #eee;
+height: 2px;
+`;
+
+const SCGroupCategory = styled.div`
+margin-top: 10px;
+`;
+
+const SCEligibilityQuestionHeader = styled.div`
+display: flex;
+justify-content: space-between;
+> button {
+margin-right: 24px;
+}
+`;
+
+export {
+SCEligibilityQuestionHeader,
+SCQuestion,
+SCOptionInput,
+SCTitle,
+SCCategory,
+SCIconButton,
+SCButton,
+SCDocument,
+SCDocuments,
+SCDetail,
+SCLine,
+SCGroupCategory,
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+448. `C:\DevCode\AstroUI\src\components\Membership\types.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\MembershipItypes.ts" type=".ts" size="2424" 1lines="105" chars="2424" -->
+   'typescript
+import { FieldType, Ioption } from 'commonui';
+
+export enum CategorySystemNames {
+  RESIDENCY_ZIP_CODE = 'Residency Zip Code',
+}
+
+export interface IQuestionModel {
+  enabled: boolean;
+  customValue: any;
+  id: string;
+  value: any;
+  errors?: string;
+  responseoptions: any:
+  fieldType?: string:
+}
+
+export interface IEligibilityDocument {
+id: string;
+name: string;
+enabled: boolean;
+errors?: string;
+}
+
+export interface IEligibilityCustomDocument
+extends Omit<IEligibilityDocument, 'id'> {
+id: string | null;
+}
+
+export interface ICategoryModel {
+areQuestionsGrouped: boolean;
+enabled: boolean;
+id: string;
+name: string;
+questions: IQuestionModel[];
+systemName: string;
+}
+
+export type ISetQuestionProperty = (
+categoryId: string,
+questionId: string,
+newQuestion: Partial<IQuestionModel> & { errors?: string },
+) => void;
+
+export type ISetCustomIdentification = (
+idx: any,
+newDocument: Partial<IEligibilityCustomDocument> & { errors?: string },
+) => void;
+
+export interface ICategoryValue {
+name: string;
+areQuestionsGrouped: boolean;
+}
+
+export type ISetCategoryProperty = (
+categoryId: string,
+categoryValue: Partial<ICategoryValue>,
+) => void;
+
+export interface IEligibilityQuestionCategory {
+model: ICategoryModel;
+setQuestionProperty: ISetQuestionProperty;
+setCategoryProperty: ISetCategoryProperty;
+}
+
+export interface IEligibilityQuestion {
+allowedFieldTypes?: FieldType[];
+categoryId: string;
+model: IQuestionModel;
+options?: IOption[];
+setQuestionProperty: ISetQuestionProperty;
+}
+
+export interface IEligibilityDocuments {
+addCustomIdentification: () => void;
+setCustomIdentification: ISetCustomIdentification;
+setIdentification: any;
+setDeleteCustomIdentification: any;
+identificationDocuments: IEligibilityDocument[];
+customIdentificationDocuments: IEligibilityCustomDocument[];
+}
+
+export interface IEligibilityDetail {
+id: number;
+key: string;
+value: string;
+description: string;
+error?: string;
+}
+
+export interface IEligiblityModel {
+state: string;
+questionCategories: ICategoryModel[];
+identificationDocuments: IEligibilityDocument[];
+customIdentificationDocuments: IEligibilityCustomDocument[];
+membershipDetails: IEligibilityDetail[];
+}
+
+export interface IEligibilityDetailsComponent {
+model: IEligibilityDetail[];
+setDetails: (
+key: string,
+detail: { description?: string; value?: string },
+) => void;
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 449. `C:\DevCode\AstroUI\src\components\Membership\useEligibility.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Membership\useEligibility.tsx" type=".tsx" size="10588" lines="395" chars="10588" -->
+```typescript
+import React, { useContext, useEffect, useState } from 'react';
+import {
+IEligiblityModel,
+ISetCategoryProperty,
+ISetQuestionProperty,
+IEligibilityDetail,
+ISetCustomIdentification,
+ICategoryModel,
+IQuestionModel,
+} from 'components/Membership/types';
+import {
+eligibilityQuestionGroup,
+IMembershipEligibilityWizard,
+Modals,
+ModalContext,
+IOption,
+} from 'commonui';
+import { useAppContext } from 'context/app-context';
+import { isValidURL } from 'helpers/validations';
+import { client2 } from 'utils/api-client';
+import { sanitizeURL } from 'utils/sanitization';
+import * as validation from './validate-question';
+import { IDataField } from 'commonui/build/core/entities/loanApplication';
+
+const isKeyLink = (key: string): boolean => key.endsWith('LINK');
+
+const useEligibility = (tenantId: string) => {
+const [loading, setLoading] = useState(true);
+const [serverMsg, setServerMsg] = useState<any>(null);
+const [alert, setAlert] = useState<any>(null);
+const [hasError, setHasError] = useState<boolean>(false);
+const [openErrorDialog, setOpenErrorDialog] = useState(false);
+const [openConfirmationDialog, setOpenConfirmationDialog] = useState(false);
+const { close, openAppModal } = useContext(ModalContext);
+const [model, setModel] = useState<IEligiblityModel>({
+state: 'Active',
+questionCategories: [],
+identificationDocuments: [],
+customIdentificationDocuments: [],
+membershipDetails: [],
+  }};
+
+  const { tenant, withinTenantContext, setPageTitle } = useAppContext();
+const titleList = new Map();
+
+  const setQuestionProperty: ISetQuestionProperty = (
+categoryId,
+questionId,
+newQuestion,
+) => {
+const categories = model.questionCategories;
+const newCategories = categories.map((c) => {
+if (c.id === categoryId) {
+const newQuestions = c.questions.map((q) => {
+if (q.id === questionId) {
+const question = { ...q, ...newQuestion };
+return {
+...question,
+errors: validation.validateQuestion(question),
+};
+}
+
+          return q;
+        }];
+return { ...c, questions: newQuestions };
+}
+return c;
+    }};
+setModel({ ...model, questionCategories: newCategories });
+};
+
+  const setCategoryProperty: ISetCategoryProperty = (
+categoryId,
+newCategory,
+) => {
+const categories = model.questionCategories;
+console.log({ categories });
+const newCategories = categories.map((c) => {
+if (c.id === categoryId) {
+return { ...c, ...newCategory };
+}
+
+      return c;
+    }};
+console.log({ newCategories });
+
+    setModel({ ...model, questionCategories: newCategories });
+};
+
+  const setIdentification = (docId: string, value: boolean): void => {
+const newIdentificationDocuments = model.identificationDocuments.map(
+(document) => ({
+...document,
+enabled: docId === document.id ? value : document.enabled,
+      }],
+    ];
+
+    setModel({ ...model, identificationDocuments: newIdentificationDocuments });
+};
+
+  const addCustomIdentification = (): void => {
+const emptyDocument = {
+id: null,
+name: '',
+enabled: true,
+};
+
+    setModel({
+...model,
+customIdentificationDocuments: [
+          .(model.customIdentificationDocuments Il [J),
+emptyDocument,
+],
+    }};
+};
+
+  const setCustomIdentification: ISetCustomIdentification = (
+idx,
+newCustomIdentification,
+) => {
+const newCustomDocuments = model.customIdentificationDocuments.map(
+(document, documentIndex) => ({
+...document,
+...(idx === documentIndex ? newCustomIdentification : {}),
+      }],
+    ];
+
+    setModel({ ...model, customIdentificationDocuments: newCustomDocuments });
+};
+
+  const setDeleteCustomIdentification = (idx: any): void => {
+model.customIdentificationDocuments.splice(idx, 1);
+setModel({ ...model });
+};
+
+  const setDetails = (
+key: string,
+newDetail: Partial<Omit<IEligibilityDetail, 'key'>>,
+): void => {
+const { membershipDetails } = model;
+const newDetails = membershipDetails.map((detail) => {
+if (detail.key === key) {
+return { ...detail, ...newDetail };
+}
+return detail;
+    }};
+setModel({ ...model, membershipDetails: newDetails });
+};
+
+  const validate = (): boolean => {
+let rez = true;
+
+    for (const category of model.questionCategories) {
+for (const question of category.questions) {
+if (question.enabled) {
+rez = rez && validation.validateQuestion(question) === '';
+}
+}
+}
+
+    for (const [
+index,
+{ name },
+] of model.customIdentificationDocuments.entries()) {
+if (!name) {
+rez = false;
+setCustomIdentification(index, {
+errors: 'Document name must be defined',
+        }];
+}
+
+      if (name && name.length > 100) {
+rez = false;
+setCustomIdentification(index, {
+errors: 'Value must be less than 100 characters long.',
+        }];
+}
+
+      if (rez) {
+setCustomIdentification(index, { errors: '' });
+}
+}
+
+    for (const detail of model.membershipDetails) {
+if (isKeyLink(detail.key) && detail.value && !isValidURL(detail.value)) {
+rez = false;
+setDetails(detail.key, { error: 'Please enter a valid URL' });
+}
+}
+
+    return rez;
+};
+
+  const handleSaveDraftClicked = (): void => {
+validateAndSave('Draft');
+};
+
+  const handleSaveClicked = (): void => {
+validateAndSave('Active');
+};
+
+  const validateAndSave = (stateToSave = 'Active') => {
+if (!validate()) {
+setOpenErrorDialog(true);
+return;
+}
+if (model.state == 'Active') {
+setOpenConfirmationDialog(true);
+return;
+}
+sendSaveRequest(stateToSave);
+};
+
+  // fetch eligibility model
+useEffect(() => {
+if (!loading) return;
+if (!tenantId) return;
+
+    withinTenantContext(
+tenantId,
+() => {
+if (tenant)
+titleList.set(
+`${tenant?.legalName} > `,
+`/admin/tenant/${tenantId}/view`,
+          };
+titleList.set(`Eligibility`, `/admin/tenant/${tenantId}/membership`);
+setPageTitle(titleList);
+client2(
+`${process.env.REACT_APP_MEMBERIZATION_API_BASE_URL}/membership-eligibility`,
+'GET',
+{ headers: { 'X-TENANT-ID': tenantId } },
+        }
+.then((data) => {
+setModel({ ...model, ...data.payload });
+setLoading(false);
+          }]
+.catch((error) => {
+console.log(error);
+setHasError(true);
+setLoading(false);
+          }];
+},
+() => {
+setHasError(true);
+setLoading(false);
+},
+    ];
+}, [loading]);
+
+  const sanitizePayload = (
+stateToSave: IEligiblityModel,
+): IEligiblityModel => ({
+...stateToSave,
+membershipDetails: stateToSave.membershipDetails.map((detail) => ({
+...detail,
+value: isKeyLink(detail.key) ? sanitizeURL(detail.value) : detail.value,
+    }}],
+  }};
+
+  const sendSaveRequest = async (stateToSave = 'Active') => {
+if (tenant) {
+setServerMsg(null);
+const url = `${process.env.REACT_APP_MEMBERIZATION_API_BASE_URL}/membership-eligibility`;
+const recordToSave = { ...sanitizePayload(model), state: stateToSave };
+client2(url, 'POST', {
+body: recordToSave,
+headers: { 'X-TENANT-ID': tenant.id },
+      }]
+.then((data) => {
+console.log(data);
+setLoading(true);
+        }]
+.catch((e) => {
+setServerMsg(
+<div id="serverError">
+<h4>
+Server returned error while processing data. Please try again.
+</h4>
+</div>,
+          };
+        }];
+}
+};
+
+  const hideAlert = (): void => {
+setAlert(null);
+};
+
+  const discardChanges = (): void => {
+setAlert(null);
+setLoading(true);
+};
+
+  const repsonseOptionsToDataFieldOptions = (
+responseOptions: string,
+): IOption[] => [
+...responseOptions
+.split('\n')
+.map((option) => ({ label: option, value: option })),
+];
+
+  const categoryQuestionToDataField = ({
+id,
+customValue,
+value,
+fieldType = '',
+responseOptions,
+}: IQuestionModel): IDataField => ({
+fieldCode: `${id}`,
+fieldLabel: customValue || value,
+fieldType: fieldType,
+options: repsonseOptionsToDataFieldOptions(responseOptions),
+presentationOrder: 1,
+required: true,
+value: '',
+  }};
+
+  const categoryToFieldGroup = ({
+areQuestionsGrouped,
+name,
+systemName,
+questions,
+}: ICategoryModel): eligibilityQuestionGroup | any => ({
+areQuestionsGrouped,
+groupCode: systemName,
+groupTitle: name,
+hidden: false,
+required: true,
+dataFields: questions
+.filter(({ enabled }) => enabled)
+.map(categoryQuestionToDataField),
+  }};
+const categories = model.questionCategories;
+const groupedCategories = categories.filter(
+({ areQuestionsGrouped }) => areQuestionsGrouped,
+  ];
+const nonGroupedQuestions = categories
+.filter(({ areQuestionsGrouped }) => !areQuestionsGrouped)
+.flatMap(({ questions }) => questions)
+.filter(({ enabled }) => enabled);
+
+  const modalProps: IMembershipEligibilityWizard = {
+description: <>This is an eligibility description</>,
+title: <>Eligibility</>,
+handleRedirect: close,
+eligibilitySegment: {},
+eligibilityQuestions: nonGroupedQuestions.map(categoryQuestionToDataField),
+eligibilityQuestionGroups: groupedCategories.map(categoryToFieldGroup),
+fetching: false,
+saveEligibilityAnswer: () => Promise.resolve(),
+skipLastStep: true,
+};
+
+  const openEligibilityParams = {
+name: Modals.MEMBERSHIP_ELIGIBILITY,
+...modalProps,
+};
+const openEligibility = (): void => openAppModal(openEligibilityParams);
+
+  return {
+addCustomIdentification,
+alert,
+discardChanges,
+handleSaveClicked,
+handleSaveDraftClicked,
+hasError,
+hideAlert,
+model,
+openEligibility,
+openErrorDialog,
+openConfirmationDialog,
+loading,
+sendSaveRequest,
+serverMsg,
+setAlert,
+setCategoryProperty,
+setDetails,
+setHasError,
+setIdentification,
+setLoading,
+setModel,
+setOpenConfirmationDialog,
+setOpenErrorDialog,
+setQuestionProperty,
+setServerMsg,
+setCustomIdentification,
+setDeleteCustomIdentification,
+validate,
+validateAndSave,
+};
+};
+
+export { useEligibility, isKeyLink };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 450. `C:\DevCode\AstroUI\src\components\Membership\validate-question.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Membership\validate-question.ts" type=".ts" size="333" lines="14" chars="333" -->
+```typescript
