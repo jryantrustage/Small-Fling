@@ -1,0 +1,188 @@
+  'css'
+// Scales for responsive SVG containers
+$ct-scales: (
+  {;},
+(15/16),
+(8/9),
+(5/6),
+(4/5),
+(3/4),
+  {][]},
+(5/8),
+(1/1.618),
+(3/5),
+(9/16),
+(8/15),
+  {;[]},
+(2/5),
+(3/8),
+  {;[]},
+(1/4)
+) !default;
+$ct-scales-names: (
+ct-square,
+ct-minor-second,
+ct-major-second,
+ct-minor-third,
+ct-major-third,
+ct-perfect-fourth,
+ct-perfect-fifth,
+ct-minor-sixth,
+ct-golden-section,
+ct-major-sixth,
+ct-minor-seventh,
+ct-major-seventh,
+ct-octave,
+ct-major-tenth,
+ct-major-eleventh,
+ct-major-twelfth,
+ct-double-octave
+) !default;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+$ct-class-slice-donut-solid: ct-slice-donut-solid !default;
+$ct-class-grid-background: ct-grid-background !default;
+$ct-class-vertical: ct-vertical !default;
+$ct-class-horizontal: ct-horizontal !default;
+$ct-class-start: ct-start !default;
+$ct-class-end: ct-end !default;
+
+// Class names to be used when generating CSS
+
+// Container ratio
+$ct-container-ratio: (1/1.618) !default;
+
+// Text styles for labels
+$ct-text-color: rgba(0, 0, 0, 0.4) !default;
+$ct-text-size: 1.3rem !default;
+$ct-text-align: flex-start !default;
+$ct-text-justify: flex-start !default;
+$ct-text-line-height: 1;
+
+// Grid styles
+$ct-grid-color: rgba(0, 0, 0, 0.2) !default;
+$ct-grid-dasharray: 2px !default;
+$ct-grid-width: 1px !default;
+$ct-grid-background-fill: none !default;
+
+// Line chart properties
+$ct-line-width: 4px !default;
+o51 $ct-line-dasharray: false !default;
+$ct-point-size: 10px !default;
+
+o54 // Line chart point, can be either round or square
+$ct-point-shape: round !default;
+// Area fill transparency between 0 and 1
+$ $ct-area-opacity: 0.1 !default;
+
+// Bar chart bar width
+$ct-bar-width: 1opx !default;
+
+// Donut width (If donut width is to big it can cause issues where the shape gets distorted)
+$ct-donut-width: 60px !default;
+
+o65 // If set to true it will include the default classes and generate css output. If you're planning to use the mixins you
+// should set this property to false
+$ct-include-classes: true !default;
+
+// If this is set to true the CSS will contain colored series. You can extend or change the color with the
+// properties below
+o71 $ct-include-colored-series: $ct-include-classes !default;
+
+o73 // If set to true this will include all responsive container variations using the scales defined at the top of the script
+o74 $ct-include-alternative-responsive-containers: $ct-include-classes !default;
+
+o76 // Series names and colors. This can be extended or customized as desired. Just add more series and colors.
+$ct-series-names:(a,b, c, d,e, f,g,h,i, j,k,l, m,n, o) !default;
+$ct-series-colors:(
+  $brand-info,
+  $brand-danger,
+  $brand-warning,
+  $brand-primary.
+  $brand-success,
+  $font-background-light-grey,
+  $gray-color,
+  $social-google,
+  $social-tumblr,
+  $social-youtube,
+  $social-twitter,
+  $social-pinterest,
+
+
+
+
+
+
+
+
+
+
+
+
+
+  'css'
+@mixin sidebar-background-color($background-color, $font-color) {
+.nav {
+    li
+> a {
+color: $font-color;
+}
+      { {
+color: rgba($font-color, 0.8);
+}
+
+      &.active,
+&:hover {
+> [data-toggle="collapse"] {
+color: $font-color;
+
+          { {
+color: rgba($font-color, 0.8);
+}
+}
+}
+}
+}
+.user {
+    > {
+color: $font-color;
+}
+}
+.simple-text {
+color: $font-color;
+}
+.sidebar-background:after {
+background: $background-color;
+opacity: 0.8;
+}
+}
+
+@mixin sidebar-active-color($font-color) {
+.nav {
+    li
+&.active > a:not([data-toggle="collapse"]) {
+color: $font-color;
+opacity: 1;
+@include shadow-big-color($font-color);
+
+        { {
+color: rgba($font-color, 0.8);
+}
+}
+}
+}
+}

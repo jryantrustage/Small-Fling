@@ -1,0 +1,117 @@
+path="C:\DevCode\AstroUI\srclcomponents\CoreProduct\CustomSection\fields\CustomSectionSelectField.tsx
+  type=".tsx" size="3145" 1ines="117" chars="3145" -->
+
+
+
+
+
+
+
+o9oo import styles from 'assets/jss/material-dashboard-pro-react/views/regularFormsstyle';
+o9o1 import CustomFormLabel from 'components/CustomFormLabel/CustomFormLabel';
+o9o2 import GridContainer from 'components/Grid/GridContainer'
+o3 import GridItem from 'components/Grid/GridItem';
+import {
+  CustomSectionSelect,
+  CustomSectionRadiooption,
+} from '../types/CustomSectionField';
+
+const usestyles = makestyles(styles);
+
+interface Props {
+  htmlId: string;
+  inputId?: string;
+  sectionSetIndex: number;
+  field: CustomSectionSelect;
+  tableIndex?: number;
+  value: string;
+  onChange: (newValue: any) => void;
+  hasEmptyOption?: boolean;
+  errorMsg?: string;
+}
+
+const CustomSectionSelectField: React.FC<Props> = ({
+htmlId,
+inputId,
+sectionSetIndex,
+field,
+tableIndex,
+value,
+errorMsg,
+onChange,
+hasEmptyOption = true,
+) = (
+const { label, helpText, required, id, options } = field;
+
+  const classes = useStyles();
+return (
+<GridContainer key={htmlId}>
+<GridItem xs={6}>
+<CustomFormLabel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const { label, value } = opt.hasOwnProperty('value')
+? (opt as CustomSectionRadioOption)
+: { label: opt as string, value: opt as string };
+return (
+<MenuItem
+key={`custom-select-${id}-${value}`}
+classes={{
+root: classes.selectMenuItem,
+}}
+value={value}
+>
+{label}
+</MenuItem>
+              ];
+            }]}
+</Select>
+</FormControl>
+<FormHelperText
+style={{ marginTop: '-20px', fontWeight: 300 }}
+error={!!errorMsg}
+>
+{errorMsg}
+</FormHelperText>
+</GridItem>
+</GridContainer>
+  };
+};
+
+export default CustomSectionSelectField;

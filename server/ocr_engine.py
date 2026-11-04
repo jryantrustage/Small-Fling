@@ -1691,6 +1691,34 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
 
     pitch_y = float(np.median(pitch_samples)) if pitch_samples else default_pitch
 
+    mean_lum = round(float(np.mean(img)), 1)
+    gutter_count = len(valid_pairs)
+    all_ocr_text_low = " ".join(b.get("text", "").lower() for b in ocr_boxes)
+    has_auth_overlay = any(
+        kw in all_ocr_text_low
+        for kw in ("enter your pin", "managed by your organization", "forgot your pin", "need to change it")
+    )
+    invalid_editor_frame = bool(gutter_count == 0 and (mean_lum > 85.0 or has_auth_overlay))
+    if invalid_editor_frame:
+        return {
+            "top_line": 0,
+            "bottom_line": 0,
+            "gutter_count": 0,
+            "mean_luminance": mean_lum,
+            "invalid_editor_frame": True,
+            "pitch_y": round(pitch_y, 3),
+            "lines": [],
+            "image_width": w,
+            "image_height": h,
+            "bounding_boxes": {
+                "first_line": {},
+                "last_line": {},
+                "wrapped_lines": [],
+                "line_boxes": {},
+                "gutter_boxes": {},
+            },
+        }
+
     if len(valid_pairs) >= 2:
         # Map each detected gutter number to its visual row offset v_i (accounting for multi-row wrapped lines where dy > 1.5 * pitch_y)
         v_offsets = [0]
@@ -1805,8 +1833,13 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         bottom_line = top_line + rows_total - 1
         y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
     else:
-        top_line = 1
-        bottom_line = 24
+        m_fn = re.search(r"frame_(\d+)_(\d+)", Path(image_path).name)
+        if m_fn and int(m_fn.group(1)) > 0 and int(m_fn.group(2)) >= int(m_fn.group(1)):
+            top_line = int(m_fn.group(1))
+            bottom_line = min(top_line + 74, int(m_fn.group(2)))
+        else:
+            top_line = 1
+            bottom_line = 24
         y_0 = 313.5 * scale_y
         y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
 
@@ -2052,6 +2085,9 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     return {
         "top_line": top_line,
         "bottom_line": bottom_line,
+        "gutter_count": gutter_count,
+        "mean_luminance": mean_lum,
+        "invalid_editor_frame": False,
         "pitch_y": round(pitch_y, 3),
         "lines": lines_list,
         "image_width": w,

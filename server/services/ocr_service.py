@@ -186,6 +186,11 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
 
 async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[str, Any]:
     res = await scan_image_with_minicpm(image_path, live_capture=False)
+    if res.get("invalid_editor_frame") or res.get("status") == "error":
+        if frame_id in state.captured_frames:
+            state.captured_frames[frame_id]["status"] = f"error: {res.get('error', 'invalid non-editor frame')}"
+        state.save_persisted_state()
+        return res
     top_ln, bot_ln, lines = res.get("top_line", 0), res.get("bottom_line", 0), res.get("lines", [])
     model_name = res.get("model_used", "MiniCPM-V")
     det_fn = res.get("detected_filename")
@@ -1140,6 +1145,25 @@ async def scan_image_with_minicpm(
     bot_ln = aux.get("bottom_line", 24)
     img_w = aux.get("image_width", 1920)
     img_h = aux.get("image_height", 1080)
+    gutter_cnt = int(aux.get("gutter_count", 0) or 0)
+    mean_lum = float(aux.get("mean_luminance", 0.0) or 0.0)
+    if aux.get("invalid_editor_frame"):
+        return {
+            "status": "error",
+            "invalid_editor_frame": True,
+            "gutter_count": gutter_cnt,
+            "mean_luminance": mean_lum,
+            "error": f"Invalid non-editor screen detected (0 gutter numbers, luminance={mean_lum:.1f})",
+            "top_line": 0,
+            "bottom_line": 0,
+            "lines": [],
+            "extracted_text": "",
+            "lines_count": 0,
+            "image_width": img_w,
+            "image_height": img_h,
+            "bounding_boxes": {},
+            "model_used": "Invalid Frame Guard",
+        }
     bboxes = aux.get("bounding_boxes", {})
     ground_truth_lines = aux.get("lines", [])
     raw_gt_snapshot = [dict(gl) for gl in ground_truth_lines]
@@ -1256,6 +1280,9 @@ async def scan_image_with_minicpm(
             "status": "success",
             "top_line": top_ln,
             "bottom_line": bot_ln,
+            "gutter_count": gutter_cnt,
+            "mean_luminance": mean_lum,
+            "invalid_editor_frame": False,
             "lines": plines,
             "extracted_text": formatted,
             "lines_count": len(plines),

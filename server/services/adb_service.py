@@ -2785,6 +2785,37 @@ async def navigate_to_target_top_line(
         if attempt > max_attempts:
             break
 
+        # Fast-path on attempt 1 when target_top is much closer to EOF (Ctrl+End) or Line 1 (Ctrl+Home) than to cur_t
+        if attempt == 1 and use_page_keys:
+            if (
+                target_total_lines > 500
+                and target_top > cur_t + 1500
+                and 0 <= (target_total_lines - target_top) < (target_top - cur_t - 500)
+            ):
+                await send_hid_keycombination(113, 123, serial=ser, caller_node=caller_node)
+                await asyncio.sleep(0.35)
+                await dismiss_keyboard(ser, valid_d)
+                caret_pos = "bottom"
+                last_dir = "up"
+                prev_top = cur_t
+                prev_first_y = first_y
+                actions_taken.append(
+                    f"Attempt 1: Dispatched Ctrl+End (113+123) shortcut from Ln {cur_t} to EOF (~Ln {target_total_lines}) before PageUp to Ln {target_top}"
+                )
+                continue
+            elif cur_t - target_top > 1500 and (target_top + 500) < (cur_t - target_top):
+                await send_hid_keycombination(113, 122, serial=ser, caller_node=caller_node)
+                await asyncio.sleep(0.35)
+                await dismiss_keyboard(ser, valid_d)
+                caret_pos = "top"
+                last_dir = "down"
+                prev_top = cur_t
+                prev_first_y = first_y
+                actions_taken.append(
+                    f"Attempt 1: Dispatched Ctrl+Home (113+122) shortcut from Ln {cur_t} to Line 1 before PageDown to Ln {target_top}"
+                )
+                continue
+
         # Determine exact visual row delta and scroll direction using visible gutter Y-coordinates
         target_in_gutter = [y for (y, n) in gutter if n == target_top] if gutter else []
         rows_span_visible = max(1, int(round((last_y - first_y) / row_pitch))) if (gutter and len(gutter) >= 2) else caret_span
@@ -2847,7 +2878,7 @@ async def navigate_to_target_top_line(
 
         # Decide between coarse PageUp/PageDown (92/93) and fine Arrow Up/Down (19/20)
         if use_page_keys and visual_rows_diff >= 36 and abs(diff) >= page_span and stall_count == 0 and not target_in_gutter:
-            num_pages = max(1, min(12, visual_rows_diff // 24))
+            num_pages = max(1, min(60, visual_rows_diff // 24))
             rem_rows = visual_rows_diff - (num_pages * 24)
             page_key = "93" if cur_dir == "down" else "92"
             trim_key = "20" if cur_dir == "down" else "19"
@@ -2856,8 +2887,14 @@ async def navigate_to_target_top_line(
             if 0 < rem_rows <= 12:
                 keys.extend([trim_key] * rem_rows)
                 total_arrows += rem_rows
-            cmd_str = f"input {disp_pfx}keyevent {' '.join(keys)} >/dev/null 2>&1"
-            await run_adb_shell(cmd_str, ser)
+            if len(keys) <= 30:
+                cmd_str = f"input {disp_pfx}keyevent {' '.join(keys)} >/dev/null 2>&1"
+            else:
+                chunks = [keys[i:i + 30] for i in range(0, len(keys), 30)]
+                cmd_str = "; sleep 0.04; ".join(
+                    f"input {disp_pfx}keyevent {' '.join(ch)} >/dev/null 2>&1" for ch in chunks
+                )
+            await run_adb_shell(cmd_str, ser, timeout=8.0)
             caret_pos = "bottom" if cur_dir == "down" else "top"
             actions_taken.append(
                 f"Attempt {attempt}: Coarse {'PageDown(93)' if cur_dir == 'down' else 'PageUp(92)'} x{num_pages}"

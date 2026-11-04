@@ -1719,14 +1719,25 @@ function AppContent() {
 
   const handleDeleteFrame = async (id: string, e?: React.MouseEvent | React.TouchEvent) => {
     e?.stopPropagation();
-    const ok = await confirm({ title: 'Delete Frame', message: 'Delete this frame from the document? Line bounds will re-index.', variant: 'danger', confirmText: 'Delete Frame' });
+    const ok = await confirm({ title: 'Delete Frame', message: 'Delete this frame from the document? Invalid lines will be replaced and frontier will recover.', variant: 'danger', confirmText: 'Delete & Recover' });
     if (!ok) return;
     setDeletingFrameId(id);
     try {
+      const idx = sortedFrames.findIndex(f => f.frame_id === id);
+      const fallbackFrame = idx > 0 ? sortedFrames[idx - 1] : (sortedFrames.length > 1 ? sortedFrames[1] : null);
       const res = await api(`/api/frames/${id}`, { method: 'DELETE' });
       if (res.ok || res.status === 404) {
+        const data = await res.json().catch(() => null);
         setFrames(prev => prev.filter(f => f.frame_id !== id));
-        if (selectedFrameId === id) setSelectedFrameId(null);
+        if (selectedFrameId === id) {
+          setSelectedFrameId(fallbackFrame?.frame_id || null);
+        }
+        if (ocrInspectImageId === id) {
+          setOcrInspectImageId(fallbackFrame?.frame_id || '');
+        }
+        if (data?.recovery?.frontier_bottom_line !== undefined) {
+          setTelemetry(p => ({ ...p, current_bottom_line: data.recovery.frontier_bottom_line }));
+        }
         await fetchData();
       }
     } finally { setDeletingFrameId(null); }
@@ -1790,8 +1801,15 @@ function AppContent() {
             addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`, { frame_id: newF.frame_id, top_line: newF.top_line, bottom_line: newF.bottom_line, page_index: newF.page_index }, 'capture_entire_markdown');
             apiJson<any>('/api/document').then(d => { setDocumentData(d); if (d.token_stats) setTokenStats(d.token_stats); });
           } else if (msg.type === 'frame_deleted') {
-            setFrames(p => p.filter(f => f.frame_id !== msg.frame_id));
-            addTelemetryEvent('FRAME', `Frame ${msg.frame_id?.slice(0, 8)} deleted`);
+            if (Array.isArray(msg.frames)) {
+              setFrames(msg.frames);
+            } else if (msg.frame_id) {
+              setFrames(p => p.filter(f => f.frame_id !== msg.frame_id));
+            }
+            if (msg.recovery?.frontier_bottom_line !== undefined) {
+              setTelemetry(p => ({ ...p, current_bottom_line: msg.recovery.frontier_bottom_line }));
+            }
+            addTelemetryEvent('FRAME', msg.recovery?.message || `Frame ${msg.frame_id?.slice(0, 8)} deleted`);
           } else if (msg.type === 'frames_purged') {
             setFrames([]);
             setSelectedFrameId(null);
@@ -2409,7 +2427,9 @@ function AppContent() {
     return deviceModel === 'pixel_8' ? 40 : 49;
   })();
 
-  const globalCurrentLine = Math.max(telemetry.current_bottom_line || 0, documentData.max_line || 0, lastCapturedLine || 0);
+  const globalCurrentLine = sortedFrames.length > 0
+    ? Math.max(lastCaptured?.bottom_line || 0, documentData.max_line || 0)
+    : Math.max(telemetry.current_bottom_line || 0, documentData.max_line || 0, lastCapturedLine || 0);
   const globalTargetLines = activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0;
   const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
 

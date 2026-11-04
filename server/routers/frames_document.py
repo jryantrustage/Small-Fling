@@ -770,15 +770,21 @@ async def update_frame_position(frame_id: str, req: FramePositionRequest):
     return {"status": "success", "frame_id": frame_id, "custom_offset_y": req.custom_offset_y}
 
 @router.delete("/api/frames/{frame_id}")
-async def delete_frame(frame_id: str):
+async def delete_frame(frame_id: str, auto_retake: bool = False):
     pid = state.get_current_project_id()
+    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
+    frame_meta = (
+        state.captured_frames.get(frame_id)
+        or state.captured_frames.get(clean_id)
+        or {"frame_id": clean_id}
+    )
+
     deleted_from_db = False
     try:
-        deleted_from_db = db.delete_frame(frame_id)
+        deleted_from_db = db.delete_frame(frame_id) or db.delete_frame(clean_id)
     except Exception as dbe:
         print(f"[delete_frame] db.delete_frame error: {dbe}")
 
-    clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
     deleted_from_mem = False
     if frame_id in state.captured_frames:
         state.captured_frames.pop(frame_id, None)
@@ -805,40 +811,43 @@ async def delete_frame(frame_id: str):
             try: p.unlink(missing_ok=True)
             except Exception: pass
 
-    # Clean up associated document lines
-    lines_to_del = [
-        k for k, v in list(state.document_lines.items())
-        if (isinstance(v, dict) and v.get("frame_id") in (frame_id, clean_id))
-        or (hasattr(v, "frame_id") and getattr(v, "frame_id") in (frame_id, clean_id))
-    ]
-    for lk in lines_to_del:
-        state.document_lines.pop(lk, None)
-        if pid:
-            try: db.delete_document_line(pid, int(lk))
-            except Exception: pass
-
-    state.save_persisted_state()
+    recovery_info = await state.recover_state_after_frame_deletion([dict(frame_meta)], project_id=pid)
 
     remaining_frames = db.get_frames(pid) if pid else []
     await state.ws_manager.broadcast({
         "type": "frame_deleted",
         "frame_id": frame_id,
-        "frames": remaining_frames
+        "frames": remaining_frames,
+        "recovery": recovery_info,
     })
     await state.ws_manager.broadcast({
         "type": "document_updated",
         "data": _doc_payload()
     })
+
+    if auto_retake and not getattr(state, "capture_loop_running", False):
+        try:
+            from routers.dag_helpers import start_capture_loop_background
+            await start_capture_loop_background(
+                project_id=pid,
+                fast_loop=True,
+                auto_resume=True,
+                resume_top_line=recovery_info.get("next_expected_top_line"),
+            )
+        except Exception as r_err:
+            print(f"[delete_frame] auto_retake start note: {r_err}")
+
     return {
         "status": "success",
         "frame_id": frame_id,
         "deleted_from_db": deleted_from_db,
-        "deleted_from_mem": deleted_from_mem
+        "deleted_from_mem": deleted_from_mem,
+        "recovery": recovery_info,
     }
 
 @router.post("/api/frames/{frame_id}/delete")
-async def delete_frame_post(frame_id: str):
-    return await delete_frame(frame_id)
+async def delete_frame_post(frame_id: str, auto_retake: bool = False):
+    return await delete_frame(frame_id, auto_retake=auto_retake)
 
 @router.post("/api/frames/batch-delete")
 async def batch_delete_frames(req: Dict[str, Any]):
@@ -847,11 +856,21 @@ async def batch_delete_frames(req: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="frame_ids must be a list")
     pid = state.get_current_project_id()
     deleted = []
+    deleted_metas = []
     for fid in frame_ids:
         sfid = str(fid)
         clean_id = sfid[:-4] if sfid.endswith(".png") else sfid
-        try: db.delete_frame(sfid)
-        except Exception: pass
+        f_meta = (
+            state.captured_frames.get(sfid)
+            or state.captured_frames.get(clean_id)
+            or {"frame_id": clean_id}
+        )
+        deleted_metas.append(dict(f_meta))
+        try:
+            db.delete_frame(sfid)
+            db.delete_frame(clean_id)
+        except Exception:
+            pass
 
         if sfid in state.captured_frames: state.captured_frames.pop(sfid, None)
         if clean_id in state.captured_frames: state.captured_frames.pop(clean_id, None)
@@ -861,30 +880,26 @@ async def batch_delete_frames(req: Dict[str, Any]):
                 try: p.unlink(missing_ok=True)
                 except Exception: pass
 
-        lines_to_del = [
-            k for k, v in list(state.document_lines.items())
-            if (isinstance(v, dict) and v.get("frame_id") in (sfid, clean_id))
-            or (hasattr(v, "frame_id") and getattr(v, "frame_id") in (sfid, clean_id))
-        ]
-        for lk in lines_to_del:
-            state.document_lines.pop(lk, None)
-            if pid:
-                try: db.delete_document_line(pid, int(lk))
-                except Exception: pass
         deleted.append(sfid)
 
-    state.save_persisted_state()
+    recovery_info = await state.recover_state_after_frame_deletion(deleted_metas, project_id=pid)
     remaining_frames = db.get_frames(pid) if pid else []
     await state.ws_manager.broadcast({
         "type": "frame_deleted",
         "frame_ids": deleted,
-        "frames": remaining_frames
+        "frames": remaining_frames,
+        "recovery": recovery_info,
     })
     await state.ws_manager.broadcast({
         "type": "document_updated",
         "data": _doc_payload()
     })
-    return {"status": "success", "deleted_count": len(deleted), "deleted_frames": deleted}
+    return {
+        "status": "success",
+        "deleted_count": len(deleted),
+        "deleted_frames": deleted,
+        "recovery": recovery_info,
+    }
 
 
 @router.post("/api/frames/purge")

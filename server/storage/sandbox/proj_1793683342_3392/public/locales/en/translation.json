@@ -1,0 +1,17 @@
+{
+"title": "Welcome to Astro",
+"authn": {
+"firstname_txt": "First Name...",
+"email_txt": "Email...",
+"password_txt": "Password",
+"login_txt": "Please Login",
+"invalid_creds": "Login failed. Invalid credentials"
+},
+"mer" : {
+"mer_info": "Merchant Information",
+"legal_name": "Legal Name",
+"postal_name": "Postal Name",
+"phone_num" : "Phone Number",
+"cuic_cust_num": "CUIC Customer Number"
+}
+}

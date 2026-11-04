@@ -63,6 +63,25 @@ class LocalAiOcrNode(BaseDagNode):
 
         exp_top = blackboard.top_line or cfg.get("expected_top", 1)
 
+        async def _purge_invalid_frame_and_abort(fid: str, img_file: Path, reason: str):
+            if fid and fid.startswith("frame_"):
+                state.captured_frames.pop(fid, None)
+                try:
+                    db.delete_frame(fid)
+                except Exception:
+                    pass
+                try:
+                    img_file.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                state.sync_resume_frontier_state(exclude_frame_id=fid)
+                state.orchestration_state["auto_resume_pending"] = True
+                try:
+                    await state.ws_manager.broadcast({"type": "frame_deleted", "frame_id": fid})
+                except Exception:
+                    pass
+            raise RuntimeError(reason)
+
         is_headless = bool(
             cfg.get("headless_mode")
             or (blackboard.payload and blackboard.payload.get("headless_mode"))
@@ -79,6 +98,12 @@ class LocalAiOcrNode(BaseDagNode):
 
             try:
                 quick_scan = await asyncio.to_thread(worker_scan_image, str(temp_calib))
+                if quick_scan.get("invalid_editor_frame"):
+                    await _purge_invalid_frame_and_abort(
+                        temp_calib.stem,
+                        temp_calib,
+                        f"Rejected invalid non-editor frame {temp_calib.stem} (0 gutter lines, luminance={quick_scan.get('mean_luminance')}). Purged frame to retake capture."
+                    )
                 raw_lines = quick_scan.get("lines", [])
                 raw_gt_snapshot = [dict(gl) for gl in raw_lines]
                 raw_bboxes = quick_scan.get("bounding_boxes", {})
@@ -115,6 +140,8 @@ class LocalAiOcrNode(BaseDagNode):
                     for item in lines_detected:
                         ln = item.get("line_number")
                         if ln and ln > 0:
+                            if exp_top > 25 and ln <= 24:
+                                continue
                             existing = state.document_lines.get(ln)
                             meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
                             meta.update({
@@ -198,6 +225,8 @@ class LocalAiOcrNode(BaseDagNode):
                     }
                 )
             except Exception as h_err:
+                if "Rejected invalid non-editor frame" in str(h_err):
+                    raise
                 print(f"[LocalAiOcrNode] Headless OCR error, falling back to standard AI OCR: {h_err}")
 
 
@@ -260,6 +289,13 @@ class LocalAiOcrNode(BaseDagNode):
                 "model_used": "MiniCPM-V (Error)"
             }
 
+        if scan_res.get("invalid_editor_frame"):
+            await _purge_invalid_frame_and_abort(
+                temp_calib.stem,
+                temp_calib,
+                f"Rejected invalid non-editor frame {temp_calib.stem}: {scan_res.get('error', 'non-editor screen')}. Frame purged to retake capture."
+            )
+
         extracted_text = scan_res.get("extracted_text", "")
         lines_detected = scan_res.get("lines", [])
         lines_count = scan_res.get("lines_count", len(lines_detected))
@@ -287,15 +323,21 @@ class LocalAiOcrNode(BaseDagNode):
                 except Exception:
                     ln = None
                 if ln and ln > 0:
+                    if exp_top > 25 and ln <= 24:
+                        continue
+                    blank_locked = bool(item.get("blank_locked", False))
+                    txt = "" if blank_locked else item.get("text", "")
                     state.document_lines[ln] = {
                         "line_number": ln,
                         "gutter_number": ln,
-                        "text": item.get("text", ""),
-                        "is_blank": not bool(item.get("text", "").strip()),
-                        "is_wrapped": False,
-                        "wrapped_line_count": 1,
+                        "text": txt,
+                        "is_blank": True if blank_locked else not bool(txt.strip()),
+                        "blank_locked": blank_locked,
+                        "is_wrapped": False if blank_locked else item.get("is_wrapped", False),
+                        "wrapped_line_count": 1 if blank_locked else item.get("wrapped_line_count", 1),
                         "status": "verified",
-                        "confidence": 0.98,
+                        "frame_id": temp_calib.stem,
+                        "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
                         "notes": f"MiniCPM-V OCR ({engine_name})",
                         "updated_at": datetime.now().isoformat()
                     }
@@ -307,6 +349,16 @@ class LocalAiOcrNode(BaseDagNode):
                     "document": state.get_document_metrics(),
                     "data": state.get_document_metrics()
                 })
+
+        if temp_calib.stem in state.captured_frames and lines_detected:
+            state.captured_frames[temp_calib.stem].update({
+                "lines": lines_detected,
+                "bounding_boxes": scan_res.get("bounding_boxes", {}),
+                "line_position_verification": scan_res.get("line_position_verification"),
+                "extracted_line_count": lines_count,
+                "status": "processed",
+                "model_used": engine_name,
+            })
 
         blackboard.ai_ocr_text = extracted_text
         blackboard.preview_text = extracted_text[:300] + ("..." if len(extracted_text) > 300 else "")

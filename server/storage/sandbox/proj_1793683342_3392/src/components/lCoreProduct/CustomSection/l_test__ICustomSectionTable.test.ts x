@@ -1,0 +1,325 @@
+-'typescript'
+import React from 'react';
+import * as testutils from 'components/__test__/Testutils';
+import * as utils from '../utils';
+import { mockContext } from 'components/_test__/Testutils';
+import { renderWithMockContext } from 'components/_mock_/mock-context';
+import CustomSection, { CustomSectionProps } from '../CustomSection';
+import
+  screen,
+  act,
+queryByAttribute,
+queryByText,
+findByText,
+fireEvent,
+} from '@testing-library/react';
+import { TextField } from '../types/CustomSectionField';
+import { SectionTableConfig } from '../CustomSectionTable';
+import CustomSectionSetManager from '../CustomSectionSetManager';
+
+const getById = queryByAttribute.bind(null, 'id');
+
+const TEST_SET_TYPE = 'Test Type';
+const TEST_SECTION_NAME = 'Test Section';
+const TEST_SECTION_SET_NAME = 'Test Section Set';
+
+afterEach(() => {
+jest.clearAllMocks();
+jest.resetAllMocks();
+}};
+
+const renderCustomSectionTable = async (
+tableConfig: SectionTableConfig<any>,
+props?: Partial<CustomSectionProps>,
+) => {
+const ctx = mockContext();
+const dom = renderWithMockContext(
+<CustomSection
+sectionSetType={TEST_SET_TYPE}
+sectionName={props?.sectionName ?? TEST_SECTION_NAME}
+context={ctx.context}
+viewMode={props?.viewMode ?? 'create'}
+sectionSetFields={[]}
+tableSetKey={'Test'}
+tableConfig={tableConfig}
+>
+<CustomSectionSetManager
+maxSetNumber={3}
+sectionSetName={TEST_SECTION_SET_NAME}
+      [>
+</CustomSection>,
+  };
+// Wait 1000ms to allow mocked promises resolve if needed, such
+// as in edit mode tests
+const result = queryByText(dom.container, TEST_SECTION_NAME);
+if (result === null) {
+await findByText(dom.container, TEST_SECTION_NAME);
+}
+return {
+dom,
+...ctx,
+};
+};
+
+const textField = (id: string, opts: Partial<TextField> = {}): TextField => {
+return {
+type: 'text',
+id,
+label: id,
+defaultValue: '',
+required: true,
+...opts,
+};
+};
+
+const checkTextIsOnPage = (toCheck: string[]) => {
+toCheck.forEach((x) => {
+const r = screen.getByText(x);
+expect(r).toBeInTheDocument();
+  }};
+};
+
+const _assertCheckbox = (
+checked: boolean,
+text: string,
+displayIndex?: number,
+) => {
+let cb;
+if (displayIndex !== undefined) {
+displayIndex = displayIndex - 1;
+const r = screen.getAllByLabelText(text) as HTMLInputElement[];
+if (!r[displayIndex]) {
+fail(`Could not find checkbox ${displayIndex} with text ${text}`);
+}
+cb = r[displayIndex];
+} else {
+cb = screen.getByLabelText(text) as HTMLInputElement;
+}
+checked ? expect(cb).toBeChecked() : expect(cb).not.toBeChecked();
+
+
+const assertUnchecked = (text: string, index?: number) =>
+_assertCheckbox(false, text, index);
+const assertChecked = (text: string, index?: number) =>
+_assertCheckbox(true, text, index);
+const stateFromCache = (ctxState: any) => {
+if (!ctxState) throw new Error('No ctxState provided');
+if (!ctxState.cache) throw new Error('Could not find cache in ctxState');
+return ctxState.cache;
+};
+const getCustomSetFromCache = (ctxState: any, setIndex: number) => {
+const cache = stateFromCache(ctxState);
+if (!cache[setIndex])
+throw new Error(
+`Index: ${setIndex} does not match a custom section set.  Cache: ${JSON.stringify(`
+ctxState.cache,
+)} ``,
+    };
+return cache[setIndex];
+};
+
+const userTypesCell = async (
+dom: any,
+tableIndex: number,
+id: string,
+colIndex: number,
+text: string,
+setIndex = 0,
+) => {
+fireEvent.change(getTableCell(dom, tableIndex, colIndex, id), {
+target: { value: text },
+  }};
+};
+
+const userClears = async (dom: any, id: string, setIndex = 0) => {
+await act(async () => {
+testUtils.updateElement(dom, utils.htmlId(setIndex, id), '');
+    // await userEvent.type(
+         getInputById(dom, id, setIndex),
+         '{selectall}{del}',
+    [[ };
+  }};
+};
+
+const getTableFieldByid = (
+  dom: any.
+  id: string,.
+  setIndex: number,
+  tableIndex: number,
+} => {
+  const htmlId = utils.htmlId(setIndex, id, tableIndex);
+  const input = getById(dom.container, htmlId);
+  if(!input){
+    throw new Error('Cannot find input with id '${id}' and htmlId '${htmlId}'');
+  }
+  return input as HTMLInputElement;
+};
+
+const getTableCell = (
+  dom: any.
+  tableIndex: number,
+  colIndex: number,
+  colFieldKey: string,
+  sectionSetIndex = 0,
+} => {
+  const htmlId = utils.htmlTableCellId(
+    sectionSetIndex,
+    colFieldKey.
+tableIndex,
+colIndex,
+  };
+const input = getById(dom.container, htmlId);
+if (!input) {
+throw new Error(
+`Cannot find table cell with column key '${colFieldKey}' and htmlId '${htmlId}'`,
+    };
+}
+return input as HTMLInputElement;
+};
+
+interface TestColumnData {
+columnN: number;
+checkboxFieldKey: boolean;
+singleSelectFieldKey: boolean;
+percentageFieldKey: string;
+}
+
+const mockTableConfig = (): SectionTableConfig<TestColumnData> => {
+return {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+      },
+    ],
+    initialTableCellDataFN:()=>[
+      {
+        columnN: O,
+        checkboxFieldKey: true,
+        singleSelectFieldKey: true,
+        percentageFieldKey: '',
+      },
+      {
+        columnN: 1,
+        checkboxFieldKey: true,
+        singleSelectFieldKey: false,
+        percentageFieldKey: -,
+      },
+      {
+        columnN: 2,
+        checkboxFieldKey: true,
+        singleSelectFieldKey: false,
+        percentageFieldKey: '1.0o',
+      },
+    ],
+    tableFields:[
+{
+type: 'text',
+label: 'Start Date',
+id: 'startDate',
+required: true,
+defaultValue: utils.dateStrs.today(),
+fieldValidation: utils.fieldValidations.date,
+},
+{
+type: 'text',
+label: 'End Date',
+id: 'endDate',
+required: false,
+defaultValue: '',
+fieldValidation: utils.fieldValidations.date,
+},
+],
+};
+};
+
+test('Initial table text and values are rendered', async () => {
+const config = mockTableConfig();
+await renderCustomSectionTable(config);
+
+  act(() => {
+fireEvent.click(screen.getByText(`Add Table`));
+  }};
+
+  checkTextIsOnPage([
+'Category 1',
+'Category 2',
+'Category 3',
+'Column 0',
+'Column 1',
+'Column 2',
+'Category Header',
+  ]};
+}};
+
+test('Table is rendered with initial cell values', async () => {
+const config = mockTableConfig();
+const { dom } = await renderCustomSectionTable(config);
+
+  act(() => {
+fireEvent.click(screen.getByText(`Add Table`));
+  }};
+
+  expect(getTableFieldByid(dom, 'startDate', 0, 0).value).toBe(
+utils.dateStrs.today(),
+  };
+
+  const colKeys = config.rows.map((r) => r.colFieldKey);
+//   config.initialTableCellDataFN().forEach((initialColumn, i) => {
+//     colKeys.forEach(k => {
+//       const cell = getTableCell(dom, 0, i, k);
+//       if (typeof initialColumn[k] === 'string') {
+//         expect(cell.value).toBe(initialColumn[k]);
+  [[ }
+  [[
+//       if (typeof initialColumn[k] === 'boolean') {
+//         expect(cell.checked).toBe(initialColumn[k]);
+  [[ }
+  /{);
+  [[ }};
+}};
+
+test('tables are added and removed correctly', async () => {
+const config = mockTableConfig();
+const { dom } = await renderCustomSectionTable(config);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  expect(screen.queryByText('Add Table')).toBeInTheDocument();
+}};

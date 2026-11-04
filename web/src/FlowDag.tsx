@@ -185,12 +185,19 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
-  const frontierBottomLine = Math.max(
-    dagStatus?.loop_diagnosis?.frontier_line || 0,
-    dagStatus?.current_bottom_line || 0,
-    dagStatus?.dag?.nodes?.frame_ocr?.bottom_line || 0
-  );
-  const autoResumeTopLine = frontierBottomLine > 0 ? frontierBottomLine + 1 : 1;
+  const frontierBottomLine =
+    dagStatus?.loop_diagnosis?.frontier_line !== undefined && dagStatus.loop_diagnosis.frontier_line > 0
+      ? dagStatus.loop_diagnosis.frontier_line
+      : Math.max(
+          dagStatus?.current_bottom_line || 0,
+          dagStatus?.dag?.nodes?.frame_ocr?.bottom_line || 0
+        );
+  const autoResumeTopLine =
+    dagStatus?.loop_diagnosis?.next_expected_top_line !== undefined && dagStatus.loop_diagnosis.next_expected_top_line > 0
+      ? dagStatus.loop_diagnosis.next_expected_top_line
+      : frontierBottomLine > 0
+        ? frontierBottomLine + 1
+        : 1;
 
   // Run an entire phase group (Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
   const handleRunPhase = async (phase: 1 | 2 | 3) => {
