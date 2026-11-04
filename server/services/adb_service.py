@@ -2696,8 +2696,7 @@ async def navigate_to_target_top_line(
             state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
             if total_arrows > 0 or total_page_keys > 0:
                 state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * caret_span)
-            state.latest_telemetry["current_top_line"] = actual_top
-            state.latest_telemetry["current_bottom_line"] = actual_bot
+            state.sync_alignment_gutter_lines(actual_top, actual_bot)
             actions_taken.append(
                 f"Verified top Line {actual_top} at y={first_y}px (range {actual_top}..{actual_bot}"
                 + (", contiguous overlap" if is_contiguous_overlap and not is_exact_or_wrapped_top else "")
@@ -2745,15 +2744,23 @@ async def navigate_to_target_top_line(
             tail_lines_txt = "\n".join(str(state.document_lines.get(k, "")) for k in tail_keys)
 
         # Physical scroll-stall at EOF when DAG 1 total_lines overestimated the true document length:
-        # If target_top > cur_t and downward scrolling stalled across multiple attempts (even after refocus/PageDown)
-        # while the file end marker ('CODESCAN_FILE_END') or 'Offline' badge is present at the bottom.
+        # Must only trigger after editor refocus (stall_count >= 2) has already been attempted and
+        # subsequent downward scrolls still cannot advance (stall_count >= 5), AND actual_bot is near
+        # target_total_lines (within 15% or <= 4000 lines when CODESCAN_FILE_END is at the very last line).
+        near_expected_eof = (
+            target_total_lines <= 0
+            or actual_bot >= target_total_lines - 4
+            or (
+                actual_bot >= int(target_total_lines * 0.85)
+                and (target_total_lines - actual_bot) <= 4500
+                and "CODESCAN_FILE_END" in tail_lines_txt
+            )
+        )
         scroll_stalled_at_bottom = bool(
             target_top > cur_t
             and (total_arrows > 0 or total_page_keys > 0)
-            and (
-                stall_count >= 3
-                or (stall_count >= 2 and "CODESCAN_FILE_END" in tail_lines_txt and target_top >= actual_bot)
-            )
+            and stall_count >= 5
+            and near_expected_eof
         )
 
         # Multi-Situation EOF Detection (after down-arrow verification):
@@ -3325,7 +3332,11 @@ async def resolve_and_dismiss_mini_modals(
 
 
 
-async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, Any]:
+async def check_and_update_alignment(
+    serial: Optional[str] = None,
+    use_cached_only: bool = False,
+    skip_classifiers: bool = False,
+) -> Dict[str, Any]:
     from services import state
     active_serial = await get_active_adb_serial(serial)
     if not active_serial:
@@ -3345,38 +3356,41 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
         cache_key = (active_serial, "desktop")
         cached_d = _frame_cache.get(cache_key, {})
         snap_bytes = None
-        if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < 1.5):
+        max_age = 15.0 if use_cached_only else 1.5
+        if cached_d.get("raw_png") and (time.time() - cached_d.get("ts", 0.0) < max_age):
             snap_bytes = cached_d["raw_png"]
-        else:
+        elif not use_cached_only:
             snap_bytes = await capture_external_screenshot(active_serial, bypass_lock=True)
 
         if snap_bytes:
             # Sync to frame cache so stream generator shares this fresh frame
-            _update_frame_cache(active_serial, "desktop", snap_bytes)
+            if not use_cached_only:
+                _update_frame_cache(active_serial, "desktop", snap_bytes)
 
             dpi_factor, _ = await fetch_current_display_dpi_factor(active_serial)
             res = await asyncio.to_thread(detect_teams_markdown_alignment, snap_bytes, None, dpi_factor)
             res["device_connected"] = True
             res["timestamp"] = datetime.now().isoformat()
-            try:
-                from classifiers.registry import classifier_registry
-                from classifiers.base import ClassifierContext
-                disp_id = await detect_external_display_id(active_serial)
-                classifier_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_bytes, alignment_data=res)
-                await classifier_registry.evaluate_all(classifier_ctx)
-                c_report = classifier_registry.get_status_report()
-                # Telemetry monitor loop is strictly passive/read-only: record classifier report without tactile interference
-                res["classifiers"], res["classifier_issues"] = c_report, c_report.get("issues", [])
-                if c_report.get("has_issues"): state.latest_telemetry["classifier_issues"] = c_report.get("issues", [])
-            except Exception as ce: print(f"[check_and_update_alignment] Classifier error: {ce}")
+            if not skip_classifiers:
+                try:
+                    from classifiers.registry import classifier_registry
+                    from classifiers.base import ClassifierContext
+                    disp_id = await detect_external_display_id(active_serial)
+                    classifier_ctx = ClassifierContext(serial=active_serial, display_id=disp_id, image_bytes=snap_bytes, alignment_data=res)
+                    await classifier_registry.evaluate_all(classifier_ctx)
+                    c_report = classifier_registry.get_status_report()
+                    # Telemetry monitor loop is strictly passive/read-only: record classifier report without tactile interference
+                    res["classifiers"], res["classifier_issues"] = c_report, c_report.get("issues", [])
+                    if c_report.get("has_issues"): state.latest_telemetry["classifier_issues"] = c_report.get("issues", [])
+                except Exception as ce: print(f"[check_and_update_alignment] Classifier error: {ce}")
 
             res = state.sanitize_for_json(res)
             state.latest_alignment_status.clear()
             state.latest_alignment_status.update(res)
-            if res.get("first_line_number") is not None:
+            if (res.get("first_line_number") or 0) > 0:
                 try: state.latest_telemetry["current_top_line"] = int(res["first_line_number"])
                 except Exception: pass
-            if res.get("last_line_number") is not None:
+            if (res.get("last_line_number") or 0) > 0:
                 try: state.latest_telemetry["current_bottom_line"] = int(res["last_line_number"])
                 except Exception: pass
             if not res.get("is_aligned", False) and state.orchestration_state.get("status") == "RUNNING":
@@ -3388,7 +3402,7 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
                 "data": state.latest_alignment_status, "classifiers": res.get("classifiers", {}),
                 "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry
             })
-        else:
+        elif not use_cached_only:
             # Screenshot failed or stream unavailable: update alignment status to avoid false positive aligned state
             if state.latest_alignment_status.get("is_aligned"):
                 state.latest_alignment_status.update({
@@ -3406,15 +3420,23 @@ async def check_and_update_alignment(serial: Optional[str] = None) -> Dict[str, 
 
 async def alignment_monitor_loop():
     from services import state
+    loop_tick = 0
     while True:
         try:
             await asyncio.sleep(2.5)
-            # When the capture loop or headless mode is actively running, skip background OCR polling
-            # so 100% of CPU / OpenVINO resources are dedicated to the active capture & OCR pipeline.
-            if getattr(state, "capture_loop_running", False) or getattr(state, "headless_mode", False):
+            loop_tick += 1
+            if getattr(state, "headless_mode", False):
                 continue
             serial = await get_active_adb_serial()
-            if serial: await check_and_update_alignment(serial)
+            if not serial:
+                continue
+            if getattr(state, "capture_loop_running", False):
+                # While capture loop is running in visual mode, refresh alignment from cached frame
+                # (zero ADB capture contention) immediately if currently unaligned or every 2nd tick (~5s).
+                if not state.latest_alignment_status.get("is_aligned") or (loop_tick % 2 == 0):
+                    await check_and_update_alignment(serial, use_cached_only=True, skip_classifiers=True)
+                continue
+            await check_and_update_alignment(serial)
         except Exception: await asyncio.sleep(4.0)
 
 async def get_live_view_metadata(serial: Optional[str] = None, mode: str = "desktop") -> Dict[str, Any]:

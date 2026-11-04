@@ -370,6 +370,91 @@ latest_alignment_status: Dict[str, Any] = {
 
 dismissed_alignment_items: set = set()
 
+
+def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, Any]:
+    """
+    Synchronizes verified gutter top/bottom line numbers into `latest_alignment_status`
+    and `latest_telemetry` during active DAG capture loops so the Live Desktop overlay
+    and TOP/BOTTOM GUTTER callouts always display real-time line bounds.
+    """
+    if top_line and top_line > 0:
+        latest_telemetry["current_top_line"] = int(top_line)
+        latest_alignment_status["first_line_number"] = int(top_line)
+    if bottom_line and bottom_line > 0:
+        latest_telemetry["current_bottom_line"] = int(bottom_line)
+        latest_alignment_status["last_line_number"] = int(bottom_line)
+
+    res_dims = latest_alignment_status.get("resolution") or {}
+    w = int(res_dims.get("width") or 1280)
+    h = int(res_dims.get("height") or 1024)
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+
+    boxes = latest_alignment_status.setdefault("boxes", {})
+    if top_line and top_line > 0:
+        fl = boxes.setdefault("first_line", {})
+        bw = max(24, len(str(int(top_line))) * int(10 * dpi_scale) + 8)
+        bh = int(22 * dpi_scale)
+        old_norm = fl.get("box_norm")
+        if not old_norm or old_norm[1] < 0.22 or not fl.get("passed"):
+            bx, by = int(38 * dpi_scale), int(300 * dpi_scale)
+            fl["box_px"] = [bx, by, bw, bh]
+            fl["box_norm"] = [round(bx / w, 4), round(by / h, 4), round(bw / w, 4), round(bh / h, 4)]
+        else:
+            px = list(fl.get("box_px") or [int(38 * dpi_scale), int(300 * dpi_scale), bw, bh])
+            px[2] = max(px[2], bw)
+            fl["box_px"] = px
+            fl["box_norm"] = [round(px[0] / w, 4), round(px[1] / h, 4), round(px[2] / w, 4), round(px[3] / h, 4)]
+        fl.update({
+            "name": "First Line Number",
+            "color": "green",
+            "hex": "#22c55e",
+            "passed": True,
+            "status": "PASSED",
+            "detected_value": f"Line {int(top_line)}",
+            "expected": "Top line integer >= 1 in gutter",
+            "details": f"Top line number {int(top_line)} detected in gutter",
+            "line_number": int(top_line),
+        })
+
+    if bottom_line and bottom_line > 0:
+        ll = boxes.setdefault("last_line", {})
+        bw = max(24, len(str(int(bottom_line))) * int(10 * dpi_scale) + 8)
+        bh = int(22 * dpi_scale)
+        old_norm = ll.get("box_norm")
+        if not old_norm or old_norm[1] > 0.91 or old_norm[1] < 0.35 or not ll.get("passed"):
+            bx, by = int(38 * dpi_scale), int(866 * dpi_scale)
+            ll["box_px"] = [bx, by, bw, bh]
+            ll["box_norm"] = [round(bx / w, 4), round(by / h, 4), round(bw / w, 4), round(bh / h, 4)]
+        else:
+            px = list(ll.get("box_px") or [int(38 * dpi_scale), int(866 * dpi_scale), bw, bh])
+            px[2] = max(px[2], bw)
+            ll["box_px"] = px
+            ll["box_norm"] = [round(px[0] / w, 4), round(px[1] / h, 4), round(px[2] / w, 4), round(px[3] / h, 4)]
+        ll.update({
+            "name": "Last Line Number",
+            "color": "red",
+            "hex": "#ef4444",
+            "passed": True,
+            "status": "PASSED",
+            "detected_value": f"Line {int(bottom_line)}",
+            "expected": f"Bottom line integer >= {int(top_line or 1)} in gutter",
+            "details": f"Bottom line number {int(bottom_line)} detected in gutter",
+            "line_number": int(bottom_line),
+        })
+
+    if isinstance(latest_alignment_status.get("missing"), list):
+        latest_alignment_status["missing"] = [
+            m for m in latest_alignment_status["missing"]
+            if "line number" not in str(m).lower() and m not in ("first_line", "last_line")
+        ]
+        if not latest_alignment_status["missing"]:
+            latest_alignment_status["is_aligned"] = True
+            latest_alignment_status["status"] = "teams markdown aligned"
+            latest_alignment_status["reason"] = None
+
+    latest_alignment_status["timestamp"] = datetime.now().isoformat()
+    return latest_alignment_status
+
 orchestration_state: Dict[str, Any] = {
     "status": "IDLE", "last_command": "NONE", "source": "system", "invoked_by": "System ⚙️", "active_step": "START_READY",
     "step_label": "Line 1 Start Position Set (Ready to Begin)", "top_line": 1, "bottom_line": 49, "next_target_top": 50, "page": 1,
@@ -685,20 +770,52 @@ def ensure_diagnostics_trace_backfilled() -> Dict[str, Any]:
     """
     global total_dag2_loops_executed
     pid = get_current_project_id()
+    proj = None
+    try:
+        proj = db.get_project(pid) if pid else db.get_active_project()
+    except Exception:
+        pass
+    proj_is_completed = str((proj or {}).get("status") or "").lower() == "completed"
+
     if pid and project_diagnostics_trace.get("project_id") not in (None, pid):
-        # Switched project: load or rebuild for current project
-        project_diagnostics_trace["project_id"] = pid
+        # Switched project: reset trace state from previous project before backfilling current project
+        project_diagnostics_trace.update({
+            "project_id": pid,
+            "project_name": (proj or {}).get("name") or f"Project {pid}",
+            "target_total_lines": int((proj or {}).get("target_total_lines") or 0),
+            "first_line_acquired_at_iso": None,
+            "first_line_acquired_at_ms": None,
+            "first_frame_id": None,
+            "last_line_acquired_at_iso": None,
+            "last_line_acquired_at_ms": None,
+            "last_frame_id": None,
+            "highest_line_acquired": 0,
+            "completed_at_iso": None,
+            "completed_at_ms": None,
+            "is_completed": proj_is_completed,
+            "current_status": "COMPLETED" if proj_is_completed else "RUNNING",
+            "last_stop_at_iso": None,
+            "last_stop_at_ms": None,
+            "last_stop_reason": None,
+            "backfilled_up_to_frame_count": 0,
+            "stop_and_restart_log": [],
+            "loop_runs": [],
+            "lifecycle_events": [],
+        })
     elif pid and not project_diagnostics_trace.get("project_id"):
         project_diagnostics_trace["project_id"] = pid
 
-    try:
-        proj = db.get_project(pid) if pid else db.get_active_project()
-        if proj:
-            project_diagnostics_trace["project_name"] = proj.get("name") or proj.get("filename") or f"Project {pid}"
-            if proj.get("target_total_lines"):
-                project_diagnostics_trace["target_total_lines"] = int(proj["target_total_lines"])
-    except Exception:
-        pass
+    if proj:
+        project_diagnostics_trace["project_name"] = proj.get("name") or proj.get("filename") or f"Project {pid}"
+        if proj.get("target_total_lines"):
+            project_diagnostics_trace["target_total_lines"] = int(proj["target_total_lines"])
+        if not proj_is_completed and project_diagnostics_trace.get("is_completed"):
+            max_cur_ln = max(document_lines.keys(), default=0) if document_lines else 0
+            tgt_ln = int(proj.get("target_total_lines") or latest_telemetry.get("target_total_lines") or 0)
+            if tgt_ln > 0 and max_cur_ln < tgt_ln - 3:
+                project_diagnostics_trace["is_completed"] = False
+                if project_diagnostics_trace.get("current_status") == "COMPLETED":
+                    project_diagnostics_trace["current_status"] = "IDLE"
 
     target_lines = int(
         latest_telemetry.get("target_total_lines")
@@ -1859,6 +1976,27 @@ def sync_resume_frontier_state(
             headless_telemetry_session["status"] = "COMPLETED"
             headless_telemetry_session["completion_percent"] = 100.0
             headless_telemetry_session["total_lines_reached"] = True
+        else:
+            cap_cnt = len(document_lines)
+            pct_cur = round(min(99.9, (last_bot / max(1, target_total)) * 100.0), 1) if target_total > 0 else 0.0
+            dag_state.get("nodes", {}).get("document_assemble", {}).update({
+                "status": "completed" if cap_cnt > 0 else "idle",
+                "total_captured_lines": cap_cnt,
+                "effective_bottom_line": last_bot,
+                "completion_percent": pct_cur,
+                "is_complete": False,
+                "error": None,
+            })
+            orchestration_state["eof_reached"] = False
+            if orchestration_state.get("status") == "COMPLETED":
+                orchestration_state["status"] = "RUNNING" if getattr(sys.modules[__name__], "capture_loop_running", False) else "IDLE"
+            project_diagnostics_trace["is_completed"] = False
+            if project_diagnostics_trace.get("current_status") == "COMPLETED":
+                project_diagnostics_trace["current_status"] = "RUNNING" if getattr(sys.modules[__name__], "capture_loop_running", False) else "IDLE"
+            headless_telemetry_session["total_lines_reached"] = False
+            if headless_telemetry_session.get("status") == "COMPLETED":
+                headless_telemetry_session["status"] = "RUNNING" if getattr(sys.modules[__name__], "capture_loop_running", False) else "IDLE"
+            headless_telemetry_session["completion_percent"] = pct_cur
         latest_telemetry["current_top_line"] = last_top
         latest_telemetry["current_bottom_line"] = last_bot
         latest_telemetry["current_page"] = max(1, last_page)
@@ -2153,11 +2291,17 @@ def get_loop_diagnosis() -> Dict[str, Any]:
     next_expected_top = (frontier_line + 1) if frontier_line > 0 else 1
 
     proj = db.get_active_project() or {}
+    proj_target = int(proj.get("target_total_lines") or 0)
+    if proj_target > 0 and str(proj.get("status") or "").lower() != "completed":
+        if int(latest_telemetry.get("target_total_lines") or 0) != proj_target:
+            latest_telemetry["target_total_lines"] = proj_target
+        if int(headless_telemetry_session.get("target_total_lines") or 0) != proj_target:
+            headless_telemetry_session["target_total_lines"] = proj_target
     target_lines = int(
-        latest_telemetry.get("target_total_lines")
+        proj_target
+        or latest_telemetry.get("target_total_lines")
         or headless_telemetry_session.get("target_total_lines")
         or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
-        or proj.get("target_total_lines")
         or 0
     )
     from ocr_engine import is_eof_reached_with_offline_awareness
@@ -2175,11 +2319,19 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         offline_detected=offline_det,
         tail_text=tail_txt,
     )
+    proj_status_completed = str(proj.get("status") or "").lower() == "completed"
+    trace_matches_proj = project_diagnostics_trace.get("project_id") in (None, proj.get("id"))
     explicitly_completed = bool(
-        str(proj.get("status") or "").lower() == "completed"
-        or project_diagnostics_trace.get("is_completed")
-        or orchestration_state.get("eof_reached")
-        or dag_state.get("nodes", {}).get("document_assemble", {}).get("is_complete")
+        proj_status_completed
+        or (
+            trace_matches_proj
+            and (
+                project_diagnostics_trace.get("is_completed")
+                or orchestration_state.get("eof_reached")
+                or dag_state.get("nodes", {}).get("document_assemble", {}).get("is_complete")
+            )
+            and (target_lines <= 0 or frontier_line >= target_lines - 3 or is_eof)
+        )
     )
     is_complete = bool(explicitly_completed or (target_lines > 0 and (frontier_line >= target_lines or is_eof)))
     if is_complete and frontier_line > 0 and target_lines != frontier_line:

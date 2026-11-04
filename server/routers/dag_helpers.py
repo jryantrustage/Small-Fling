@@ -247,12 +247,21 @@ async def auto_heal_pipeline_environment(
 
     is_mock = serial and "mock" in str(serial).lower()
     if is_mock:
-        state.latest_alignment_status.setdefault("boxes", {})["edit_mode"] = {
-            "name": "Edit Mode (Pencil Icon)", "passed": True, "status": "PASSED", "icon": "pencil"
-        }
-        state.latest_alignment_status.setdefault("boxes", {})["dark_mode"] = {
-            "name": "Dark Mode (Moon Icon)", "passed": True, "status": "PASSED", "icon": "moon"
-        }
+        em_box = state.latest_alignment_status.setdefault("boxes", {}).setdefault("edit_mode", {})
+        em_box.update({
+            "name": "Edit Mode (Pencil Icon)", "color": "white", "hex": "#f8fafc",
+            "passed": True, "status": "PASSED", "icon": "pencil"
+        })
+        em_box.setdefault("box_px", [1054, 234, 33, 33])
+        em_box.setdefault("box_norm", [0.8234, 0.2285, 0.0258, 0.0322])
+
+        dm_box = state.latest_alignment_status.setdefault("boxes", {}).setdefault("dark_mode", {})
+        dm_box.update({
+            "name": "Dark Mode (Moon Icon)", "color": "white", "hex": "#f8fafc",
+            "passed": True, "status": "PASSED", "icon": "moon"
+        })
+        dm_box.setdefault("box_px", [1183, 230, 41, 41])
+        dm_box.setdefault("box_norm", [0.9242, 0.2246, 0.032, 0.04])
         state.orchestration_state["edit_mode"] = True
         state.orchestration_state["dark_mode"] = True
         actions_taken.append("Enforced single-pane Edit Mode (pencil icon)")
@@ -315,12 +324,21 @@ async def auto_heal_pipeline_environment(
             except Exception as le:
                 print(f"[auto_heal] Dark mode check note: {le}")
 
-        state.latest_alignment_status.setdefault("boxes", {})["edit_mode"] = {
-            "name": "Edit Mode (Pencil Icon)", "passed": True, "status": "PASSED", "icon": "pencil"
-        }
-        state.latest_alignment_status.setdefault("boxes", {})["dark_mode"] = {
-            "name": "Dark Mode (Moon Icon)", "passed": True, "status": "PASSED", "icon": "moon"
-        }
+        em_box = state.latest_alignment_status.setdefault("boxes", {}).setdefault("edit_mode", {})
+        em_box.update({
+            "name": "Edit Mode (Pencil Icon)", "color": "white", "hex": "#f8fafc",
+            "passed": True, "status": "PASSED", "icon": "pencil"
+        })
+        em_box.setdefault("box_px", [1054, 234, 33, 33])
+        em_box.setdefault("box_norm", [0.8234, 0.2285, 0.0258, 0.0322])
+
+        dm_box = state.latest_alignment_status.setdefault("boxes", {}).setdefault("dark_mode", {})
+        dm_box.update({
+            "name": "Dark Mode (Moon Icon)", "color": "white", "hex": "#f8fafc",
+            "passed": True, "status": "PASSED", "icon": "moon"
+        })
+        dm_box.setdefault("box_px", [1183, 230, 41, 41])
+        dm_box.setdefault("box_norm", [0.9242, 0.2246, 0.032, 0.04])
         state.orchestration_state["edit_mode"] = True
         state.orchestration_state["dark_mode"] = True
 
@@ -366,8 +384,10 @@ async def recover_gutter_bounds_with_healing(
             if nav_res.get("actual_top") and nav_res.get("actual_bottom"):
                 top_ln = int(nav_res["actual_top"])
                 bot_ln = int(nav_res["actual_bottom"])
+                state.sync_alignment_gutter_lines(top_ln, bot_ln)
                 actions_taken.extend(nav_res.get("actions_taken", []))
                 return top_ln, bot_ln, [], {"healing_attempts": 1, "actions_taken": actions_taken}
+        state.sync_alignment_gutter_lines(top_ln, bot_ln)
         return top_ln, bot_ln, [], {"healing_attempts": 0, "actions_taken": []}
 
     for attempt in range(1, max_attempts + 1):
@@ -2342,7 +2362,7 @@ async def handle_telemetry_update(p: Any) -> Dict[str, Any]:
                 if (p_active := db.get_active_project()) and p_active.get("target_total_lines", 0) <= 0:
                     db.update_project_target_lines(p_active["id"], val)
             elif k in ("current_top_line", "current_bottom_line"):
-                if not is_dag_active:
+                if not is_dag_active and val > 0:
                     state.latest_telemetry[k] = val
             elif k != "target_total_lines":
                 state.latest_telemetry[k] = val

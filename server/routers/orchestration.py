@@ -63,7 +63,11 @@ async def handle_orchestration_command(payload: OrchestrationRequest):
 @router.get("/api/dag/status")
 async def get_dag_status():
     proj = db.get_active_project()
-    target_tot = proj.get("target_total_lines", 0) if proj else state.latest_telemetry.get("target_total_lines", 0)
+    target_tot = (
+        (proj.get("target_total_lines", 0) if proj else 0)
+        or state.latest_telemetry.get("target_total_lines", 0)
+        or state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
+    )
     node_5 = state.dag_state["nodes"].get("verification_trigger", {})
     return {"status": "success", "dag": state.dag_state, "target_total_lines": target_tot, "current_top_line": state.latest_telemetry.get("current_top_line", 0), "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 0), "current_page": state.latest_telemetry.get("current_page", 1), "active_node": state.dag_state.get("current_active_node"), "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}), "telemetry": state.get_fresh_telemetry(), "latest_telemetry": state.get_fresh_telemetry(), "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {}), "loop_diagnosis": state.get_loop_diagnosis()}
 @router.get("/api/dag/nodes/metadata")

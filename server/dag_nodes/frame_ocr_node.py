@@ -494,14 +494,19 @@ class FrameOcrNode(BaseDagNode):
 
         target_top = bot_ln + 1 if (bot_ln > 0 and bot_ln >= top_ln) else ((top_ln or expected_top or 1) + lpp)
         state.orchestration_state["next_target_top"] = target_top
-        state.latest_telemetry["current_top_line"] = top_ln
-        state.latest_telemetry["current_bottom_line"] = bot_ln
+        state.sync_alignment_gutter_lines(top_ln, bot_ln)
         state.latest_telemetry["next_target_top"] = target_top
         state.latest_telemetry["current_page"] = pidx
         blackboard.top_line = top_ln
         blackboard.bottom_line = bot_ln
         blackboard.target_next_top = target_top
         blackboard.ocr_results = scan_res
+        await state.ws_manager.broadcast({
+            "type": "alignment_status",
+            "alignment": state.latest_alignment_status,
+            "data": state.latest_alignment_status,
+            "telemetry": state.latest_telemetry
+        })
 
         if "arrow_down" in state.dag_state["nodes"]:
             state.dag_state["nodes"]["arrow_down"].update({

@@ -313,6 +313,16 @@ class ArrowDownPagerNode(BaseDagNode):
         if eof_reached and effective_bot > 0:
             state.latest_telemetry["current_bottom_line"] = effective_bot
             blackboard.bottom_line = effective_bot
+        state.sync_alignment_gutter_lines(
+            settled_top,
+            effective_bot if (effective_bot and effective_bot >= settled_top) else state.latest_telemetry.get("current_bottom_line", 0),
+        )
+        await state.ws_manager.broadcast({
+            "type": "alignment_status",
+            "alignment": state.latest_alignment_status,
+            "data": state.latest_alignment_status,
+            "telemetry": state.latest_telemetry
+        })
         blackboard.top_line = settled_top
         blackboard.arrow_count = total_arrows_pressed
 

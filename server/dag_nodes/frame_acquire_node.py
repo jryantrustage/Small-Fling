@@ -322,8 +322,7 @@ class FrameAcquireNode(BaseDagNode):
             "error": None
         }
         state.latest_telemetry["current_page"] = page_idx
-        state.latest_telemetry["current_top_line"] = top_ln
-        state.latest_telemetry["current_bottom_line"] = bot_ln
+        state.sync_alignment_gutter_lines(top_ln, bot_ln)
         state.latest_telemetry["status_message"] = f"Frame #{page_idx} acquired ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB in {cap_duration_ms}ms) ✔"
 
         state.dag_state["nodes"]["frame_acquire"].update({
@@ -338,11 +337,19 @@ class FrameAcquireNode(BaseDagNode):
             "error": None
         })
 
-        # 9. Broadcast new_frame and telemetry to UI
+        # 9. Broadcast new_frame, alignment, and telemetry to UI
         await state.ws_manager.broadcast({
             "type": "new_frame",
             "frame": frame_info,
-            "data": frame_info
+            "data": frame_info,
+            "alignment": state.latest_alignment_status,
+            "telemetry": state.latest_telemetry
+        })
+        await state.ws_manager.broadcast({
+            "type": "alignment_status",
+            "alignment": state.latest_alignment_status,
+            "data": state.latest_alignment_status,
+            "telemetry": state.latest_telemetry
         })
         await state.ws_manager.broadcast({
             "type": "telemetry",

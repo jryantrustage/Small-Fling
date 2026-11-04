@@ -1798,6 +1798,24 @@ function AppContent() {
           if (msg.type === 'new_frame' && newF) {
             setFrames(p => [...p.filter(f => f.frame_id !== newF.frame_id), newF]);
             setSelectedFrameId(curr => (curr ? curr : newF.frame_id));
+            if (msg.alignment) {
+              setAlignmentData(msg.alignment);
+            } else if (newF.top_line > 0 || newF.bottom_line > 0) {
+              setAlignmentData(prev => ({
+                ...prev,
+                first_line_number: newF.top_line > 0 ? newF.top_line : prev.first_line_number,
+                last_line_number: newF.bottom_line > 0 ? newF.bottom_line : prev.last_line_number,
+              }));
+            }
+            if (msg.telemetry) {
+              setTelemetry(p => ({ ...p, ...msg.telemetry }));
+            } else if (newF.top_line > 0 || newF.bottom_line > 0) {
+              setTelemetry(p => ({
+                ...p,
+                current_top_line: newF.top_line > 0 ? newF.top_line : p.current_top_line,
+                current_bottom_line: newF.bottom_line > 0 ? newF.bottom_line : p.current_bottom_line,
+              }));
+            }
             addTelemetryEvent('FRAME', `New frame: ${newF.frame_id.slice(0, 8)}`, { frame_id: newF.frame_id, top_line: newF.top_line, bottom_line: newF.bottom_line, page_index: newF.page_index }, 'capture_entire_markdown');
             apiJson<any>('/api/document').then(d => { setDocumentData(d); if (d.token_stats) setTokenStats(d.token_stats); });
           } else if (msg.type === 'frame_deleted') {
@@ -1886,8 +1904,6 @@ function AppContent() {
             if (typeof msg.headless_mode === 'boolean') {
               setHeadlessMode(msg.headless_mode);
             }
-          } else if (msg.type === 'dag_updated' && msg.dag && typeof msg.dag.headless_mode === 'boolean') {
-            setHeadlessMode(msg.dag.headless_mode);
           } else if (msg.type === 'device_selected') {
             const newInfo = msg.device_info || msg.data;
             if (newInfo?.active_serial) {
@@ -1900,13 +1916,14 @@ function AppContent() {
               apiJson<DeviceInfoData>('/api/device/info').then(info => { if (info) setDeviceInfo(info); });
             }
             setStreamKey(Date.now());
-          } else if (msg.type === 'telemetry_updated' && msg.data) {
-            setTelemetry(p => ({ ...p, ...msg.data }));
-            if (typeof msg.data.desktop_keyboard_prohibited === 'boolean') {
-              setDesktopKeyboardProhibited(msg.data.desktop_keyboard_prohibited);
+          } else if ((msg.type === 'telemetry_updated' || msg.type === 'telemetry') && (msg.data || msg.telemetry)) {
+            const tData = msg.telemetry || msg.data;
+            setTelemetry(p => ({ ...p, ...tData }));
+            if (typeof tData.desktop_keyboard_prohibited === 'boolean') {
+              setDesktopKeyboardProhibited(tData.desktop_keyboard_prohibited);
             }
-            if (typeof msg.data.desktop_mode_enabled === 'boolean') {
-              setDesktopModeEnabled(msg.data.desktop_mode_enabled);
+            if (typeof tData.desktop_mode_enabled === 'boolean') {
+              setDesktopModeEnabled(tData.desktop_mode_enabled);
             }
           } else if (msg.type === 'keyboard_prohibit_changed') {
             if (typeof msg.desktop_keyboard_prohibited === 'boolean') {
@@ -1971,6 +1988,15 @@ function AppContent() {
               data: { key_event: k }
             }]);
           } else if (msg.type === 'dag_updated') {
+            if (msg.dag && typeof msg.dag.headless_mode === 'boolean') {
+              setHeadlessMode(msg.dag.headless_mode);
+            }
+            if (msg.telemetry) {
+              setTelemetry(p => ({ ...p, ...msg.telemetry }));
+            }
+            if (msg.alignment) {
+              setAlignmentData(msg.alignment);
+            }
             const dagNodeId = msg.node_id || msg.dag?.current_active_node || 'init_end';
             const devName = deviceInfoRef.current?.active_model || (deviceModelRef.current === 'pixel_10' ? 'Pixel 10 Pro XL' : 'Pixel 8 Pro');
             if (msg.status === 'error' || msg.error) {
@@ -2013,6 +2039,7 @@ function AppContent() {
           } else if (msg.type === 'alignment_status') {
             const d = msg.alignment || msg.data;
             if (d) setAlignmentData(d);
+            if (msg.telemetry) setTelemetry(p => ({ ...p, ...msg.telemetry }));
             if (msg.multipart_state) setMultipartState(msg.multipart_state);
           } else if (msg.type === 'capture_loop_status') {
             if (typeof msg.running === 'boolean') {
@@ -3541,7 +3568,10 @@ function AppContent() {
                             <span className="gutter-callout-icon">▲</span>
                             <span className="gutter-callout-label">TOP GUTTER:</span>
                             <span className="gutter-callout-value">
-                              {alignmentData.first_line_number || telemetry.current_top_line ? `Line #${alignmentData.first_line_number || telemetry.current_top_line}` : 'Detecting...'}
+                              {(() => {
+                                const topLn = alignmentData.first_line_number || telemetry.current_top_line || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1]?.top_line : 0);
+                                return topLn ? `Line #${topLn}` : 'Detecting...';
+                              })()}
                             </span>
                           </div>
                         }
@@ -3550,7 +3580,10 @@ function AppContent() {
                             <span className="gutter-callout-icon">▼</span>
                             <span className="gutter-callout-label">BOTTOM GUTTER:</span>
                             <span className="gutter-callout-value">
-                              {alignmentData.last_line_number || telemetry.current_bottom_line ? `Line #${alignmentData.last_line_number || telemetry.current_bottom_line}` : 'Detecting...'}
+                              {(() => {
+                                const botLn = alignmentData.last_line_number || telemetry.current_bottom_line || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1]?.bottom_line : 0);
+                                return botLn ? `Line #${botLn}` : 'Detecting...';
+                              })()}
                             </span>
                           </div>
                         }
