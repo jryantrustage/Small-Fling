@@ -114,7 +114,7 @@ class LocalAiOcrNode(BaseDagNode):
                     if l.get("line_number") is not None and str(l.get("line_number")).strip().isdigit()
                 ]
 
-                if all_lns:
+                if all_lns and not quick_scan.get("is_wrapped_continuation"):
                     lines_detected, rescanned = await asyncio.to_thread(
                         rescan_lines_on_image_sync,
                         temp_calib,
@@ -137,10 +137,36 @@ class LocalAiOcrNode(BaseDagNode):
                 engine_name = "Headless RapidOCR (Inspector Rescan Engine)"
 
                 if cfg.get("save_to_document", True):
+                    lead_cont = quick_scan.get("leading_wrapped_continuation")
+                    if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+                        state.append_wrapped_continuation_line(
+                            int(lead_cont["line_number"]),
+                            temp_calib.stem,
+                            lead_cont["text"],
+                            is_root_chunk=False,
+                        )
                     for item in lines_detected:
                         ln = item.get("line_number")
                         if ln and ln > 0:
-                            if exp_top > 25 and ln <= 24:
+                            if exp_top > 25 and ln <= 24 and not quick_scan.get("is_wrapped_continuation"):
+                                continue
+                            if item.get("is_wrapped_continuation"):
+                                state.append_wrapped_continuation_line(
+                                    ln,
+                                    temp_calib.stem,
+                                    item.get("text", ""),
+                                    is_root_chunk=False,
+                                    confidence=item.get("confidence", 0.99),
+                                )
+                                continue
+                            if item.get("is_wrapped"):
+                                state.append_wrapped_continuation_line(
+                                    ln,
+                                    temp_calib.stem,
+                                    item.get("text", ""),
+                                    is_root_chunk=True,
+                                    confidence=item.get("confidence", 0.99),
+                                )
                                 continue
                             existing = state.document_lines.get(ln)
                             meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})

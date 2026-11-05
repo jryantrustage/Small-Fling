@@ -113,10 +113,20 @@ class FrameAcquireNode(BaseDagNode):
             or state.latest_telemetry.get("current_top_line")
         )
 
+        char_track_mode = bool(
+            state.orchestration_state.get("character_tracking_mode")
+            or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
+        )
+        tracked_ln = int(
+            state.orchestration_state.get("character_tracking_line")
+            or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
+            or (expected_top - 1 if (expected_top and expected_top > 1) else 1)
+        )
+
         # Ensure exact `last_line + 1` alignment on top of the next image capture & OCR when auto-resuming,
         # OR whenever the viewport jumped outside the contiguous window [expected_top - 6, expected_top].
         is_mock = bool(serial and "mock" in str(serial).lower())
-        is_exact_match = (t_det == expected_top)
+        is_exact_match = (t_det == expected_top) or (char_track_mode and t_det == 0)
         is_contiguous_window = (
             t_det > 0
             and max(1, expected_top - 6) <= t_det <= expected_top
@@ -124,6 +134,7 @@ class FrameAcquireNode(BaseDagNode):
         )
         needs_range_recovery = (
             not is_mock
+            and not char_track_mode
             and cfg.get("recover_gutter_range", True)
             and expected_top
             and expected_top > 1
@@ -206,6 +217,10 @@ class FrameAcquireNode(BaseDagNode):
             top_ln = 1
             bot_ln = b_det if (b_det > 1 and (b_det - 1) <= 75) else (1 + lpp - 1)
             page_idx = 1
+        elif char_track_mode and t_det <= 0:
+            top_ln = tracked_ln
+            bot_ln = tracked_ln
+            page_idx = len(existing_frames) + 1
         elif t_det > 0:
             top_ln = t_det
             bot_ln = b_det if (b_det >= top_ln and (b_det - top_ln) <= 75) else (top_ln + lpp - 1)
@@ -222,7 +237,7 @@ class FrameAcquireNode(BaseDagNode):
         content_hash = hashlib.sha256(snap).hexdigest()
 
         # Accurate arrow_count resolution for this frame
-        if page_idx <= 1 or top_ln <= 1:
+        if page_idx <= 1 or (top_ln <= 1 and not char_track_mode):
             arr_count = 0
         else:
             recorded_arrows = (
@@ -235,12 +250,17 @@ class FrameAcquireNode(BaseDagNode):
             elif page_idx == 2 or top_ln <= (lpp + 2):
                 arr_count = 49  # Calibrated initial down arrows for Page 1 -> 2
             else:
-                arr_count = 24  # Calibrated step down arrows for Page N -> N+1
+                arr_count = 22  # Calibrated step down arrows for Page N -> N+1
 
         # 6. Save image files
         now_dt = datetime.now()
         now_str = now_dt.strftime("%Y%m%d_%H%M%S_%f")[:19]
-        fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
+        is_wrap_cont = bool(char_track_mode and top_ln == bot_ln and t_det <= 0)
+        fid = (
+            f"frame_{top_ln:05d}_{bot_ln:05d}_wrap{page_idx:04d}_{now_str}"
+            if is_wrap_cont
+            else f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
+        )
         fn = f"{fid}.png"
         frame_path = state.FRAMES_DIR / fn
         with open(frame_path, "wb") as f:
@@ -296,7 +316,9 @@ class FrameAcquireNode(BaseDagNode):
             "created_at": now_dt.isoformat(),
             "extracted_line_count": 0,
             "model_used": "Display Capture (Node 3)",
-            "arrow_count": arr_count
+            "arrow_count": arr_count,
+            "character_tracking_mode": char_track_mode,
+            "is_wrapped_continuation": is_wrap_cont,
         }
         state.captured_frames[fid] = frame_info
 

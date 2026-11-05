@@ -719,8 +719,8 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
                     pass
         orig_top = finfo.get("top_line", 0)
         orig_bot = finfo.get("bottom_line", 0)
-        final_top = orig_top if orig_top > 0 else (top_ln or 1)
-        final_bot = orig_bot if orig_bot > 0 else (bot_ln or (final_top + len(lines) - 1 if lines else final_top + 23))
+        final_top = top_ln if top_ln > 0 else (orig_top if orig_top > 0 else 1)
+        final_bot = bot_ln if bot_ln > 0 else (orig_bot if orig_bot > 0 else (final_top + len(lines) - 1 if lines else final_top + 23))
 
         finfo.update({
             "top_line": final_top,
@@ -731,8 +731,23 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
             "ocr_extracted_count": len(lines),
             "status": "processed",
             "model_used": res.get("model_used", f"MiniCPM-V ({mt})"),
-            "bounding_boxes": res.get("bounding_boxes", {})
+            "bounding_boxes": res.get("bounding_boxes", {}),
+            "lines": lines,
         })
+        new_lns = {int(item["line_number"]) for item in lines if item.get("line_number")}
+        stale_lns = [
+            ln for ln, entry in list(state.document_lines.items())
+            if ((entry.get("frame_id") if isinstance(entry, dict) else getattr(entry, "meta", {}).get("frame_id")) == frame_id)
+            and ln not in new_lns
+        ]
+        pid = finfo.get("project_id") or state.get_current_project_id()
+        for sln in stale_lns:
+            state.document_lines.pop(sln, None)
+            if pid:
+                try:
+                    db.delete_document_lines_range(pid, sln, sln)
+                except Exception:
+                    pass
         for item in lines:
             if item.get("line_number"):
                 ln = int(item["line_number"])
@@ -749,6 +764,7 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
                     "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
                     "notes": f"Local MiniCPM-V OCR ({mt})", "updated_at": datetime.now().isoformat()
                 }
+        state.sync_resume_frontier_state()
         state.save_persisted_state()
         data = {"status": "success", "frame_id": frame_id, "top_line": top_ln, "bottom_line": bot_ln,
                 "extracted_line_count": len(lines), "bounding_boxes": res.get("bounding_boxes", {}), "lines": lines, "model_target": mt}

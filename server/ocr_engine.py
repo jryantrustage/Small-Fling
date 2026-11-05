@@ -881,25 +881,165 @@ def worker_verify_first_line(image_path: str, dpi_factor: float = 1.0) -> Tuple[
     is_at_home = has_line_1 or (first_ln in (1, 2))
     return is_at_home, (1 if is_at_home else first_ln)
 
+def join_wrapped_row_slices(row_texts: List[str]) -> str:
+    """
+    Stitches visual row slices belonging to a single wrapped logical line.
+    Preserves exact continuous strings when wrapped at the right column margin (~96 chars)
+    and inserts a single space when wrapped early at a word/attribute boundary.
+    """
+    cleaned = [str(t).strip() for t in row_texts if str(t).strip()]
+    if not cleaned:
+        return ""
+    out = cleaned[0]
+    for idx in range(1, len(cleaned)):
+        nxt = cleaned[idx]
+        last_row = cleaned[idx - 1]
+        # If the previous visual row wrapped early (< 86 chars) at a whitespace boundary
+        # or ends with a quoted attribute / punctuation followed by an identifier, join with space
+        if (
+            len(last_row) < 86
+            and " " in last_row
+            and not last_row.endswith(("\\", "/", "-", "_"))
+            and (last_row[-1] in ('"', "'", ",", ";", ":", ")", "]") or nxt[0].isalnum())
+        ):
+            out = out + " " + nxt
+        else:
+            out = out + nxt
+    if "CODESCAN_FILE_START" in out:
+        out = re.sub(r'"(type=|size=|lines=|1ines=|chars=)', r'" \1', out)
+        out = out.replace(' 1ines="', ' lines="')
+    return out
+
+
+def extract_visual_editor_rows(
+    img: np.ndarray,
+    dpi_factor: float = 1.0,
+    gutter: Optional[List[Tuple[int, int]]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Slices the Teams Markdown editor viewport into its fixed-pitch visual rows (up to 24 rows,
+    pitch ~27px at 220 DPI) and runs direct single-line recognition (use_det=False, use_rec=True)
+    on each non-empty row so dense wrapped base64/JSON/markdown text is never dropped by DBNet.
+    """
+    if img is None:
+        return []
+    ocr = get_rapid_ocr()
+    h, w = img.shape[:2]
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    pitch_y = 27.0 * dpi_scale
+    y0 = 309.0 * dpi_scale
+
+    if gutter:
+        gy0 = float(gutter[0][0])
+        r0 = max(0, int(round((gy0 - y0) / pitch_y)))
+        if abs(gy0 - (y0 + r0 * pitch_y)) <= 9.0 * dpi_scale:
+            y0 = gy0 - r0 * pitch_y
+
+    gx1 = max(0, int(round(30 * dpi_scale)))
+    gx2 = min(w, int(round(99 * dpi_scale)))
+    code_x_normal = int(round(104 * dpi_scale))
+    code_x_badge = int(round(140 * dpi_scale))
+    code_x_end = max(code_x_badge + 40, w - int(round(20 * dpi_scale)))
+    max_row_yc = min(942.0 * dpi_scale, float(h) - 82.0 * dpi_scale)
+
+    visual_rows: List[Dict[str, Any]] = []
+    for r in range(24):
+        yc = y0 + r * pitch_y
+        if yc > max_row_yc:
+            break
+        y1 = max(0, int(round(yc - 0.44 * pitch_y)))
+        y2 = min(h, int(round(yc + 0.44 * pitch_y)))
+        if y2 <= y1 + 4:
+            continue
+
+        # Rows r >= 22 (y >= 885 * dpi_scale) have the bottom-left [Offline] badge at x=18..134
+        is_obstructed_left = bool(yc >= 885.0 * dpi_scale or r >= 22)
+        x1_code = code_x_badge if is_obstructed_left else code_x_normal
+
+        gutter_ink_px = 0
+        if not is_obstructed_left and gx2 > gx1:
+            g_strip = img[y1:y2, gx1:gx2]
+            if g_strip.size > 0:
+                g_gray = cv2.cvtColor(g_strip, cv2.COLOR_BGR2GRAY) if g_strip.ndim == 3 else g_strip
+                g_fg = np.abs(g_gray.astype(np.int16) - float(np.median(g_gray))) > 18
+                gutter_ink_px = int(np.count_nonzero(g_fg))
+
+        c_strip = img[y1:y2, x1_code:code_x_end]
+        if c_strip.size == 0:
+            continue
+        c_gray = cv2.cvtColor(c_strip, cv2.COLOR_BGR2GRAY) if c_strip.ndim == 3 else c_strip
+        c_fg = np.abs(c_gray.astype(np.int16) - float(np.median(c_gray))) > 18
+        ink_px = int(np.count_nonzero(c_fg))
+
+        text_str = ""
+        conf_val = 1.0
+        min_x_ink = x1_code
+        max_x_ink = x1_code
+        if ink_px >= 10 and ocr is not None:
+            _, xs_fg = np.where(c_fg)
+            if len(xs_fg) > 0:
+                ix1 = max(0, int(xs_fg.min()) - 6)
+                ix2 = min(c_strip.shape[1], int(xs_fg.max()) + 8)
+                min_x_ink = x1_code + int(xs_fg.min())
+                max_x_ink = x1_code + int(xs_fg.max())
+                tight = c_strip[:, ix1:ix2]
+                if tight.size > 0:
+                    try:
+                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
+                        if rec_res and rec_res[0] and rec_res[0][1]:
+                            text_str = str(rec_res[0][1]).strip()
+                            conf_val = float(rec_res[0][2])
+                    except Exception:
+                        pass
+
+        visual_rows.append({
+            "row_idx": r,
+            "y": int(round(yc)),
+            "y_center": round(yc, 2),
+            "min_y": y1,
+            "max_y": y2,
+            "min_x": min_x_ink,
+            "max_x": max(min_x_ink + 20, max_x_ink),
+            "text": text_str,
+            "score": round(conf_val, 3),
+            "ink_px": ink_px,
+            "gutter_ink_px": gutter_ink_px,
+            "is_obstructed_left": is_obstructed_left,
+        })
+    return visual_rows
+
+
 def extract_content_text_rows(img: np.ndarray, gutter_w: int = 140, min_y: int = 140, max_y: int = 980) -> List[Dict[str, Any]]:
     """
     Extracts text lines from the editor content area (excluding the left gutter column and top toolbar).
-    Groups OCR bounding boxes that share approximately the same vertical center into coherent text rows.
+    Falls back to fixed-pitch visual row slicing when dense wrapped lines cause detector drop-outs.
     """
-    if img is None: return []
+    if img is None:
+        return []
+    v_rows = extract_visual_editor_rows(img)
+    filtered = [
+        r for r in v_rows
+        if min_y <= r["y"] <= max_y and r.get("ink_px", 0) >= 10 and r.get("text")
+    ]
+    if filtered:
+        return filtered
+
     ocr = get_rapid_ocr()
-    if ocr is None: return []
+    if ocr is None:
+        return []
     try:
         results, _ = ocr(img)
     except Exception as e:
         print(f"[extract_content_text_rows] OCR error: {e}")
         return []
-    if not results: return []
+    if not results:
+        return []
 
     boxes = []
     for bbox, text, score in results:
         clean = text.strip()
-        if not clean: continue
+        if not clean:
+            continue
         pts = np.array(bbox)
         min_x = int(np.min(pts[:, 0]))
         max_x = int(np.max(pts[:, 0]))
@@ -914,7 +1054,8 @@ def extract_content_text_rows(img: np.ndarray, gutter_w: int = 140, min_y: int =
                 "score": float(score)
             })
 
-    if not boxes: return []
+    if not boxes:
+        return []
     rows: List[List[Dict[str, Any]]] = []
     for b in boxes:
         placed = False
@@ -943,50 +1084,235 @@ def extract_content_text_rows(img: np.ndarray, gutter_w: int = 140, min_y: int =
         })
     return content_rows
 
-def detect_line_wrap_state(img: np.ndarray, dpi_factor: float = 1.0) -> Dict[str, Any]:
+
+def detect_line_wrap_state(img: np.ndarray, dpi_factor: float = 1.0, gutter: Optional[List[Tuple[int, int]]] = None) -> Dict[str, Any]:
     """
     Detects whether the editor viewport is dominated by wrapped text spanning multiple visual lines
-    where gutter line numbers may be missing or sparse.
-    Extracts top and bottom text anchors to enable deterministic text-anchored pagination.
+    where gutter line numbers are missing at the bottom of the page or across the entire page.
+    Extracts top/bottom visual row anchors and a 6-row sliding window (rows 18..23, where row 21 is
+    bottom_text_anchor and row 22 is target_top_text_anchor = bottom_text_anchor + 1) to enable
+    deterministic character-anchored pagination.
     """
     if img is None:
         return {
-            "is_wrapped_page": False, "gutter_count": 0, "content_row_count": 0,
-            "top_text_anchor": "", "bottom_text_anchor": "", "content_rows": []
+            "is_wrapped_page": False,
+            "is_bottom_wrapped": False,
+            "gutter_count": 0,
+            "content_row_count": 0,
+            "wrapped_rows_below_last_gutter": 0,
+            "wrapped_rows_above_first_gutter": 0,
+            "top_text_anchor": "",
+            "bottom_text_anchor": "",
+            "target_top_text_anchor": "",
+            "bottom_anchor_window": [],
+            "content_rows": [],
         }
 
-    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
-    h, w = img.shape[:2]
-    norm_mult = max(0.4, (w / 1920.0) * dpi_factor)
-    gutter_w = int(max(110.0, min(220.0, 150.0 * norm_mult)))
-    doc_top_y = max(135, int(150 * (h / 1080.0)))
-    doc_bot_y = int(h * 0.96)
+    if gutter is None:
+        gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+    visual_rows = extract_visual_editor_rows(img, dpi_factor=dpi_factor, gutter=gutter)
+    unobstructed_rows = [r for r in visual_rows if not r.get("is_obstructed_left") and r.get("row_idx", 0) <= 21]
+    non_empty_unobstructed = [r for r in unobstructed_rows if r.get("ink_px", 0) >= 10 and r.get("text")]
 
-    content_rows = extract_content_text_rows(img, gutter_w=gutter_w, min_y=doc_top_y, max_y=doc_bot_y)
     gutter_count = len(gutter)
-    content_row_count = len(content_rows)
+    content_row_count = len(non_empty_unobstructed)
 
-    is_wrapped = (gutter_count <= 2 and content_row_count >= 5) or ((content_row_count - gutter_count) >= 15)
+    wrapped_below = 0
+    wrapped_above = 0
+    if gutter:
+        first_gy = float(gutter[0][0])
+        last_gy = float(gutter[-1][0])
+        above_rows = [
+            r for r in unobstructed_rows
+            if r["y"] < first_gy - 13.0 and r.get("gutter_ink_px", 0) < 8 and r.get("ink_px", 0) >= 10
+        ]
+        below_rows = [
+            r for r in unobstructed_rows
+            if r["y"] > last_gy + 13.0 and r.get("gutter_ink_px", 0) < 8 and r.get("ink_px", 0) >= 10
+        ]
+        wrapped_above = len(above_rows)
+        wrapped_below = len(below_rows)
+    else:
+        wrapped_below = content_row_count
 
-    top_text = content_rows[0]["text"] if content_rows else ""
-    bottom_text = content_rows[-1]["text"] if content_rows else ""
-    top_y = content_rows[0]["y"] if content_rows else 0
-    bottom_y = content_rows[-1]["y"] if content_rows else 0
+    row_by_idx = {r["row_idx"]: r for r in visual_rows}
+    r0 = row_by_idx.get(0) or (non_empty_unobstructed[0] if non_empty_unobstructed else None)
+    r21 = row_by_idx.get(21) if (row_by_idx.get(21) and row_by_idx[21].get("text")) else (
+        non_empty_unobstructed[-1] if non_empty_unobstructed else None
+    )
+    r22 = row_by_idx.get(22)
+
+    top_text = r0["text"] if r0 else ""
+    bottom_text = r21["text"] if r21 else ""
+    target_top_text = r22["text"] if (r22 and r22.get("text")) else ""
+    top_y = r0["y"] if r0 else 0
+    bottom_y = r21["y"] if r21 else 0
+
+    # Build 6-row anchor window centered around r=21 (index 3 = r21 = bottom_anchor, index 4 = r22 = target_top_anchor)
+    anchor_base_idx = r21["row_idx"] if r21 else 21
+    window_indices = [anchor_base_idx - 3, anchor_base_idx - 2, anchor_base_idx - 1, anchor_base_idx, anchor_base_idx + 1, anchor_base_idx + 2]
+    bottom_anchor_window = [
+        (row_by_idx[idx]["text"] if (idx in row_by_idx and row_by_idx[idx].get("text")) else "")
+        for idx in window_indices
+    ]
+
+    # Bottom is wrapped and continues onto next page if:
+    # 1) No gutter numbers exist on the page and there are >= 3 content rows, OR
+    # 2) There are blank-gutter code rows below the last gutter number AND either row 22 has code ink
+    #    or row 21 is a long wrapped line (>= 45 chars)
+    r22_has_ink = bool(r22 and r22.get("ink_px", 0) >= 10 and r22.get("text"))
+    is_bottom_wrapped = bool(
+        (gutter_count == 0 and content_row_count >= 3)
+        or (wrapped_below >= 1 and (r22_has_ink or len(bottom_text) >= 45 or wrapped_below >= 3))
+    )
+    is_wrapped = bool(
+        (gutter_count == 0 and content_row_count >= 3)
+        or (gutter_count <= 2 and content_row_count >= 5)
+        or is_bottom_wrapped
+        or ((content_row_count - gutter_count) >= 8)
+    )
 
     return {
         "is_wrapped_page": is_wrapped,
+        "is_bottom_wrapped": is_bottom_wrapped,
         "gutter_count": gutter_count,
         "content_row_count": content_row_count,
+        "wrapped_rows_below_last_gutter": wrapped_below,
+        "wrapped_rows_above_first_gutter": wrapped_above,
         "top_text_anchor": top_text,
         "bottom_text_anchor": bottom_text,
+        "target_top_text_anchor": target_top_text,
+        "bottom_anchor_window": bottom_anchor_window,
         "top_text_y": top_y,
         "bottom_text_y": bottom_y,
         "top_gutter_line": gutter[0][1] if gutter else 0,
         "bottom_gutter_line": gutter[-1][1] if gutter else 0,
-        "content_rows": content_rows
+        "content_rows": non_empty_unobstructed,
+        "visual_rows": visual_rows,
     }
 
-def find_text_anchor_offset(img: np.ndarray, anchor_text: str, target_y: int = 165, dpi_factor: float = 1.0) -> Optional[int]:
+
+def _compute_row_text_similarity(s_text: str, p_text: str, p_was_obstructed_left: bool = False) -> float:
+    """
+    Computes similarity between a current visual row s_text and a previous-page anchor row p_text.
+    Handles the ~3-character left prefix offset when p_text came from row 22/23 (cropped at x=140
+    to avoid the bottom-left Offline badge) and is now at an unobstructed upper row (cropped at x=104).
+    """
+    from difflib import SequenceMatcher
+    a = re.sub(r"\s+", "", str(s_text or ""))
+    b = re.sub(r"\s+", "", str(p_text or ""))
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    if len(b) >= 12 and (b in a or a in b):
+        return min(1.0, max(len(b) / max(1, len(a)), 0.94))
+    best = SequenceMatcher(None, a, b).ratio()
+    if p_was_obstructed_left and len(a) > len(b):
+        for trim_left in (2, 3, 4, 5):
+            if len(a) > trim_left + 8:
+                r_trimmed = SequenceMatcher(None, a[trim_left:], b).ratio()
+                if r_trimmed > best:
+                    best = r_trimmed
+    return best
+
+
+def locate_character_anchor_row(
+    img: np.ndarray,
+    bottom_anchor: str,
+    target_top_anchor: str = "",
+    bottom_anchor_window: Optional[List[str]] = None,
+    dpi_factor: float = 1.0,
+) -> Dict[str, Any]:
+    """
+    Locates the exact visual row index `k` (`target_top_row_idx`) on `img` where the visual row
+    immediately following the previous page's bottom row (`target_top_anchor` = `bottom_anchor + 1`)
+    currently resides.
+    - When `k == 0`: `bottom_anchor + 1` is positioned at visual row 0 (`y ~ 309px`)!
+    - When `k > 0`: viewport needs `k` DownArrows to bring `bottom_anchor + 1` up to row 0.
+    - When `k < 0`: viewport overshot by `|k|` rows and needs `|k|` UpArrows to bring `bottom_anchor + 1` down to row 0.
+    """
+    if img is None:
+        return {"found": False, "target_top_row_idx": None, "delta_arrows": 0, "confidence": 0.0, "visual_rows": []}
+
+    cur_rows = extract_visual_editor_rows(img, dpi_factor=dpi_factor)
+    if not cur_rows:
+        return {"found": False, "target_top_row_idx": None, "delta_arrows": 0, "confidence": 0.0, "visual_rows": []}
+
+    row_map = {r["row_idx"]: r for r in cur_rows}
+    # Build window list where index 3 is bottom_anchor (r=21) and index 4 is target_top_anchor (r=22)
+    win = list(bottom_anchor_window) if (bottom_anchor_window and len(bottom_anchor_window) >= 4) else ["", "", "", bottom_anchor or "", target_top_anchor or "", ""]
+    while len(win) < 6:
+        win.append("")
+    if bottom_anchor and not win[3]:
+        win[3] = bottom_anchor
+    if target_top_anchor and not win[4]:
+        win[4] = target_top_anchor
+
+    target_top_win_idx = 4
+    best_k: Optional[int] = None
+    best_score = 0.0
+    best_max_single = 0.0
+
+    for k in range(-3, 23):
+        weighted_sum = 0.0
+        weight_total = 0.0
+        max_single = 0.0
+        matched_rows = 0
+        for w_idx, p_str in enumerate(win):
+            if not p_str or len(p_str.strip()) < 4:
+                continue
+            rel = w_idx - target_top_win_idx  # rel == -1 is bottom_anchor, rel == 0 is target_top_anchor
+            s_idx = k + rel
+            if s_idx < 0 or s_idx not in row_map:
+                continue
+            s_str = row_map[s_idx].get("text", "")
+            if not s_str:
+                continue
+            # Only rows originally at index >= 4 (r=22, 23) came from behind the Offline badge
+            # unless enriched with full unobstructed strings (len >= 94)
+            was_obstructed = bool(w_idx >= 4 and len(p_str) <= 93)
+            sim = _compute_row_text_similarity(s_str, p_str, p_was_obstructed_left=was_obstructed)
+            w = 1.6 if rel in (-1, 0) else 1.0
+            weighted_sum += sim * w
+            weight_total += w
+            if sim > max_single:
+                max_single = sim
+            if sim >= 0.62:
+                matched_rows += 1
+
+        if weight_total > 0:
+            avg_score = weighted_sum / weight_total
+            # Prefer candidates supported by multiple matching rows in the sliding window
+            effective_score = avg_score + min(0.08, 0.025 * max(0, matched_rows - 1))
+            if effective_score > best_score and (max_single >= 0.62 or avg_score >= 0.58):
+                best_score = effective_score
+                best_max_single = max_single
+                best_k = k
+
+    # Enrich window[4..6] with unobstructed 96-char strings from cur_rows when best_k >= 0
+    enriched_window = list(win)
+    if best_k is not None and best_score >= 0.60:
+        for offset in range(0, min(3, len(win) - target_top_win_idx)):
+            s_idx = best_k + offset
+            if 0 <= s_idx <= 21 and s_idx in row_map and len(row_map[s_idx].get("text", "")) >= 10:
+                enriched_window[target_top_win_idx + offset] = row_map[s_idx]["text"]
+
+    found = bool(best_k is not None and best_score >= 0.58)
+    return {
+        "found": found,
+        "target_top_row_idx": best_k if found else None,
+        "bottom_anchor_row_idx": (best_k - 1) if found and best_k is not None else None,
+        "delta_arrows": int(best_k) if (found and best_k is not None) else 0,
+        "confidence": round(min(1.0, float(best_score)), 3),
+        "max_row_similarity": round(min(1.0, float(best_max_single)), 3),
+        "current_row0_text": row_map[0]["text"] if 0 in row_map else "",
+        "enriched_anchor_window": enriched_window,
+        "visual_rows": cur_rows,
+    }
+
+
+def find_text_anchor_offset(img: np.ndarray, anchor_text: str, target_y: int = 309, dpi_factor: float = 1.0) -> Optional[int]:
     """
     Searches for anchor_text (or significant substring/token match) in img.
     If found at row y_found, returns dy = y_found - target_y.
@@ -995,41 +1321,14 @@ def find_text_anchor_offset(img: np.ndarray, anchor_text: str, target_y: int = 1
     """
     if not anchor_text or not anchor_text.strip() or img is None:
         return None
-
-    clean_anchor = anchor_text.strip()
-    if len(clean_anchor) < 4:
-        return None
-
-    h, w = img.shape[:2]
-    norm_mult = max(0.4, (w / 1920.0) * dpi_factor)
-    gutter_w = int(max(110.0, min(220.0, 150.0 * norm_mult)))
-    content_rows = extract_content_text_rows(img, gutter_w=gutter_w, min_y=120, max_y=int(h * 0.98))
-    if not content_rows:
-        return None
-
-    # 1. Exact or substring match
-    anchor_clean = re.sub(r'\s+', ' ', clean_anchor).lower()
-    for row in content_rows:
-        row_clean = re.sub(r'\s+', ' ', row["text"]).lower()
-        if anchor_clean in row_clean or row_clean in anchor_clean:
-            return row["y"] - target_y
-
-    # 2. Token overlap match (at least 2 words or 60% token overlap)
-    anchor_words = [w for w in re.findall(r'\w{3,}', anchor_clean)]
-    if len(anchor_words) >= 2:
-        best_match = None
-        best_overlap = 0
-        for row in content_rows:
-            row_clean = re.sub(r'\s+', ' ', row["text"]).lower()
-            row_words = set(re.findall(r'\w{3,}', row_clean))
-            overlap = sum(1 for w in anchor_words if w in row_words)
-            if overlap >= max(2, int(len(anchor_words) * 0.6)) and overlap > best_overlap:
-                best_overlap = overlap
-                best_match = row
-
-        if best_match is not None:
-            return best_match["y"] - target_y
-
+    loc = locate_character_anchor_row(img, bottom_anchor="", target_top_anchor=anchor_text.strip(), dpi_factor=dpi_factor)
+    if loc.get("found") and loc.get("target_top_row_idx") is not None:
+        k = int(loc["target_top_row_idx"])
+        v_rows = loc.get("visual_rows") or []
+        for r in v_rows:
+            if r.get("row_idx") == k:
+                return int(r["y"] - target_y)
+        return int(round(k * 27.0))
     return None
 
 def detect_editor_first_row_y(img: np.ndarray, gutter: Optional[List[Tuple[int, int]]] = None, avg_pitch: float = 27.0) -> Tuple[float, int]:
@@ -1776,6 +2075,45 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             },
         }
 
+    leading_wrapped_continuation: Optional[Dict[str, Any]] = None
+    bottom_wrapped_extra_rows: int = 0
+    character_tracking_mode: bool = False
+    is_wrapped_continuation: bool = False
+
+    def _inspect_row_ink(yc_row: float) -> Tuple[int, int, str, float]:
+        sy1 = max(0, int(round(yc_row - 0.42 * pitch_y)))
+        sy2 = min(h, int(round(yc_row + 0.42 * pitch_y)))
+        if sy2 <= sy1 + 4:
+            return 0, 0, "", 0.0
+        g_strip = img[sy1:sy2, max(0, int(round(30 * scale_x))) : min(w, int(round(99 * scale_x)))]
+        g_ink = 0
+        if g_strip.size > 0:
+            gg = cv2.cvtColor(g_strip, cv2.COLOR_BGR2GRAY) if g_strip.ndim == 3 else g_strip
+            g_ink = int(np.count_nonzero(np.abs(gg.astype(np.int16) - float(np.median(gg))) > 18))
+        c_strip = img[sy1:sy2, x_code_start:x_code_end]
+        c_ink = 0
+        r_txt = ""
+        r_conf = 0.95
+        if c_strip.size > 0:
+            cg = cv2.cvtColor(c_strip, cv2.COLOR_BGR2GRAY) if c_strip.ndim == 3 else c_strip
+            cfg = np.abs(cg.astype(np.int16) - float(np.median(cg))) > 18
+            c_ink = int(np.count_nonzero(cfg))
+            if c_ink >= 10 and ocr is not None:
+                _, xs_r = np.where(cfg)
+                if len(xs_r) > 0:
+                    rx1 = max(0, int(xs_r.min()) - 6)
+                    rx2 = min(c_strip.shape[1], int(xs_r.max()) + 8)
+                    rtight = c_strip[:, rx1:rx2]
+                    if rtight.size > 0:
+                        try:
+                            r_res, _ = ocr(rtight, use_det=False, use_cls=False, use_rec=True)
+                            if r_res and r_res[0] and r_res[0][1]:
+                                r_txt = str(r_res[0][1]).strip()
+                                r_conf = float(r_res[0][2])
+                        except Exception:
+                            pass
+        return g_ink, c_ink, r_txt, r_conf
+
     if len(valid_pairs) >= 2:
         # Map each detected gutter number to its visual row offset v_i (accounting for multi-row wrapped lines where dy > 1.5 * pitch_y)
         v_offsets = [0]
@@ -1820,12 +2158,52 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         first_ln = valid_pairs[0][1]
         first_cy = y_v0
         rows_above = max(0, int(np.floor((first_cy - min_center_y) / pitch_y + 0.18)))
-        top_line = max(1, first_ln - rows_above)
+
+        # Check if rows above first_cy are blank-gutter wrapped continuation rows of (first_ln - 1)
+        above_wrapped_texts: List[str] = []
+        above_wrapped_count = 0
+        if rows_above > 0:
+            for step_up in range(rows_above, 0, -1):
+                yc_up = first_cy - step_up * pitch_y
+                g_ink_u, c_ink_u, txt_u, _ = _inspect_row_ink(yc_up)
+                if g_ink_u < 8 and c_ink_u >= 10:
+                    above_wrapped_count += 1
+                    if txt_u:
+                        above_wrapped_texts.append(txt_u)
+
+        if above_wrapped_count > 0 and above_wrapped_count >= rows_above - 1:
+            top_line = first_ln
+            if above_wrapped_texts:
+                leading_wrapped_continuation = {
+                    "line_number": max(1, first_ln - 1),
+                    "text": join_wrapped_row_slices(above_wrapped_texts),
+                    "rows_count": rows_above,
+                    "y_top": max(0, int(round(first_cy - rows_above * pitch_y - 0.42 * pitch_y))),
+                    "y_bottom": max(0, int(round(first_cy - 0.42 * pitch_y))),
+                }
+        else:
+            top_line = max(1, first_ln - rows_above)
 
         last_ln = valid_pairs[-1][1]
         last_cy = y_v0 + v_offsets[-1] * pitch_y
         rows_below = max(0, int(np.floor((max_center_y - last_cy) / pitch_y + 0.18)))
-        bottom_line = max(top_line, last_ln + rows_below)
+
+        # Check if rows below last_cy are blank-gutter wrapped continuation rows of last_ln
+        below_wrapped_count = 0
+        if rows_below > 0:
+            for step_dn in range(1, rows_below + 1):
+                yc_dn = last_cy + step_dn * pitch_y
+                g_ink_d, c_ink_d, _, _ = _inspect_row_ink(yc_dn)
+                if g_ink_d < 8 and c_ink_d >= 10:
+                    below_wrapped_count += 1
+                elif g_ink_d >= 12:
+                    break
+
+        if below_wrapped_count > 0:
+            bottom_wrapped_extra_rows = below_wrapped_count
+            bottom_line = max(top_line, last_ln + max(0, rows_below - below_wrapped_count))
+        else:
+            bottom_line = max(top_line, last_ln + rows_below)
 
         # Check if the final EOF row (e.g. '---' after blank line / CODESCAN_FILE_END) sits at last_cy + pitch_y
         # with its left gutter number occluded by the bottom-left [Cloud-Check] / [Offline] badge
@@ -1849,8 +2227,6 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                             bottom_line = max(bottom_line, last_ln + 1)
 
         # Build exact y_center(ln) for every integer line ln in range(top_line, bottom_line + 1):
-        # When no wrapped lines exist on the page, v_offsets[k] == valid_pairs[k][1] - first_ln,
-        # so y_center(ln) = y_0 + (ln - top_line) * pitch_y identically.
         y_0 = first_cy - (first_ln - top_line) * pitch_y
         y_centers: Dict[int, float] = {}
 
@@ -1882,23 +2258,123 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     elif len(valid_pairs) == 1:
         y0_pt, ln0_pt, _ = valid_pairs[0]
         min_center_y = 300.0 * scale_y
-        max_center_y = 940.0 * scale_y
+        max_center_y = min(940.0 * scale_y, float(h) - 140.0 * scale_y)
         rows_above = max(0, int(np.floor((y0_pt - min_center_y) / pitch_y + 0.18)))
-        top_line = max(1, ln0_pt - rows_above)
+        above_wrapped_texts = []
+        above_wrapped_count = 0
+        if rows_above > 0:
+            for step_up in range(rows_above, 0, -1):
+                g_ink_u, c_ink_u, txt_u, _ = _inspect_row_ink(y0_pt - step_up * pitch_y)
+                if g_ink_u < 8 and c_ink_u >= 10:
+                    above_wrapped_count += 1
+                    if txt_u:
+                        above_wrapped_texts.append(txt_u)
+        if above_wrapped_count > 0 and above_wrapped_count >= rows_above - 1:
+            top_line = ln0_pt
+            if above_wrapped_texts:
+                leading_wrapped_continuation = {
+                    "line_number": max(1, ln0_pt - 1),
+                    "text": join_wrapped_row_slices(above_wrapped_texts),
+                    "rows_count": rows_above,
+                    "y_top": max(0, int(round(y0_pt - rows_above * pitch_y - 0.42 * pitch_y))),
+                    "y_bottom": max(0, int(round(y0_pt - 0.42 * pitch_y))),
+                }
+        else:
+            top_line = max(1, ln0_pt - rows_above)
+
+        rows_below = max(0, int(np.floor((max_center_y - y0_pt) / pitch_y + 0.18)))
+        below_wrapped_count = 0
+        if rows_below > 0:
+            for step_dn in range(1, rows_below + 1):
+                g_ink_d, c_ink_d, _, _ = _inspect_row_ink(y0_pt + step_dn * pitch_y)
+                if g_ink_d < 8 and c_ink_d >= 10:
+                    below_wrapped_count += 1
+        if below_wrapped_count > 0:
+            bottom_wrapped_extra_rows = below_wrapped_count
+            bottom_line = max(top_line, ln0_pt + max(0, rows_below - below_wrapped_count))
+        else:
+            bottom_line = max(top_line, ln0_pt + rows_below)
         y_0 = y0_pt - (ln0_pt - top_line) * pitch_y
-        rows_total = max(1, int(np.floor((max_center_y - y_0) / pitch_y + 0.18)) + 1)
-        bottom_line = top_line + rows_total - 1
         y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
     else:
+        # Full-page wrapped continuation mode (0 gutter numbers on a valid dark-mode editor page)
+        v_rows = extract_visual_editor_rows(img, dpi_factor=scale_y)
+        unobstructed = [r for r in v_rows if not r.get("is_obstructed_left") and r.get("row_idx", 0) <= 21]
+        non_empty_rows = [r for r in unobstructed if r.get("ink_px", 0) >= 10 and r.get("text")]
         m_fn = re.search(r"frame_(\d+)_(\d+)", Path(image_path).name)
-        if m_fn and int(m_fn.group(1)) > 0 and int(m_fn.group(2)) >= int(m_fn.group(1)):
-            top_line = int(m_fn.group(1))
-            bottom_line = min(top_line + 74, int(m_fn.group(2)))
+        active_ln = int(m_fn.group(1)) if (m_fn and int(m_fn.group(1)) > 0) else 1
+        if non_empty_rows:
+            character_tracking_mode = True
+            is_wrapped_continuation = True
+            top_line = active_ln
+            bottom_line = active_ln
+            joined_wrap_text = join_wrapped_row_slices([r["text"] for r in non_empty_rows])
+            y1_wrap = unobstructed[0]["min_y"] if unobstructed else int(round(297 * scale_y))
+            y2_wrap = unobstructed[-1]["max_y"] if unobstructed else int(round(888 * scale_y))
+            yc_wrap = 0.5 * (y1_wrap + y2_wrap)
+            gbox_wrap = {
+                "x": gx_min,
+                "y": y1_wrap,
+                "width": avg_gw,
+                "height": max(16, int(round(0.84 * pitch_y))),
+                "line_number": active_ln,
+                "confidence": 0.99,
+            }
+            cbox_wrap = {
+                "x": min(r["min_x"] for r in non_empty_rows),
+                "y": y1_wrap,
+                "width": max(40, max(r["max_x"] for r in non_empty_rows) - min(r["min_x"] for r in non_empty_rows)),
+                "height": max(24, y2_wrap - y1_wrap),
+                "line_number": active_ln,
+            }
+            wrap_line_entry = {
+                "line_number": active_ln,
+                "gutter_number": active_ln,
+                "text": joined_wrap_text,
+                "row_slice_text": joined_wrap_text,
+                "is_blank": False,
+                "blank_locked": False,
+                "ink_px": sum(int(r.get("ink_px", 0)) for r in non_empty_rows),
+                "is_wrapped": True,
+                "is_wrapped_continuation": True,
+                "wrapped_line_count": len(unobstructed),
+                "status": "verified",
+                "confidence": round(float(np.mean([r.get("score", 0.95) for r in non_empty_rows])), 3),
+                "position_verified": True,
+                "shift_detected": False,
+                "row_alignment_score": 1.0,
+                "y_top": y1_wrap,
+                "y_bottom": y2_wrap,
+                "y_center": round(yc_wrap, 2),
+                "bbox": cbox_wrap,
+                "gutter_bbox": gbox_wrap,
+            }
+            return {
+                "top_line": active_ln,
+                "bottom_line": active_ln,
+                "gutter_count": 0,
+                "mean_luminance": mean_lum,
+                "invalid_editor_frame": False,
+                "character_tracking_mode": True,
+                "is_wrapped_continuation": True,
+                "leading_wrapped_continuation": None,
+                "pitch_y": round(pitch_y, 3),
+                "lines": [wrap_line_entry],
+                "image_width": w,
+                "image_height": h,
+                "bounding_boxes": {
+                    "first_line": cbox_wrap,
+                    "last_line": cbox_wrap,
+                    "wrapped_lines": [cbox_wrap],
+                    "line_boxes": {active_ln: cbox_wrap},
+                    "gutter_boxes": {active_ln: gbox_wrap},
+                },
+            }
         else:
-            top_line = 1
-            bottom_line = 24
-        y_0 = 313.5 * scale_y
-        y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
+            top_line = active_ln
+            bottom_line = active_ln + 23
+            y_0 = 313.5 * scale_y
+            y_centers = {ln: y_0 + (ln - top_line) * pitch_y for ln in range(top_line, bottom_line + 1)}
 
     gutter_boxes: Dict[int, Dict[str, Any]] = {}
     line_boxes: Dict[int, Dict[str, Any]] = {}
@@ -1914,7 +2390,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         y_top_ln = yc - half_strip
         y_bot_ln = yc + half_strip
 
-        # Check for wrapped line: y_center(ln + 1) - y_center(ln) > 1.5 * pitch_y
+        # Check for wrapped line: y_center(ln + 1) - y_center(ln) > 1.5 * pitch_y, or bottom wrapped extra rows
         if (ln + 1) in y_centers and (y_centers[ln + 1] - yc) > 1.5 * pitch_y:
             dY = y_centers[ln + 1] - yc
             is_wrapped = True
@@ -1922,6 +2398,11 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             y_top_next = y_centers[ln + 1] - half_strip
             strip_y1 = max(0, int(round(y_top_ln)))
             strip_y2 = min(h, int(round(y_top_next)))
+        elif ln == bottom_line and bottom_wrapped_extra_rows > 0:
+            is_wrapped = True
+            wrapped_line_count = 1 + bottom_wrapped_extra_rows
+            strip_y1 = max(0, int(round(y_top_ln)))
+            strip_y2 = min(h, int(round(yc + (bottom_wrapped_extra_rows + 0.42) * pitch_y)))
         else:
             is_wrapped = False
             wrapped_line_count = 1
@@ -2022,7 +2503,27 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         if not is_wrapped and not has_alnum_word and ink_w <= int(round(68 * scale_x)):
             short_decoded = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
 
-        if short_decoded:
+        # For multi-row wrapped lines, extract each visual sub-row directly via single-line recognition
+        wrapped_sub_texts: List[str] = []
+        wrapped_sub_confs: List[float] = []
+        if is_wrapped and wrapped_line_count >= 2:
+            for sub_r in range(wrapped_line_count):
+                _, sub_c_ink, sub_txt, sub_conf = _inspect_row_ink(yc + sub_r * pitch_y)
+                if sub_c_ink >= 10 and sub_txt:
+                    wrapped_sub_texts.append(sub_txt)
+                    wrapped_sub_confs.append(sub_conf)
+
+        if wrapped_sub_texts:
+            line_str = indent_prefix + join_wrapped_row_slices(wrapped_sub_texts)
+            avg_conf = float(np.mean(wrapped_sub_confs)) if wrapped_sub_confs else 0.95
+            content_box = {
+                "x": first_ink_abs_x,
+                "y": strip_y1,
+                "width": max(40, ink_w + 10),
+                "height": box_h,
+                "line_number": ln,
+            }
+        elif short_decoded:
             line_str = indent_prefix + short_decoded
             avg_conf = 0.99
             content_box = {
@@ -2145,6 +2646,10 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         "gutter_count": gutter_count,
         "mean_luminance": mean_lum,
         "invalid_editor_frame": False,
+        "character_tracking_mode": bool(character_tracking_mode or bottom_wrapped_extra_rows > 0),
+        "is_wrapped_continuation": is_wrapped_continuation,
+        "leading_wrapped_continuation": leading_wrapped_continuation,
+        "bottom_wrapped_extra_rows": bottom_wrapped_extra_rows,
         "pitch_y": round(pitch_y, 3),
         "lines": lines_list,
         "image_width": w,

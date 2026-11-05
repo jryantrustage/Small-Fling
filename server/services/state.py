@@ -371,7 +371,12 @@ latest_alignment_status: Dict[str, Any] = {
 dismissed_alignment_items: set = set()
 
 
-def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, Any]:
+def sync_alignment_gutter_lines(
+    top_line: int,
+    bottom_line: int,
+    character_tracking_mode: bool = False,
+    anchor_preview: str = "",
+) -> Dict[str, Any]:
     """
     Synchronizes verified gutter top/bottom line numbers into `latest_alignment_status`
     and `latest_telemetry` during active DAG capture loops so the Live Desktop overlay
@@ -383,6 +388,7 @@ def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, An
     if bottom_line and bottom_line > 0:
         latest_telemetry["current_bottom_line"] = int(bottom_line)
         latest_alignment_status["last_line_number"] = int(bottom_line)
+    latest_alignment_status["character_tracking_mode"] = bool(character_tracking_mode)
 
     res_dims = latest_alignment_status.get("resolution") or {}
     w = int(res_dims.get("width") or 1280)
@@ -404,15 +410,22 @@ def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, An
             px[2] = max(px[2], bw)
             fl["box_px"] = px
             fl["box_norm"] = [round(px[0] / w, 4), round(px[1] / h, 4), round(px[2] / w, 4), round(px[3] / h, 4)]
+        fl_label = f"Line {int(top_line)} (Char Track)" if character_tracking_mode else f"Line {int(top_line)}"
+        fl_details = (
+            f"Character tracking active on wrapped Line {int(top_line)}"
+            + (f" • '{anchor_preview[:32]}...'" if anchor_preview else "")
+            if character_tracking_mode
+            else f"Top line number {int(top_line)} detected in gutter"
+        )
         fl.update({
             "name": "First Line Number",
             "color": "green",
             "hex": "#22c55e",
             "passed": True,
             "status": "PASSED",
-            "detected_value": f"Line {int(top_line)}",
-            "expected": "Top line integer >= 1 in gutter",
-            "details": f"Top line number {int(top_line)} detected in gutter",
+            "detected_value": fl_label,
+            "expected": "Top line integer >= 1 in gutter or wrapped character anchor",
+            "details": fl_details,
             "line_number": int(top_line),
         })
 
@@ -430,15 +443,21 @@ def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, An
             px[2] = max(px[2], bw)
             ll["box_px"] = px
             ll["box_norm"] = [round(px[0] / w, 4), round(px[1] / h, 4), round(px[2] / w, 4), round(px[3] / h, 4)]
+        ll_label = f"Line {int(bottom_line)} (Char Track)" if character_tracking_mode else f"Line {int(bottom_line)}"
+        ll_details = (
+            f"Character tracking active at bottom of wrapped Line {int(bottom_line)}"
+            if character_tracking_mode
+            else f"Bottom line number {int(bottom_line)} detected in gutter"
+        )
         ll.update({
             "name": "Last Line Number",
             "color": "red",
             "hex": "#ef4444",
             "passed": True,
             "status": "PASSED",
-            "detected_value": f"Line {int(bottom_line)}",
-            "expected": f"Bottom line integer >= {int(top_line or 1)} in gutter",
-            "details": f"Bottom line number {int(bottom_line)} detected in gutter",
+            "detected_value": ll_label,
+            "expected": f"Bottom line integer >= {int(top_line or 1)} in gutter or wrapped character anchor",
+            "details": ll_details,
             "line_number": int(bottom_line),
         })
 
@@ -454,6 +473,67 @@ def sync_alignment_gutter_lines(top_line: int, bottom_line: int) -> Dict[str, An
 
     latest_alignment_status["timestamp"] = datetime.now().isoformat()
     return latest_alignment_status
+
+
+def append_wrapped_continuation_line(
+    line_number: int,
+    frame_id: str,
+    chunk_text: str,
+    page_index: Optional[int] = None,
+    is_root_chunk: bool = False,
+    **extra_meta: Any,
+) -> Dict[str, Any]:
+    """
+    Idempotently stitches multi-page wrapped continuation text chunks onto `document_lines[line_number]`.
+    Maintains an ordered map of `frame_id -> chunk_text` so re-scanning or retrying any wrapped page
+    updates its chunk in place without duplicating or overwriting earlier pages of the wrapped line.
+    """
+    from ocr_engine import join_wrapped_row_slices
+    ln = int(line_number)
+    fid = str(frame_id or f"page_{page_index or 0}")
+    clean_chunk = str(chunk_text or "")
+
+    existing = document_lines.get(ln)
+    if existing is not None and hasattr(existing, "meta") and not is_root_chunk:
+        meta = dict(existing.meta)
+        chunks_map = dict(meta.get("wrapped_chunks") or {})
+        chunk_order = list(meta.get("wrapped_chunk_order") or [])
+        if not chunks_map:
+            root_fid = str(meta.get("frame_id") or "root")
+            root_txt = str(existing)
+            if root_txt:
+                chunks_map[root_fid] = root_txt
+                chunk_order.append(root_fid)
+    else:
+        meta = {
+            "line_number": ln,
+            "status": "verified",
+            "frame_id": fid,
+            "page_index": page_index,
+        }
+        chunks_map = {}
+        chunk_order = []
+
+    if fid not in chunk_order:
+        chunk_order.append(fid)
+    chunks_map[fid] = clean_chunk
+
+    ordered_texts = [chunks_map[k] for k in chunk_order if k in chunks_map and chunks_map[k]]
+    full_text = join_wrapped_row_slices(ordered_texts) if ordered_texts else clean_chunk
+
+    meta.update(extra_meta)
+    meta.update({
+        "line_number": ln,
+        "text": full_text,
+        "is_wrapped": True,
+        "wrapped_chunks": chunks_map,
+        "wrapped_chunk_order": chunk_order,
+        "wrapped_pages_count": len(chunk_order),
+        "last_continuation_frame_id": fid,
+        "updated_at": datetime.now().isoformat(),
+    })
+    document_lines[ln] = MasterLine(full_text, **meta)
+    return document_lines[ln].to_dict()
 
 orchestration_state: Dict[str, Any] = {
     "status": "IDLE", "last_command": "NONE", "source": "system", "invoked_by": "System ⚙️", "active_step": "START_READY",
@@ -2087,6 +2167,17 @@ def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, 
         if (f.get("bottom_line", 0) or 0) == max_bot:
             frontier_idx = idx
             frontier_frame = f
+            # If subsequent frames are wrapped continuations of max_bot with distinct content, advance frontier_idx
+            for sub_idx in range(idx + 1, len(sorted_f)):
+                sf = sorted_f[sub_idx]
+                if (sf.get("bottom_line", 0) or 0) == max_bot and (
+                    sf.get("is_wrapped_continuation")
+                    or sf.get("character_tracking_mode")
+                    or "_wrap" in str(sf.get("frame_id", ""))
+                ):
+                    if not sf.get("content_hash") or sf.get("content_hash") != frontier_frame.get("content_hash"):
+                        frontier_idx = sub_idx
+                        frontier_frame = sf
             break
 
     if frontier_idx < 0 or frontier_idx == len(sorted_f) - 1:
@@ -2094,15 +2185,27 @@ def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, 
 
     pruned_ids: List[str] = []
     frontier_top = int(frontier_frame.get("top_line", 0) or 0) if frontier_frame else 0
+    frontier_hash = frontier_frame.get("content_hash") if frontier_frame else None
     for f in sorted_f[frontier_idx + 1:]:
         fid = f.get("frame_id")
         if not fid or fid == exclude_frame_id:
             continue
         f_bot = int(f.get("bottom_line", 0) or 0)
         f_top = int(f.get("top_line", 0) or 0)
+        is_wrap_cont = bool(
+            f.get("is_wrapped_continuation")
+            or f.get("character_tracking_mode")
+            or "_wrap" in str(fid)
+            or (f_top > 0 and f_top == f_bot)
+        )
         # If a frame after the frontier regressed more than 10 lines behind max_bot
         # OR is an exact duplicate retry of the frontier frame (e.g. repeated EOF captures), prune it
-        if f_bot < max_bot - 10 or (f_bot == max_bot and frontier_top > 0 and f_top == frontier_top):
+        if f_bot < max_bot - 10 or (
+            f_bot == max_bot
+            and frontier_top > 0
+            and f_top == frontier_top
+            and (not is_wrap_cont or (frontier_hash and f.get("content_hash") == frontier_hash))
+        ):
             pruned_ids.append(fid)
             captured_frames.pop(fid, None)
             try:

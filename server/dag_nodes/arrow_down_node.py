@@ -98,20 +98,64 @@ class ArrowDownPagerNode(BaseDagNode):
         else:
             padding = int(cfg.get("scroll_padding_lines", 4))
 
+        f_ocr_node = state.dag_state["nodes"].get("frame_ocr", {})
+        char_track_mode = bool(
+            payload.get("character_tracking_mode")
+            if payload.get("character_tracking_mode") is not None
+            else (
+                f_ocr_node.get("character_tracking_mode")
+                or state.orchestration_state.get("character_tracking_mode", False)
+            )
+        )
+        char_track_line = int(
+            payload.get("character_tracking_line")
+            or f_ocr_node.get("character_tracking_line")
+            or state.orchestration_state.get("character_tracking_line")
+            or prev_bottom
+            or cur_top
+            or 1
+        )
+        bottom_text_anchor = str(
+            payload.get("bottom_text_anchor")
+            or f_ocr_node.get("bottom_text_anchor")
+            or state.orchestration_state.get("bottom_text_anchor")
+            or ""
+        )
+        target_top_text_anchor = str(
+            payload.get("target_top_text_anchor")
+            or f_ocr_node.get("target_top_text_anchor")
+            or state.orchestration_state.get("target_top_text_anchor")
+            or ""
+        )
+        bottom_anchor_window = (
+            payload.get("bottom_anchor_window")
+            or f_ocr_node.get("bottom_anchor_window")
+            or state.orchestration_state.get("bottom_anchor_window")
+            or []
+        )
+
         needed_scroll = max(1, target_top - cur_top)
         if not is_mock:
-            needed_scroll = max(24 if target_top == prev_bottom + 1 else 1, needed_scroll)
+            if char_track_mode:
+                # Step 20 visual rows so previous bottom_text_anchor (r=21) lands at r=1
+                # and target_top_text_anchor (r=22 = bottom_anchor + 1) lands at r=2 for 1-to-1 DownArrow trim
+                needed_scroll = 20
+            else:
+                needed_scroll = max(20 if target_top == prev_bottom + 1 else 1, min(22, needed_scroll))
 
-        if padding > 0:
+        if char_track_mode:
+            calibrated_init = 41 if (cur_top == 1 and cursor_line <= 1) else 20
+            calibrated_step = 20
+        elif padding > 0:
             calibrated_init = (needed_scroll + padding) * 2
-            calibrated_step = needed_scroll + padding
+            calibrated_step = min(22, needed_scroll)
         else:
             cursor_travel = max(0, prev_bottom - cursor_line) if (cur_top == 1 or cursor_line <= cur_top) else 0
             viewport_scroll = needed_scroll
             calibrated_init = cursor_travel + viewport_scroll
             calibrated_step = viewport_scroll
 
-        if cur_top == 1 or cursor_line <= cur_top:
+        if cur_top == 1 or (not char_track_mode and cursor_line <= cur_top):
             calibrated_stride = calibrated_init
         else:
             calibrated_stride = calibrated_step
@@ -174,12 +218,15 @@ class ArrowDownPagerNode(BaseDagNode):
         # Only perform an open-loop initial step if running inside a fresh fast_loop cycle AND
         # the viewport has not already been moved toward target_top by an earlier attempt/manual click.
         prev_n6 = state.dag_state["nodes"].get("arrow_down", {})
-        already_moved = (
-            not payload.get("fast_loop")
-            or prev_n6.get("status") == "error"
-            or state.latest_telemetry.get("current_top_line") == target_top
-            or (prev_n6.get("new_top_line") and prev_n6.get("new_top_line") != cur_top)
-        )
+        if char_track_mode and payload.get("fast_loop") and prev_n6.get("status") != "error":
+            already_moved = False
+        else:
+            already_moved = (
+                not payload.get("fast_loop")
+                or prev_n6.get("status") == "error"
+                or state.latest_telemetry.get("current_top_line") == target_top
+                or (prev_n6.get("new_top_line") and prev_n6.get("new_top_line") != cur_top)
+            )
 
         total_arrows_pressed = 0
         if not already_moved and dispatch_meth.lower() not in ("page_up_down", "pagedown", "pageup"):
@@ -201,9 +248,14 @@ class ArrowDownPagerNode(BaseDagNode):
             current_top=cur_top if (not already_moved and dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup")) else None,
             current_bottom=prev_bottom if (not already_moved and dispatch_meth.lower() in ("page_up_down", "pagedown", "pageup")) else None,
             lines_per_page=visible_span,
-            use_page_keys=use_page_keys,
+            use_page_keys=False if char_track_mode else use_page_keys,
             max_attempts=max_attempts,
-            caller_node="arrow_down"
+            caller_node="arrow_down",
+            character_tracking_mode=char_track_mode,
+            character_tracking_line=char_track_line,
+            bottom_text_anchor=bottom_text_anchor,
+            target_top_text_anchor=target_top_text_anchor,
+            bottom_anchor_window=bottom_anchor_window,
         )
 
         snap_after = nav_res.get("snapshot_bytes")
@@ -218,6 +270,7 @@ class ArrowDownPagerNode(BaseDagNode):
                 pass
 
         matched = bool(nav_res.get("reached", False))
+        nav_char_mode = bool(nav_res.get("character_tracking_mode", False))
         eof_reached = bool(nav_res.get("eof_reached", False))
         offline_overlay_detected = bool(
             nav_res.get("offline_overlay_detected", False)
@@ -241,7 +294,7 @@ class ArrowDownPagerNode(BaseDagNode):
         # If previous bottom or actual bottom is at total_lines OR 1..4 lines short (e.g. 32,878 vs 32,881)
         # while the 'Offline' markdown editor overlay is covering the last 3 lines, the scan is complete!
         effective_bot = max(int(prev_bottom or 0), int(actual_bot or 0))
-        if not eof_reached and target_total_lines > 0 and effective_bot >= target_total_lines - 4:
+        if not eof_reached and not nav_char_mode and target_total_lines > 0 and effective_bot >= target_total_lines - 4:
             from ocr_engine import detect_offline_editor_overlay, is_eof_reached_with_offline_awareness
             if not offline_overlay_detected and snap_after:
                 off_res = detect_offline_editor_overlay(snap_after, use_ocr=True)
@@ -295,7 +348,12 @@ class ArrowDownPagerNode(BaseDagNode):
             })
             raise RuntimeError(error_msg)
 
-        settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top) else target_top
+        if nav_char_mode:
+            settled_top = int(actual_top or char_track_line or prev_bottom)
+            effective_bot = int(actual_bot or settled_top)
+        else:
+            settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top + 4) else target_top
+
         if eof_reached and effective_bot > 0:
             reconciled = state.reconcile_eof_total_lines_and_complete_project(
                 actual_eof_line=effective_bot,
@@ -307,15 +365,23 @@ class ArrowDownPagerNode(BaseDagNode):
         state.orchestration_state["cursor_line"] = effective_bot if eof_reached else new_cursor_line
         state.orchestration_state["last_arrow_count"] = total_arrows_pressed
         state.orchestration_state["next_target_top"] = settled_top
+        state.orchestration_state["character_tracking_mode"] = nav_char_mode
+        if nav_char_mode:
+            state.orchestration_state["character_tracking_line"] = settled_top
         state.orchestration_state["eof_reached"] = eof_reached
         state.orchestration_state["offline_overlay_detected"] = offline_overlay_detected
         state.latest_telemetry["current_top_line"] = settled_top
         if eof_reached and effective_bot > 0:
             state.latest_telemetry["current_bottom_line"] = effective_bot
             blackboard.bottom_line = effective_bot
+        elif nav_char_mode:
+            state.latest_telemetry["current_bottom_line"] = effective_bot
+            blackboard.bottom_line = effective_bot
         state.sync_alignment_gutter_lines(
             settled_top,
             effective_bot if (effective_bot and effective_bot >= settled_top) else state.latest_telemetry.get("current_bottom_line", 0),
+            character_tracking_mode=nav_char_mode,
+            anchor_preview=str(nav_res.get("matched_anchor_text") or ""),
         )
         await state.ws_manager.broadcast({
             "type": "alignment_status",
@@ -336,6 +402,17 @@ class ArrowDownPagerNode(BaseDagNode):
                     else "(100% EOF reached) ✔"
                 )
             )
+        elif nav_char_mode:
+            anchor_prev = str(nav_res.get("matched_anchor_text") or "")[:28]
+            insight_str = (
+                f"Character Tracking Mode: stepped {total_arrows_pressed} arrows • "
+                f"wrapped Line {settled_top} aligned at top row ('{anchor_prev}...') ✔"
+            )
+        elif nav_res.get("transitioned_to_gutter"):
+            insight_str = (
+                f"Transitioned from Character Tracking → Gutter Mode at Line {settled_top} "
+                f"({total_arrows_pressed} arrows) ✔"
+            )
         else:
             insight_str = f"Stepped {total_arrows_pressed} down/up arrows: target top Line {settled_top} verified ✔"
 
@@ -347,6 +424,7 @@ class ArrowDownPagerNode(BaseDagNode):
             "target_top_line": settled_top,
             "target_top": settled_top,
             "new_top_line": settled_top,
+            "character_tracking_mode": nav_char_mode,
             "reached": True,
             "advanced": True,
             "eof_reached": eof_reached,
@@ -362,6 +440,7 @@ class ArrowDownPagerNode(BaseDagNode):
                 "target_top_line": settled_top,
                 "target_top": settled_top,
                 "expected_top": settled_top,
+                "character_tracking_mode": nav_char_mode,
                 "eof_reached": eof_reached,
             })
 
@@ -376,6 +455,7 @@ class ArrowDownPagerNode(BaseDagNode):
                 "target_top_line": settled_top,
                 "target_top": settled_top,
                 "new_top_line": settled_top,
+                "character_tracking_mode": nav_char_mode,
                 "cursor_line": effective_bot if eof_reached else new_cursor_line,
                 "reached": True,
                 "advanced": True,

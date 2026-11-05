@@ -350,13 +350,14 @@ def render_row_anchored_visual_prompt(
 
     rgb = np.array(pil_img.convert("RGB"))
     h, w = rgb.shape[:2]
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    scale_x = dpi_scale
+    scale_y = dpi_scale
 
     if ground_truth_lines:
         canvas = rgb.copy()
-        gutter_x_end = int(round(92 * scale_x))
-        code_x_start = int(round(94 * scale_x))
+        gutter_x_end = int(round(99 * scale_x))
+        code_x_start = int(round(101 * scale_x))
         code_x_end = max(code_x_start + 1, w - 24)
         font_scale = max(0.35, 0.42 * scale_y)
 
@@ -794,8 +795,9 @@ def rescan_lines_on_image_sync(
         raise FileNotFoundError(f"Image not found: {image_path}")
 
     h, w = img.shape[:2]
-    scale_x = w / 1920.0
-    scale_y = h / 1080.0
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    scale_x = dpi_scale
+    scale_y = dpi_scale
     ocr = get_rapid_ocr()
     if ocr is None:
         raise RuntimeError("RapidOCR engine is not available")
@@ -809,12 +811,12 @@ def rescan_lines_on_image_sync(
     }
     rescanned_lns = []
 
-    x_code_start = int(round(94 * scale_x))
+    x_code_start = int(round(101 * scale_x))
     x_code_end = max(x_code_start + 1, w - 24)
     char_pitch_x = 11.4 * scale_x
     sep_end_col = max(6, int(round(14 * scale_x)))
     bleed_end_col = max(4, int(round(5 * scale_x)))
-    from ocr_engine import decode_short_code_glyphs, verify_and_repair_ocr_line_positions
+    from ocr_engine import decode_short_code_glyphs, verify_and_repair_ocr_line_positions, join_wrapped_row_slices
 
     for ln in line_numbers:
         target_line = lines_map.get(ln)
@@ -891,7 +893,36 @@ def rescan_lines_on_image_sync(
         indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
 
         new_text = ""
-        if not is_wrapped and ink_w <= int(round(68 * scale_x)):
+        if is_wrapped or (y2 - y1) >= int(round(40 * scale_y)):
+            pitch_est = 27.0 * scale_y
+            n_sub = max(2, int(round((y2 - y1) / max(1.0, pitch_est))))
+            sub_texts: List[str] = []
+            for sub_r in range(n_sub):
+                sy1 = max(y1, int(round(y1 + sub_r * pitch_est)))
+                sy2 = min(y2, int(round(y1 + (sub_r + 1) * pitch_est)))
+                if sy2 <= sy1 + 4:
+                    continue
+                sub_strip = img[sy1:sy2, x_code_start:x_code_end]
+                if sub_strip.size == 0:
+                    continue
+                sg = cv2.cvtColor(sub_strip, cv2.COLOR_BGR2GRAY) if sub_strip.ndim == 3 else sub_strip
+                sfg = np.abs(sg.astype(np.int16) - float(np.median(sg))) > 18
+                if int(np.count_nonzero(sfg)) >= 10:
+                    _, xs_s = np.where(sfg)
+                    if len(xs_s) > 0:
+                        sx1 = max(0, int(xs_s.min()) - 6)
+                        sx2 = min(sub_strip.shape[1], int(xs_s.max()) + 8)
+                        stight = sub_strip[:, sx1:sx2]
+                        if stight.size > 0:
+                            try:
+                                s_res, _ = ocr(stight, use_det=False, use_cls=False, use_rec=True)
+                                if s_res and s_res[0] and s_res[0][1]:
+                                    sub_texts.append(str(s_res[0][1]).strip())
+                            except Exception:
+                                pass
+            if sub_texts:
+                new_text = indent_prefix + join_wrapped_row_slices(sub_texts)
+        elif not is_wrapped and ink_w <= int(round(68 * scale_x)):
             short_t = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
             if short_t:
                 new_text = indent_prefix + short_t

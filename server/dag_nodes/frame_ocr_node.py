@@ -117,6 +117,10 @@ class FrameOcrNode(BaseDagNode):
                     expected_top=expected_top
                 )
             # Recover ONLY if there is a gap (t_det > expected_top) or if the viewport jumped backward (> 8 lines before expected_top).
+            char_track_active = bool(
+                state.orchestration_state.get("character_tracking_mode")
+                or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
+            )
             # If expected_top - 8 <= t_det <= expected_top and b_det >= expected_top, it is a contiguous zero-gap overlap!
             is_contiguous = (
                 t_det > 0
@@ -125,6 +129,7 @@ class FrameOcrNode(BaseDagNode):
             )
             if (
                 not is_mock
+                and not char_track_active
                 and cfg.get("recover_gutter_range", True)
                 and expected_top > 0
                 and t_det > 0
@@ -156,7 +161,7 @@ class FrameOcrNode(BaseDagNode):
                     b_det = int(nav_res["actual_bottom"])
 
             top_ln = t_det if t_det > 0 else expected_top
-            bot_ln = b_det if (b_det >= top_ln and (b_det - top_ln) <= 75) else (top_ln + lpp - 1)
+            bot_ln = b_det if (b_det >= top_ln and (b_det - top_ln) <= 75) else (top_ln if char_track_active else (top_ln + lpp - 1))
             if not lines_detected:
                 lines_detected = [
                     {
@@ -172,6 +177,10 @@ class FrameOcrNode(BaseDagNode):
             scan_res = {"top_line": top_ln, "bottom_line": bot_ln, "lines": lines_detected}
         else:
             from routers.orchestration import recover_gutter_bounds_with_healing
+            char_track_active = bool(
+                state.orchestration_state.get("character_tracking_mode")
+                or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
+            )
             top_ln, bot_ln, lines_detected, heal_meta = await recover_gutter_bounds_with_healing(
                 serial=serial,
                 disp_id=disp_id,
@@ -180,8 +189,11 @@ class FrameOcrNode(BaseDagNode):
                 node_id="frame_ocr",
                 expected_top=expected_top
             )
+            if heal_meta.get("character_tracking_mode"):
+                char_track_active = True
             if (
                 not is_mock
+                and not char_track_active
                 and cfg.get("recover_gutter_range", True)
                 and expected_top > 0
                 and top_ln > 0
@@ -210,7 +222,7 @@ class FrameOcrNode(BaseDagNode):
             if top_ln <= 0:
                 top_ln = expected_top
             if bot_ln < top_ln or (bot_ln - top_ln) > 75:
-                bot_ln = top_ln + lpp - 1
+                bot_ln = top_ln if char_track_active else (top_ln + lpp - 1)
 
             if not lines_detected or not any(bool((l.get("text") or "").strip()) for l in lines_detected):
                 full_scan = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=top_ln, live_capture=True)
@@ -238,25 +250,56 @@ class FrameOcrNode(BaseDagNode):
             if abs(n4_min - top_ln) <= 2 and abs(n4_max - bot_ln) <= 2:
                 lines_detected = [dict(l) for l in n4_lines]
 
+        ws_ver: Dict[str, Any] = {}
         gt_lines_for_ver = None
         bboxes_for_ver = dict(n4_bboxes) if n4_bboxes else {}
-        if not lines_detected or not all(l.get("row_slice_text") is not None for l in lines_detected):
-            try:
-                ws_ver = await asyncio.to_thread(worker_scan_image, str(temp_calib))
-                gt_lines_for_ver = ws_ver.get("lines", [])
-                if not bboxes_for_ver:
-                    bboxes_for_ver = ws_ver.get("bounding_boxes", {})
-                if not lines_detected or not any((l.get("text") or "").strip() for l in lines_detected):
-                    lines_detected = [dict(l) for l in gt_lines_for_ver]
-            except Exception as ws_e:
-                print(f"[FrameOcrNode] worker_scan_image verification note: {ws_e}")
+        try:
+            ws_ver = await asyncio.to_thread(worker_scan_image, str(temp_calib))
+            gt_lines_for_ver = ws_ver.get("lines", [])
+            if not bboxes_for_ver:
+                bboxes_for_ver = ws_ver.get("bounding_boxes", {})
+            if ws_ver.get("is_wrapped_continuation"):
+                tracked_ln = int(
+                    state.orchestration_state.get("character_tracking_line")
+                    or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
+                    or top_ln
+                    or max(1, expected_top - 1)
+                )
+                top_ln = tracked_ln
+                bot_ln = tracked_ln
+                for gl in gt_lines_for_ver:
+                    gl["line_number"] = tracked_ln
+                    gl["gutter_number"] = tracked_ln
+                lines_detected = [dict(gl) for gl in gt_lines_for_ver]
+            elif ws_ver.get("gutter_count", 0) >= 1 and ws_ver.get("top_line", 0) > 0 and ws_ver.get("bottom_line", 0) >= ws_ver.get("top_line", 0):
+                # Adopt worker_scan_image's blank-gutter-aware top_line and bottom_line so wrapped rows never fabricate fake line numbers
+                top_ln = int(ws_ver["top_line"])
+                bot_ln = int(ws_ver["bottom_line"])
+                gt_by_ln = {int(gl["line_number"]): gl for gl in gt_lines_for_ver if gl.get("line_number")}
+                filtered_lines: List[Dict[str, Any]] = []
+                for l_item in lines_detected:
+                    ln_i = int(l_item.get("line_number") or 0)
+                    if top_ln <= ln_i <= bot_ln:
+                        if ln_i in gt_by_ln and gt_by_ln[ln_i].get("is_wrapped") and gt_by_ln[ln_i].get("text"):
+                            filtered_lines.append(dict(gt_by_ln[ln_i]))
+                        else:
+                            filtered_lines.append(l_item)
+                lines_detected = filtered_lines if filtered_lines else [dict(gl) for gl in gt_lines_for_ver]
+            elif not lines_detected or not any((l.get("text") or "").strip() for l in lines_detected):
+                lines_detected = [dict(l) for l in gt_lines_for_ver]
+        except Exception as ws_e:
+            print(f"[FrameOcrNode] worker_scan_image verification note: {ws_e}")
 
         ver_report = verify_and_repair_ocr_line_positions(lines_detected, gt_lines_for_ver, bboxes_for_ver)
         lines_detected = ver_report["lines"]
         bboxes_for_ver = ver_report["bounding_boxes"]
+        scan_res["top_line"] = top_ln
+        scan_res["bottom_line"] = bot_ln
         scan_res["lines"] = lines_detected
         scan_res["bounding_boxes"] = bboxes_for_ver
         scan_res["line_position_verification"] = ver_report
+
+        is_wrap_continuation_page = bool(ws_ver.get("is_wrapped_continuation") or (top_ln == bot_ln and ws_ver.get("gutter_count", 0) == 0))
 
         # Resolve logical page index and check duplicate content against prior frames
         is_duplicate = False
@@ -264,7 +307,7 @@ class FrameOcrNode(BaseDagNode):
 
         if not other_frames:
             pidx = 1
-        elif top_ln == 1 or not any(f.get("page_index") == 1 for f in other_frames):
+        elif (top_ln == 1 and not is_wrap_continuation_page) or not any(f.get("page_index") == 1 for f in other_frames):
             pidx = 1
             p1_frames = [f for f in other_frames if f.get("page_index") == 1]
             if p1_frames:
@@ -276,7 +319,12 @@ class FrameOcrNode(BaseDagNode):
                 is_duplicate = True
                 duplicate_fid = last_f["frame_id"]
                 pidx = last_f.get("page_index", len(other_frames))
-            elif last_f.get("top_line") == top_ln and last_f.get("bottom_line") == bot_ln:
+            elif (
+                not is_wrap_continuation_page
+                and top_ln != bot_ln
+                and last_f.get("top_line") == top_ln
+                and last_f.get("bottom_line") == bot_ln
+            ):
                 is_duplicate = True
                 duplicate_fid = last_f["frame_id"]
                 pidx = last_f.get("page_index", len(other_frames))
@@ -304,10 +352,11 @@ class FrameOcrNode(BaseDagNode):
                     "content_hash": content_hash,
                     "status": "processed",
                     "extracted_line_count": len(lines_detected) if lines_detected else (bot_ln - top_ln + 1),
-                    "arrow_count": arrow_count
+                    "arrow_count": arrow_count,
+                    "is_wrapped_continuation": is_wrap_continuation_page,
                 })
                 frame_info = state.captured_frames[fid]
-            elif old_rec.get("top_line") != top_ln or old_rec.get("bottom_line") != bot_ln:
+            elif old_rec.get("top_line") != top_ln or old_rec.get("bottom_line") != bot_ln or (is_wrap_continuation_page and "_wrap" not in cur_acquire_fid):
                 # Bounds were refined by Node 5; replace the Node 3 record so we never leave two rows or mismatched filenames
                 old_fn = old_rec.get("filename")
                 created_iso = old_rec.get("created_at") or datetime.now().isoformat()
@@ -316,7 +365,12 @@ class FrameOcrNode(BaseDagNode):
                     db.delete_frame(cur_acquire_fid)
                 except Exception:
                     pass
-                fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
+                if is_wrap_continuation_page and top_ln > 0:
+                    fid = f"frame_{top_ln:05d}_{bot_ln:05d}_wrap{pidx:04d}_{now_str}"
+                elif top_ln > 0 and bot_ln > 0:
+                    fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
+                else:
+                    fid = f"frame_p{pidx:03d}_{now_str}"
                 fn = f"{fid}.png"
                 frame_path = state.FRAMES_DIR / fn
                 with open(frame_path, "wb") as f:
@@ -339,7 +393,8 @@ class FrameOcrNode(BaseDagNode):
                     "created_at": created_iso,
                     "extracted_line_count": len(lines_detected) if lines_detected else (bot_ln - top_ln + 1),
                     "model_used": cfg.get("engine", "RapidOCR"),
-                    "arrow_count": arrow_count
+                    "arrow_count": arrow_count,
+                    "is_wrapped_continuation": is_wrap_continuation_page,
                 }
                 state.captured_frames[fid] = frame_info
             else:
@@ -351,7 +406,8 @@ class FrameOcrNode(BaseDagNode):
                     "content_hash": content_hash,
                     "status": "processed",
                     "extracted_line_count": len(lines_detected) if lines_detected else (bot_ln - top_ln + 1),
-                    "arrow_count": arrow_count
+                    "arrow_count": arrow_count,
+                    "is_wrapped_continuation": is_wrap_continuation_page,
                 })
                 frame_info = state.captured_frames[fid]
         elif is_duplicate and duplicate_fid in state.captured_frames:
@@ -363,11 +419,17 @@ class FrameOcrNode(BaseDagNode):
                 "content_hash": content_hash,
                 "status": "processed",
                 "extracted_line_count": len(lines_detected) if lines_detected else (bot_ln - top_ln + 1),
-                "arrow_count": arrow_count
+                "arrow_count": arrow_count,
+                "is_wrapped_continuation": is_wrap_continuation_page,
             })
             frame_info = state.captured_frames[fid]
         else:
-            fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}" if (top_ln > 0 and bot_ln > 0) else f"frame_p{pidx:03d}_{now_str}"
+            if is_wrap_continuation_page and top_ln > 0:
+                fid = f"frame_{top_ln:05d}_{bot_ln:05d}_wrap{pidx:04d}_{now_str}"
+            elif top_ln > 0 and bot_ln > 0:
+                fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
+            else:
+                fid = f"frame_p{pidx:03d}_{now_str}"
             fn = f"{fid}.png"
             frame_path = state.FRAMES_DIR / fn
             with open(frame_path, "wb") as f:
@@ -386,7 +448,8 @@ class FrameOcrNode(BaseDagNode):
                 "created_at": datetime.now().isoformat(),
                 "extracted_line_count": len(lines_detected) if lines_detected else (bot_ln - top_ln + 1),
                 "model_used": cfg.get("engine", "RapidOCR"),
-                "arrow_count": arrow_count
+                "arrow_count": arrow_count,
+                "is_wrapped_continuation": is_wrap_continuation_page,
             }
             state.captured_frames[fid] = frame_info
         state.orchestration_state["last_acquired_frame_id"] = fid
@@ -439,6 +502,17 @@ class FrameOcrNode(BaseDagNode):
         except Exception:
             pass
 
+        # If this page started with wrapped continuation rows above first_ln, append them to (first_ln - 1)
+        lead_cont = ws_ver.get("leading_wrapped_continuation")
+        if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+            state.append_wrapped_continuation_line(
+                int(lead_cont["line_number"]),
+                fid,
+                lead_cont["text"],
+                page_index=pidx,
+                is_root_chunk=False,
+            )
+
         # Populate document master lines if text was detected (overwriting any shifted line when shift_repaired=True)
         for item in lines_detected:
             ln = item.get("line_number")
@@ -447,6 +521,26 @@ class FrameOcrNode(BaseDagNode):
                 raw_txt = ocr_svc.sanitize_line_text(ln, raw_txt)
                 if item.get("blank_locked"):
                     raw_txt = ""
+                if is_wrap_continuation_page or item.get("is_wrapped_continuation"):
+                    state.append_wrapped_continuation_line(
+                        ln,
+                        fid,
+                        raw_txt,
+                        page_index=pidx,
+                        is_root_chunk=False,
+                        confidence=item.get("confidence", 0.99),
+                    )
+                    continue
+                if item.get("is_wrapped"):
+                    state.append_wrapped_continuation_line(
+                        ln,
+                        fid,
+                        raw_txt,
+                        page_index=pidx,
+                        is_root_chunk=True,
+                        confidence=item.get("confidence", 0.99),
+                    )
+                    continue
                 if ln in state.document_lines and not item.get("shift_repaired") and not item.get("position_verified"):
                     existing = state.document_lines[ln]
                     ex_txt = (existing.get("text") if isinstance(existing, dict) else str(existing)).strip()
@@ -470,13 +564,19 @@ class FrameOcrNode(BaseDagNode):
 
         # Detect line wrap state and 'Offline' editor overlay
         offline_overlay_detected = False
+        target_top_anchor_text = ""
+        bottom_anchor_window: List[str] = []
+        is_bottom_wrapped = False
         try:
             from ocr_engine import detect_offline_editor_overlay, _last_gutter_offline_info
             img_wrap = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
             wrap_info = detect_line_wrap_state(img_wrap, dpi_factor=dpi_factor)
             bottom_anchor_text = wrap_info.get("bottom_text_anchor", "")
             top_anchor_text = wrap_info.get("top_text_anchor", "")
+            target_top_anchor_text = wrap_info.get("target_top_text_anchor", "")
+            bottom_anchor_window = wrap_info.get("bottom_anchor_window", [])
             is_wrapped_page = wrap_info.get("is_wrapped_page", False)
+            is_bottom_wrapped = bool(wrap_info.get("is_bottom_wrapped", False))
             blackboard.latest_frame_bgr = img_wrap
             offline_overlay_detected = bool(_last_gutter_offline_info.get("detected"))
             if not offline_overlay_detected and img_wrap is not None:
@@ -487,14 +587,27 @@ class FrameOcrNode(BaseDagNode):
             top_anchor_text = ""
             is_wrapped_page = False
 
+        next_char_track_mode = bool(is_bottom_wrapped or is_wrap_continuation_page)
+        next_char_track_line = bot_ln if next_char_track_mode else 0
+        frame_info["character_tracking_mode"] = next_char_track_mode
+
         state.orchestration_state["bottom_text_anchor"] = bottom_anchor_text
         state.orchestration_state["top_text_anchor"] = top_anchor_text
+        state.orchestration_state["target_top_text_anchor"] = target_top_anchor_text
+        state.orchestration_state["bottom_anchor_window"] = bottom_anchor_window
         state.orchestration_state["is_wrapped_page"] = is_wrapped_page
+        state.orchestration_state["character_tracking_mode"] = next_char_track_mode
+        state.orchestration_state["character_tracking_line"] = next_char_track_line
         state.orchestration_state["offline_overlay_detected"] = offline_overlay_detected
 
         target_top = bot_ln + 1 if (bot_ln > 0 and bot_ln >= top_ln) else ((top_ln or expected_top or 1) + lpp)
         state.orchestration_state["next_target_top"] = target_top
-        state.sync_alignment_gutter_lines(top_ln, bot_ln)
+        state.sync_alignment_gutter_lines(
+            top_ln,
+            bot_ln,
+            character_tracking_mode=next_char_track_mode,
+            anchor_preview=bottom_anchor_text,
+        )
         state.latest_telemetry["next_target_top"] = target_top
         state.latest_telemetry["current_page"] = pidx
         blackboard.top_line = top_ln
@@ -513,8 +626,12 @@ class FrameOcrNode(BaseDagNode):
                 "target_top_line": target_top,
                 "target_top": target_top,
                 "prev_bottom": bot_ln,
-                "arrow_count": max(1, target_top - (top_ln or 1)),
+                "arrow_count": 20 if next_char_track_mode else max(1, target_top - (top_ln or 1)),
+                "character_tracking_mode": next_char_track_mode,
+                "character_tracking_line": next_char_track_line,
                 "bottom_text_anchor": bottom_anchor_text,
+                "target_top_text_anchor": target_top_anchor_text,
+                "bottom_anchor_window": bottom_anchor_window,
                 "is_wrapped_page": is_wrapped_page
             })
         if "verification_trigger" in state.dag_state["nodes"]:
@@ -522,6 +639,7 @@ class FrameOcrNode(BaseDagNode):
                 "target_top_line": target_top,
                 "target_top": target_top,
                 "expected_top": target_top,
+                "character_tracking_mode": next_char_track_mode,
                 "bottom_text_anchor": bottom_anchor_text
             })
 
@@ -533,12 +651,18 @@ class FrameOcrNode(BaseDagNode):
             if rep_cnt > 0
             else f"Pos Verified {ver_cnt}/{ver_cnt} lines (0 shifted)"
         )
+        mode_tag = f" [CharTrack Ln {bot_ln}]" if next_char_track_mode else ""
 
         state.dag_state["nodes"]["frame_ocr"].update({
             "status": "completed",
             "top_line": top_ln,
             "bottom_line": bot_ln,
             "target_top_line": target_top,
+            "character_tracking_mode": next_char_track_mode,
+            "character_tracking_line": next_char_track_line,
+            "bottom_text_anchor": bottom_anchor_text,
+            "target_top_text_anchor": target_top_anchor_text,
+            "bottom_anchor_window": bottom_anchor_window,
             "extracted_line_count": len(lines_detected) if lines_detected else lpp,
             "position_verified": True,
             "verified_lines_count": ver_cnt,
@@ -547,7 +671,7 @@ class FrameOcrNode(BaseDagNode):
             "line_position_verification": ver_report,
             "frame_id": fid,
             "evaluator": "Gutter & Line Position Evaluator",
-            "telemetry_insight": f"Page {pidx} (Ln {top_ln} → {bot_ln}) • {pos_summary} ✔ Next: Ln {target_top}",
+            "telemetry_insight": f"Page {pidx} (Ln {top_ln} → {bot_ln}){mode_tag} • {pos_summary} ✔ Next: Ln {target_top}",
             "error": None
         })
 

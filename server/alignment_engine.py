@@ -580,6 +580,27 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                 last_line_num = first_line_num + 7
                 last_line_box = [first_line_box[0], int(h * 0.85), first_line_box[2], first_line_box[3]]
 
+    char_track_aligned = False
+    if first_line_num <= 0 and dark_mode_active:
+        try:
+            from ocr_engine import detect_line_wrap_state
+            from services import state as _st
+            wrap_st = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=[])
+            if wrap_st.get("is_wrapped_page") and wrap_st.get("content_row_count", 0) >= 3:
+                tracked_ln = int(
+                    _st.orchestration_state.get("character_tracking_line")
+                    or _st.latest_telemetry.get("current_bottom_line")
+                    or _st.latest_telemetry.get("current_top_line")
+                    or 1
+                )
+                first_line_num = tracked_ln
+                last_line_num = tracked_ln
+                first_line_box = [int(38 * dpi_scale), int(300 * dpi_scale), int(64 * dpi_scale), int(22 * dpi_scale)]
+                last_line_box = [int(38 * dpi_scale), int(866 * dpi_scale), int(64 * dpi_scale), int(22 * dpi_scale)]
+                char_track_aligned = True
+        except Exception:
+            pass
+
     first_line_detected = (first_line_num > 0)
     last_line_detected = (last_line_num > 0)
 
@@ -658,9 +679,9 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "hex": "#22c55e",
             "passed": bool(first_line_detected),
             "status": "PASSED" if first_line_detected else "FAILED",
-            "detected_value": f"Line {first_line_num}" if first_line_detected else "None detected",
-            "expected": "Top line integer >= 1 in gutter",
-            "details": f"Top line number {first_line_num} detected in gutter" if first_line_detected else "Top line number not found in gutter",
+            "detected_value": (f"Line {first_line_num} (Char Track)" if char_track_aligned else f"Line {first_line_num}") if first_line_detected else "None detected",
+            "expected": "Top line integer >= 1 in gutter or wrapped character anchor",
+            "details": (f"Character tracking active on wrapped Line {first_line_num}" if char_track_aligned else f"Top line number {first_line_num} detected in gutter") if first_line_detected else "Top line number not found in gutter",
             "line_number": int(first_line_num),
             "box_px": to_clean_box(first_line_box),
             "box_norm": to_norm(first_line_box)
@@ -671,9 +692,9 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "hex": "#ef4444",
             "passed": bool(last_line_detected),
             "status": "PASSED" if last_line_detected else "FAILED",
-            "detected_value": f"Line {last_line_num}" if last_line_detected else "None detected",
-            "expected": f"Bottom line integer >= {first_line_num or 1} in gutter",
-            "details": f"Bottom line number {last_line_num} detected in gutter" if last_line_detected else "Bottom line number not found in gutter",
+            "detected_value": (f"Line {last_line_num} (Char Track)" if char_track_aligned else f"Line {last_line_num}") if last_line_detected else "None detected",
+            "expected": f"Bottom line integer >= {first_line_num or 1} in gutter or wrapped character anchor",
+            "details": (f"Character tracking active at bottom of wrapped Line {last_line_num}" if char_track_aligned else f"Bottom line number {last_line_num} detected in gutter") if last_line_detected else "Bottom line number not found in gutter",
             "line_number": int(last_line_num),
             "box_px": to_clean_box(last_line_box),
             "box_norm": to_norm(last_line_box)

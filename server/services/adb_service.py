@@ -2535,7 +2535,12 @@ async def navigate_to_target_top_line(
     lines_per_page: Optional[int] = None,
     use_page_keys: bool = True,
     max_attempts: int = 12,
-    caller_node: str = "arrow_down"
+    caller_node: str = "arrow_down",
+    character_tracking_mode: Optional[bool] = None,
+    character_tracking_line: Optional[int] = None,
+    bottom_text_anchor: str = "",
+    target_top_text_anchor: str = "",
+    bottom_anchor_window: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Deterministically navigates the markdown editor viewport from ANY current gutter top/bottom range
@@ -2547,6 +2552,10 @@ async def navigate_to_target_top_line(
          dispatches batched DPAD_DOWN (keycode 20) or DPAD_UP (keycode 19) micro-trimming,
          automatically compensating for caret viewport traversal (`page_span - 1 + padding`) if a direction
          change or top/bottom caret unpinning occurs.
+      4. When `character_tracking_mode` is active (a long wrapped line has no gutter numbers at the
+         bottom of the page or across entire screens), locates `bottom_text_anchor + 1` (`target_top_text_anchor`)
+         via row-slice OCR (`locate_character_anchor_row`) and uses Up/Down arrows to position `anchor + 1`
+         at visual row 0 (`y ~ 309px`), transitioning back to Gutter Mode as soon as gutter numbers reappear.
     """
     from services import state
     import db
@@ -2555,9 +2564,44 @@ async def navigate_to_target_top_line(
         find_gutter_numbers_cluster,
         detect_offline_editor_overlay,
         is_eof_reached_with_offline_awareness,
+        locate_character_anchor_row,
+        detect_line_wrap_state,
     )
 
     target_top = max(1, int(target_top))
+    f_ocr_state = state.dag_state.get("nodes", {}).get("frame_ocr", {})
+    char_mode = bool(
+        character_tracking_mode
+        if character_tracking_mode is not None
+        else (
+            f_ocr_state.get("character_tracking_mode")
+            or state.orchestration_state.get("character_tracking_mode", False)
+        )
+    )
+    tracked_ln = int(
+        character_tracking_line
+        or f_ocr_state.get("character_tracking_line")
+        or state.orchestration_state.get("character_tracking_line")
+        or max(1, target_top - 1)
+    )
+    bot_anchor = str(
+        bottom_text_anchor
+        or f_ocr_state.get("bottom_text_anchor")
+        or state.orchestration_state.get("bottom_text_anchor")
+        or ""
+    )
+    tgt_top_anchor = str(
+        target_top_text_anchor
+        or f_ocr_state.get("target_top_text_anchor")
+        or state.orchestration_state.get("target_top_text_anchor")
+        or ""
+    )
+    active_anchor_win = list(
+        bottom_anchor_window
+        or f_ocr_state.get("bottom_anchor_window")
+        or state.orchestration_state.get("bottom_anchor_window")
+        or []
+    )
     ser = await get_active_adb_serial(serial)
     did = display_id if (display_id is not None and display_id > 0) else await detect_external_display_id(ser)
     valid_d = sanitize_input_display_id(did)
@@ -2661,18 +2705,136 @@ async def navigate_to_target_top_line(
             cur_bot = (cur_t or target_top) + page_span - 1
 
         is_exact_or_wrapped_top = (
-            (bool(gutter) and first_g == target_top and first_y <= wrapped_top_tolerance_y)
-            or (not gutter and det_top == target_top)
+            (bool(gutter) and first_g == target_top and first_y <= max_top_row_y)
+            or (not gutter and det_top == target_top and not char_mode)
         )
         # Safe contiguous overlap: after >=2 adjustment attempts, if cur_t is 1..5 lines above target_top
         # and the viewport includes target_top..cur_bot with forward progress, ZERO lines are skipped!
         is_contiguous_overlap = (
-            attempt >= 3
+            not char_mode
+            and attempt >= 3
             and bool(cur_t and cur_t > 0)
             and max(1, target_top - 5) <= cur_t <= target_top
             and cur_bot >= target_top + 2
             and (current_top is None or cur_t > current_top or target_top <= 2)
         )
+
+        # Character Tracking Mode: when previous page ended inside a wrapped line (or current page has no gutter),
+        # locate target_top_text_anchor (bottom_text_anchor + 1) and position it at visual row 0 (y ~ 309px).
+        if (char_mode or not gutter) and (bot_anchor or tgt_top_anchor or any(active_anchor_win)) and not is_exact_or_wrapped_top:
+            loc = locate_character_anchor_row(
+                img,
+                bottom_anchor=bot_anchor,
+                target_top_anchor=tgt_top_anchor,
+                bottom_anchor_window=active_anchor_win,
+                dpi_factor=dpi_factor,
+            )
+            if loc.get("enriched_anchor_window"):
+                active_anchor_win = loc["enriched_anchor_window"]
+                if len(active_anchor_win) > 4 and active_anchor_win[4]:
+                    tgt_top_anchor = active_anchor_win[4]
+
+            if loc.get("found") and loc.get("target_top_row_idx") is not None:
+                k_row = int(loc["target_top_row_idx"])
+                if k_row == 0:
+                    if latest_snap:
+                        modal_res = await resolve_and_dismiss_mini_modals(
+                            serial=ser,
+                            display_id=valid_d,
+                            image_bytes=latest_snap,
+                            caller_node=caller_node,
+                        )
+                        if modal_res.get("detected") and modal_res.get("snapshot_bytes"):
+                            latest_snap = modal_res["snapshot_bytes"]
+                            actions_taken.extend(modal_res.get("actions_taken", []))
+
+                    row0_txt = str(loc.get("current_row0_text") or "")
+                    if gutter and first_g and first_g > 0:
+                        # Gutter numbers reappeared! Check if bottom of this page is still wrapped
+                        wrap_now = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=gutter)
+                        still_wrapped_bot = bool(wrap_now.get("is_bottom_wrapped", False))
+                        actual_top = int(first_g)
+                        actual_bot = int(last_g or actual_top)
+                        state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
+                        state.sync_alignment_gutter_lines(
+                            actual_top,
+                            actual_bot,
+                            character_tracking_mode=still_wrapped_bot,
+                            anchor_preview=row0_txt,
+                        )
+                        actions_taken.append(
+                            f"Character Tracking aligned anchor+1 at row 0 (conf={loc.get('confidence')}) and transitioned to Gutter Line {actual_top}..{actual_bot} on check {attempt}"
+                        )
+                        return {
+                            "status": "ok",
+                            "reached": True,
+                            "character_tracking_mode": still_wrapped_bot,
+                            "transitioned_to_gutter": True,
+                            "matched_anchor_text": row0_txt,
+                            "target_top": actual_top,
+                            "actual_top": actual_top,
+                            "actual_bottom": actual_bot,
+                            "arrows_pressed": total_arrows,
+                            "page_keys_pressed": total_page_keys,
+                            "attempts": min(attempt, max_attempts),
+                            "snapshot_bytes": latest_snap,
+                            "actions_taken": actions_taken,
+                        }
+                    else:
+                        # Entire page is a wrapped continuation of tracked_ln
+                        actual_top = tracked_ln
+                        actual_bot = tracked_ln
+                        state.orchestration_state["cursor_line"] = tracked_ln
+                        state.sync_alignment_gutter_lines(
+                            tracked_ln,
+                            tracked_ln,
+                            character_tracking_mode=True,
+                            anchor_preview=row0_txt,
+                        )
+                        actions_taken.append(
+                            f"Character Tracking verified anchor+1 at row 0 for wrapped Line {tracked_ln} (conf={loc.get('confidence')}) on check {attempt}"
+                        )
+                        return {
+                            "status": "ok",
+                            "reached": True,
+                            "character_tracking_mode": True,
+                            "is_wrapped_continuation": True,
+                            "matched_anchor_text": row0_txt,
+                            "target_top": tracked_ln,
+                            "actual_top": tracked_ln,
+                            "actual_bottom": tracked_ln,
+                            "arrows_pressed": total_arrows,
+                            "page_keys_pressed": total_page_keys,
+                            "attempts": min(attempt, max_attempts),
+                            "snapshot_bytes": latest_snap,
+                            "actions_taken": actions_taken,
+                        }
+
+                if attempt > max_attempts:
+                    break
+
+                cur_dir = "down" if k_row > 0 else "up"
+                arrow_key = "20" if k_row > 0 else "19"
+                needs_traverse = (
+                    (cur_dir == "up" and caret_pos == "bottom")
+                    or (cur_dir == "down" and caret_pos == "top")
+                )
+                if k_row >= 21 and not needs_traverse:
+                    step_cnt = 20
+                else:
+                    step_cnt = abs(k_row) + (caret_span if needs_traverse else 0)
+                step_cnt = max(1, min(60, step_cnt))
+                keys = " ".join([arrow_key] * step_cnt)
+                total_arrows += step_cnt
+                await run_adb_shell(f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+                caret_pos = "bottom" if cur_dir == "down" else "top"
+                last_dir = cur_dir
+                actions_taken.append(
+                    f"Attempt {attempt} [CharTrack Ln {tracked_ln}]: anchor+1 at row {k_row} (conf={loc.get('confidence')}) -> dispatched {step_cnt} {'Down(20)' if cur_dir == 'down' else 'Up(19)'} arrows (traverse={needs_traverse})"
+                )
+                await asyncio.sleep(0.18)
+                await dismiss_keyboard(ser, valid_d)
+                continue
 
         if is_exact_or_wrapped_top or is_contiguous_overlap:
             # Ensure no mini-modal / toast popup contaminates the aligned viewport frame
@@ -2693,10 +2855,12 @@ async def navigate_to_target_top_line(
             else:
                 actual_bot = actual_top + page_span - 1
 
+            wrap_check = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=gutter)
+            still_char_mode = bool(wrap_check.get("is_bottom_wrapped", False))
             state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
             if total_arrows > 0 or total_page_keys > 0:
                 state.orchestration_state["last_arrow_count"] = total_arrows + (total_page_keys * caret_span)
-            state.sync_alignment_gutter_lines(actual_top, actual_bot)
+            state.sync_alignment_gutter_lines(actual_top, actual_bot, character_tracking_mode=still_char_mode)
             actions_taken.append(
                 f"Verified top Line {actual_top} at y={first_y}px (range {actual_top}..{actual_bot}"
                 + (", contiguous overlap" if is_contiguous_overlap and not is_exact_or_wrapped_top else "")
@@ -2705,6 +2869,8 @@ async def navigate_to_target_top_line(
             return {
                 "status": "ok",
                 "reached": True,
+                "character_tracking_mode": still_char_mode,
+                "transitioned_to_gutter": bool(char_mode and not still_char_mode),
                 "contiguous_overlap": bool(is_contiguous_overlap and not is_exact_or_wrapped_top),
                 "target_top": target_top,
                 "actual_top": actual_top,
@@ -2717,6 +2883,18 @@ async def navigate_to_target_top_line(
             }
 
         if not cur_t or cur_t <= 0:
+            # Viewport has 0 gutter numbers (overshot into a massive wrapped line without anchor match):
+            # Back up with UpArrows (19) so the gutter numbers above the wrapped line reappear!
+            if attempt <= max_attempts:
+                backup_cnt = (caret_span + 18) if caret_pos == "bottom" else 18
+                keys = " ".join(["19"] * backup_cnt)
+                total_arrows += backup_cnt
+                await run_adb_shell(f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+                caret_pos = "top"
+                last_dir = "up"
+                actions_taken.append(
+                    f"Attempt {attempt}: No gutter numbers visible (overshot into wrapped block) -> backed up {backup_cnt} Up(19) arrows toward Ln {target_top}"
+                )
             await dismiss_keyboard(ser, valid_d)
             await asyncio.sleep(0.18)
             continue

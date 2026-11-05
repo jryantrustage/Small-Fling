@@ -367,8 +367,49 @@ async def recover_gutter_bounds_with_healing(
     top_ln, bot_ln = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
     lines_detected: List[Dict[str, Any]] = []
 
-    if top_ln > 0 and bot_ln > top_ln:
-        if expected_top and expected_top > 0 and top_ln != expected_top and not (serial and "mock" in str(serial).lower()):
+    char_track_active = bool(
+        state.orchestration_state.get("character_tracking_mode")
+        or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
+    )
+    tracked_ln = int(
+        state.orchestration_state.get("character_tracking_line")
+        or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
+        or (expected_top - 1 if (expected_top and expected_top > 1) else 0)
+        or state.latest_telemetry.get("current_bottom_line")
+        or 1
+    )
+
+    # Check if this frame is a full-page wrapped continuation (0 gutter numbers on a valid dark-mode editor page)
+    if top_ln <= 0 or bot_ln <= 0:
+        scan_wrap = await state.scan_image_in_process(temp_calib)
+        if not scan_wrap.get("invalid_editor_frame") and (
+            scan_wrap.get("is_wrapped_continuation") or scan_wrap.get("character_tracking_mode")
+        ):
+            lines_detected = scan_wrap.get("lines", [])
+            for l_entry in lines_detected:
+                l_entry["line_number"] = tracked_ln
+                l_entry["gutter_number"] = tracked_ln
+            state.sync_alignment_gutter_lines(tracked_ln, tracked_ln, character_tracking_mode=True)
+            return (
+                tracked_ln,
+                tracked_ln,
+                lines_detected,
+                {
+                    "healing_attempts": 0,
+                    "actions_taken": [f"Character Tracking Mode verified wrapped continuation page for Line {tracked_ln}"],
+                    "character_tracking_mode": True,
+                    "is_wrapped_continuation": True,
+                },
+            )
+
+    if top_ln > 0 and bot_ln >= top_ln:
+        if (
+            expected_top
+            and expected_top > 0
+            and top_ln != expected_top
+            and not char_track_active
+            and not (serial and "mock" in str(serial).lower())
+        ):
             nav_res = await navigate_to_target_top_line(
                 target_top=expected_top,
                 serial=serial,
@@ -384,10 +425,14 @@ async def recover_gutter_bounds_with_healing(
             if nav_res.get("actual_top") and nav_res.get("actual_bottom"):
                 top_ln = int(nav_res["actual_top"])
                 bot_ln = int(nav_res["actual_bottom"])
-                state.sync_alignment_gutter_lines(top_ln, bot_ln)
+                state.sync_alignment_gutter_lines(
+                    top_ln,
+                    bot_ln,
+                    character_tracking_mode=bool(nav_res.get("character_tracking_mode", False)),
+                )
                 actions_taken.extend(nav_res.get("actions_taken", []))
                 return top_ln, bot_ln, [], {"healing_attempts": 1, "actions_taken": actions_taken}
-        state.sync_alignment_gutter_lines(top_ln, bot_ln)
+        state.sync_alignment_gutter_lines(top_ln, bot_ln, character_tracking_mode=char_track_active)
         return top_ln, bot_ln, [], {"healing_attempts": 0, "actions_taken": []}
 
     for attempt in range(1, max_attempts + 1):

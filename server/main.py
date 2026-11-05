@@ -344,13 +344,14 @@ app.include_router(kiosk.router)
 app.include_router(analyzer_sandbox.router)
 
 if __name__ == "__main__":
+    import os
     import uvicorn
     import time
     import subprocess
 
+    os.chdir(str(config.SERVER_DIR))
     is_debug = sys.gettrace() is not None or "debugpy" in sys.modules
-    # Keep reload enabled so changes in development are automatically picked up
-    reload_enabled = True
+    reload_enabled = os.environ.get("UVICORN_RELOAD", "0") == "1"
 
     uvicorn_kwargs = {
         "host": config.SERVER_HOST,
@@ -360,7 +361,8 @@ if __name__ == "__main__":
     if reload_enabled:
         uvicorn_kwargs["reload"] = True
         uvicorn_kwargs["reload_dirs"] = [str(config.SERVER_DIR)]
-        uvicorn_kwargs["reload_excludes"] = ["*/storage/*", "storage/*", "storage/**", "*.json", "*.log", "__pycache__"]
+        uvicorn_kwargs["reload_includes"] = ["*.py"]
+        uvicorn_kwargs["reload_excludes"] = ["*/storage/*", "storage/*", "storage/**", "*/data/*", "data/*", "*.db*", "*.json", "*.log", "__pycache__"]
 
     max_retries = 4
     for attempt in range(max_retries):

@@ -14357,3 +14357,2078 @@ draft[i] = { ...draft[i], ...obj, copy: undefined };
 : setObjs(
 produce((draft) => {
 draft[i] = { ...draft[i], ...obj };
+          }],
+        };
+};
+
+  return {
+objs,
+push,
+update,
+setArray: setObjs,
+mapUpdates,
+};
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 320. `C:\DevCode\AstroUI\src\components\Decisioning\useRuleSetUrls.tsx`
+
+<!-- CODESCAN_FILE_START -->
+path="C:\DevCode\AstroUI\src\components\DecisioningluseRuleSetUrls.tsx" type=".tsx" size="3152"
+import { LocationDescriptorObject } from 'history';
+import { useNavigate, generatePath } from 'react-router-dom';
+import { Paths } from 'layouts/RouterSwitch';
+import { Association } from './api/types';
+
+export interface IUseRuleSetUrlProps {
+productId?: string;
+tenantId?: string;
+}
+
+export interface IUseRuleSetUrls {
+ruleSetListPath: string;
+goToRuleSetList: () => void;
+toNewRuleSet: (
+ruleSetTemplateType: string,
+associations: Association[],
+) => LocationDescriptorObject;
+goToNewRuleSet: (
+ruleSetTemplateType: string,
+associations: Association[],
+) => void;
+toExistingRuleSet: (ruleSetId: string) => LocationDescriptorObject;
+goToExistingRuleSet: (ruleSetId: string) => void;
+buildTemplateAssociation: (tenantId: string) => Association[];
+}
+
+const TENANT_MSG = 'Tenant Id has not been set correctly';
+const PRODUCT_MSG = 'Product Id has not been set correctly';
+
+const editRuleSetRoute = (
+tenantId: string,
+ruleSetId: string,
+productId: string,
+): string =>
+generatePath(Paths.RuleSetEdit, { tenantId, ruleSetId, productId });
+
+const newRuleSetRoute = (
+tenantId: string,
+ruleSetTemplateType: string,
+productId: string,
+): string =>
+generatePath(Paths.RuleSetNew, { tenantId, ruleSetTemplateType, productId });
+
+export const ruleSetListRoute = (tenantId: string, productId: string): string =>
+generatePath(Paths.RuleSetList, { tenantId, productId });
+
+export const useRuleSetUrls = ({
+tenantId,
+productId,
+}: IUseRuleSetUrlProps = {}): IUseRuleSetUrls => {
+const push = useNavigate();
+
+  const toNewRuleSet = (
+ruleSetTemplateType: string,
+associations: Association[],
+): LocationDescriptorObject => {
+if (!tenantId) {
+throw new Error(TENANT_MSG);
+}
+if (!productId) {
+throw new Error(PRODUCT_MSG);
+}
+
+    return {
+pathname: newRuleSetRoute(tenantId, ruleSetTemplateType, productId),
+state: {
+associations,
+},
+};
+};
+
+  const goToNewRuleSet = (
+ruleSetTemplateType: string,
+associations: Association[],
+): void => {
+if (!tenantId) {
+throw new Error(TENANT_MSG);
+}
+
+    push(toNewRuleSet(ruleSetTemplateType, associations));
+};
+
+  const toExistingRuleSet = (ruleSetId: string): LocationDescriptorObject => {
+if (!tenantId) {
+throw new Error(TENANT_MSG);
+}
+if (!productId) {
+throw new Error(PRODUCT_MSG);
+}
+
+    return {
+pathname: editRuleSetRoute(tenantId, ruleSetId, productId),
+};
+};
+
+  const goToExistingRuleSet = (ruleSetId: string): void => {
+push(toExistingRuleSet(ruleSetId));
+};
+
+  const ruleSetListPath = ruleSetListRoute(tenantId ?? '', productId ?? '');
+const goToRuleSetList = (): void => {
+if (!tenantId) {
+throw new Error(TENANT_MSG);
+}
+push(ruleSetListPath);
+};
+
+  const buildTemplateAssociation = (tenantId: string): Association[] => {
+return [
+{
+id: tenantId,
+idType: 'tenant',
+},
+];
+};
+
+  return {
+ruleSetListPath,
+goToRuleSetList,
+toNewRuleSet,
+goToNewRuleSet,
+toExistingRuleSet,
+goToExistingRuleSet,
+buildTemplateAssociation,
+};
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 321. `C:\DevCode\AstroUI\src\components\Decisioning\utils.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Decisioning\utils.ts" type=".ts" size="997" lines="32" chars="997" -->
+```typescript
+import {
+ConditionNode,
+IConditionProperties,
+} from 'commonui/build/core/entities/decisioning';
+
+export const getQuery = (query: string): string | null =>
+new URLSearchParams(window.location.search).get(query);
+
+export const createQueryParamString = (
+queryParams: Record<string, string>,
+): string => {
+return new URLSearchParams(queryParams).toString();
+};
+
+const conditionUnfinishedOrInError = (node: IConditionProperties): boolean =>
+!!node.errorText || node.operator === '' || node.value === '';
+
+export const checkNodeForErrors = (node: ConditionNode): boolean => {
+  switch (node.type) {
+    case 'single':
+      return conditionUnfinishedorInError(node.condition);
+    case 'compound':
+case 'logicGroup':
+return node.nodes.some(checkNodeForErrors);
+default:
+throw new Error(`Invalid logic type: ${(node as ConditionNode).type}`);
+}
+};
+
+export const ruleSetErrorMsg = (title: string): string =>
+`Please fix errors with the ${title} rule before saving`;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 322. `C:\DevCode\AstroUI\src\components\Documentation\Documentation.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documentation\Documentation.tsx" type=".tsx" size="730" lines="32" chars="730" -->
+```typescript
+import React from 'react';
+import { IDocumentation } from './types';
+import { CardSection } from '../Card/CardSection';
+import { SCDocumentation } from './styles';
+
+const Documentation = ({
+title = 'Documentation',
+children,
+documentation = [],
+links = [],
+}: IDocumentation) => (
+<CardSection title={title}>
+<SCDocumentation>
+{children}
+{documentation.map(doc => (
+<div key={doc}>{doc}</div>
+      ]]}
+<ul>
+{links.map(({ label, url }) => (
+<li key={url}>
+<a rel="noreferrer" href={url} target="_blank">
+{label || url}
+            >[>>
+</li>
+        }]}
+</ul>
+</SCDocumentation>
+</CardSection>
+];
+
+export { Documentation };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 323. `C:\DevCode\AstroUI\src\components\Documentation\index.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documentation\index.ts" type=".ts" size="84" lines="4" chars="84" -->
+```typescript
+export * from './Documentation';
+export * from './types';
+export * from './styles';
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 324. `C:\DevCode\AstroUI\src\components\Documentation\styles.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documentation\styles.ts" type=".ts" size="273" lines="16" chars="273" -->
+```typescript
+import styled from 'styled-components';
+import { Theme } from 'commonui';
+
+const SCDocumentation = styled.div`
+max-width: 600px;
+${Theme.getFontStyles('body1')};
+> div {
+margin-bottom: 10px;
+}
+> ul {
+margin-left: 20px;
+}
+`;
+
+export { SCDocumentation };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 325. `C:\DevCode\AstroUI\src\components\Documentation\types.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documentation\types.ts" type=".ts" size="220" lines="14" chars="220" -->
+```typescript
+import React from 'react';
+
+export interface ILink {
+label?: string;
+url: string;
+}
+
+export interface IDocumentation {
+title?: string;
+children?: React.ReactNode;
+documentation?: string[];
+links?: ILink[];
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 326. `C:\DevCode\AstroUI\src\components\Documents\__test__\DocumentsList.test.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\__test__\DocumentsList.test.tsx" type=".tsx" size="2038" lines="80" chars="2038" -->
+```typescript
+import React from 'react';
+import { BrowserRouter } from 'react-router-dom';
+import { DocumentsList } from '../DocumentsList';
+import { AuthContext } from 'context/auth-context';
+import { AppContext } from 'context/app-context';
+import { UserContext } from 'context/user-context';
+import { render, screen } from '@testing-library/react';
+
+export const wrapWithMockContextDocumentList = (
+tenantId: string,
+component: any,
+): JSX.Element => {
+const mockContext = {
+tenant: {
+id: tenantId,
+legalName: '',
+creationPending: true,
+tenantSchema: '',
+},
+setTenant: () => {},
+withinTenantContext: (successFunc: any): any => {
+successFunc();
+},
+pageTitle: '',
+setPageTitle: () => {},
+setDisplayCreateButton: () => {},
+setCreateButtonClicked: () => {},
+createButtonClicked: true,
+displayCreateButton: true,
+};
+
+  const mockAuthContext = {
+login: () => {},
+loginErrorState: () => {},
+data: { user: null },
+logout: () => {},
+logoutRequested: false,
+};
+
+  return (
+<AuthContext.Provider value={mockAuthContext}>
+<AppContext.Provider value={mockContext as any}>
+<UserContext.Provider value={{ user: '' } as any}>
+{component}
+</UserContext.Provider>
+</AppContext.Provider>
+</AuthContext.Provider>
+  ];
+};
+
+describe('DocumentsList', () => {
+test('Renders', async () => {
+const systemDocumentsList = render(
+wrapWithMockContextDocumentList(
+'12345',
+<BrowserRouter>
+<DocumentsList />
+</BrowserRouter>,
+      ],
+    ];
+const systemDocumentsListGrid = systemDocumentsList.queryByRole(
+'system-documents-container',
+    ];
+
+    expect(systemDocumentsListGrid);
+  }};
+
+  it('should render with no systemdocumentlist', () => {
+render(
+wrapWithMockContextDocumentList(
+        ``,
+<BrowserRouter>
+<DocumentsList />
+</BrowserRouter>,
+      ],
+    ];
+expect(screen.queryAllByRole('row').length).toEqual(1);
+  }};
+}};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 327. `C:\DevCode\AstroUI\src\components\Documents\__test__\DocumentUtils.test.js`
+
+<!-- CODESCAN_FILE_START -->
+```javascript
+import {
+uploadDocument,
+loadDocument,
+fetchDocumentTypes,
+fetchDocuments,
+} from '../DocumentUtils';
+import {
+fetchDocumentTypesSuccessResponse,
+expectedDocumentTypes,
+fetchDocumentsSuccessResponse,
+expectedDocuments,
+} from './DocumentUtilsTestData';
+
+describe('DocumentUtils', () => {
+const fetchSpy = jest.spyOn(global, 'fetch');
+async function execWithFetchJsonMock(responseJsonObject, action) {
+const mockJsonPromise = Promise.resolve(responseJsonObject);
+fetchSpy.mockResolvedValue({
+ok: true,
+json: () => mockJsonPromise,
+blob: jest.fn(),
+    }};
+
+    return await action();
+}
+
+  const { URL } = window;
+
+  beforeEach(() => {
+delete window.URL;
+window.URL = {
+createObjectURL: jest.fn(() => 'blobUrl'),
+revokeObjectURL: jest.fn(),
+};
+  }};
+
+  afterAll(() => {
+window.URL = URL;
+  }};
+
+  afterEach(() => {
+fetchSpy.mockClear();
+  }};
+});
+  test('Test fetchDocumentTypes', async () => {
+await execWithFetchJsonMock(fetchDocumentTypesSuccessResponse, async () => {
+const documentTypes = await fetchDocumentTypes();
+expect(documentTypes).toEqual(expectedDocumentTypes);
+expect(fetchSpy).toHaveBeenCalledTimes(1);
+    }};
+  }};
+
+  test('Test fetchDocuments', async () => {
+await execWithFetchJsonMock(fetchDocumentsSuccessResponse, async () => {
+const documents = await fetchDocuments(expectedDocumentTypes);
+expect(documents).toEqual(expectedDocuments);
+expect(fetchSpy).toHaveBeenCalledTimes(1);
+    }};
+  }};
+
+  test('Test uploadDocument', async () => {
+const expectedResponse = { ok: true };
+await execWithFetchJsonMock(expectedResponse, async () => {
+const fileContents = 'file contents';
+const file = new Blob([fileContents], {
+type: 'text/plain',
+name: 'file.txt',
+      }];
+expect(
+await uploadDocument(expectedDocumentTypes[0].id, file, 'test user'),
+).toBe(undefined);
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    }};
+  }};
+
+  test('Test previewDocument', async () => {
+const expectedResponse = { ok: true };
+const documentInfo = expectedDocuments[0];
+jest.spyOn(global, 'setTimeout').mockImplementation((action) => action());
+
+    await execWithFetchJsonMock(expectedResponse, async () => {
+const document = await loadDocument(documentInfo);
+expect(document).toEqual({
+contentType: 'application/pdf',
+contentUrl: 'blobUrl',
+      }];
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+expect(window.URL.createObjectURL).toHaveBeenCalledTimes(1);
+expect(window.URL.revokeObjectURL).toBeCalledWith('blobUrl');
+expect(window.URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    }};
+  }};
+}};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 328. `C:\DevCode\AstroUI\src\components\Documents\__test__\DocumentUtilsTestData.js`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\__test__\DocumentUtilsTestData.js" type=".js" size="3361" lines="140" chars="3361" -->
+```javascript
+export const expectedDocumentTypes = [
+{ id: 2, name: 'Disclosures' },
+{ id: 1, name: 'Terms & Conditions' },
+];
+
+export const fetchDocumentTypesSuccessResponse = {
+result: {
+code: 0,
+message: 'Success',
+apiVer: '1.0.0',
+correlationId: 'd0c2ace5-eb09-4bef-9d19-22bf82fc0b22',
+errors: [],
+},
+payload: [
+{
+resourceTypeid: 1,
+name: 'Terms & Conditions',
+description: 'Terms & Conditions to be accepted by users',
+subType: 'system',
+createDate: '2020-02-05T15:19:15.041Z',
+createdBy: 'Create Script',
+updatedBy: 'Create Script',
+lastUpdateDate: '2020-02-05T15:19:15.041Z',
+},
+{
+resourceTypeid: 2,
+name: 'Disclosures',
+description: 'Disclosures to be accepted by users',
+subType: 'system',
+createDate: '2020-02-05T15:19:15.041Z',
+createdBy: 'Create Script',
+updatedBy: 'Create Script',
+lastUpdateDate: '2020-02-05T15:19:15.041Z',
+},
+],
+};
+
+export const expectedDocuments = [
+{
+id: 2,
+status: 'Active',
+typeName: 'Disclosures',
+filename: 'test.pdf',
+version: 1,
+typeId: 2,
+contentType: 'application/pdf',
+},
+{
+id: 2,
+status: 'Archive',
+typeName: 'Terms & Conditions',
+filename: 'test2.pdf',
+version: 1,
+typeId: 1,
+contentType: 'application/pdf',
+},
+{
+id: 2,
+status: 'Archive',
+typeName: 'Terms & Conditions',
+filename: 'test2.2.pdf',
+version: 2,
+typeId: 1,
+contentType: 'application/pdf',
+},
+{
+id: 2,
+status: 'Active',
+typeName: 'Terms & Conditions',
+filename: 'test2.3.pdf',
+version: 3,
+typeId: 1,
+contentType: 'application/pdf',
+},
+];
+
+export const fetchDocumentsSuccessResponse = {
+result: {
+code: 0,
+message: 'Success',
+apiVer: '1.0.0',
+correlationId: '1df23240-7582-4319-a82d-ac8f426dd332',
+errors: [],
+},
+payload: [
+{
+resourceId: 2,
+typeId: 2,
+fileName: 'test.pdf',
+contentType: 'application/pdf',
+version: 1,
+blobId: 'c2a06d75-3bd8-429c-adc0-01ea24457d58',
+tenantId: 'system',
+createDate: '2020-02-05T15:34:52.633Z',
+createdBy: 'me',
+updatedBy: 'me2',
+lastUpdateDate: '2020-02-05T15:34:52.633Z',
+},
+{
+resourceId: 2,
+typeId: 1,
+fileName: 'test2.pdf',
+contentType: 'application/pdf',
+version: 1,
+blobId: 'c2a06d75-3bd8-429c-adc0-01ea24457d58',
+tenantId: 'system',
+createDate: '2020-02-05T15:34:52.633Z',
+createdBy: 'me',
+updatedBy: 'me2',
+lastUpdateDate: '2020-02-05T15:34:52.633Z',
+},
+{
+resourceId: 2,
+typeId: 1,
+fileName: 'test2.2.pdf',
+contentType: 'application/pdf',
+version: 2,
+blobId: 'c2a06d75-3bd8-429c-adc0-01ea24457d58',
+tenantId: 'system',
+createDate: '2020-02-05T15:34:52.633Z',
+createdBy: 'me',
+updatedBy: 'me2',
+lastUpdateDate: '2020-02-05T15:34:52.633Z',
+},
+{
+resourceId: 2,
+typeId: 1,
+fileName: 'test2.3.pdf',
+contentType: 'application/pdf',
+version: 3,
+blobId: 'c2a06d75-3bd8-429c-adc0-01ea24457d58',
+tenantId: 'system',
+createDate: '2020-02-05T15:34:52.633Z',
+createdBy: 'me',
+updatedBy: 'me2',
+lastUpdateDate: '2020-02-05T15:34:52.633Z',
+},
+],
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 329. `C:\DevCode\AstroUI\src\components\Documents\__test__\UploadDocumentForm.test.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\__test__\UploadDocumentForm.test.tsx" type=".tsx" size="4354" lines="159" chars="4342" -->
+```typescript
+import {
+act,
+fireEvent,
+render,
+screen,
+waitFor,
+} from '@testing-library/react';
+import React from 'react';
+import * as DocumentUtils from '../DocumentUtils';
+import { UploadDocumentForm } from '../UploadDocumentForm';
+
+describe('should test the UploadDocumentForm component', () => {
+afterEach(() => {
+jest.resetAllMocks();
+  }};
+const documentTypes = [
+{
+id: 1,
+name: 'Disclosures',
+},
+{
+id: 2,
+name: 'Terms & Conditions',
+},
+];
+const tenantId = 'test-tenant-id';
+const mockReload = jest.fn();
+
+  const uploadDocumentSpy = jest.spyOn(DocumentUtils, 'uploadDocument');
+
+  // The tests below are skipped because something has changed in the commonUI components in the document form.
+// This is beyond the scope of the project I'm working on, and needs to be addressed by someone associated with Astro.
+it('should render the component', async () => {
+render(
+<UploadDocumentForm
+documentTypes={documentTypes}
+reload={mockReload}
+tenantId={tenantId}
+      [>,
+    ];
+expect(screen.getByText('Document Type')).toBeInTheDocument();
+const documentFileInput = screen.getByLabelText('Document File');
+expect(documentFileInput).toBeInTheDocument();
+expect(documentFileInput).toBeDisabled();
+expect(screen.getByText('Upload')).toBeDisabled();
+  }};
+
+  it.skip('should select a document type successfully', () => {
+render(
+<UploadDocumentForm
+documentTypes={documentTypes}
+reload={mockReload}
+tenantId={tenantId}
+      [>,
+    ];
+
+    const dropdown = screen.getByLabelText('toggle menu');
+fireEvent.click(dropdown);
+const itemToSelect = screen.getByText('Disclosures');
+fireEvent.click(itemToSelect);
+
+    expect(screen.getByRole('combobox', { name: 'Document Type' })).toHaveValue(
+'Disclosures',
+    ];
+  }};
+
+  it.skip('should upload a file successfully', async () => {
+render(
+<UploadDocumentForm
+documentTypes={documentTypes}
+reload={mockReload}
+tenantId={tenantId}
+      [>,
+    ];
+
+    const dropdown = screen.getByLabelText('toggle menu');
+fireEvent.click(dropdown);
+const itemToSelect = screen.getByText('Disclosures');
+fireEvent.click(itemToSelect);
+
+    expect(screen.getByRole('combobox', { name: 'Document Type' })).toHaveValue(
+'Disclosures',
+    ];
+
+    const fileUpload: any = screen.getByLabelText('Document File');
+fireEvent.change(fileUpload, {
+target: {
+files: [new File(['(⌐□_□)'], 'test.pdf', { type: 'application/pdf' })],
+},
+    }};
+
+    expect(fileUpload.files[0].name).toBe('test.pdf');
+
+    const uploadButton = screen.getByText('Upload');
+expect(uploadButton).toBeEnabled();
+
+    fireEvent.click(uploadButton);
+
+    await waitFor(() => {
+uploadDocumentSpy.mockResolvedValueOnce();
+    }};
+
+    act(() => {
+expect(
+screen.getByRole('combobox', { name: 'Document Type' }),
+).toHaveValue('');
+    }};
+
+    expect(mockReload).toHaveBeenCalled();
+  }};
+
+  it.skip('should set an error on trying to upload a file', async () => {
+render(
+<UploadDocumentForm
+documentTypes={documentTypes}
+reload={mockReload}
+tenantId={tenantId}
+      [>,
+    ];
+
+    uploadDocumentSpy.mockRejectedValueOnce({ message: 'test error' });
+
+    const dropdown = screen.getByLabelText('toggle menu');
+fireEvent.click(dropdown);
+const itemToSelect = screen.getByText('Disclosures');
+fireEvent.click(itemToSelect);
+
+    expect(screen.getByRole('combobox', { name: 'Document Type' })).toHaveValue(
+'Disclosures',
+    ];
+
+    const fileUpload: any = screen.getByLabelText('Document File');
+fireEvent.change(fileUpload, {
+target: {
+files: [new File(['(⌐□_□)'], 'test.pdf', { type: 'application/pdf' })],
+      },
+    }};
+
+    expect(fileUpload.files[o].name).toBe('test.pdf'):
+
+    const uploadButton = screen.getByText('Upload');
+expect(uploadButton).toBeEnabled();
+
+    fireEvent.click(uploadButton);
+
+    expect(mockReload).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+expect(screen.getByText('test error')).toBeInTheDocument();
+    }};
+
+    act(() => {
+expect(
+screen.getByRole('combobox', { name: 'Document Type' }),
+).toHaveValue('Disclosures');
+    }};
+  }};
+}};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 330. `C:\DevCode\AstroUI\src\components\Documents\DocumentsList.css`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\DocumentsList.css" type=".css" size="236" lines="17" chars="236" -->
+   'css
+.rt-tr-group .showOnHover {
+visibility: hidden;
+}
+
+.rt-tr-group:hover .showOnHover {
+visibility: visible;
+}
+
+.dialog-document-view > div > .MuiPaper-root {
+height: 80%;
+line-height: 0px;
+}
+
+#documentType-menu {
+z-index: 99;
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 331. `C:\DevCode\AstroUI\src\components\Documents\DocumentsList.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\DocumentsList.tsx" type=".tsx" size="7134" lines="220" chars="7134" -->
+```typescript
+import React, { usestate, useEffect, ReactElement  from 'react';
+import { Icon, ICoN_TYPES, Table } from 'commonui';
+oo import { SCHeader, SCStatus, SCActions, SCActionButton } from '../TableStyles';
+o1 import GridContainer from 'components/Grid/GridContainer';
+import GridItem from 'components/Grid/GridItem';
+import Card from 'components/Card/Card';
+import CardHeader from 'components/Card/CardHeader';
+import CardText from 'components/Card/CardText';
+import CardBody from 'components/Card/CardBody';
+import Primary from 'components/Typography/Primary';
+import useAppContext from 'context/app-context';
+o9 import { UploadDocumentForm } from 'components/Documents/UploadDocumentForm';
+import
+  fetchDocumentTypes,
+  fetchDocuments,
+loadDocument,
+} from './Documentutils';
+import { Document } from './types';
+import DialogTitle from '@material-ui/core/DialogTitle';
+import Dialog from '@material-ui/core/Dialog';
+import DialogContent from '@material-ui/core/DialogContent';
+import DialogActions from '@material-ui/core/DialogActions';
+import './DocumentsList.css';
+import { useParams } from 'react-router-dom';
+
+export const DocumentsList = (): ReactElement => {
+const { tenant, setPageTitle, setDisplayCreateButton } = useAppContext();
+const params = useParams();
+const tenantId = params.tenantId;
+const isTenantLevelMode = tenantId !== undefined;
+const [documentTypes, setDocumentTypes] = useState<any[]>([]);
+const [documents, setDocuments] = useState<Document[]>([]);
+const titleList = new Map();
+
+  async function reloadDocuments(): Promise<void> {
+setDocuments(await fetchDocuments(documentTypes, tenantId));
+}
+
+  useEffect(() => {
+setDisplayCreateButton(false);
+(async function fetchData(): Promise<void> {
+setDocumentTypes(await fetchDocumentTypes(isTenantLevelMode));
+    }}[];
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+  useEffect(() => {
+if (documentTypes.length > 0) {
+if (tenantId) {
+titleList.set(
+`${tenant?.legalName} > `,
+`/admin/tenant/${tenantId}/view`,
+        };
+titleList.set(`Documents `, `/admin/tenant/${tenantId}/documents`);
+setPageTitle(titleList);
+} else {
+setPageTitle(`System Documents`);
+}
+(async function fetchData() {
+await reloadDocuments();
+      }][];
+}
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [documentTypes]);
+
+  //Split into two states so the popup opens first, before the loading is complete
+const [selectedDocumentCaption, setSelectedDocumentCaption] = useState<
+string | undefined
+>(undefined);
+const [selectedDocument, setSelectedDocument] = useState<
+string | undefined | any
+>(undefined);
+
+  const formatdata = (data: any): any =>
+data.map((row: any) => {
+return {
+...row,
+status:
+'Active' === row.status ? (
+<SCStatus status={row.status}>{row.status}</SCStatus>
+          } ; {
+<Primary>
+<b>{row.status}</b>
+</Primary>
+          },
+actions: (
+<SCActions id={row.id}>
+<SCActionButton
+title="View File"
+id={`${row.id}_view`}
+aria-label="View Document"
+color="blue"
+onClick={async () => {
+setSelectedDocumentCaption(
+`Type - ${row.typeName}, Version - ${row.version}, Status - ${row.status}`,
+                };
+setSelectedDocument(await loadDocument(row, tenantId));
+}}
+>
+<Icon size={20} name={ICON_TYPES.CIRCLE_RIGHT_ARROW} />
+</SCActionButton>
+</SCActions>
+        },
+};
+    }};
+
+  function closeDocumentPreview(): void {
+setSelectedDocumentCaption(undefined);
+setSelectedDocument(undefined);
+}
+const staticColumn = {
+filterable: false,
+sortable: false,
+};
+return (
+    >>
+<GridContainer role="system-documents-container">
+<GridItem xs={12}>
+<Card>
+<CardHeader color="cuna1" text>
+<CardText color="cuna1">
+<h4>Document Management</h4>
+</CardText>
+</CardHeader>
+<CardBody>
+<UploadDocumentForm
+documentTypes={documentTypes}
+reload={reloadDocuments}
+tenantId={tenantId}
+/>
+<Table
+data={formatdata(
+documents.sort((a, b) =>
+(a.status + a.typeName).localeCompare(
+b.status + b.typeName,
+                    ],
+                  ],
+                }}
+filterable
+sortable
+minRows={0}
+pageSize={25}
+columns={[
+{
+Header: <SCHeader> Type </SCHeader>,
+accessor: 'typeName',
+filterable: false,
+},
+{
+Header: <SCHeader> File Name </SCHeader>,
+accessor: 'filename',
+filterable: false,
+},
+{
+Header: <SCHeader> Version </SCHeader>,
+accessor: 'version',
+filterable: false,
+},
+{
+Header: <SCHeader> Status </SCHeader>,
+accessor: 'status',
+filterable: false,
+},
+{
+...staticColumn,
+Header: '',
+accessor: 'actions',
+},
+]}
+showPaginationTop={false}
+showPaginationBottom={true}
+className="-highlight"
+/>
+</CardBody>
+</Card>
+</GridItem>
+</GridContainer>
+<Dialog
+onClose={closeDocumentPreview}
+aria-labelledby="form-error-title"
+open={!!selectedDocumentCaption}
+maxWidth="lg"
+fullWidth
+scroll="paper"
+className="dialog-document-view"
+>
+<DialogTitle>{selectedDocumentCaption || ''}</DialogTitle>
+<DialogContent>
+{selectedDocument && (
+<object
+data={selectedDocument.contentUrl}
+type={selectedDocument.contentType}
+width="100%"
+height="100%"
+>
+<embed
+src={selectedDocument.contentUrl}
+type={selectedDocument.contentType}
+/>
+</object>
+          }}
+</DialogContent>
+<DialogActions style={{ paddingRight: '23px' }}>
+<SCActions id="dialog-button">
+<SCActionButton
+title="OK"
+id="ok_button"
+aria-label="ok_button"
+color="blue"
+onClick={closeDocumentPreview}
+>
+OK
+</SCActionButton>
+</SCActions>
+</DialogActions>
+</Dialog>
+</>
+  ];
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 332. `C:\DevCode\AstroUI\src\components\Documents\DocumentTypeSelect.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\DocumentTypeSelect.tsx" type=".tsx" size="1040" lines="39" chars="1040" -->
+```typescript
+import React, { ReactElement } from 'react';
+import { DocumentTypeSelectProps } from './types';
+import { Combobox } from 'commonui';
+
+const DocumentTypeSelect = ({
+documentTypeID,
+onChange,
+documentTypes,
+}: DocumentTypeSelectProps): ReactElement => {
+const handleChange = (name: string, value: string): void => {
+const outgoingValue =
+typeof value === 'number' ? value : parseInt(value, 10);
+onChange(outgoingValue);
+};
+
+  const formattedOptions = documentTypes.map((type) => ({
+label: type.name,
+value: type.id,
+  }}];
+
+  return (
+    >>
+<label htmlFor="documentType">Document Type</label>
+<Combobox
+id="documentType"
+value={documentTypeID as unknown as string} // had to typecast this or else the value wouldn't change
+onChange={handleChange}
+name="documentType"
+options={formattedOptions}
+placeholder="Select a document type"
+deactivateFilter={true}
+disabled={false}
+      [>
+</>
+  ];
+};
+
+export default DocumentTypeSelect;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 333. `C:\DevCode\AstroUI\src\components\Documents\DocumentUtils.js`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\DocumentUtils.js" type=".js" size="3573" lines="119" chars="3573" -->
+```javascript
+import {
+generalFetch,
+client2,
+handleJsonResponseError,
+} from 'utils/api-client';
+
+const systemLevel = 'system';
+const tenantLevel = 'tenant';
+export const defaultDocumentTypeID = 0;
+
+function groupBy(xs, key, valueSelector) {
+  valueSelector = valueSelector ll ((x) => x);
+return xs.reduce(function (rv, x) {
+(rv[x[key]] = rv[x[key]] || []).push(valueSelector(x));
+return rv;
+}, {});
+}
+
+export function fetchDocumentTypes(isTenantLevel) {
+const url = `${process.env.REACT_APP_RESOURCE_API_BASE_URL}resource-types/${
+isTenantLevel ? tenantLevel : systemLevel
+}`;
+return client2(url).then((response) => {
+const documentTypes = response.payload
+.map((x) => ({ id: x.resourceTypeid, name: x.name }))
+.sort((a, b) => a.name.localeCompare(b.name));
+
+    return [...documentTypes];
+  }};
+}
+
+export function fetchDocuments(documentTypes, tenantId) {
+const url = `${
+process.env.REACT_APP_RESOURCE_API_BASE_URL
+}resources?tenantId=${tenantId === undefined ? systemLevel : tenantId}`;
+const config =
+tenantId === undefined ? {} : { headers: { 'X-TENANT-ID': tenantId } };
+
+  return client2(url, 'GET', config).then((documentsResponse) => {
+const groups = groupBy(
+documentsResponse.payload,
+'typeId',
+(x) => x.version,
+    ];
+return documentsResponse.payload.map((file) => {
+const maxVersion = Math.max(...groups[file.typeId]);
+return {
+id: file.resourceId,
+status: maxVersion === file.version ? 'Active' : 'Archive',
+typeName: documentTypes.find((x) => x.id === file.typeId)?.name,
+filename: file.fileName,
+version: file.version,
+typeId: file.typeId,
+contentType: file.contentType,
+};
+    }};
+  }};
+}
+
+export async function uploadDocument(documentTypeID, file, userInfo, tenantId) {
+const url = `${process.env.REACT_APP_RESOURCE_API_BASE_URL}resources`;
+const headers =
+tenantId === undefined ? undefined : { 'X-TENANT-ID': tenantId };
+
+  console.log('uploadDocument documentTypeID', documentTypeID);
+
+  const formData = new FormData();
+formData.append(
+'fileMetadata',
+JSON.stringify({
+typeId: documentTypeID,
+createdBy: userInfo, // TODO Vlad Shcherbyna: should be changed to server side
+updatedBy: userInfo, // TODO Vlad Shcherbyna: should be changed to server side
+tenantId: tenantId === undefined ? systemLevel : tenantId,
+    }},
+  ];
+formData.append('fileContents', file);
+
+  await client2(url, 'POST', {
+body: formData,
+headers: headers,
+errorHandler: handleJsonResponseError,
+isJson: false,
+  }};
+}
+
+export async function loadDocument(documentInfo, tenantId) {
+const config =
+tenantId === undefined
+? undefined
+: { headers: { 'X-TENANT-ID': tenantId } };
+const url = `${
+process.env.REACT_APP_RESOURCE_API_BASE_URL
+}resource-content?tenantId=${tenantId || systemLevel}&typeId=${
+documentInfo.typeId
+}&version=${documentInfo.version}`;
+const blobContent = await generalFetch(url, 'GET', config).then((r) =>
+r.blob(),
+  ];
+
+  const blob = new Blob([blobContent], { type: documentInfo.contentType });
+if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+window.navigator.msSaveOrOpenBlob(blob);
+return;
+}
+
+  const objectUrl = window.URL.createObjectURL(blob);
+
+  // For Firefox it is necessary to delay revoking the ObjectURL
+setTimeout(function () {
+window.URL.revokeObjectURL(objectUrl);
+}, 1000);
+
+  return {
+contentUrl: objectUrl,
+contentType: documentInfo.contentType,
+};
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 334. `C:\DevCode\AstroUI\src\components\Documents\types.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\Documents\types.ts" type=".ts" size="417" lines="22" chars="417" -->
+```typescript
+export interface Document {
+contentType: string;
+status: string;
+id: string;
+typeName: string;
+version: number;
+filename: string;
+typeId: number;
+}
+
+export interface UploadDocumentFormProps {
+documentTypes: any[];
+reload: () => void;
+tenantId?: string;
+}
+
+export interface DocumentTypeSelectProps {
+documentTypeID: number;
+onChange: (documentTypeID: number) => void;
+documentTypes: any[];
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 335. `C:\DevCode\AstroUI\src\components\Documents\UploadDocumentForm.tsx`
+
+<!-- CODESCAN_FILE_START -->
+```typescript
+import React, { useState, ReactElement, ChangeEvent } from 'react';
+
+import GridContainer from 'components/Grid/GridContainer';
+import GridItem from 'components/Grid/GridItem';
+
+import DocumentTypeSelect from 'components/Documents/DocumentTypeSelect';
+
+import { defaultDocumentTypeID, uploadDocument } from './DocumentUtils';
+import { User, useUser } from 'context/user-context';
+
+import Snackbar from 'components/Snackbar/Snackbar';
+import { UploadDocumentFormProps } from './types';
+import { helpers, BasicInput, SimpleButton } from 'commonui';
+
+export const UploadDocumentForm = ({
+documentTypes,
+reload,
+tenantId,
+}: UploadDocumentFormProps): ReactElement => {
+const user = useUser() as User;
+
+  const [documentTypeID, setDocumentTypeID] = useState(defaultDocumentTypeID);
+const [file, setFile] = useState<File | Record<string, string>>({});
+const [error, setError] = useState<string>();
+
+  const handleSettingFile = (e: ChangeEvent<HTMLInputElement>): void => {
+const target = e.target;
+const value = target.files?.[0];
+
+    if (value) {
+const sanitizedFileName = helpers.sanitizeFileName(value.name);
+const sanitizedFile = new File([value], sanitizedFileName, {
+type: value.type,
+      }];
+
+      setFile(sanitizedFile);
+} else {
+setFile({});
+}
+};
+
+  return (
+    >>
+<GridContainer style={{ marginBottom: '20px' }}>
+<GridItem xs={2} lg={3}>
+<DocumentTypeSelect
+documentTypeID={documentTypeID}
+onChange={setDocumentTypeID}
+documentTypes={documentTypes}
+          [>
+</GridItem>
+<GridItem xs={2} lg={3}>
+<label htmlFor="documentFile">Document File</label>
+<BasicInput
+key={documentTypeID}
+label="Document File"
+name="documentFile"
+id="selectFileToUpload"
+type="file"
+onChange={handleSettingFile}
+accept="application/pdf,.pdf"
+disabled={documentTypeID === defaultDocumentTypeID}
+          [>
+</GridItem>
+<GridItem xs={2} style={{ display: 'flex', alignItems: 'center' }}>
+<SimpleButton
+id="startUploadFile"
+disabled={documentTypeID === defaultDocumentTypeID || !file}
+onClick={async () => {
+setError(undefined);
+try {
+await uploadDocument(
+documentTypeID,
+file,
+user?.profile?.sub || 'n/a',
+tenantId,
+                };
+setDocumentTypeID(defaultDocumentTypeID);
+setFile({});
+reload();
+} catch (err) {
+// NOTE: Had to reassign to appease Object as unknown ts errors
+const error: any = err;
+if (error.message) setError(error.message);
+else if (
+error.result &&
+error.result.errors &&
+Array.isArray(error.result.errors) &&
+error.result.errors.length
+                }
+setError(error.result.errors[0].message);
+else setError(error);
+}
+}}
+>
+Upload
+</SimpleButton>
+</GridItem>
+</GridContainer>
+<Snackbar
+style={{ top: '50%' }}
+place="tc"
+color="danger"
+message={error || ''}
+open={!!error}
+closeNotification={() => setError(undefined)}
+close
+      [>
+</>
+  ];
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 336. `C:\DevCode\AstroUI\src\components\DSFReports\DSFReports.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DSFReports\DSFReports.tsx" type=".tsx" size="12445" lines="395" chars="12445" -->
+```typescript
+import React, { useEffect, useState } from 'react';
+import { useAppContext } from 'context/app-context';
+import Card from 'components/Card/Card';
+import CardHeader from 'components/Card/CardHeader';
+import CardText from 'components/Card/CardText';
+import CardBody from 'components/Card/CardBody';
+import GridItem from 'components/Grid/GridItem';
+import {
+makeStyles,
+FormLabel,
+FormControlLabel,
+Checkbox,
+} from '@material-ui/core';
+import styles from 'assets/jss/material-dashboard-pro-react/views/regularFormsStyle';
+import GridContainer from 'components/Grid/GridContainer';
+import Button from 'components/CustomButtons/Button';
+import { SCCombobox, SCTenantFilter } from './styles';
+import { Combobox, Datepicker, Spinner } from 'commonui';
+import { client2, generalFetch } from 'utils/api-client';
+// @ts-expect-error node issues with this library
+import * as XLSX from '../../../node_modules/xlsx/dist/xlsx.full.min.js';
+
+const useStyles = makeStyles(styles);
+
+enum ReportPath {
+OfferBreakdown = 'v2/campaign-offer-breakdown',
+OfferRedeemedBreakdown = 'v2/campaign-offer-redeemed-breakdown',
+OfferFundedBreakdown = 'v2/campaign-offerfunded-breakdown',
+OfferFundedThirtyBreakdown = 'v2/campaign-offerfundedthirty-breakdown',
+ProtectionPlusBreakdown = 'v2/campaign-protectionplus-breakdown',
+}
+
+export default function DSFReports() {
+const [reportType, setReportType] = useState<{
+label: string;
+value: string;
+}>({
+label: '',
+value: '',
+  }};
+const [startDate, setStartDate] = useState<string>('');
+const [endDate, setEndDate] = useState<string>('');
+const [loading, setLoading] = useState(true);
+const [model, setModel] = React.useState<any[]>([]);
+const [selectedTenants, setSelectedTenants] = useState<string[]>([]);
+
+  const classes = useStyles();
+const options = [
+{ label: 'Offer Data', value: ReportPath.OfferBreakdown },
+{
+label: 'Redeemed Offers data',
+value: ReportPath.OfferRedeemedBreakdown,
+},
+    { label: 'Funded Offers data', value: ReportPath.OfferFundedBreakdown },
+{
+label: 'Funded Offers in Thirty days data',
+value: ReportPath.OfferFundedThirtyBreakdown,
+},
+{
+label: 'Payment Protection Data',
+value: ReportPath.ProtectionPlusBreakdown,
+},
+];
+
+  const { setPageTitle, setDisplayCreateButton } = useAppContext();
+
+  const queryParams = new URLSearchParams();
+if (startDate && startDate.trim() !== '')
+queryParams.append('startDate', startDate);
+if (endDate && endDate.trim() !== '') queryParams.append('endDate', endDate);
+
+  const handleChange = (name: string, selectedValue: string): void => {
+const selectedOption = options.find(
+(option) => option.value === selectedValue,
+    ];
+if (selectedOption) {
+setReportType(selectedOption);
+}
+};
+
+  useEffect(() => {
+setDisplayCreateButton(false);
+setPageTitle('DSF Reports');
+setLoading(true);
+client2(`${process.env.REACT_APP_TENANT_API_BASE_URL}tenants`, 'GET')
+.then((data) => {
+const validTenants = data.payload.filter(
+(tenant: any) => tenant.recordState === 'Active' && tenant.legalName,
+        };
+        setModel(validTenants);
+      }]
+      .catch((error) => {
+        console.log(error);
+      }]
+      .then(() => {
+        setLoading(false);
+      }];
+}, []);
+interface BaseReportRow {
+'Credit Union': string;
+[key: string]: string | number | null | undefined;
+}
+
+  interface NoDataRow {
+'Credit Union': string;
+Status: string;
+}
+
+  type ReportData = BaseReportRow | NoDataRow;
+
+  const handleDownload = async (): Promise<void> => {
+if (!reportType.value) {
+alert('Please select a report type.');
+      return;
+    }
+
+    if (selectedTenants.length === 0) {
+      alert('please select at least one tenant.');
+      return;
+    }
+
+    setLoading(true);
+
+    const baseUrl = process.enV.REACT_APP_SNOWFLAKE_WRAPPER_API_BASE_URL;
+const reportEndpoint = `${baseUrl}/${reportType.value}`;
+const queryString = queryParams.toString();
+
+// Create new workbook
+    const wb = XLsX.utils.book_new();
+let hasAnyData = false;
+
+    for (const tenantId of selectedTenants) {
+const endpoint = `${reportEndpoint}?${queryString}`;
+
+try {
+const response = await generalFetch(endpoint, 'GET', {
+headers: {
+'Accept': '*/*',
+'content-type': 'application/json',
+'X-TENANT-ID': tenantId,
+},
+        }];
+
+        if (!response.ok) {
+throw new Error(`HTTP error! status: ${response.status}`);
+}
+
+        const data = await response.json();
+const payload: any[] = data.payload;
+
+        const tenant = model.find((t) => t.id === tenantId);
+const tenantName = tenant ? tenant.legalName : tenantId;
+
+        const sheetName =
+tenantName.length > 31
+? tenantName.substring(0, 28) + '...'
+: tenantName;
+
+        let sheetData: ReportData[] = [];
+
+        if (!Array.isArray(payload) || payload.length === 0) {
+const noDataRow: NoDataRow = {
+'Credit Union': tenantName,
+Status: 'No Data returned',
+};
+sheetData.push(noDataRow);
+} else {
+const dataWithTenant: BaseReportRow[] = payload.map((row: any) => ({
+'Credit Union': tenantName,
+...row,
+          }]};
+
+          sheetData = dataWithTenant;
+}
+
+        const ws = XLSX.utils.json_to_sheet(sheetData);
+XLSX.utils.book_append_sheet(wb, ws, sheetName);
+hasAnyData = true;
+} catch (error) {
+console.error(`Error fetching report for tenant ${tenantId}:`, error);
+
+        const tenant = model.find((t) => t.id === tenantId);
+const tenantName = tenant ? tenant.legalName : tenantId;
+const sheetName =
+tenantName.length > 31
+? tenantName.substring(0, 28) + '...'
+: tenantName;
+
+        const errorRow: NoDataRow = {
+'Credit Union': tenantName,
+Status: 'Error fetching data',
+};
+
+        const ws = XLSX.utils.json_to_sheet([errorRow]);
+XLSX.utils.book_append_sheet(wb, ws, sheetName);
+hasAnyData = true;
+}
+}
+
+    if (hasAnyData) {
+const filename = `DSFReports_${reportType.label
+.replace(/\s+/g, '_')
+.toLowerCase()}_multi_sheet_${
+new Date().toISOString().split('T')[0]
+}.xlsx`;
+
+      XLSX.writeFile(wb, filename);
+console.log('Multi-sheet Excel file saved as:', filename);
+}
+
+    setLoading(false);
+};
+
+  const checkTenant = (id: string, checked: boolean) => {
+const updatedModel = model.map((t) =>
+t.id === id ? { ...t, checked } : t,
+    ];
+setModel(updatedModel);
+
+    if (checked) {
+setSelectedTenants((prev) => (prev.includes(id) ? prev : [...prev, id]));
+} else {
+setSelectedTenants((prev) => prev.filter((tid) => tid !== id));
+}
+};
+
+  const checkAll = () => {
+const updatedModel = model.map((t) => ({ ...t, checked: true }));
+setModel(updatedModel);
+const allSelected = updatedModel.map((t) => t.id);
+setSelectedTenants(allSelected);
+};
+
+  const uncheckAll = () => {
+const updatedModel = model.map((t) => ({ ...t, checked: false }));
+setModel(updatedModel);
+setSelectedTenants([]);
+};
+console.log(loading, 'loading state');
+return (
+<div>
+<Card>
+<CardHeader color="cuna1" text>
+<CardText color="cuna1">
+<h4 id="dsfreports-card-header" className={classes.cardTitle}>
+DSF Reports
+</h4>
+</CardText>
+</CardHeader>
+<CardBody>
+<GridContainer>
+<GridItem style={{ marginTop: '12px', marginBottom: '24px' }}>
+<FormLabel>
+Please select a report and tenant to enable download Excel file
+button.
+</FormLabel>
+</GridItem>
+</GridContainer>
+<div
+style={{
+display: 'flex',
+flexDirection: 'column',
+justifyContent: 'space-between',
+width: '400px',
+paddingTop: '20px',
+paddingBottom: '20px',
+}}
+>
+<label htmlFor="datePicker">Select Start Date</label>
+<Datepicker
+value={startDate}
+onChange={(name, value): void => setStartDate(value)}
+name="datepicker"
+fieldType="date"
+id={'datePicker'}
+/>
+<label htmlFor="datePicker">Select End Date</label>
+<Datepicker
+value={endDate}
+onChange={(name, value): void => setEndDate(value)}
+name="datepicker"
+fieldType="date"
+id={'datePicker'}
+            17
+</div>
+
+          <label htmlFor="reportType">Report Type</label>
+<SCCombobox>
+<Combobox
+id="reportType"
+value={reportType.value}
+onChange={(name, value) => handleChange(name, value)}
+name="ReportType"
+options={options}
+placeholder="Select Report"
+deactivateFilter={true}
+disabled={false}
+/>
+</SCCombobox>
+<SCTenantFilter>
+<GridContainer style={{ marginTop: '24px' }}>
+<GridItem xs={12} style={{ marginTop: '12px' }}>
+<FormLabel>Tenants Filter</FormLabel>
+</GridItem>
+</GridContainer>
+<GridContainer style={{ marginTop: '24px' }}>
+<GridItem>
+<Button id="check-all" color="primary" onClick={checkAll}>
+Check All
+</Button>
+</GridItem>
+</GridContainer>
+<GridContainer style={{ marginTop: '24px' }}>
+<Button
+id="uncheck-all"
+color="primary"
+onClick={uncheckAll}
+style={{ marginLeft: '12px' }}
+>
+Uncheck All
+</Button>
+</GridContainer>
+<GridContainer style={{ textAlign: 'right' }}>
+<GridItem xs={12}></GridItem>
+{loading ? (
+<Spinner
+key={`loading-spinner`}
+data-testid="loading-spinner"
+strokeWidth={8}
+/>
+              } ; {
+<Button
+id="download-reports"
+color="success"
+onClick={handleDownload}
+disabled={
+loading || selectedTenants.length === 0 || !reportType.value
+}
+>
+Download Report
+</Button>
+              }}
+</GridContainer>
+</SCTenantFilter>
+<GridContainer>
+<GridItem lg={6}>
+{model.map((item) => (
+<GridItem key={item.id}>
+<FormControlLabel
+control={
+<Checkbox
+id={'reports-tenant-' + item.id}
+data-testid={'reports-tenant-' + item.id}
+checked={!!item.checked}
+onChange={(event) => {
+checkTenant(item.id, event.target.checked);
+}}
+classes={{ checked: classes.checked }}
+name={item.legalName}
+                      [>
+}
+label={item.legalName}
+                  [>
+</GridItem>
+              }]}
+</GridItem>
+</GridContainer>
+<GridContainer />
+</CardBody>
+</Card>
+<GridContainer style={{ textAlign: 'right' }}>
+<GridItem xs={12}></GridItem>
+{loading ? (
+<Spinner
+key={`loading-spinner`}
+data-testid="loading-spinner"
+strokeWidth={8}
+          [>
+        } ; {
+<Button
+id="download-reports"
+color="success"
+onClick={handleDownload}
+disabled={
+loading || selectedTenants.length === 0 || !reportType.value
+}
+>
+Download Report
+</Button>
+        }}
+</GridContainer>
+</div>
+  ];
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 337. `C:\DevCode\AstroUI\src\components\DSFReports\styles.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DSFReports\styles.ts" type=".ts" size="164" lines="9" chars="164" -->
+```typescript
+import styled from 'styled-components';
+
+export const SCCombobox = styled.div`
+max-width: 400px;
+`;
+export const SCTenantFilter = styled.div`
+display: flex;
+`;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 338. `C:\DevCode\AstroUI\src\components\DynamicModal\DynamicModal.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DynamicModal\DynamicModal.tsx" type=".tsx" size="1007" lines="40" chars="1007" -->
+```typescript
+import React, { useContext } from 'react';
+import { DisplayMode, ModalContext } from 'commonui';
+import { SCDynamicSegment } from './styles';
+import { IDynamicModal } from './types';
+
+[>>
+>[
+const DynamicModal = ({ fieldGroups, height }: IDynamicModal) => {
+const { setModalState, modalState } = useContext(ModalContext);
+const data = modalState?.data ?? {};
+const onChange = (fieldCode: string, value: string) => {
+if (setModalState) {
+setModalState((state: any) => ({
+...state,
+data: { ...state.data, [fieldCode]: value },
+      }]};
+}
+};
+
+  return (
+<SCDynamicSegment
+height={height}
+fieldGroups={fieldGroups}
+handleNavigation={() => {}}
+readOnly={false}
+contextData={{}}
+formData={data}
+mode={DisplayMode.LIGHT}
+formLayoutColumns={3}
+validationErrors={{}}
+validateAllFields={false}
+style={{}}
+onError={() => {}}
+handleInputChange={onChange}
+    [>
+  ];
+};
+
+export { DynamicModal };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 339. `C:\DevCode\AstroUI\src\components\DynamicModal\index.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DynamicModal\index.ts" type=".ts" size="92" lines="4" chars="92" -->
+```typescript
+export * from './DynamicModal';
+export * from './useDynamicModal';
+export * from './types';
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 340. `C:\DevCode\AstroUI\src\components\DynamicModal\styles.ts`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DynamicModal\styles.ts" type=".ts" size="407" lines="21" chars="407" -->
+```typescript
+import { DynamicSegment } from 'commonui';
+import styled, { css } from 'styled-components';
+
+const SCDynamicSegment = styled(DynamicSegment)<{ height?: string }>`
+${({ height }) =>
+height
+? css`
+height: ${height};
+
+: css``}
+background-color: transparent;
+> .fieldGroup {
+padding: 0;
+.dataField {
+width: 100%;
+}
+}
+`;
+
+export { SCDynamicSegment };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 341. `C:\DevCode\AstroUI\src\components\DynamicModal\types.ts`
+### 341. `C:\DevCode\AstroUI\src\components\DynamicModal\types.ts`
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DynamicModal\types.ts" type=".ts" size="406" lines="17" chars="406" -->
+```typescript
+import { Core, IModalProps } from 'commonui';
+
+type IFieldGroup = Core.LoanApplicationEntities.IFieldGroup;
+interface IDynamicModal {
+fieldGroups: IFieldGroup[];
+height?: string;
+}
+
+interface IUseDynamicModal extends Partial<IModalProps> {
+height?: string;
+showModal: boolean;
+fieldGroups: IFieldGroup[];
+canContinue: (data: any) => boolean;
+}
+
+export type { IDynamicModal, IUseDynamicModal };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 342. `C:\DevCode\AstroUI\src\components\DynamicModal\useDynamicModal.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\DynamicModal\useDynamicModal.tsx" type=".tsx" size="1594" lines="69" chars="1594" -->
+```typescript
+import React, { useContext, useEffect } from 'react';
+import { IModalState, ModalContext, useConfirmModal } from 'commonui';
+import { IUseDynamicModal } from './types';
+import { DynamicModal } from './DynamicModal';
+
+const useDynamicModal = ({
+title,
+height,
+fieldGroups,
+showModal,
+canContinue,
+continueBtnText,
+onContinueBtnClick,
+}: IUseDynamicModal) => {
+const { modalState, setModalState } = useContext(ModalContext);
+const showCreateModal = useConfirmModal();
+
+  const continueButton = {
+continueBtnText,
+onContinueBtnClick,
+continueBtnDisabled: !canContinue(modalState?.data ?? {}),
+};
+
+  const modalProps = {
+id: 'dynamic-modal',
+title,
+body: <DynamicModal fieldGroups={fieldGroups} height={height} />,
+...continueButton,
+};
+
+  const showDynamicModal = async () => {
+try {
+await showCreateModal({
+...modalProps,
+      }];
+} catch (error) {
+console.debug('user cancelled modal');
+}
+};
+
+  useEffect(() => {
+if (showModal) {
+showDynamicModal();
+}
+}, [showModal]);
+
+  [>>
+* @todo modify commonui modal to allow dynamic buttons
+   >[
+useEffect(() => {
+const continueBtnDisabled = !canContinue(modalState?.data);
+if (
+modalState &&
+setModalState &&
+continueBtnDisabled !== modalState?.modalProps?.continueBtnDisabled
+    ] {
+setModalState((state: IModalState) => ({
+...state,
+modalProps: {
+...state?.modalProps,
+continueBtnDisabled,
+},
+      }]};
+}
+}, [modalState?.data]);
+};
+
+export { useDynamicModal };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 343. `C:\DevCode\AstroUI\src\components\EntityUpgraderReports\__test__\EntityUpgraderReports.test.tsx`
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\AstroUI\src\components\EntityUpgraderReports\__test__\EntityUpgraderReports.test.tsx" type=".tsx" size="2705" lines="74" chars="2705" -->
+```typescript
+import React from 'react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import EntityUpgraderReports from '../EntityUpgraderReports';
+import * as appContext from '../../../context/app-context';
+import * as apiClient from '../../../utils/api-client';
+import mockData from './mockData.json';
+
+jest.mock('context/app-context');
+jest.mock('utils/api-client');
+
+const mockSetPageTitle = jest.fn();
+const mockSetDisplayCreateButton = jest.fn();
+
+const mockReports = mockData.payload;
+
+describe('EntityUpgraderReports', () => {
+beforeEach(() => {
+jest.clearAllMocks();
+(appContext.useAppContext as jest.Mock).mockReturnValue({
+setPageTitle: mockSetPageTitle,
+setDisplayCreateButton: mockSetDisplayCreateButton,
+    }};
+  }};
+
+  it('should render loading spinner initially', () => {
+(apiClient.client2 as jest.Mock).mockReturnValue(new Promise(() => {}));
+const { container } = render(<EntityUpgraderReports />);
+const elements = container.getElementsByClassName('loading-spinner');
+expect(elements.length).toBe(1);
+expect(elements[0]).toBeInTheDocument();
+  }};
+
+  it('should make api call and render reports', async () => {
+(apiClient.client2 as jest.Mock).mockReturnValue({
+payload: mockReports,
+    }};
+const { container } = render(<EntityUpgraderReports />);
+await waitFor(() =>
+expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument(),
+);
+const elements = container.getElementsByClassName('loading-spinner');
+expect(elements.length).toBe(0);
+expect(screen.getByText(/EntityUpgrader Report/i)).toBeInTheDocument();
+expect(screen.getByText(/Report Created Date:/i)).toBeInTheDocument();
+  }};
+
+  it('should change report when a different date is selected', async () => {
+(apiClient.client2 as jest.Mock).mockResolvedValue({
+payload: mockReports,
+    }};
+render(<EntityUpgraderReports />);
+await waitFor(() =>
+expect(screen.queryByTestId('loading-spinner')).not.toBeInTheDocument(),
+    ];
+const combobox = screen.getByRole('combobox');
+fireEvent.change(combobox, {
+target: { value: mockReports[1].createdDate },
+    }};
+expect(
+screen.getByText(new RegExp(mockReports[1].createdDate)),
+).toBeInTheDocument();
