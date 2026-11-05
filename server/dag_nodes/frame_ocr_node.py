@@ -8,7 +8,7 @@ import hashlib
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import cv2
 import numpy as np
@@ -106,9 +106,13 @@ class FrameOcrNode(BaseDagNode):
         if is_fast:
             t_det, b_det = await state.detect_gutter_bounds_in_process(temp_calib, dpi_factor=dpi_factor)
             lines_detected = []
+            char_track_active = bool(
+                state.orchestration_state.get("character_tracking_mode")
+                or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
+            )
             if t_det <= 0 or b_det < t_det or (b_det - t_det) > 75:
                 from routers.orchestration import recover_gutter_bounds_with_healing
-                t_det, b_det, lines_detected, _ = await recover_gutter_bounds_with_healing(
+                t_det, b_det, lines_detected, heal_meta = await recover_gutter_bounds_with_healing(
                     serial=serial,
                     disp_id=disp_id,
                     temp_calib=temp_calib,
@@ -116,11 +120,9 @@ class FrameOcrNode(BaseDagNode):
                     node_id="frame_ocr",
                     expected_top=expected_top
                 )
+                if heal_meta.get("character_tracking_mode"):
+                    char_track_active = True
             # Recover ONLY if there is a gap (t_det > expected_top) or if the viewport jumped backward (> 8 lines before expected_top).
-            char_track_active = bool(
-                state.orchestration_state.get("character_tracking_mode")
-                or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
-            )
             # If expected_top - 8 <= t_det <= expected_top and b_det >= expected_top, it is a contiguous zero-gap overlap!
             is_contiguous = (
                 t_det > 0

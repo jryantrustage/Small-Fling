@@ -8,7 +8,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services import state
@@ -105,6 +105,16 @@ class LocalAiOcrNode(BaseDagNode):
                         f"Rejected invalid non-editor frame {temp_calib.stem} (0 gutter lines, luminance={quick_scan.get('mean_luminance')}). Purged frame to retake capture."
                     )
                 raw_lines = quick_scan.get("lines", [])
+                if quick_scan.get("is_wrapped_continuation"):
+                    tracked_ln = int(
+                        state.orchestration_state.get("character_tracking_line")
+                        or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
+                        or exp_top
+                        or 1
+                    )
+                    for gl in raw_lines:
+                        gl["line_number"] = tracked_ln
+                        gl["gutter_number"] = tracked_ln
                 raw_gt_snapshot = [dict(gl) for gl in raw_lines]
                 raw_bboxes = quick_scan.get("bounding_boxes", {})
 
@@ -341,6 +351,14 @@ class LocalAiOcrNode(BaseDagNode):
                     pass
 
         if cfg.get("save_to_document", True):
+            lead_cont = scan_res.get("leading_wrapped_continuation")
+            if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+                state.append_wrapped_continuation_line(
+                    int(lead_cont["line_number"]),
+                    temp_calib.stem,
+                    lead_cont["text"],
+                    is_root_chunk=False,
+                )
             for item in lines_detected:
                 try:
                     raw_ln = str(item.get("line_number") or "").strip()
@@ -349,10 +367,28 @@ class LocalAiOcrNode(BaseDagNode):
                 except Exception:
                     ln = None
                 if ln and ln > 0:
-                    if exp_top > 25 and ln <= 24:
+                    if exp_top > 25 and ln <= 24 and not scan_res.get("is_wrapped_continuation"):
                         continue
                     blank_locked = bool(item.get("blank_locked", False))
                     txt = "" if blank_locked else item.get("text", "")
+                    if item.get("is_wrapped_continuation"):
+                        state.append_wrapped_continuation_line(
+                            ln,
+                            temp_calib.stem,
+                            txt,
+                            is_root_chunk=False,
+                            confidence=item.get("confidence", 0.98),
+                        )
+                        continue
+                    if item.get("is_wrapped") and not blank_locked:
+                        state.append_wrapped_continuation_line(
+                            ln,
+                            temp_calib.stem,
+                            txt,
+                            is_root_chunk=True,
+                            confidence=item.get("confidence", 0.98),
+                        )
+                        continue
                     state.document_lines[ln] = {
                         "line_number": ln,
                         "gutter_number": ln,

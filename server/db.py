@@ -5,8 +5,26 @@ from typing import Dict, Any, List, Optional
 
 import config
 
-DB_PATH = Path(__file__).parent / "data" / "matrix_capture.db"
-DATA_DIR, FRAMES_DIR = Path(__file__).parent / "data", config.FRAMES_DIR
+_LEGACY_DB_PATH = Path(__file__).parent / "data" / "matrix_capture.db"
+DATA_DIR, FRAMES_DIR = config.DATA_DIR, config.FRAMES_DIR
+DB_PATH = DATA_DIR / "matrix_capture.db"
+
+def _ensure_storage_db_migrated():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if _LEGACY_DB_PATH.exists() and _LEGACY_DB_PATH.stat().st_size > 4096:
+        if not DB_PATH.exists() or DB_PATH.stat().st_size < 4096:
+            try:
+                src = sqlite3.connect(str(_LEGACY_DB_PATH), timeout=10.0)
+                dst = sqlite3.connect(str(DB_PATH), timeout=10.0)
+                with dst:
+                    src.backup(dst)
+                dst.close()
+                src.close()
+            except Exception as e:
+                import shutil
+                shutil.copy2(str(_LEGACY_DB_PATH), str(DB_PATH))
+
+_ensure_storage_db_migrated()
 
 def get_connection() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True); FRAMES_DIR.mkdir(parents=True, exist_ok=True)

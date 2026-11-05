@@ -251,46 +251,18 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             # Compact icon aspect ratio and reasonable icon height
             if 0.45 <= (bw / max(1, bh)) <= 2.5 and bh <= int(60 * dpi_factor) and area <= 2000 * (dpi_factor ** 2):
                 abs_cx = min_pencil_x + bx + bw // 2
-                abs_cy = tb_y1 + by + bh // 2
-
-                # Check for neighbor mode icons horizontally aligned in the toolbar row
-                r_y1 = max(0, abs_cy - int(18 * dpi_factor))
-                r_y2 = min(h, abs_cy + int(18 * dpi_factor))
-                row_strip = img[r_y1:r_y2, int(w * 0.50):]
-                gray = cv2.cvtColor(row_strip, cv2.COLOR_BGR2GRAY)
-                edges = cv2.Canny(gray, 40, 140)
-                e_conts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                neighbor_offsets = []
-                for ec in e_conts:
-                    if cv2.contourArea(ec) >= 8:
-                        ex, ey, ew, eh = cv2.boundingRect(ec)
-                        abs_ex = int(w * 0.50) + ex + ew // 2
-                        offset = abs_ex - abs_cx
-                        if int(20 * dpi_factor) <= abs(offset) <= int(90 * dpi_factor):
-                            neighbor_offsets.append(offset)
-
-                has_left_mode_icon = any(-int(80 * dpi_factor) <= off <= -int(25 * dpi_factor) for off in neighbor_offsets)
-                has_right_mode_icon = any(int(25 * dpi_factor) <= off <= int(80 * dpi_factor) for off in neighbor_offsets)
-
-                if not has_left_mode_icon:
-                    # Blue pill is on leftmost mode icon (Pencil icon) -> Single-pane Edit Mode
+                # In the toolbar's right button group ([Pencil] [Eye] | [Moon]),
+                # Pencil (Edit Mode) is at ~0.825w..0.848w, whereas Eye (Preview Mode) is at >= 0.858w.
+                if abs_cx <= int(w * 0.855):
                     edit_mode_active = True
                     split_screen_detected = False
                     best_area = area
                     best_pencil = (min_pencil_x + bx, tb_y1 + by, bw, bh)
                     break
-                elif has_left_mode_icon and has_right_mode_icon:
-                    # Blue pill is between mode icons (Split View icon) -> Split Screen Preview Mode
-                    split_screen_detected = True
-                    edit_mode_active = False
-                    best_pencil = (int(abs_cx - 50 * dpi_factor), tb_y1 + by, bw, bh)
-                    break
                 else:
-                    # Blue pill is on Preview Only icon -> Full Preview Mode
                     edit_mode_active = False
                     split_screen_detected = False
-                    best_pencil = (int(abs_cx - 100 * dpi_factor), tb_y1 + by, bw, bh)
+                    best_pencil = (int(abs_cx - 45 * dpi_factor), tb_y1 + by, bw, bh)
                     break
 
     if best_pencil:

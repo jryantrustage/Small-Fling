@@ -316,17 +316,18 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     """
     if img is None: return 0, 0
     gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
-    if len(gutter) >= 2:
+    if len(gutter) >= 1:
         t_c, b_c = gutter[0][1], gutter[-1][1]
         if 0 < t_c <= b_c and (b_c - t_c) <= 75:
             return t_c, b_c
 
     h, w = img.shape[:2]
-    scale_x = w / 1920.0
-    norm_multiplier = max(0.4, scale_x * dpi_factor)
+    dpi_scale = (h / 1080.0) if h < 720 else 1.0
+    scale_x = dpi_scale
+    norm_multiplier = max(0.4, (w / 1920.0) * dpi_factor)
 
     # 1. Primary: standard fullscreen gutter with generous right padding (x <= 145) and x_min filter (x_min <= 96)
-    gutter_w = int(max(125.0, min(145.0, 115.0 * norm_multiplier)))
+    gutter_w = int(max(125.0, min(145.0, 145.0 * scale_x)))
     max_gutter_xmin = int(96 * scale_x)
     top_y1 = max(275, int(h * 0.255))
     top_y2 = min(h - 150, int(h * 0.65))
@@ -353,40 +354,14 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
         if 0 < t <= b and (b - t) <= 75:
             return t, b
 
-    # 2. Secondary: sidebar open (gutter around x ~ 300 scaled by norm_multiplier)
-    sidebar_x1 = int(240.0 * norm_multiplier)
-    sidebar_x2 = sidebar_x1 + gutter_w
-    if sidebar_x2 < w:
-        top_crop2 = img[top_y1:top_y2, sidebar_x1:sidebar_x2]
-        bot_crop2 = img[bot_y1:bot_y2, sidebar_x1:sidebar_x2]
-        top2_scaled = cv2.resize(top_crop2, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
-        f_top2 = _fast_ocr_executor.submit(extract_numbers_from_slice, top2_scaled)
-        f_bot2 = _fast_ocr_executor.submit(extract_numbers_from_slice, bot_crop2)
-        top_nums2 = clean_slice_numbers(f_top2.result())
-        bot_nums2 = clean_slice_numbers(f_bot2.result())
-        if top_nums2 and top_nums2[0] > 1 and len(top_nums2) >= 2:
-            if top_nums2[0] <= 12:
-                top_nums2.insert(0, 1)
-        if top_nums2 and bot_nums2:
-            t2, b2 = top_nums2[0], bot_nums2[-1]
-            if b2 > 0 and t2 > 0 and (b2 - t2) > 75:
-                bot2_seq_valid = len(bot_nums2) >= 2 and 0 < (bot_nums2[-1] - bot_nums2[-2]) <= 3
-                top2_seq_valid = len(top_nums2) >= 2 and 0 < (top_nums2[1] - top_nums2[0]) <= 3
-                if bot2_seq_valid and not top2_seq_valid and str(b2 - 57).startswith(str(t2)):
-                    t2 = max(1, b2 - 57)
-                elif top2_seq_valid and not bot2_seq_valid:
-                    b2 = bot_nums2[-2] if (len(bot_nums2) >= 2 and 0 <= bot_nums2[-2] - t2 <= 75) else top_nums2[-1]
-            if 0 < t2 <= b2 and (b2 - t2) <= 75:
-                return t2, b2
-
     if gutter:
         return gutter[0][1], gutter[-1][1]
 
-    # Return partial if either top or bot detected, ensuring bot is never an inverted truncation < top
-    t = (top_nums or (top_nums2 if 'top_nums2' in locals() else []) or [0])[0]
-    b = (bot_nums or (bot_nums2 if 'bot_nums2' in locals() else []) or [0])[-1]
+    # Return partial if either top or bot detected in the primary left gutter, ensuring bot >= top
+    t = (top_nums or bot_nums or [0])[0]
+    b = (bot_nums or top_nums or [0])[-1]
     if b > 0 and t > 0 and b < t:
-        b = 0
+        b = t
     return t, b
 
 def fast_verify_first_line(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[bool, int]:
@@ -693,14 +668,22 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     except Exception as e:
         print(f"[find_gutter_numbers_cluster] Primary strip error: {e}")
 
-    # 2. Fallback to wider scan if fewer than 3 gutter numbers found (e.g., sidebar open)
-    if len(candidates) < 3:
+    # 2. Fallback to wider scan ONLY if 0 candidates found in primary gutter AND a sidebar gutter
+    # with >= 5 strictly sequential (dn == 1) line numbers exists at x_min >= 220 * scale_x
+    if not candidates:
         sub_w = int(min(w, max(480, int(w * 0.45 * norm_multiplier))))
         try:
             res_wide, _ = ocr(img[crop_top_y:crop_bot_y, :sub_w])
-            wide_cands = _parse_ocr_candidates(res_wide, max_x=None)
-            if len(wide_cands) > len(candidates):
-                candidates = wide_cands
+            raw_wide = _parse_ocr_candidates(res_wide, max_x=None)
+            sidebar_cands = [c for c in raw_wide if c[0] >= int(220 * scale_x)]
+            if len(sidebar_cands) >= 5:
+                s_sorted = sorted(sidebar_cands, key=lambda it: it[1])
+                seq_hits = sum(
+                    1 for i in range(len(s_sorted) - 1)
+                    if s_sorted[i + 1][2] - s_sorted[i][2] == 1 and 16 <= (s_sorted[i + 1][1] - s_sorted[i][1]) <= 36
+                )
+                if seq_hits >= 4:
+                    candidates = sidebar_cands
         except Exception as e:
             print(f"[find_gutter_numbers_cluster] Wide fallback error: {e}")
 
@@ -1158,12 +1141,17 @@ def detect_line_wrap_state(img: np.ndarray, dpi_factor: float = 1.0, gutter: Opt
 
     # Bottom is wrapped and continues onto next page if:
     # 1) No gutter numbers exist on the page and there are >= 3 content rows, OR
-    # 2) There are blank-gutter code rows below the last gutter number AND either row 22 has code ink
-    #    or row 21 is a long wrapped line (>= 45 chars)
+    # 2) There are blank-gutter code rows below the last gutter number AND row 21 reaches near the right margin
+    #    (so the wrapped line did not already terminate on row 21) AND (row 22 has code ink or >= 2 wrapped rows below).
+    h_img, w_img = img.shape[:2]
+    r21_reaches_margin = bool(
+        len(bottom_text) >= 60
+        or (r21 and int(r21.get("max_x", 0)) >= int(w_img * 0.65))
+    )
     r22_has_ink = bool(r22 and r22.get("ink_px", 0) >= 10 and r22.get("text"))
     is_bottom_wrapped = bool(
         (gutter_count == 0 and content_row_count >= 3)
-        or (wrapped_below >= 1 and (r22_has_ink or len(bottom_text) >= 45 or wrapped_below >= 3))
+        or (wrapped_below >= 1 and r21_reaches_margin and (r22_has_ink or wrapped_below >= 2))
     )
     is_wrapped = bool(
         (gutter_count == 0 and content_row_count >= 3)

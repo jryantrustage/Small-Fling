@@ -213,11 +213,37 @@ async def process_frame_with_local_ocr(frame_id: str, image_path: Path) -> Dict[
     })
     if top_ln > 0 and bot_ln > 0:
         state.latest_telemetry["current_top_line"], state.latest_telemetry["current_bottom_line"] = top_ln, bot_ln
+    lead_cont = res.get("leading_wrapped_continuation")
+    if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+        state.append_wrapped_continuation_line(
+            int(lead_cont["line_number"]),
+            frame_id,
+            lead_cont["text"],
+            is_root_chunk=False,
+        )
     for item in lines:
         if item.get("line_number"):
             ln = int(item["line_number"])
             blank_locked = bool(item.get("blank_locked", False))
             txt = "" if blank_locked else item.get("text", "")
+            if item.get("is_wrapped_continuation"):
+                state.append_wrapped_continuation_line(
+                    ln,
+                    frame_id,
+                    txt,
+                    is_root_chunk=False,
+                    confidence=item.get("confidence", 0.98),
+                )
+                continue
+            if item.get("is_wrapped") and not blank_locked:
+                state.append_wrapped_continuation_line(
+                    ln,
+                    frame_id,
+                    txt,
+                    is_root_chunk=True,
+                    confidence=item.get("confidence", 0.98),
+                )
+                continue
             state.document_lines[ln] = {
                 "line_number": ln,
                 "gutter_number": ln,
@@ -1197,6 +1223,50 @@ async def scan_image_with_minicpm(
         }
     bboxes = aux.get("bounding_boxes", {})
     ground_truth_lines = aux.get("lines", [])
+    if aux.get("is_wrapped_continuation"):
+        tracked_ln = int(
+            state.orchestration_state.get("character_tracking_line")
+            or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
+            or (expected_top if (expected_top and expected_top > 0) else 0)
+            or state.latest_telemetry.get("current_bottom_line")
+            or 1
+        )
+        top_ln = tracked_ln
+        bot_ln = tracked_ln
+        for gl in ground_truth_lines:
+            gl["line_number"] = tracked_ln
+            gl["gutter_number"] = tracked_ln
+        formatted_wrap = "\n".join(f"{p['line_number']:>3}: {p.get('text', '')}" for p in ground_truth_lines)
+        return {
+            "status": "success",
+            "top_line": top_ln,
+            "bottom_line": bot_ln,
+            "gutter_count": 0,
+            "mean_luminance": mean_lum,
+            "invalid_editor_frame": False,
+            "is_wrapped_continuation": True,
+            "character_tracking_mode": True,
+            "bottom_text_anchor": aux.get("bottom_text_anchor", ""),
+            "target_top_text_anchor": aux.get("target_top_text_anchor", ""),
+            "bottom_anchor_window": aux.get("bottom_anchor_window", []),
+            "lines": ground_truth_lines,
+            "extracted_text": formatted_wrap,
+            "lines_count": len(ground_truth_lines),
+            "image_width": img_w,
+            "image_height": img_h,
+            "bounding_boxes": bboxes,
+            "model_used": "Local RapidOCR (Character Tracking Wrapped Page)",
+            "detected_filename": None,
+            "line_position_verification": {
+                "verified": True,
+                "total_lines": len(ground_truth_lines),
+                "verified_count": len(ground_truth_lines),
+                "shifted_count": 0,
+                "repaired_count": 0,
+                "lines": ground_truth_lines,
+                "bounding_boxes": bboxes,
+            },
+        }
     raw_gt_snapshot = [dict(gl) for gl in ground_truth_lines]
     model_used = "Local RapidOCR (OpenVINO Accelerated)"
     detected_filename = None
@@ -1314,6 +1384,12 @@ async def scan_image_with_minicpm(
             "gutter_count": gutter_cnt,
             "mean_luminance": mean_lum,
             "invalid_editor_frame": False,
+            "is_wrapped_continuation": bool(aux.get("is_wrapped_continuation", False)),
+            "character_tracking_mode": bool(aux.get("character_tracking_mode", False)),
+            "leading_wrapped_continuation": aux.get("leading_wrapped_continuation"),
+            "bottom_text_anchor": aux.get("bottom_text_anchor", ""),
+            "target_top_text_anchor": aux.get("target_top_text_anchor", ""),
+            "bottom_anchor_window": aux.get("bottom_anchor_window", []),
             "lines": plines,
             "extracted_text": formatted,
             "lines_count": len(plines),
@@ -1469,27 +1545,57 @@ async def sequential_rescan_all_frames_task(
             lines = aux.get("lines", [])
             bboxes = aux.get("bounding_boxes", {})
 
-            line_numbers = [l.get("line_number") for l in lines if l.get("line_number") is not None]
-            if not line_numbers and top_l and bot_l:
-                line_numbers = list(range(top_l, bot_l + 1))
+            if aux.get("is_wrapped_continuation"):
+                fn_m = re.search(r"frame_(\d+)_(\d+)", str(fid))
+                tracked_l = int(finfo.get("top_line") or (int(fn_m.group(1)) if fn_m else 0) or state.sequential_rescan_progress.get("current_bottom_line") or 1)
+                top_l = tracked_l
+                bot_l = tracked_l
+                for gl in lines:
+                    gl["line_number"] = tracked_l
+                    gl["gutter_number"] = tracked_l
+                updated_lines = lines
+                rescanned = lines
+                ver_report = {
+                    "verified": True,
+                    "total_lines": len(lines),
+                    "verified_count": len(lines),
+                    "shifted_count": 0,
+                    "repaired_count": 0,
+                    "lines": lines,
+                    "bounding_boxes": bboxes,
+                }
+            else:
+                line_numbers = [l.get("line_number") for l in lines if l.get("line_number") is not None]
+                if not line_numbers and top_l and bot_l:
+                    line_numbers = list(range(top_l, bot_l + 1))
 
-            try:
-                from ocr_engine import verify_and_repair_ocr_line_positions
-                updated_lines, rescanned = await asyncio.to_thread(
-                    rescan_lines_on_image_sync,
-                    ipath,
-                    line_numbers,
-                    lines,
-                    bboxes
-                )
-                ver_report = verify_and_repair_ocr_line_positions(updated_lines, lines, bboxes)
-                updated_lines = ver_report.get("lines", updated_lines)
-                bboxes = ver_report.get("bounding_boxes", bboxes)
-            except Exception as e:
-                print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
-                continue
+                try:
+                    from ocr_engine import verify_and_repair_ocr_line_positions
+                    updated_lines, rescanned = await asyncio.to_thread(
+                        rescan_lines_on_image_sync,
+                        ipath,
+                        line_numbers,
+                        lines,
+                        bboxes
+                    )
+                    ver_report = verify_and_repair_ocr_line_positions(updated_lines, lines, bboxes)
+                    updated_lines = ver_report.get("lines", updated_lines)
+                    bboxes = ver_report.get("bounding_boxes", bboxes)
+                except Exception as e:
+                    print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
+                    continue
 
             dur_ms = round((time.perf_counter() - t_scan_start) * 1000, 1)
+
+            lead_cont = aux.get("leading_wrapped_continuation")
+            if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+                state.append_wrapped_continuation_line(
+                    int(lead_cont["line_number"]),
+                    fid,
+                    lead_cont["text"],
+                    is_root_chunk=False,
+                    page_index=finfo.get("page_index"),
+                )
 
             for l_item in updated_lines:
                 ln = l_item.get("line_number")
@@ -1497,6 +1603,26 @@ async def sequential_rescan_all_frames_task(
                     continue
                 blank_locked = bool(l_item.get("blank_locked", False))
                 final_txt = "" if blank_locked else l_item.get("text", "")
+                if l_item.get("is_wrapped_continuation"):
+                    state.append_wrapped_continuation_line(
+                        ln,
+                        fid,
+                        final_txt,
+                        is_root_chunk=False,
+                        page_index=finfo.get("page_index"),
+                        confidence=l_item.get("confidence", 0.99),
+                    )
+                    continue
+                if l_item.get("is_wrapped") and not blank_locked:
+                    state.append_wrapped_continuation_line(
+                        ln,
+                        fid,
+                        final_txt,
+                        is_root_chunk=True,
+                        page_index=finfo.get("page_index"),
+                        confidence=l_item.get("confidence", 0.99),
+                    )
+                    continue
                 existing = state.document_lines.get(ln)
                 meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
                 meta.update({

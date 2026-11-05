@@ -2719,9 +2719,45 @@ async def navigate_to_target_top_line(
             and (current_top is None or cur_t > current_top or target_top <= 2)
         )
 
+        # Auto-activate Character Tracking Mode if called in Gutter Mode while the current viewport's bottom line
+        # wraps off the bottom of the screen (trailing blank gutter rows below last_g) and target_top > last_g.
+        if (
+            not char_mode
+            and character_tracking_mode is not False
+            and attempt == 1
+            and gutter
+            and last_g
+            and target_top > last_g
+            and (target_top - last_g) <= 2
+            and last_y < int(850 * scale_y)
+        ):
+            wrap_auto = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=gutter)
+            if wrap_auto.get("is_bottom_wrapped") and (
+                wrap_auto.get("bottom_text_anchor") or wrap_auto.get("target_top_text_anchor")
+            ):
+                char_mode = True
+                tracked_ln = int(last_g)
+                bot_anchor = str(wrap_auto.get("bottom_text_anchor") or bot_anchor)
+                tgt_top_anchor = str(wrap_auto.get("target_top_text_anchor") or tgt_top_anchor)
+                active_anchor_win = list(wrap_auto.get("bottom_anchor_window") or active_anchor_win)
+                state.orchestration_state.update({
+                    "character_tracking_mode": True,
+                    "character_tracking_line": tracked_ln,
+                    "bottom_text_anchor": bot_anchor,
+                    "target_top_text_anchor": tgt_top_anchor,
+                    "bottom_anchor_window": active_anchor_win,
+                })
+                actions_taken.append(
+                    f"Auto-activated Character Tracking Mode on wrapped Line {tracked_ln} (last gutter y={last_y}px, {wrap_auto.get('trailing_blank_gutter_rows')} wrapped rows)"
+                )
+
         # Character Tracking Mode: when previous page ended inside a wrapped line (or current page has no gutter),
         # locate target_top_text_anchor (bottom_text_anchor + 1) and position it at visual row 0 (y ~ 309px).
-        if (char_mode or not gutter) and (bot_anchor or tgt_top_anchor or any(active_anchor_win)) and not is_exact_or_wrapped_top:
+        should_use_char_track = bool(
+            char_mode
+            or (character_tracking_mode is not False and not gutter and abs(target_top - tracked_ln) <= 2)
+        )
+        if should_use_char_track and (bot_anchor or tgt_top_anchor or any(active_anchor_win)) and not is_exact_or_wrapped_top:
             loc = locate_character_anchor_row(
                 img,
                 bottom_anchor=bot_anchor,
@@ -2750,25 +2786,29 @@ async def navigate_to_target_top_line(
 
                     row0_txt = str(loc.get("current_row0_text") or "")
                     if gutter and first_g and first_g > 0:
-                        # Gutter numbers reappeared! Check if bottom of this page is still wrapped
+                        # Gutter numbers reappeared! Keep character_tracking_mode=True if first_g is below row 0
+                        # (so Node 3 & Node 5 capture the leading wrapped rows above first_g without scrolling first_g to row 0)
+                        # or if the bottom of this page is also wrapped.
                         wrap_now = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=gutter)
                         still_wrapped_bot = bool(wrap_now.get("is_bottom_wrapped", False))
+                        has_leading_wrapped_rows = bool(first_y > max_top_row_y)
+                        keep_char_mode_for_capture = bool(still_wrapped_bot or has_leading_wrapped_rows)
                         actual_top = int(first_g)
                         actual_bot = int(last_g or actual_top)
                         state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
                         state.sync_alignment_gutter_lines(
                             actual_top,
                             actual_bot,
-                            character_tracking_mode=still_wrapped_bot,
+                            character_tracking_mode=keep_char_mode_for_capture,
                             anchor_preview=row0_txt,
                         )
                         actions_taken.append(
-                            f"Character Tracking aligned anchor+1 at row 0 (conf={loc.get('confidence')}) and transitioned to Gutter Line {actual_top}..{actual_bot} on check {attempt}"
+                            f"Character Tracking aligned anchor+1 at row 0 (conf={loc.get('confidence')}) and detected Gutter Line {actual_top}..{actual_bot} on check {attempt}"
                         )
                         return {
                             "status": "ok",
                             "reached": True,
-                            "character_tracking_mode": still_wrapped_bot,
+                            "character_tracking_mode": keep_char_mode_for_capture,
                             "transitioned_to_gutter": True,
                             "matched_anchor_text": row0_txt,
                             "target_top": actual_top,
@@ -3054,8 +3094,8 @@ async def navigate_to_target_top_line(
             diff = target_top - cur_t
             rows_to_last = max(1, int(round((last_y - top_row_y) / row_pitch)))
             rem_lines = target_top - last_g
-            if rem_lines == 1 and last_y >= int(830 * scale_y):
-                visual_rows_diff = max(rows_span_visible, min(26, int(round(rows_to_last + avg_rows_per_line))))
+            if rem_lines == 1:
+                visual_rows_diff = rows_to_last + 1
             else:
                 visual_rows_diff = rows_to_last + max(rem_lines, int(round(rem_lines * avg_rows_per_line)))
         elif target_top > cur_t:
@@ -3076,7 +3116,7 @@ async def navigate_to_target_top_line(
         # If stalled twice, tap inside the safe code area (never x=80 y=305 which can hit Undo/Redo if toolbar shifted)
         if stall_count >= 2:
             tap_x = int(350 * (img.shape[1] / 1920.0))
-            tap_y = max(int(top_row_y + 10), int(first_y)) if cur_dir == "up" else min(int(930 * scale_y), int(last_y))
+            tap_y = int(top_row_y + 10) if cur_dir == "up" else min(int(930 * scale_y), max(int(868 * scale_y), int(last_y)))
             await run_adb_shell(f"input {disp_pfx}tap {tap_x} {tap_y} >/dev/null 2>&1", ser)
             await asyncio.sleep(0.06)
             await dismiss_keyboard(ser, valid_d)

@@ -141,9 +141,13 @@ ocr_engine = LocalGutterOCREngine(
 )
 
 class MasterLine(str):
-    def __new__(cls, text: str = "", **meta):
-        s = super().__new__(cls, str(text) if text is not None else "")
-        s.meta = dict(meta)
+    def __new__(cls, _text: str = "", **meta):
+        if not _text and "text" in meta:
+            _text = meta.get("text", "")
+        meta_clean = dict(meta)
+        meta_clean.pop("text", None)
+        s = super().__new__(cls, str(_text) if _text is not None else "")
+        s.meta = meta_clean
         return s
 
     def _notify_dirty(self):
@@ -515,7 +519,21 @@ def append_wrapped_continuation_line(
         chunk_order = []
 
     if fid not in chunk_order:
-        chunk_order.append(fid)
+        # If the previous entry in chunk_order was a temporary or pre-refinement frame_id from Node 3/4
+        # (either no longer in captured_frames or holding the identical chunk_text), replace it in-place
+        replaced_in_place = False
+        if chunk_order:
+            last_k = chunk_order[-1]
+            if last_k != fid and (
+                chunks_map.get(last_k) == clean_chunk
+                or last_k == "dag_node3_capture_temp"
+                or (captured_frames and last_k.startswith("frame_") and last_k not in captured_frames)
+            ):
+                chunks_map.pop(last_k, None)
+                chunk_order[-1] = fid
+                replaced_in_place = True
+        if not replaced_in_place:
+            chunk_order.append(fid)
     chunks_map[fid] = clean_chunk
 
     ordered_texts = [chunks_map[k] for k in chunk_order if k in chunks_map and chunks_map[k]]
@@ -524,7 +542,6 @@ def append_wrapped_continuation_line(
     meta.update(extra_meta)
     meta.update({
         "line_number": ln,
-        "text": full_text,
         "is_wrapped": True,
         "wrapped_chunks": chunks_map,
         "wrapped_chunk_order": chunk_order,
@@ -532,6 +549,7 @@ def append_wrapped_continuation_line(
         "last_continuation_frame_id": fid,
         "updated_at": datetime.now().isoformat(),
     })
+    meta.pop("text", None)
     document_lines[ln] = MasterLine(full_text, **meta)
     return document_lines[ln].to_dict()
 
@@ -2016,16 +2034,58 @@ def sync_resume_frontier_state(
             "verified": True,
             "is_active": False,
         })
+        char_track_resume = False
+        char_track_anchor = ""
+        char_track_target_anchor = ""
+        char_track_win: List[str] = []
+        if last_frame and ((last_bot - last_top + 1) < 22 or "_wrap" in str(last_frame.get("frame_id") or "")):
+            try:
+                import cv2 as _cv2
+                from ocr_engine import detect_line_wrap_state, find_gutter_numbers_cluster
+                fid_str = str(last_frame.get("frame_id") or "")
+                fname_str = str(last_frame.get("filename") or f"{fid_str}.png")
+                fpath = FRAMES_DIR / fname_str
+                if not fpath.exists():
+                    fpath = FRAMES_DIR / f"{fid_str}.png"
+                if fpath.exists():
+                    f_img = _cv2.imread(str(fpath))
+                    if f_img is not None:
+                        f_gut = find_gutter_numbers_cluster(f_img, 1.0)
+                        ws = detect_line_wrap_state(f_img, 1.0, f_gut)
+                        if ws.get("is_bottom_wrapped") or ws.get("is_wrapped_page"):
+                            char_track_resume = True
+                            char_track_anchor = str(ws.get("bottom_text_anchor") or "")
+                            char_track_target_anchor = str(ws.get("target_top_text_anchor") or "")
+                            char_track_win = list(ws.get("bottom_anchor_window") or [])
+            except Exception as _we:
+                print(f"[sync_resume_frontier_state] wrap check note: {_we}")
+
+        orchestration_state["character_tracking_mode"] = char_track_resume
+        orchestration_state["character_tracking_line"] = last_bot if char_track_resume else 0
+        orchestration_state["bottom_text_anchor"] = char_track_anchor
+        orchestration_state["target_top_text_anchor"] = char_track_target_anchor
+        orchestration_state["bottom_anchor_window"] = char_track_win
+
         dag_state.get("nodes", {}).get("frame_ocr", {}).update({
             "top_line": last_top,
             "bottom_line": last_bot,
-            "target_top_line": next_top,
+            "target_top_line": last_bot if char_track_resume else next_top,
+            "character_tracking_mode": char_track_resume,
+            "character_tracking_line": last_bot if char_track_resume else 0,
+            "bottom_text_anchor": char_track_anchor,
+            "target_top_text_anchor": char_track_target_anchor,
+            "bottom_anchor_window": char_track_win,
         })
         dag_state.get("nodes", {}).get("arrow_down", {}).update({
             "prev_bottom": last_bot,
-            "target_top": next_top,
-            "target_top_line": next_top,
-            "new_top_line": next_top,
+            "target_top": last_bot if char_track_resume else next_top,
+            "target_top_line": last_bot if char_track_resume else next_top,
+            "new_top_line": last_bot if char_track_resume else next_top,
+            "character_tracking_mode": char_track_resume,
+            "character_tracking_line": last_bot if char_track_resume else 0,
+            "bottom_text_anchor": char_track_anchor,
+            "target_top_text_anchor": char_track_target_anchor,
+            "bottom_anchor_window": char_track_win,
             "eof_reached": bool(proj_is_completed or (target_total > 0 and last_bot >= target_total)),
         })
         dag_state.get("nodes", {}).get("verification_trigger", {}).update({
@@ -2242,6 +2302,121 @@ def prune_regressed_frames(exclude_frame_id: Optional[str] = None) -> Dict[str, 
         "frontier_bottom_line": max_bot,
         "next_expected_top_line": max_bot + 1
     }
+
+
+async def recover_state_after_frame_deletion(
+    deleted_metas: List[Dict[str, Any]],
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Cleans up document_lines (including stitched wrapped chunks) associated with deleted frames,
+    resynchronizes the resume frontier and character-tracking state, and persists the updated state.
+    """
+    from ocr_engine import join_wrapped_row_slices
+
+    pid = project_id or get_current_project_id()
+    deleted_fids = set()
+    deleted_ranges: List[Tuple[int, int]] = []
+    for m in deleted_metas or []:
+        if not isinstance(m, dict):
+            continue
+        raw_fid = str(m.get("frame_id") or "")
+        if raw_fid:
+            deleted_fids.add(raw_fid)
+            if raw_fid.endswith(".png"):
+                deleted_fids.add(raw_fid[:-4])
+            else:
+                deleted_fids.add(f"{raw_fid}.png")
+        t_ln = int(m.get("top_line") or 0)
+        b_ln = int(m.get("bottom_line") or 0)
+        if t_ln > 0 and b_ln >= t_ln:
+            deleted_ranges.append((t_ln, b_ln))
+
+    # Determine line ranges still covered by remaining frames
+    active_fids = set(captured_frames.keys())
+    remaining_covered = set()
+    max_remaining_bot = 0
+    for rf in captured_frames.values():
+        rt = int(rf.get("top_line") or 0)
+        rb = int(rf.get("bottom_line") or 0)
+        if rb > max_remaining_bot:
+            max_remaining_bot = rb
+        if rt > 0 and rb >= rt:
+            for ln in range(rt, rb + 1):
+                remaining_covered.add(ln)
+
+    removed_lines: List[int] = []
+    updated_wrapped_lines: List[int] = []
+
+    def _is_chunk_stale(ck: str) -> bool:
+        base_ck = str(ck).split("__")[0]
+        return bool(base_ck in deleted_fids or ck in deleted_fids)
+
+    for ln, entry in list(document_lines.items()):
+        meta = entry.meta if hasattr(entry, "meta") else (entry if isinstance(entry, dict) else {})
+        entry_fid = str(meta.get("frame_id") or "")
+        base_entry_fid = entry_fid.split("__")[0]
+        chunks_map = dict(meta.get("wrapped_chunks") or {})
+        chunk_order = list(meta.get("wrapped_chunk_order") or [])
+
+        if chunks_map and (any(_is_chunk_stale(k) for k in chunks_map) or any(_is_chunk_stale(k) for k in chunk_order)):
+            stale_keys = [k for k in list(chunks_map.keys()) if _is_chunk_stale(k)]
+            for sk in stale_keys:
+                chunks_map.pop(sk, None)
+            chunk_order = [k for k in chunk_order if not _is_chunk_stale(k) and k in chunks_map]
+            if chunk_order and (ln in remaining_covered or not _is_chunk_stale(entry_fid)):
+                ordered_texts = [chunks_map[k] for k in chunk_order if chunks_map.get(k)]
+                new_text = join_wrapped_row_slices(ordered_texts) if ordered_texts else ""
+                new_meta = dict(meta)
+                if _is_chunk_stale(entry_fid):
+                    new_meta["frame_id"] = chunk_order[0]
+                new_meta["wrapped_chunks"] = chunks_map
+                new_meta["wrapped_chunk_order"] = chunk_order
+                new_meta["wrapped_pages_count"] = len(chunk_order)
+                new_meta["last_continuation_frame_id"] = chunk_order[-1]
+                new_meta.pop("text", None)
+                document_lines[ln] = MasterLine(new_text, **new_meta)
+                updated_wrapped_lines.append(ln)
+                continue
+            else:
+                document_lines.pop(ln, None)
+                removed_lines.append(ln)
+                continue
+
+        in_deleted_range = any(t <= ln <= b for (t, b) in deleted_ranges)
+        is_deleted_fid = bool(base_entry_fid and (base_entry_fid in deleted_fids or entry_fid in deleted_fids))
+        is_beyond_frontier = bool(max_remaining_bot > 0 and ln > max_remaining_bot)
+        if is_beyond_frontier or ((is_deleted_fid or in_deleted_range) and ln not in remaining_covered):
+            document_lines.pop(ln, None)
+            removed_lines.append(ln)
+
+    if pid and removed_lines:
+        for rln in removed_lines:
+            try:
+                db.delete_document_lines_range(pid, rln, rln)
+            except Exception:
+                pass
+
+    frontier_info = sync_resume_frontier_state()
+    save_persisted_state()
+
+    next_top = int(
+        dag_state.get("nodes", {}).get("arrow_down", {}).get("target_top_line")
+        or frontier_info.get("next_top_line")
+        or 1
+    )
+    return {
+        "project_id": pid,
+        "deleted_frames": list(deleted_fids),
+        "removed_lines_count": len(removed_lines),
+        "updated_wrapped_lines": updated_wrapped_lines,
+        "last_top_line": frontier_info.get("last_top_line", 0),
+        "last_bottom_line": frontier_info.get("last_bottom_line", 0),
+        "next_expected_top_line": next_top,
+        "last_frame_id": frontier_info.get("last_frame_id"),
+        "character_tracking_mode": bool(orchestration_state.get("character_tracking_mode", False)),
+    }
+
 
 
 def reconcile_eof_total_lines_and_complete_project(

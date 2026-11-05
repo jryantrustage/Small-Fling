@@ -49,20 +49,13 @@ class ViewToEditAction(ObservationActionPlugin):
         # 1. Check for center vertical split-screen divider in read/preview mode (x in [0.46W, 0.54W])
         if img is not None:
             h, w = img.shape[:2]
-            center_x1 = int(w * 0.46)
-            center_x2 = int(w * 0.54)
-            center_strip = img[int(h * 0.25):int(h * 0.85), center_x1:center_x2]
-            gray_center = cv2.cvtColor(center_strip, cv2.COLOR_BGR2GRAY) if len(center_strip.shape) == 3 else center_strip
-            edges = cv2.Canny(gray_center, 50, 150)
-            vertical_lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=120, minLineLength=int(h * 0.3), maxLineGap=15)
-            has_split_divider = vertical_lines is not None and len(vertical_lines) > 0
-            pencil_x = int(1655 * (w / 1920.0))
-            pencil_y = int(190 * (h / 1080.0))
+            pencil_x = int(1060 * (w / 1280.0))
+            pencil_y = int(240 * (h / 1024.0))
         else:
-            has_split_divider = False
-            pencil_x, pencil_y = 1655, 190
+            pencil_x, pencil_y = 1060, 240
+        has_split_divider = False
 
-        # 2. Check classifier as complementary source
+        # 2. Check EditModeClassifier (verifies gutter numbers and toolbar blue pencil highlight)
         cl_detected = False
         cl_details = ""
         cl_coords = None
@@ -84,8 +77,8 @@ class ViewToEditAction(ObservationActionPlugin):
         except Exception:
             pass
 
-        detected = has_split_divider or cl_detected
-        reason = "Split-screen preview divider detected" if has_split_divider else (cl_details or "Edit mode inactive")
+        detected = bool(cl_detected)
+        reason = cl_details or "Edit mode inactive"
 
         return (
             detected,

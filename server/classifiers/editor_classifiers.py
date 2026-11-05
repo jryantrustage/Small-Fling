@@ -296,7 +296,7 @@ class EditModeClassifier(BaseClassifier):
         if img is not None:
             from ocr_engine import find_gutter_numbers_cluster
             cluster = find_gutter_numbers_cluster(img)
-            if cluster and len(cluster) >= 3:
+            if cluster and len(cluster) >= 1:
                 # Gutter numbers are clearly present in the left margin -> Editor is verified in Edit Mode!
                 return ClassificationResult(
                     classifier_id=self.id,
@@ -316,11 +316,11 @@ class EditModeClassifier(BaseClassifier):
             scale_x = (w_t / 1920.0) if w_t > 0 else 1.0
             scale_y = (h_t / 1080.0) if h_t > 0 else 1.0
 
-            # Only inspect toolbar within actual editor bounds (x < 1100), not the outer desktop wallpaper
+            # Inspect the right side of the formatting toolbar where [Pencil] (~0.83w) and [Eye] (~0.865w) reside
             tb_y1 = int(70 * scale_y)
-            tb_y2 = int(270 * scale_y)
-            tb_x1 = max(int(600 * scale_x), min(int(1050 * scale_x), int(w_t * 0.55)))
-            tb_x2 = min(w_t, int(1100 * scale_x))
+            tb_y2 = int(285 * scale_y)
+            tb_x1 = int(w_t * 0.55)
+            tb_x2 = int(w_t * 0.96)
             crop_tb = img[tb_y1:tb_y2, tb_x1:tb_x2] if tb_x2 > tb_x1 else img[tb_y1:tb_y2, :]
             if crop_tb.size > 0:
                 hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
@@ -334,35 +334,11 @@ class EditModeClassifier(BaseClassifier):
                     bx, by, bw, bh = cv2.boundingRect(c)
                     if 0.45 <= (bw / max(1, bh)) <= 2.5 and bh <= int(60 * scale_y) and area <= 2000 * (scale_y ** 2):
                         abs_cx = tb_x1 + bx + bw // 2
-                        abs_cy = tb_y1 + by + bh // 2
-
-                        # Check for neighbor mode icons horizontally aligned in the toolbar row
-                        r_y1 = max(0, abs_cy - int(18 * scale_y))
-                        r_y2 = min(h_t, abs_cy + int(18 * scale_y))
-                        row_strip = img[r_y1:r_y2, tb_x1:tb_x2]
-                        gray = cv2.cvtColor(row_strip, cv2.COLOR_BGR2GRAY)
-                        edges = cv2.Canny(gray, 40, 140)
-                        e_conts, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                        neighbor_offsets = []
-                        for ec in e_conts:
-                            if cv2.contourArea(ec) >= 8:
-                                ex, ey, ew, eh = cv2.boundingRect(ec)
-                                abs_ex = tb_x1 + ex + ew // 2
-                                offset = abs_ex - abs_cx
-                                if int(20 * scale_x) <= abs(offset) <= int(90 * scale_x):
-                                    neighbor_offsets.append(offset)
-
-                        has_left_mode_icon = any(-int(80 * scale_x) <= off <= -int(25 * scale_x) for off in neighbor_offsets)
-                        has_right_mode_icon = any(int(25 * scale_x) <= off <= int(80 * scale_x) for off in neighbor_offsets)
-
-                        if not has_left_mode_icon:
+                        # In the toolbar's right button group ([Pencil] [Eye] | [Moon]),
+                        # Pencil (Edit Mode) is at ~0.825w..0.848w, whereas Eye (Preview Mode) is at >= 0.858w.
+                        if abs_cx <= int(w_t * 0.855):
                             edit_mode_active = True
                             split_screen_detected = False
-                            break
-                        elif has_left_mode_icon and has_right_mode_icon:
-                            split_screen_detected = True
-                            edit_mode_active = False
                             break
                         else:
                             edit_mode_active = False

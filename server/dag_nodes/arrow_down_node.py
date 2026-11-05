@@ -7,7 +7,7 @@ the prior page bottom line number + 1 to the top first line of the new page.
 import asyncio
 import json
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import cv2
 import numpy as np

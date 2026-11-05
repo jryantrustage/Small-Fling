@@ -748,22 +748,52 @@ async def scan_frame_ocr(frame_id: str, engine: Optional[str] = Query("auto"), m
                     db.delete_document_lines_range(pid, sln, sln)
                 except Exception:
                     pass
+        lead_wrap = str(res.get("leading_wrapped_continuation") or "")
+        if lead_wrap and final_top > 1:
+            state.append_wrapped_continuation_line(
+                line_number=final_top - 1,
+                frame_id=f"{frame_id}__lead",
+                chunk_text=lead_wrap,
+                page_index=finfo.get("page_index"),
+                is_root_chunk=False,
+                notes=f"Local MiniCPM-V OCR ({mt}) • Leading Wrapped Continuation",
+            )
         for item in lines:
             if item.get("line_number"):
                 ln = int(item["line_number"])
                 blank_locked = bool(item.get("blank_locked", False))
                 final_txt = "" if blank_locked else item.get("text", "")
-                state.document_lines[ln] = {
-                    "line_number": ln, "gutter_number": ln, "text": final_txt,
-                    "is_blank": True if blank_locked else item.get("is_blank", not bool(final_txt.strip())),
-                    "blank_locked": blank_locked,
-                    "is_wrapped": False if blank_locked else item.get("is_wrapped", False),
-                    "wrapped_line_count": 1 if blank_locked else item.get("wrapped_line_count", 1),
-                    "status": "verified",
-                    "frame_id": frame_id, "sources": [frame_id],
-                    "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
-                    "notes": f"Local MiniCPM-V OCR ({mt})", "updated_at": datetime.now().isoformat()
-                }
+                if not blank_locked and item.get("is_wrapped_continuation"):
+                    state.append_wrapped_continuation_line(
+                        line_number=ln,
+                        frame_id=frame_id,
+                        chunk_text=final_txt,
+                        page_index=finfo.get("page_index"),
+                        is_root_chunk=False,
+                        notes=f"Local MiniCPM-V OCR ({mt}) • Wrapped Continuation",
+                    )
+                elif not blank_locked and item.get("is_wrapped"):
+                    state.append_wrapped_continuation_line(
+                        line_number=ln,
+                        frame_id=frame_id,
+                        chunk_text=final_txt,
+                        page_index=finfo.get("page_index"),
+                        is_root_chunk=True,
+                        wrapped_line_count=item.get("wrapped_line_count", 1),
+                        notes=f"Local MiniCPM-V OCR ({mt})",
+                    )
+                else:
+                    state.document_lines[ln] = {
+                        "line_number": ln, "gutter_number": ln, "text": final_txt,
+                        "is_blank": True if blank_locked else item.get("is_blank", not bool(final_txt.strip())),
+                        "blank_locked": blank_locked,
+                        "is_wrapped": False if blank_locked else item.get("is_wrapped", False),
+                        "wrapped_line_count": 1 if blank_locked else item.get("wrapped_line_count", 1),
+                        "status": "verified",
+                        "frame_id": frame_id, "sources": [frame_id],
+                        "confidence": 1.0 if blank_locked else item.get("confidence", 0.98),
+                        "notes": f"Local MiniCPM-V OCR ({mt})", "updated_at": datetime.now().isoformat()
+                    }
         state.sync_resume_frontier_state()
         state.save_persisted_state()
         data = {"status": "success", "frame_id": frame_id, "top_line": top_ln, "bottom_line": bot_ln,
