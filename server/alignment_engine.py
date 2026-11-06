@@ -19,6 +19,24 @@ import cv2
 import numpy as np
 from ocr_engine import get_rapid_ocr
 
+def normalize_bundle_identifier_ocr(raw_name: str) -> str:
+    """
+    Normalizes common RapidOCR substitutions in bundle/folder identifiers and filenames:
+    - 'CommonUl_' / 'DIXUl_' / 'DIxUl_' / 'DIXUL_' -> 'CommonUI_' / 'DIXUI_'
+    - 'partl' / 'partI' / 'part|' -> 'part1'
+    - ',md' / '.m' -> '.md'
+    """
+    s = (raw_name or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"\bDIxU[IlL]([_\-])", r"DIXUI\1", s)
+    s = re.sub(r"([A-Za-z0-9])[Uu][lL]([_\-])", r"\1UI\2", s)
+    s = re.sub(r"CommonUl([_\-])", r"CommonUI\1", s)
+    s = re.sub(r"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[lI|](?=[,\.]m|\.md|\.m\b|$|\s)", "part1", s)
+    s = re.sub(r"(?i)[,\.]m(?:d)?$", ".md", s)
+    return s
+
+
 def parse_multipart_markdown_filename(file_name: Optional[str], top_tokens: Optional[list] = None) -> Dict[str, Any]:
     """
     Detects whether a markdown filename belongs to a multi-part bundle (e.g., `..._part1.md`, `..._part2.md`).
@@ -36,15 +54,19 @@ def parse_multipart_markdown_filename(file_name: Optional[str], top_tokens: Opti
             "total_parts": None
         }
 
-    # Normalize common RapidOCR substitutions (e.g. 'CommonUl_' -> 'CommonUI_')
-    norm_name = re.sub(r'CommonUl([_\-])', r'CommonUI\1', raw_name)
-    # Match '..._part1.md', '...part1.md', '...-part2.md', or standalone 'part1.md'
+    norm_name = normalize_bundle_identifier_ocr(raw_name)
+    # Match '..._part1.md', '...part1.md', '...-part2.md', 'part 1 of 9', or standalone 'part1.md'
     m = re.match(
-        r'^(?P<prefix>.*?)(?P<sep>[_\-\s]*)part[_\-\s]*(?P<part>\d+)(?P<ext>\.md|\.markdown)?$',
+        r'^(?P<prefix>.*?)(?P<sep>[_\-\s]*)(?:part|pt)[_\-\s#]*(?P<part>\d+)(?:\s*(?:of|\.\.)\s*(?P<tot>\d+))?(?P<ext>\.md|\.markdown)?.*$',
         norm_name,
         re.IGNORECASE
     )
     total_parts: Optional[int] = None
+    if m and m.group("tot"):
+        try:
+            total_parts = int(m.group("tot"))
+        except Exception:
+            pass
     if top_tokens:
         for tok in top_tokens:
             txt = tok[4] if len(tok) >= 5 else str(tok)
@@ -67,8 +89,10 @@ def parse_multipart_markdown_filename(file_name: Optional[str], top_tokens: Opti
             "total_parts": total_parts
         }
 
-    prefix = m.group("prefix").rstrip("_- ")
+    prefix = normalize_bundle_identifier_ocr(m.group("prefix").rstrip("_- ("))
     sep = (m.group("sep") or "_") if prefix else ""
+    if sep and sep.strip() == "":
+        sep = "_"
     part_num = int(m.group("part"))
     ext = m.group("ext") or ".md"
     clean_file_name = f"{prefix}{sep}part{part_num}{ext}"

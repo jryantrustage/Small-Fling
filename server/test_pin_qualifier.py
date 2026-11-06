@@ -157,3 +157,35 @@ async def test_pin_vs_username_password_differentiation_classifier():
     assert res_fix_pin.success is True
     assert "2992" in res_fix_pin.message
 
+
+
+def test_parse_multipart_filename_ocr_confusions():
+    """Verify RapidOCR confusions (DIXUl -> DIXUI, partl -> part1, ,md -> .md) normalize cleanly."""
+    from alignment_engine import parse_multipart_markdown_filename
+    res1 = parse_multipart_markdown_filename("DIXUl_impact_26-11-05-9-43pm_partl.md")
+    assert res1["is_multipart"] is True
+    assert res1["part_number"] == 1
+    assert res1["base_prefix"] == "DIXUI_impact_26-11-05-9-43pm"
+
+    res9 = parse_multipart_markdown_filename("DIxUl_impact_26-11-05-9-43pm_part9,md")
+    assert res9["is_multipart"] is True
+    assert res9["part_number"] == 9
+    assert res9["base_prefix"] == "DIXUI_impact_26-11-05-9-43pm"
+
+
+def test_blank_white_teams_fingerprint_detection():
+    """Verify blank white screen with Teams header triggers requires_escape_for_pin."""
+    import numpy as np
+    import cv2
+    from services.adb_service import detect_teams_auth_or_fingerprint_screen_cv
+
+    img = np.full((1080, 1920, 3), 255, dtype=np.uint8)
+    img[0:68, :] = (238, 224, 205)  # Teams title bar
+    img[980:1080, :] = (24, 24, 28)  # Bottom taskbar
+    cv2.putText(img, "Teams", (110, 46), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (40, 40, 40), 2)
+
+    det = detect_teams_auth_or_fingerprint_screen_cv(img)
+    assert det["detected"] is True
+    assert det["auth_subtype"] == "fingerprint_blank_teams"
+    assert det["requires_escape_for_pin"] is True
+    assert det["auth_type"] == "pin"

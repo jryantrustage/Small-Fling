@@ -46,7 +46,7 @@ export interface ProjectBundleGroup {
   parts: ProjectData[];
   project?: ProjectData;
   total_parts_count: number;
-  expected_total_parts: number;
+  expected_total_parts?: number;
   total_frames: number;
   total_lines: number;
   verified_lines: number;
@@ -183,15 +183,27 @@ export interface MultipartExportRecord {
   download_count?: number;
 }
 
+export interface PredeterminedBundlePart {
+  file_name: string;
+  part_number: number;
+  total_parts?: number;
+  base_prefix?: string;
+  visual_row_index?: number;
+  tap_coords?: [number, number];
+  status?: 'completed' | 'scanning' | 'pending' | string;
+}
+
 export interface MultipartBundleState {
   auto_chain_enabled: boolean;
   is_multipart: boolean;
   base_prefix: string;
+  folder_name?: string;
   current_part?: number | null;
   total_parts?: number | null;
   next_part_number?: number | null;
   next_file_name?: string | null;
   available_parts?: number[];
+  predetermined_parts?: PredeterminedBundlePart[];
   exported_parts?: MultipartExportRecord[];
   transition_status?: string;
   last_transition_message?: string;

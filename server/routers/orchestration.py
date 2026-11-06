@@ -624,3 +624,24 @@ async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None
         capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(payload.get("serial")))
         res["loop_started"] = True
     return res
+@router.post("/api/dag/multipart/predetermine-folder")
+@router.post("/api/dag/multipart/scan-folder")
+async def api_predetermine_multipart_folder(payload: Optional[Dict[str, Any]] = None):
+    from services.ui_automator_service import predetermine_bundle_from_folder_screenshot
+    payload = payload or {}
+    ser = await get_active_adb_serial(payload.get("serial"))
+    disp_id = payload.get("display_id") or await detect_external_display_id(ser)
+    res = await predetermine_bundle_from_folder_screenshot(
+        serial=ser,
+        display_id=disp_id,
+        target_part_number=payload.get("target_part_number"),
+        reopen_editor=bool(payload.get("reopen_editor", True)),
+        force_rescan=bool(payload.get("force_rescan", True)),
+    )
+    mp_state = state.sync_multipart_state_from_alignment()
+    await state.ws_manager.broadcast({
+        "type": "multipart_transition_status",
+        "multipart_state": mp_state,
+        "predetermined": res,
+    })
+    return {"status": "success", **res, "multipart_state": mp_state}

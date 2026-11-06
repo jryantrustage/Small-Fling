@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   Camera, Cloud, Zap, Smartphone, Key, Cpu,
-  Monitor, ChevronDown, ChevronRight, FolderOpen, PanelLeft, PanelLeftClose, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
+  Monitor, ChevronRight, FolderOpen, PanelLeft, PanelLeftClose, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
   Check, FileText, X,
   Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle,
   Upload, Download
@@ -102,7 +102,6 @@ function AppContent() {
   const [isTelemetryExpanded, setIsTelemetryExpanded] = useState(false);
   const [workspaceMode, setWorkspaceMode] = useState<'capture_dag' | 'ocr_inspector' | 'analyzer_sandbox'>('capture_dag');
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
-  const projectDropdownRef = useRef<HTMLDivElement>(null);
   const [_showDag, setShowDag] = useState(true);
   const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('init_end');
@@ -481,6 +480,7 @@ function AppContent() {
   });
   const [isPreparingScreen, setIsPreparingScreen] = useState<boolean>(false);
   const [isTransitioningNextPart, setIsTransitioningNextPart] = useState<boolean>(false);
+  const [isScanningFolderBundle, setIsScanningFolderBundle] = useState<boolean>(false);
   const [startupProjectName, setStartupProjectName] = useState<string>('');
   const [startupNameTouched, setStartupNameTouched] = useState<boolean>(false);
 
@@ -573,6 +573,32 @@ function AppContent() {
       console.error('Failed to transition to next markdown part', e);
     } finally {
       setIsTransitioningNextPart(false);
+    }
+  };
+
+  const handlePredetermineFolderBundle = async (reopenEditor: boolean = true) => {
+    setIsScanningFolderBundle(true);
+    try {
+      const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
+      const res = await api('/api/dag/multipart/predetermine-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serial: activeSer, reopen_editor: reopenEditor, force_rescan: true })
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.multipart_state) setMultipartState(d.multipart_state);
+        const partsCount = d.predetermined_parts?.length || d.multipart_state?.predetermined_parts?.length || 0;
+        if (partsCount > 0) {
+          addTelemetryEvent('SYSTEM', `Predetermined ${partsCount} markdown part(s) from OneDrive/Teams folder screenshot ✔`, d, 'initialize');
+        }
+        setStreamKey(Date.now());
+        await fetchData();
+      }
+    } catch (e) {
+      console.error('Failed to predetermine folder bundle', e);
+    } finally {
+      setIsScanningFolderBundle(false);
     }
   };
 
@@ -2762,8 +2788,19 @@ function AppContent() {
     const groups: ProjectBundleGroup[] = [];
     const bundleMap = new Map<string, ProjectData[]>();
 
+    const resolveEffectiveBundleId = (p: ProjectData): string => {
+      const explicitBid = (p.bundle_id || '').trim();
+      if (explicitBid) return explicitBid;
+      const fnCandidate = (p.part_file_name || p.name || '').trim();
+      const m = fnCandidate.match(/^(.+?)[_\-\s]*part[_\-\s]*(\d+)(?:[_\-\s]*(?:of|\.\.)[_\-\s]*(\d+))?(?:\.(?:md|markdown))?$/i);
+      if (m && m[1]) {
+        return `bundle_${m[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      }
+      return '';
+    };
+
     for (const p of projects) {
-      const bid = (p.bundle_id || '').trim();
+      const bid = resolveEffectiveBundleId(p);
       if (bid) {
         const list = bundleMap.get(bid) || [];
         list.push(p);
@@ -2773,7 +2810,7 @@ function AppContent() {
 
     const handledBundles = new Set<string>();
     for (const p of projects) {
-      const bid = (p.bundle_id || '').trim();
+      const bid = resolveEffectiveBundleId(p);
       if (bid) {
         if (handledBundles.has(bid)) continue;
         handledBundles.add(bid);
@@ -2791,13 +2828,18 @@ function AppContent() {
         const isActive = sortedParts.some(pt => pt.id === activeProject?.id || Boolean(pt.is_active));
         const projDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.project_download_count ?? 0), 0);
         const mdDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.markdown_download_count ?? 0), 0);
+        const maxPartTotal = sortedParts.reduce((acc, pt) => Math.max(acc, pt.total_parts ?? 0, pt.part_number ?? 0), 0);
+        const expectedTotal = isActive
+          ? Math.max(sortedParts.length, maxPartTotal, multipartState.total_parts || 0, multipartState.predetermined_parts?.length || 0)
+          : Math.max(sortedParts.length, maxPartTotal);
 
         groups.push({
           type: 'bundle',
-          bundle_id: bid,
+          bundle_id: p.bundle_id || bid,
           bundle_name: bName,
           parts: sortedParts,
           total_parts_count: sortedParts.length,
+          expected_total_parts: expectedTotal,
           total_frames: totalFrames,
           total_lines: totalLines,
           verified_lines: verifiedLines,
@@ -2815,6 +2857,7 @@ function AppContent() {
           bundle_name: p.name,
           parts: [p],
           total_parts_count: 1,
+          expected_total_parts: 1,
           total_frames: framesCount,
           total_lines: totalLines,
           verified_lines: verifiedLines,
@@ -2825,69 +2868,29 @@ function AppContent() {
       }
     }
     return groups;
-  }, [projects, activeProject?.id]);
+  }, [projects, activeProject?.id, multipartState.total_parts, multipartState.predetermined_parts]);
 
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">
       {/* Unified Top Navigation Bar (Single 48px Row) */}
       <header className="unified-top-navbar">
-        {/* Left: App Brand + Slide-Out Left Projects Sidebar Toggle + Device Target Pill */}
+        {/* Left: App Brand + Hidden Project Import Input + Device Target Pill (Project selection lives exclusively in Left Sidebar) */}
         <div className="navbar-left">
           <div className="brand-group" style={{ display: 'flex', alignItems: 'center', gap: '7px', marginRight: '4px' }}>
             <span className="brand-dot" />
             <h1 className="brand-title" style={{ fontSize: '13.5px', fontWeight: 800, margin: 0, whiteSpace: 'nowrap' }}>Small-Fling</h1>
           </div>
 
-          {/* Slide-Out Left Sidebar Toggle Button */}
-          <div ref={projectDropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-            <button
-              type="button"
-              className="project-badge"
-              data-testid="toggle-projects-sidebar-btn"
-              onClick={() => setShowProjectDropdown(p => !p)}
-              title={activeProject?.description ? `File: ${activeProject.description} (Click to toggle Projects Left Sidebar)` : `${activeProject?.name || 'Select Project'} (Click to toggle Projects Left Sidebar)`}
-              style={{
-                height: '30px',
-                padding: '0 10px',
-                gap: '6px',
-                borderColor: showProjectDropdown ? '#58a6ff' : undefined,
-                background: showProjectDropdown ? 'rgba(56, 139, 253, 0.16)' : undefined
-              }}
-            >
-              {showProjectDropdown ? <PanelLeftClose size={13} color="#58a6ff" /> : <PanelLeft size={13} color="#00ff9d" />}
-              <FolderKanban size={13} color="#00ff9d" />
-              <span className="project-badge-name" style={{ maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {activeProject ? activeProject.name : 'Select Project'}
-              </span>
-              {(activeProject?.part_number || multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
-                <span style={{
-                  fontSize: '9.5px',
-                  fontWeight: 800,
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.16)' : 'rgba(139, 148, 158, 0.2)',
-                  color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e',
-                  border: `1px solid ${multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`
-                }}>
-                  Part {activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}
-                  {(activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts) ? `..${activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts}` : '..N'}
-                </span>
-              )}
-            </button>
-
-            <input
-              type="file"
-              ref={projectImportInputRef}
-              accept=".zip"
-              style={{ display: 'none' }}
-              onChange={e => {
-                const file = e.target.files?.[0];
-                if (file) handleImportProject(file);
-              }}
-            />
-          </div>
+          <input
+            type="file"
+            ref={projectImportInputRef}
+            accept=".zip"
+            style={{ display: 'none' }}
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleImportProject(file);
+            }}
+          />
 
           {/* Device Target Pill (Pixel 8 / Pixel 10 with lock icon) */}
           <div ref={deviceDropdownRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
@@ -3077,33 +3080,36 @@ function AppContent() {
         {showProjectDropdown ? (
           <aside className="projects-slideout-sidebar" data-testid="projects-slideout-sidebar">
             <div className="projects-sidebar-header">
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <FolderKanban size={14} color="#00ff9d" />
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.5px' }}>
+                  <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.5px' }}>
                     PROJECTS ({projects.length})
                   </span>
                 </div>
                 <button
                   type="button"
+                  data-testid="toggle-projects-sidebar-btn"
                   onClick={() => setShowProjectDropdown(false)}
-                  title="Collapse Projects Left Sidebar"
+                  title="Collapse Projects Left Sidebar to Full-Height Rail"
                   style={{
-                    background: 'transparent',
+                    background: 'rgba(48, 54, 61, 0.45)',
                     border: '1px solid #30363d',
                     borderRadius: '5px',
-                    color: '#8b949e',
-                    padding: '3px 5px',
+                    color: '#c9d1d9',
+                    padding: '4px 6px',
                     cursor: 'pointer',
                     display: 'inline-flex',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginLeft: 'auto'
                   }}
                 >
                   <PanelLeftClose size={13} />
                 </button>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '5px', width: '100%' }}>
                 <button
                   type="button"
                   className="btn btn-xs btn-primary"
@@ -3158,28 +3164,82 @@ function AppContent() {
               </div>
             </div>
 
-            {/* Multi-Part Auto-Chain Row */}
-            <div className="projects-sidebar-toolbar">
+            {/* Multi-Part Auto-Chain & Predetermined Folder Manifest Row */}
+            <div className="projects-sidebar-toolbar" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
               <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px',
                 padding: '5px 8px', background: '#161b22', borderRadius: '6px', border: '1px solid #21262d', fontSize: '10.5px', width: '100%'
               }}>
-                <span style={{ color: '#c9d1d9', fontWeight: 600 }}>
-                  📂 Multi-Part Bundle ({activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}..{activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts || 'N'})
+                <span style={{ color: '#c9d1d9', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  📂 Multi-Part Bundle ({activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}..{activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts || (multipartState.predetermined_parts?.length || 'N')})
                 </span>
-                <button
-                  type="button"
-                  onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    data-testid="scan-folder-bundle-btn"
+                    onClick={() => handlePredetermineFolderBundle(true)}
+                    disabled={isScanningFolderBundle}
+                    title="Take a screenshot of the Teams / OneDrive folder to predetermine all markdown files in the bundle"
+                    style={{
+                      padding: '2px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer',
+                      border: '1px solid rgba(56, 189, 248, 0.45)',
+                      background: 'rgba(56, 189, 248, 0.12)',
+                      color: '#38bdf8'
+                    }}
+                  >
+                    {isScanningFolderBundle ? 'Scanning...' : '📸 Scan Folder'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+                    style={{
+                      padding: '2px 7px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800, cursor: 'pointer',
+                      border: `1px solid ${multipartState.auto_chain_enabled ? '#00ff9d66' : '#30363d'}`,
+                      background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.14)' : '#0d1117',
+                      color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e'
+                    }}
+                  >
+                    Auto-Chain: {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+              </div>
+
+              {Array.isArray(multipartState.predetermined_parts) && multipartState.predetermined_parts.length > 0 && (
+                <div
+                  data-testid="predetermined-parts-strip"
                   style={{
-                    padding: '2px 7px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800, cursor: 'pointer',
-                    border: `1px solid ${multipartState.auto_chain_enabled ? '#00ff9d66' : '#30363d'}`,
-                    background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.14)' : '#0d1117',
-                    color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e'
+                    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px',
+                    padding: '4px 8px', background: 'rgba(13, 17, 23, 0.9)', borderRadius: '6px', border: '1px solid rgba(163, 113, 247, 0.28)'
                   }}
                 >
-                  Auto-Chain: {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
-                </button>
-              </div>
+                  <span style={{ fontSize: '9.5px', color: '#a371f7', fontWeight: 700, marginRight: '2px' }}>
+                    Predetermined ({multipartState.predetermined_parts.length}):
+                  </span>
+                  {multipartState.predetermined_parts.map(pt => {
+                    const st = pt.status || 'pending';
+                    const isDone = st === 'completed';
+                    const isScan = st === 'scanning' || pt.part_number === (activeProject?.part_number || multipartState.current_part);
+                    return (
+                      <span
+                        key={pt.part_number}
+                        title={`${pt.file_name} • Status: ${st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''}`}
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          fontFamily: 'var(--font-mono, monospace)',
+                          background: isDone ? 'rgba(0, 255, 157, 0.16)' : isScan ? 'rgba(56, 189, 248, 0.2)' : 'rgba(48, 54, 61, 0.45)',
+                          color: isDone ? '#00ff9d' : isScan ? '#38bdf8' : '#8b949e',
+                          border: `1px solid ${isDone ? 'rgba(0, 255, 157, 0.4)' : isScan ? 'rgba(56, 189, 248, 0.5)' : '#30363d'}`
+                        }}
+                      >
+                        P{pt.part_number}{isDone ? '✓' : isScan ? '●' : ''}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Scrollable Project & Bundle Cards */}
@@ -3187,6 +3247,11 @@ function AppContent() {
               {projectGroups.map(group => {
                 if (group.type === 'bundle') {
                   const isExpanded = expandedBundleIds.has(group.bundle_id);
+                  const expectedTotal = Math.max(group.total_parts_count, group.expected_total_parts || group.total_parts_count);
+                  const scannedPartNums = new Set(group.parts.map((pt, i) => pt.part_number || i + 1));
+                  const pendingPredetermined = (group.is_active && Array.isArray(multipartState.predetermined_parts))
+                    ? multipartState.predetermined_parts.filter(pt => !scannedPartNums.has(pt.part_number))
+                    : [];
                   return (
                     <div
                       key={group.bundle_id}
@@ -3217,7 +3282,9 @@ function AppContent() {
                             </span>
                           </div>
                           <span className="bundle-parts-count-pill" data-testid="bundle-parts-count">
-                            {group.total_parts_count} {group.total_parts_count === 1 ? 'Part / MD' : 'Parts / MDs'}
+                            {expectedTotal > group.total_parts_count
+                              ? `${group.total_parts_count}/${expectedTotal} Parts`
+                              : `${group.total_parts_count} ${group.total_parts_count === 1 ? 'Part / MD' : 'Parts / MDs'}`}
                           </span>
                         </div>
 
@@ -3225,7 +3292,9 @@ function AppContent() {
                         <div className="bundle-metrics-grid">
                           <div className="bundle-metric-chip" data-testid="bundle-metric-parts">
                             <span className="metric-label">Parts / MDs</span>
-                            <span className="metric-val" style={{ color: '#d2a8ff' }}>{group.total_parts_count}</span>
+                            <span className="metric-val" style={{ color: '#d2a8ff' }}>
+                              {expectedTotal > group.total_parts_count ? `${group.total_parts_count} / ${expectedTotal}` : group.total_parts_count}
+                            </span>
                           </div>
                           <div className="bundle-metric-chip" data-testid="bundle-metric-captures">
                             <span className="metric-label">Image Captures</span>
@@ -3258,7 +3327,7 @@ function AppContent() {
                               cursor: 'pointer'
                             }}
                           >
-                            {isExpanded ? 'Hide Parts' : `View ${group.total_parts_count} Parts`}
+                            {isExpanded ? 'Hide Parts' : `View ${expectedTotal} Parts`}
                           </button>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -3394,6 +3463,39 @@ function AppContent() {
                               </div>
                             );
                           })}
+                          {pendingPredetermined.map(pendingPt => (
+                            <div
+                              key={`pending_part_${pendingPt.part_number}`}
+                              className="bundle-part-card"
+                              style={{ opacity: 0.65, borderStyle: 'dashed' }}
+                              title={`Predetermined from folder screenshot: ${pendingPt.file_name} (Queued for Auto-Chain)`}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
+                                  <span className="part-index-badge" style={{ background: 'rgba(139, 148, 158, 0.18)', color: '#8b949e' }}>
+                                    Part {pendingPt.part_number}
+                                  </span>
+                                  <FileText size={11} color="#8b949e" style={{ flexShrink: 0 }} />
+                                  <span
+                                    className="part-file-name"
+                                    style={{
+                                      fontSize: '10.5px',
+                                      fontWeight: 600,
+                                      color: '#8b949e',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                  >
+                                    {pendingPt.file_name}
+                                  </span>
+                                </div>
+                                <span style={{ fontSize: '9px', color: '#a371f7', fontWeight: 700 }}>
+                                  QUEUED
+                                </span>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -3487,15 +3589,87 @@ function AppContent() {
             </div>
           </aside>
         ) : (
-          <div
+          <aside
             className="projects-collapsed-rail"
             data-testid="projects-collapsed-rail"
             onClick={() => setShowProjectDropdown(true)}
-            title="Expand Projects Slide-Out Left Sidebar"
+            title="Click to expand Projects & Multi-Part Bundles Left Sidebar"
           >
-            <PanelLeft size={14} color="#00ff9d" />
-            <span className="rail-vertical-label">PROJECTS ({projects.length})</span>
-          </div>
+            <button
+              type="button"
+              className="rail-expand-btn"
+              data-testid="toggle-projects-sidebar-btn"
+              onClick={e => {
+                e.stopPropagation();
+                setShowProjectDropdown(true);
+              }}
+              title="Expand Projects Left Sidebar"
+            >
+              <PanelLeft size={14} color="#00ff9d" />
+            </button>
+
+            {/* Mini Icons for Each Project / Bundle */}
+            <div className="rail-mini-projects-list" onClick={e => e.stopPropagation()}>
+              {projectGroups.map(group => {
+                const firstPart = group.parts[0];
+                const isGroupActive = group.is_active;
+                const expectedTot = Math.max(group.total_parts_count, group.expected_total_parts || group.total_parts_count);
+                const badgeText = group.type === 'bundle'
+                  ? (expectedTot > 1 ? `${group.total_parts_count}/${expectedTot}` : `${group.total_parts_count}P`)
+                  : `P1`;
+                return (
+                  <button
+                    key={group.bundle_id}
+                    type="button"
+                    className={`rail-mini-project-icon ${isGroupActive ? 'active' : ''}`}
+                    data-testid="rail-mini-project-btn"
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (firstPart && firstPart.id !== activeProject?.id) {
+                        handleSwitchProject(firstPart.id);
+                      } else {
+                        setShowProjectDropdown(true);
+                      }
+                    }}
+                    title={`${group.bundle_name} • ${group.total_parts_count}${expectedTot > group.total_parts_count ? `/${expectedTot}` : ''} Part(s) • ${group.total_frames.toLocaleString()} Captures • ${group.verified_lines.toLocaleString()} / ${group.total_lines.toLocaleString()} Verified Lines`}
+                  >
+                    {group.type === 'bundle' ? (
+                      <FolderOpen size={12} color={isGroupActive ? '#00ff9d' : '#a371f7'} />
+                    ) : (
+                      <FolderKanban size={12} color={isGroupActive ? '#00ff9d' : '#8b949e'} />
+                    )}
+                    <span className="rail-mini-project-badge">{badgeText}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Vertical Splayed Essential Statistics Mirroring Verified Lines Right Sidebar */}
+            <div className="rail-splayed-stats">
+              <span className="rail-vertical-label">
+                PROJECTS ({projects.length})
+              </span>
+              {(() => {
+                const activeGrp = projectGroups.find(g => g.is_active) || projectGroups[0];
+                if (!activeGrp) return null;
+                const expParts = Math.max(activeGrp.total_parts_count, activeGrp.expected_total_parts || activeGrp.total_parts_count);
+                const totFrames = activeGrp.total_frames || frames.length || 0;
+                const totLns = activeGrp.total_lines || globalTargetLines || documentData.total_lines || 0;
+                const verLns = activeGrp.verified_lines || documentData.total_lines || 0;
+                return (
+                  <span className="rail-vertical-stats">
+                    {expParts > 1 ? `${activeGrp.total_parts_count}/${expParts} PARTS` : `${activeGrp.total_parts_count} MD`}
+                    {' • '}
+                    {totFrames.toLocaleString()} IMGS
+                    {' • '}
+                    {verLns.toLocaleString()}/{totLns.toLocaleString()} LNS
+                  </span>
+                );
+              })()}
+            </div>
+
+            <Maximize2 size={12} style={{ marginTop: 'auto', opacity: 0.75, flexShrink: 0 }} />
+          </aside>
         )}
 
         {workspaceMode === 'ocr_inspector' ? (

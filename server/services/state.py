@@ -2960,12 +2960,14 @@ def assemble_and_save_reconstructed_markdown() -> str:
 multipart_bundle_state: Dict[str, Any] = {
     "auto_chain_enabled": True,
     "is_multipart": False,
+    "folder_name": "",
     "base_prefix": "",
     "current_part": None,
     "total_parts": None,
     "next_part_number": None,
     "next_file_name": None,
     "available_parts": [],
+    "predetermined_parts": [],
     "exported_parts": [],
     "transition_status": "idle",
     "last_transition_message": "",
@@ -2977,11 +2979,15 @@ multipart_bundle_state: Dict[str, Any] = {
 def _extract_canonical_filename_from_project_or_lines(proj: Dict[str, Any], lines_dict: Optional[Dict[int, Any]] = None) -> str:
     """
     Resolves the canonical markdown filename (e.g., 'CommonUI_develop_26-10-29-2-26pm_part2.md')
-    from alignment status, project description ('File: ...'), lines 1..10 of document_lines, or project name.
+    from alignment status, project part_file_name, project description ('File: ...'), lines 1..10 of document_lines, or project name.
     """
     align_fn = (latest_alignment_status or {}).get("file_name") or ""
     if align_fn and re.search(r"_part\d+\.md$", align_fn, re.IGNORECASE):
         return align_fn
+
+    part_fn = str((proj or {}).get("part_file_name") or "").strip()
+    if part_fn and re.search(r"_part\d+\.md$", part_fn, re.IGNORECASE):
+        return part_fn
 
     desc = str((proj or {}).get("description") or "")
     m_desc = re.search(r"([A-Za-z0-9_\-.]+_part\d+\.(?:md|markdown|txt))", desc, re.IGNORECASE)
@@ -3003,13 +3009,13 @@ def _extract_canonical_filename_from_project_or_lines(proj: Dict[str, Any], line
                 p_num = int(m_hdr.group(2))
                 return f"{prefix}_part{p_num}.md"
 
-    return align_fn or str((proj or {}).get("name") or "")
+    return part_fn or align_fn or str((proj or {}).get("name") or "")
 
 
 def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Synchronizes multipart_bundle_state with the latest alignment status, project description,
-    document header lines, and active project name.
+    Synchronizes multipart_bundle_state with the latest alignment status, predetermined folder manifest,
+    project bundle fields (bundle_id, part_number, total_parts, part_file_name), and document header lines.
     """
     global multipart_bundle_state
     from alignment_engine import parse_multipart_markdown_filename
@@ -3036,18 +3042,26 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
                 detected_total_parts = int(m_tot.group(2))
                 break
 
+    predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
+    proj_part_num = proj.get("part_number")
+    proj_total_parts = proj.get("total_parts")
+    proj_bundle_id = proj.get("bundle_id")
+    proj_bundle_name = proj.get("bundle_name")
+
     if mp_info and mp_info.get("is_multipart"):
         multipart_bundle_state["is_multipart"] = True
         if mp_info.get("base_prefix"):
             multipart_bundle_state["base_prefix"] = mp_info["base_prefix"]
         if mp_info.get("part_number") is not None:
-            multipart_bundle_state["current_part"] = mp_info["part_number"]
+            multipart_bundle_state["current_part"] = int(mp_info["part_number"])
         if mp_info.get("total_parts") is not None:
-            multipart_bundle_state["total_parts"] = mp_info["total_parts"]
+            multipart_bundle_state["total_parts"] = int(mp_info["total_parts"])
         elif detected_total_parts is not None:
             multipart_bundle_state["total_parts"] = detected_total_parts
+        elif proj_total_parts:
+            multipart_bundle_state["total_parts"] = int(proj_total_parts)
         if mp_info.get("next_part_number") is not None:
-            multipart_bundle_state["next_part_number"] = mp_info["next_part_number"]
+            multipart_bundle_state["next_part_number"] = int(mp_info["next_part_number"])
         if mp_info.get("next_file_name"):
             multipart_bundle_state["next_file_name"] = mp_info["next_file_name"]
     else:
@@ -3061,6 +3075,46 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
                     multipart_bundle_state["total_parts"] = detected_total_parts
                 multipart_bundle_state["next_part_number"] = parsed_proj.get("next_part_number")
                 multipart_bundle_state["next_file_name"] = parsed_proj.get("next_file_name")
+
+    # Fallback to active project's bundle metadata or predetermined folder manifest
+    if proj_part_num or proj_bundle_id or predetermined:
+        multipart_bundle_state["is_multipart"] = True
+        if proj_bundle_name and not multipart_bundle_state.get("base_prefix"):
+            multipart_bundle_state["base_prefix"] = str(proj_bundle_name)
+        if proj_part_num and not multipart_bundle_state.get("current_part"):
+            multipart_bundle_state["current_part"] = int(proj_part_num)
+        if proj_total_parts and not multipart_bundle_state.get("total_parts"):
+            multipart_bundle_state["total_parts"] = int(proj_total_parts)
+
+    if predetermined:
+        avail = sorted({int(p["part_number"]) for p in predetermined if p.get("part_number") is not None})
+        if avail:
+            multipart_bundle_state["available_parts"] = avail
+            multipart_bundle_state["total_parts"] = max(multipart_bundle_state.get("total_parts") or 0, max(avail))
+        cur_p = int(multipart_bundle_state.get("current_part") or proj_part_num or 1)
+        multipart_bundle_state["current_part"] = cur_p
+        next_candidates = [p for p in predetermined if int(p.get("part_number") or 0) > cur_p]
+        if next_candidates:
+            next_entry = min(next_candidates, key=lambda x: int(x["part_number"]))
+            multipart_bundle_state["next_part_number"] = int(next_entry["part_number"])
+            multipart_bundle_state["next_file_name"] = next_entry.get("file_name")
+        elif avail and cur_p >= max(avail):
+            multipart_bundle_state["next_part_number"] = None
+            multipart_bundle_state["next_file_name"] = None
+
+        exported_part_nums = {
+            int(ep["part_number"])
+            for ep in (multipart_bundle_state.get("exported_parts") or [])
+            if ep.get("part_number") is not None
+        }
+        for pt in predetermined:
+            pno = int(pt.get("part_number") or 0)
+            if pno in exported_part_nums or pno < cur_p:
+                pt["status"] = "completed"
+            elif pno == cur_p:
+                pt["status"] = "scanning"
+            else:
+                pt["status"] = "pending"
 
     multipart_bundle_state["updated_at"] = datetime.now().isoformat()
     return multipart_bundle_state

@@ -675,6 +675,48 @@ def update_project_description(project_id: str, description: str) -> bool:
         conn.commit()
     return True
 
+def update_project_bundle_metadata(
+    project_id: str,
+    bundle_id: Optional[str] = None,
+    bundle_name: Optional[str] = None,
+    part_number: Optional[int] = None,
+    total_parts: Optional[int] = None,
+    part_file_name: Optional[str] = None,
+) -> bool:
+    proj = get_project(project_id)
+    if not proj:
+        return False
+    b_meta = _infer_bundle_metadata(
+        name=proj.get("name") or "",
+        description=proj.get("description") or "",
+        bundle_id=bundle_id if bundle_id is not None else (proj.get("bundle_id") or ""),
+        bundle_name=bundle_name if bundle_name is not None else (proj.get("bundle_name") or ""),
+        part_number=part_number if part_number is not None else int(proj.get("part_number") or 0),
+        total_parts=total_parts if total_parts is not None else int(proj.get("total_parts") or 0),
+        part_file_name=part_file_name if part_file_name is not None else (proj.get("part_file_name") or ""),
+    )
+    with get_connection() as conn:
+        c = conn.cursor()
+        c.execute(
+            """
+            UPDATE projects
+            SET bundle_id = ?, bundle_name = ?, part_number = ?, total_parts = ?, part_file_name = ?, updated_at = ?
+            WHERE id = ?;
+            """,
+            (
+                b_meta["bundle_id"],
+                b_meta["bundle_name"],
+                b_meta["part_number"],
+                b_meta["total_parts"],
+                b_meta["part_file_name"],
+                datetime.now().isoformat(),
+                project_id,
+            ),
+        )
+        conn.commit()
+    return True
+
+
 def append_project_filename(project_id: str, filename: str) -> str:
     proj = get_project(project_id)
     if not proj:
@@ -683,10 +725,13 @@ def append_project_filename(project_id: str, filename: str) -> str:
     clean_fn = filename.strip()
     if not clean_fn:
         return cur_desc
-    if clean_fn in cur_desc:
-        return cur_desc
-    new_desc = f"{cur_desc} | {clean_fn}" if cur_desc else clean_fn
-    update_project_description(project_id, new_desc)
+    new_desc = cur_desc if clean_fn in cur_desc else (f"{cur_desc} | {clean_fn}" if cur_desc else clean_fn)
+    if new_desc != cur_desc:
+        update_project_description(project_id, new_desc)
+    try:
+        update_project_bundle_metadata(project_id, part_file_name=clean_fn)
+    except Exception:
+        pass
     return new_desc
 
 def activate_project(project_id: str) -> bool:

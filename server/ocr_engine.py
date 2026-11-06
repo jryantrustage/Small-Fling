@@ -2109,8 +2109,9 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     mean_lum = round(float(np.mean(img)), 1)
     gutter_count = len(valid_pairs)
     all_ocr_text_low = " ".join(b.get("text", "").lower() for b in ocr_boxes)
+    all_ocr_nospace = _RE_MULTI_SPACE.sub("", all_ocr_text_low)
     has_auth_overlay = any(
-        kw in all_ocr_text_low
+        kw in all_ocr_text_low or kw.replace(" ", "") in all_ocr_nospace
         for kw in ("enter your pin", "managed by your organization", "forgot your pin", "need to change it")
     )
     invalid_editor_frame = bool(gutter_count == 0 and (mean_lum > 85.0 or has_auth_overlay))

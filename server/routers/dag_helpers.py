@@ -1048,7 +1048,26 @@ async def execute_dag_group_initialize(
 
         try:
             from services.adb_service import is_editor_full_screen
-            from services.ui_automator_service import prepare_markdown_editor_window
+            from services.ui_automator_service import (
+                _ensure_teams_authenticated_if_needed,
+                predetermine_bundle_from_folder_screenshot,
+                prepare_markdown_editor_window,
+            )
+            if active_serial and "mock" not in str(active_serial).lower():
+                await _ensure_teams_authenticated_if_needed(active_serial, disp_id)
+                if state.multipart_bundle_state.get("auto_chain_enabled", True):
+                    init_group["progress"] = {"percent": 11, "stage": "Predetermining OneDrive / Teams folder bundle files...", "status": "running"}
+                    await state.ws_manager.broadcast({
+                        "type": "project_init_progress", "stage": "Predetermining OneDrive / Teams folder bundle files...", "percent": 11, "status": "running", "dag": state.dag_state
+                    })
+                    pred_res = await predetermine_bundle_from_folder_screenshot(
+                        serial=active_serial, display_id=disp_id, reopen_editor=True, force_rescan=False
+                    )
+                    if pred_res.get("predetermined_parts"):
+                        mp_sync = state.sync_multipart_state_from_alignment()
+                        await state.ws_manager.broadcast({
+                            "type": "multipart_transition_status", "multipart_state": mp_sync, "predetermined": pred_res
+                        })
             fs_check = await is_editor_full_screen(active_serial, disp_id)
             if not fs_check.get("is_fullscreen", True):
                 init_group["progress"] = {"percent": 12, "stage": "Maximizing Markdown Editor & enforcing Edit + Dark Mode...", "status": "running"}
@@ -1147,10 +1166,18 @@ async def execute_dag_group_initialize(
                 if not home_img.exists():
                     home_img = state.FRAMES_DIR / f"calib_home_{active_pid}.png"
                 if home_img.exists():
+                    from alignment_engine import detect_teams_markdown_alignment
                     from ocr_engine import worker_scan_image
+                    align_home = await asyncio.to_thread(detect_teams_markdown_alignment, str(home_img))
+                    if align_home and align_home.get("file_name"):
+                        detected_fn = align_home.get("file_name")
+                        state.latest_alignment_status["file_name"] = detected_fn
+                        if align_home.get("back_button_coords"):
+                            state.latest_alignment_status["back_button_coords"] = align_home["back_button_coords"]
                     scan_res = await asyncio.to_thread(worker_scan_image, str(home_img))
                     lines = scan_res.get("lines", [])
-                    detected_fn = scan_res.get("detected_filename")
+                    if not detected_fn:
+                        detected_fn = scan_res.get("detected_filename")
                     if not detected_fn:
                         for l in lines[:6]:
                             txt = (l.get("text") or "").strip()
@@ -1165,10 +1192,12 @@ async def execute_dag_group_initialize(
                                     break
                     if detected_fn:
                         db.append_project_filename(active_pid, detected_fn)
+                        mp_sync = state.sync_multipart_state_from_alignment()
                         updated_p = db.get_project(active_pid)
                         if updated_p:
-                            await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p})
+                            await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p, "projects": db.get_projects()})
                             await state.ws_manager.broadcast({"type": "project_switched", "project": updated_p})
+                        await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": mp_sync})
             except Exception as fe:
                 print(f"[execute_dag_group_initialize] Filename scan note: {fe}")
 
@@ -1884,6 +1913,22 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                         await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_rec["project"]})
                                     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
                                     await state.ws_manager.broadcast({"type": "markdown_part_exported", "export": export_rec, "multipart_state": state.multipart_bundle_state})
+                                    mp_state_rec = state.sync_multipart_state_from_alignment()
+                                    if mp_state_rec.get("is_multipart") and mp_state_rec.get("auto_chain_enabled", True) and state.capture_loop_running:
+                                        await emit_dag_telemetry_event(
+                                            category="SYSTEM",
+                                            message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state_rec.get('next_part_number')}...",
+                                            dag="verify_assemble",
+                                            serial=active_serial,
+                                        )
+                                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
+                                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                                            advance_to_next_multipart = True
+                                            break
+                                        elif trans_res.get("bundle_completed"):
+                                            comp_bundle_msg = f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
+                                            state.latest_telemetry["status_message"] = comp_bundle_msg
+                                            await emit_dag_telemetry_event(category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial)
                                     stop_reason_logged = True
                                     break
                                 if n8_rec.get("status") != "error":
@@ -1925,6 +1970,22 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                     await state.ws_manager.broadcast({"type": "project_updated", "project": reconciled_rec["project"]})
                                 await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
                                 await state.ws_manager.broadcast({"type": "markdown_part_exported", "export": export_rec, "multipart_state": state.multipart_bundle_state})
+                                mp_state_rec = state.sync_multipart_state_from_alignment()
+                                if mp_state_rec.get("is_multipart") and mp_state_rec.get("auto_chain_enabled", True) and state.capture_loop_running:
+                                    await emit_dag_telemetry_event(
+                                        category="SYSTEM",
+                                        message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state_rec.get('next_part_number')}...",
+                                        dag="verify_assemble",
+                                        serial=active_serial,
+                                    )
+                                    trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
+                                    if trans_res.get("status") == "success" and state.capture_loop_running:
+                                        advance_to_next_multipart = True
+                                        break
+                                    elif trans_res.get("bundle_completed"):
+                                        comp_bundle_msg = f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
+                                        state.latest_telemetry["status_message"] = comp_bundle_msg
+                                        await emit_dag_telemetry_event(category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial)
                                 stop_reason_logged = True
                                 break
                             state.record_diagnostics_trace_event(
