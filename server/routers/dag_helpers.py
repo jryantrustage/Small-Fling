@@ -2369,6 +2369,11 @@ async def transition_to_next_multipart_project(
             arrow_count_step=active_proj.get("arrow_count_step"),
             settle_delay_ms=active_proj.get("settle_delay_ms"),
             lock_device=bool(active_proj.get("lock_device", True)),
+            bundle_id=active_proj.get("bundle_id") or None,
+            bundle_name=active_proj.get("bundle_name") or base_prefix or None,
+            part_number=int(next_part_num or 0) if next_part_num else None,
+            total_parts=int(tot_parts or 0) if tot_parts else None,
+            part_file_name=opened_file,
         )
     )
 

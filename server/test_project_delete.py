@@ -164,3 +164,135 @@ def test_project_and_markdown_download_counters():
     del_res = client.delete(f"/api/projects/{proj_id}")
     assert del_res.status_code == 200
 
+
+def test_multipart_bundle_storage_activation_and_import_export():
+    import io
+    import json
+    import zipfile
+
+    storage_frames = Path(config.FRAMES_DIR)
+    storage_frames.mkdir(parents=True, exist_ok=True)
+    bundle_name = "DIXUI_impact_26-11-05-9-43pm"
+    bundle_id = "bundle_dixui_impact_26-11-05-9-43pm"
+
+    # Clean up any leftover bundle from prior runs
+    db.delete_bundle_projects(bundle_id)
+
+    created_part_ids = []
+    for part_idx in range(1, 4):
+        part_file = f"{bundle_name}_part{part_idx}.md"
+        proj = db.create_project(
+            name=part_file,
+            description=f"File: {part_file}",
+            target_total_lines=100 * part_idx,
+            bundle_id=bundle_id,
+            bundle_name=bundle_name,
+            part_number=part_idx,
+            total_parts=3,
+            part_file_name=part_file,
+        )
+        pid = proj["id"]
+        created_part_ids.append(pid)
+
+        fid = f"bundle_p{part_idx}_frame_001"
+        fn = f"{fid}.png"
+        img_path = storage_frames / fn
+        Image.new("RGB", (200, 120), color=(20 * part_idx, 40, 80)).save(img_path)
+
+        db.save_frame(
+            project_id=pid,
+            frame_id=fid,
+            filename=fn,
+            top_line=1,
+            bottom_line=20,
+            page_index=1,
+            file_size=img_path.stat().st_size,
+            status="processed",
+            extracted_line_count=20,
+        )
+        lines = {
+            ln: {
+                "line_number": ln,
+                "text": f"Part {part_idx} Line {ln} content",
+                "confidence": 0.98,
+                "frame_id": fid,
+                "is_verified": 1 if ln <= 15 else 0,
+            }
+            for ln in range(1, 21)
+        }
+        db.save_document_lines(pid, lines)
+        db.save_project_telemetry(pid, {"current_page": part_idx, "current_top_line": 1, "current_bottom_line": 20})
+        md_disk_path = db.sync_project_part_markdown_file(pid)
+        assert md_disk_path is not None and md_disk_path.exists()
+        assert f"Part {part_idx} Line 1 content" in md_disk_path.read_text(encoding="utf-8")
+
+    # Verify /api/projects returns bundle metadata and verified/total line counts
+    list_res = client.get("/api/projects")
+    assert list_res.status_code == 200
+    bundle_parts = [p for p in list_res.json() if p.get("bundle_id") == bundle_id]
+    assert len(bundle_parts) == 3
+    for p in bundle_parts:
+        assert p["frame_count"] == 1
+        assert p["total_lines"] == 20
+        assert p["verified_lines"] == 15
+
+    # Activate Part 2 and verify full context + OCR inspector data loads immediately
+    part2_id = created_part_ids[1]
+    act_res = client.post(f"/api/projects/{part2_id}/activate")
+    assert act_res.status_code == 200
+    act_data = act_res.json()
+    assert act_data["project"]["id"] == part2_id
+    assert len(act_data["frames"]) == 1
+    assert act_data["frames"][0]["frame_id"] == "bundle_p2_frame_001"
+    assert act_data["document"]["total_lines"] == 20
+    assert any("Part 2 Line 1 content" in ln["text"] for ln in act_data["document"]["lines"])
+
+    ocr_res = client.get("/api/ocr/inspect?image_id=bundle_p2_frame_001")
+    assert ocr_res.status_code == 200
+    ocr_data = ocr_res.json()
+    assert ocr_data["image_id"] == "bundle_p2_frame_001"
+    assert ocr_data["total_lines"] == 20
+    assert len(ocr_data["gutter_boxes"]) == 20
+
+    # Export the multi-part bundle ZIP archive
+    export_res = client.get(f"/api/projects/bundle/{bundle_id}/export")
+    assert export_res.status_code == 200
+    zip_bytes = export_res.content
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        names = zf.namelist()
+        assert "project_data.json" in names
+        assert f"parts/{bundle_name}_part1.md" in names
+        assert f"parts/{bundle_name}_part2.md" in names
+        assert f"parts/{bundle_name}_part3.md" in names
+        manifest = json.loads(zf.read("project_data.json").decode("utf-8"))
+        assert manifest["is_bundle"] is True
+        assert manifest["total_parts_count"] == 3
+        assert len(manifest["parts"]) == 3
+
+    # Delete the entire bundle
+    del_bundle_res = client.delete(f"/api/projects/bundle/{bundle_id}")
+    assert del_bundle_res.status_code == 200
+    assert len(db.get_bundle_projects(bundle_id)) == 0
+
+    # Re-import the multi-part bundle ZIP archive
+    import_res = client.post(
+        "/api/projects/import",
+        files={"file": (f"{bundle_name}_bundle.zip", zip_bytes, "application/zip")},
+    )
+    assert import_res.status_code == 200
+    imp_data = import_res.json()
+    assert imp_data["status"] == "success"
+    assert imp_data["is_bundle"] is True
+    assert imp_data["parts_count"] == 3
+
+    restored_parts = db.get_bundle_projects(bundle_id)
+    assert len(restored_parts) == 3
+    for rp in restored_parts:
+        assert rp["frame_count"] == 1
+        assert rp["total_lines"] == 20
+        assert rp["verified_lines"] == 15
+
+    # Clean up restored bundle
+    client.delete(f"/api/projects/bundle/{bundle_id}")
+
+

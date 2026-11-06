@@ -200,10 +200,15 @@ export const OcrLineInspectorWorkspace: React.FC<OcrLineInspectorWorkspaceProps>
   );
 
   useEffect(() => {
+    setLineSliceCache({});
+    setDocWindowLines(new Map());
+    setGtScore(null);
     if (activeFrame?.frame_id) {
       fetchFrameInspect(activeFrame.frame_id, false);
+    } else {
+      setInspectData(null);
     }
-  }, [activeFrame?.frame_id, fetchFrameInspect]);
+  }, [projectId, activeFrame?.frame_id, fetchFrameInspect]);
 
   // Load Ground-Truth Score if reference markdown exists for project
   const fetchGroundTruthScore = useCallback(async () => {

@@ -29,6 +29,31 @@ export interface ProjectData {
   hid_config?: any;
   project_download_count?: number;
   markdown_download_count?: number;
+  verified_lines?: number;
+  total_lines?: number;
+  bundle_id?: string;
+  bundle_name?: string;
+  part_number?: number;
+  total_parts?: number;
+  part_file_name?: string;
+  is_bundle_part?: boolean;
+}
+
+export interface ProjectBundleGroup {
+  type: 'bundle' | 'single';
+  bundle_id: string;
+  bundle_name: string;
+  parts: ProjectData[];
+  project?: ProjectData;
+  total_parts_count: number;
+  expected_total_parts: number;
+  total_frames: number;
+  total_lines: number;
+  verified_lines: number;
+  project_download_count: number;
+  markdown_download_count: number;
+  is_active: boolean;
+  active_part?: ProjectData | null;
 }
 
 export interface LineData {

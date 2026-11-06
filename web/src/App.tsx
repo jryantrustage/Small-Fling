@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Scan, Settings, Search, Coins, Layers, RotateCw, RefreshCw, AlertCircle, FolderKanban, Plus, Trash2,
   Camera, Cloud, Zap, Smartphone, Key, Cpu,
-  Monitor, ChevronDown, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
+  Monitor, ChevronDown, ChevronRight, FolderOpen, PanelLeft, PanelLeftClose, Info, Eye, EyeOff, Sliders, Maximize2, Activity,
   Check, FileText, X,
   Lock, ShieldCheck, ShieldAlert, ToggleLeft, ToggleRight, AlertTriangle,
   Upload, Download
@@ -11,7 +11,7 @@ import { TelemetryToaster, type TelemetryData, type TelemetryEvent } from './Tel
 import { FlowDag } from './FlowDag';
 import { useConfirm, Modal } from './ConfirmModal';
 import type {
-  ProjectData, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
+  ProjectData, ProjectBundleGroup, LineData, FrameData, RecaptureItem, TokenStats, FrameBoundingBoxes, AlignmentData, DeviceInfoData,
   DeviceProfile, DeviceHardwareSpecs, DesktopVerificationInfo, MultipartBundleState
 } from './types';
 import { AlignmentDiagnosticsModal } from './components/AlignmentDiagnosticsModal';
@@ -702,20 +702,31 @@ function AppContent() {
   }, [deviceInfo]);
   const deviceDropdownRef = useRef<HTMLDivElement>(null);
 
+  const [expandedBundleIds, setExpandedBundleIds] = useState<Set<string>>(new Set());
+  const toggleBundleExpanded = useCallback((bundleId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setExpandedBundleIds(prev => {
+      const next = new Set(prev);
+      if (next.has(bundleId)) {
+        next.delete(bundleId);
+      } else {
+        next.add(bundleId);
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (layoutMenuRef.current && !layoutMenuRef.current.contains(e.target as Node)) {
         setShowLayoutMenu(false);
       }
-      if (projectDropdownRef.current && !projectDropdownRef.current.contains(e.target as Node)) {
-        setShowProjectDropdown(false);
-      }
     };
-    if (showLayoutMenu || showProjectDropdown) {
+    if (showLayoutMenu) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showLayoutMenu, showProjectDropdown]);
+  }, [showLayoutMenu]);
 
   const isDocVisibleRef = useRef(true);
   const isFetchingRef = useRef(false);
@@ -1193,9 +1204,66 @@ function AppContent() {
   }, [projectInitProgress?.active, projectInitProgress?.status, fetchData]);
 
   const handleSwitchProject = async (id: string) => {
-    setInspectorMode('live');
-    setOcrInspectImageId('');
-    await api(`/api/projects/${id}/activate`, { method: 'POST' });
+    try {
+      const res = await api(`/api/projects/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.project) {
+          setActiveProject(data.project);
+        }
+        if (Array.isArray(data?.projects)) {
+          setProjects(data.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id)));
+        }
+        const nextFrames: FrameData[] = Array.isArray(data?.frames) ? data.frames : [];
+        setFrames(nextFrames);
+        setSelectedFrameIds(new Set());
+        setSelectedLineNumbers(new Set());
+        const sortedNext = [...nextFrames].sort(
+          (a, b) =>
+            (a.page_index || 0) - (b.page_index || 0) ||
+            (a.created_at || '').localeCompare(b.created_at || '') ||
+            (a.top_line || 0) - (b.top_line || 0)
+        );
+        const initialFrame = sortedNext[0] || null;
+        setSelectedFrameId(initialFrame ? initialFrame.frame_id : null);
+        setOcrInspectImageId(initialFrame ? initialFrame.frame_id : 'dag_node3_capture_temp');
+        if (initialFrame) {
+          setInspectorMode(curr => (curr === 'ocr_inspect' ? 'ocr_inspect' : 'single'));
+          if (traceFrameId) {
+            setTraceFrameId(initialFrame.frame_id);
+          }
+        } else {
+          setInspectorMode('live');
+          if (traceFrameId) {
+            setTraceFrameId(null);
+          }
+        }
+        if (data?.document) {
+          setDocumentData({
+            total_lines: data.document.total_lines ?? 0,
+            issue_count: data.document.issue_count ?? 0,
+            min_line: data.document.min_line ?? 0,
+            max_line: data.document.max_line ?? 0,
+            lines: Array.isArray(data.document.lines) ? data.document.lines : []
+          });
+          if (data.document.token_stats) {
+            setTokenStats(data.document.token_stats);
+          }
+        }
+        if (data?.telemetry) {
+          setTelemetry(prev => ({ ...prev, ...data.telemetry }));
+        }
+        if (data?.token_stats) {
+          setTokenStats(data.token_stats);
+        }
+        if (data?.multipart_state) {
+          setMultipartState(prev => ({ ...prev, ...data.multipart_state }));
+        }
+        fetchLazyLines(1, Math.max(60, lazyWindowSize), false);
+      }
+    } catch (e) {
+      console.error('[App] handleSwitchProject error:', e);
+    }
     await fetchData();
   };
 
@@ -1717,10 +1785,10 @@ function AppContent() {
     }
   };
 
-  const handleExportProject = async (projectId: string, projectName?: string) => {
+  const handleExportProject = async (projectId: string, projectName?: string, includeBundle: boolean = true) => {
     setIsExportingProject(true);
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/export`);
+      const res = await fetch(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/export?include_bundle=${includeBundle}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to export project archive');
@@ -1760,9 +1828,134 @@ function AppContent() {
     }
   };
 
+  const handleExportBundle = async (bundleId: string, bundleName?: string) => {
+    setIsExportingProject(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/bundle/${encodeURIComponent(bundleId)}/export`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to export project bundle archive');
+      }
+      const headerCount = Number(res.headers.get('x-project-download-count'));
+      setProjects(prev => prev.map(p => {
+        if (p.bundle_id !== bundleId) return p;
+        const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((p.project_download_count ?? 0) + 1);
+        return { ...p, project_download_count: nextCount };
+      }));
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = `${bundleName || bundleId}_bundle.zip`;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      addTelemetryEvent('SYSTEM', `Bundle archive exported: ${filename} ✔`, undefined, 'system');
+    } catch (e: any) {
+      console.error('[App] handleExportBundle error:', e);
+      await showAlert({ title: 'Export Failed', message: e.message || 'Could not export bundle archive.', variant: 'danger' });
+    } finally {
+      setIsExportingProject(false);
+    }
+  };
+
+  const handleExportBundleMarkdown = async (bundleId: string, bundleName?: string) => {
+    setIsExportingMarkdown(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/projects/bundle/${encodeURIComponent(bundleId)}/export-markdown`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to export bundle markdown');
+      }
+      const headerCount = Number(res.headers.get('x-markdown-download-count'));
+      setProjects(prev => prev.map(p => {
+        if (p.bundle_id !== bundleId) return p;
+        const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((p.markdown_download_count ?? 0) + 1);
+        return { ...p, markdown_download_count: nextCount };
+      }));
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = `${bundleName || bundleId}_bundle.md`;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      addTelemetryEvent('SYSTEM', `Bundle markdown saved: ${filename} ✔`, undefined, 'system');
+    } catch (e: any) {
+      console.error('[App] handleExportBundleMarkdown error:', e);
+      await showAlert({ title: 'Export Failed', message: e.message || 'Could not export bundle markdown.', variant: 'danger' });
+    } finally {
+      setIsExportingMarkdown(false);
+    }
+  };
+
+  const handleDeleteBundle = async (bundleId: string, bundleName?: string, partIds: string[] = []) => {
+    const label = bundleName || bundleId;
+    const ok = await confirm({
+      title: 'Delete Project Bundle',
+      message: `Permanently delete bundle "${label}" and all of its ${partIds.length || ''} markdown parts and captured frames?`,
+      variant: 'danger',
+      confirmText: 'Delete Bundle'
+    });
+    if (!ok) return;
+
+    partIds.forEach(pid => deletedProjectIdsRef.current.add(pid));
+    const wasActiveInBundle = Boolean(activeProjectRef.current && partIds.includes(activeProjectRef.current.id));
+    setProjects(prev => {
+      const remaining = prev.filter(p => p.bundle_id !== bundleId && !partIds.includes(p.id));
+      if (wasActiveInBundle) {
+        setActiveProject(remaining.find(p => p.is_active) || remaining[0] || null);
+      }
+      return remaining;
+    });
+    if (wasActiveInBundle) {
+      setFrames([]);
+      setSelectedFrameId(null);
+      setSelectedFrameIds(new Set());
+      setSelectedLineNumbers(new Set());
+      setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+      setInspectorMode('live');
+      setOcrInspectImageId('');
+    }
+
+    try {
+      const res = await api(`/api/projects/bundle/${encodeURIComponent(bundleId)}`, { method: 'DELETE' });
+      if (res.ok || res.status === 404) {
+        const delData = await res.json().catch(() => null);
+        if (Array.isArray(delData?.projects)) {
+          const filtered = delData.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id));
+          setProjects(filtered);
+          setActiveProject(delData.active_project || filtered.find((p: any) => p.is_active) || filtered[0] || null);
+        }
+        addTelemetryEvent('SYSTEM', `Deleted project bundle "${label}"`);
+      } else {
+        partIds.forEach(pid => deletedProjectIdsRef.current.delete(pid));
+        await fetchData();
+      }
+    } catch {
+      partIds.forEach(pid => deletedProjectIdsRef.current.delete(pid));
+      await fetchData();
+    }
+  };
+
   const handleImportProject = async (file: File) => {
-    if (!file.name.endsWith('.zip')) {
-      await showAlert({ title: 'Invalid File', message: 'Please select a .zip project archive.', variant: 'warning' });
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      await showAlert({ title: 'Invalid File', message: 'Please select a .zip project or bundle archive.', variant: 'warning' });
       return;
     }
     setIsImportingProject(true);
@@ -1775,8 +1968,22 @@ function AppContent() {
       });
       const data = await res.json();
       if (res.ok) {
-        addTelemetryEvent('SYSTEM', `Project imported successfully: ${data.project?.name} (${data.frames_imported} frames, ${data.lines_imported} lines) ✔`, undefined, 'system');
-        await fetchData();
+        addTelemetryEvent(
+          'SYSTEM',
+          data.is_bundle
+            ? `Project bundle imported: ${data.bundle_name || data.project?.name} (${data.parts_imported || 1} parts, ${data.frames_imported} frames, ${data.lines_imported} lines) ✔`
+            : `Project imported successfully: ${data.project?.name} (${data.frames_imported} frames, ${data.lines_imported} lines) ✔`,
+          undefined,
+          'system'
+        );
+        if (Array.isArray(data.all_projects)) {
+          setProjects(data.all_projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id)));
+        }
+        if (data.project?.id) {
+          await handleSwitchProject(data.project.id);
+        } else {
+          await fetchData();
+        }
       } else {
         await showAlert({ title: 'Import Failed', message: data.detail || 'Failed to import project archive.', variant: 'danger' });
       }
@@ -2543,31 +2750,108 @@ function AppContent() {
   const globalTargetLines = activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0;
   const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
 
+  const projectGroups = useMemo<ProjectBundleGroup[]>(() => {
+    const groups: ProjectBundleGroup[] = [];
+    const bundleMap = new Map<string, ProjectData[]>();
+
+    for (const p of projects) {
+      const bid = (p.bundle_id || '').trim();
+      if (bid) {
+        const list = bundleMap.get(bid) || [];
+        list.push(p);
+        bundleMap.set(bid, list);
+      }
+    }
+
+    const handledBundles = new Set<string>();
+    for (const p of projects) {
+      const bid = (p.bundle_id || '').trim();
+      if (bid) {
+        if (handledBundles.has(bid)) continue;
+        handledBundles.add(bid);
+        const rawParts = bundleMap.get(bid) || [p];
+        const sortedParts = [...rawParts].sort(
+          (a, b) => (a.part_number || 0) - (b.part_number || 0) || a.name.localeCompare(b.name)
+        );
+        const bName =
+          sortedParts.find(pt => pt.bundle_name)?.bundle_name ||
+          p.name.replace(/[_\-\s]*part[_\-\s]*\d+(?:[_\-\s]*(?:of|\.\.)[_\-\s]*\d+)?(?:\.md)?$/i, '').trim() ||
+          bid;
+        const totalFrames = sortedParts.reduce((acc, pt) => acc + (pt.frame_count ?? 0), 0);
+        const totalLines = sortedParts.reduce((acc, pt) => acc + (pt.total_lines ?? pt.line_count ?? 0), 0);
+        const verifiedLines = sortedParts.reduce((acc, pt) => acc + (pt.verified_lines ?? pt.line_count ?? 0), 0);
+        const isActive = sortedParts.some(pt => pt.id === activeProject?.id || Boolean(pt.is_active));
+        const projDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.project_download_count ?? 0), 0);
+        const mdDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.markdown_download_count ?? 0), 0);
+
+        groups.push({
+          type: 'bundle',
+          bundle_id: bid,
+          bundle_name: bName,
+          parts: sortedParts,
+          total_parts_count: sortedParts.length,
+          total_frames: totalFrames,
+          total_lines: totalLines,
+          verified_lines: verifiedLines,
+          is_active: isActive,
+          project_download_count: projDl,
+          markdown_download_count: mdDl
+        });
+      } else {
+        const framesCount = p.frame_count ?? 0;
+        const totalLines = p.total_lines ?? p.line_count ?? 0;
+        const verifiedLines = p.verified_lines ?? p.line_count ?? 0;
+        groups.push({
+          type: 'single',
+          bundle_id: p.id,
+          bundle_name: p.name,
+          parts: [p],
+          total_parts_count: 1,
+          total_frames: framesCount,
+          total_lines: totalLines,
+          verified_lines: verifiedLines,
+          is_active: p.id === activeProject?.id || Boolean(p.is_active),
+          project_download_count: p.project_download_count ?? 0,
+          markdown_download_count: p.markdown_download_count ?? 0
+        });
+      }
+    }
+    return groups;
+  }, [projects, activeProject?.id]);
+
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">
       {/* Unified Top Navigation Bar (Single 48px Row) */}
       <header className="unified-top-navbar">
-        {/* Left: App Brand + Project Selector Dropdown + Device Target Pill */}
+        {/* Left: App Brand + Slide-Out Left Projects Sidebar Toggle + Device Target Pill */}
         <div className="navbar-left">
           <div className="brand-group" style={{ display: 'flex', alignItems: 'center', gap: '7px', marginRight: '4px' }}>
             <span className="brand-dot" />
             <h1 className="brand-title" style={{ fontSize: '13.5px', fontWeight: 800, margin: 0, whiteSpace: 'nowrap' }}>Small-Fling</h1>
           </div>
 
-          {/* Project Selector Dropdown */}
+          {/* Slide-Out Left Sidebar Toggle Button */}
           <div ref={projectDropdownRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
             <button
               type="button"
               className="project-badge"
+              data-testid="toggle-projects-sidebar-btn"
               onClick={() => setShowProjectDropdown(p => !p)}
-              title={activeProject?.description ? `File: ${activeProject.description}` : (activeProject?.name || 'Select Project')}
-              style={{ height: '30px', padding: '0 10px', gap: '6px' }}
+              title={activeProject?.description ? `File: ${activeProject.description} (Click to toggle Projects Left Sidebar)` : `${activeProject?.name || 'Select Project'} (Click to toggle Projects Left Sidebar)`}
+              style={{
+                height: '30px',
+                padding: '0 10px',
+                gap: '6px',
+                borderColor: showProjectDropdown ? '#58a6ff' : undefined,
+                background: showProjectDropdown ? 'rgba(56, 139, 253, 0.16)' : undefined
+              }}
             >
+              {showProjectDropdown ? <PanelLeftClose size={13} color="#58a6ff" /> : <PanelLeft size={13} color="#00ff9d" />}
               <FolderKanban size={13} color="#00ff9d" />
               <span className="project-badge-name" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {activeProject ? activeProject.name : 'Select Project'}
               </span>
-              {(multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
+              {(activeProject?.part_number || multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
                 <span style={{
                   fontSize: '9.5px',
                   fontWeight: 800,
@@ -2577,11 +2861,10 @@ function AppContent() {
                   color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e',
                   border: `1px solid ${multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`
                 }}>
-                  Part {multipartState.current_part || alignmentData.part_number || 1}
-                  {(multipartState.total_parts || alignmentData.total_parts) ? `..${multipartState.total_parts || alignmentData.total_parts}` : '..N'}
+                  Part {activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}
+                  {(activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts) ? `..${activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts}` : '..N'}
                 </span>
               )}
-              <ChevronDown size={11} />
             </button>
 
             <input
@@ -2594,143 +2877,6 @@ function AppContent() {
                 if (file) handleImportProject(file);
               }}
             />
-
-            {showProjectDropdown && (
-              <div className="project-dropdown-popover">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '6px', borderBottom: '1px solid #21262d' }}>
-                  <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#8b949e', letterSpacing: '0.5px' }}>PROJECTS ({projects.length})</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-primary"
-                      onClick={() => { setShowProjectDropdown(false); setShowNewProjectModal(true); }}
-                      style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px' }}
-                    >
-                      <Plus size={11} />
-                      <span>New</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-outline"
-                      onClick={() => projectImportInputRef.current?.click()}
-                      disabled={isImportingProject}
-                      style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px', color: '#38bdf8', borderColor: '#38bdf855' }}
-                    >
-                      <Upload size={11} />
-                      <span>{isImportingProject ? '...' : 'Import'}</span>
-                    </button>
-                    {activeProject && (
-                      <>
-                        <button
-                          type="button"
-                          className="btn-download-action variant-markdown"
-                          onClick={() => handleExportMarkdown(activeProject.id, activeProject.name)}
-                          disabled={isExportingMarkdown}
-                          title={`Download Markdown (.md) • Downloaded ${activeProject.markdown_download_count ?? 0} time(s)`}
-                        >
-                          <Download size={11} />
-                          <span>MD</span>
-                          <span className="download-counter-badge">{activeProject.markdown_download_count ?? 0}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-download-action variant-project"
-                          onClick={() => handleExportProject(activeProject.id, activeProject.name)}
-                          disabled={isExportingProject}
-                          title={`Export Project Archive (.zip) • Downloaded ${activeProject.project_download_count ?? 0} time(s)`}
-                        >
-                          <Download size={11} />
-                          <span>Export</span>
-                          <span className="download-counter-badge">{activeProject.project_download_count ?? 0}</span>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {/* Multi-Part Auto-Chain Row */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '5px 8px', background: '#161b22', borderRadius: '6px', border: '1px solid #21262d', fontSize: '10.5px'
-                }}>
-                  <span style={{ color: '#c9d1d9', fontWeight: 600 }}>
-                    📂 Multi-Part Bundle ({multipartState.current_part || alignmentData.part_number || 1}..{multipartState.total_parts || alignmentData.total_parts || 'N'})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
-                    style={{
-                      padding: '2px 7px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800, cursor: 'pointer',
-                      border: `1px solid ${multipartState.auto_chain_enabled ? '#00ff9d66' : '#30363d'}`,
-                      background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.14)' : '#0d1117',
-                      color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e'
-                    }}
-                  >
-                    Auto-Chain: {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
-                  </button>
-                </div>
-
-                {/* Project List */}
-                <div style={{ maxHeight: '240px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {projects.map(p => (
-                    <div
-                      key={p.id}
-                      onClick={() => { handleSwitchProject(p.id); setShowProjectDropdown(false); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '6px 8px', borderRadius: '6px', cursor: 'pointer',
-                        background: p.id === activeProject?.id ? 'rgba(56, 139, 253, 0.15)' : '#161b22',
-                        border: `1px solid ${p.id === activeProject?.id ? '#58a6ff66' : '#21262d'}`,
-                        gap: '8px'
-                      }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {p.name}
-                        </div>
-                        <div style={{ fontSize: '9.5px', color: '#8b949e' }}>
-                          {p.frame_count ?? 0} frames • {p.line_count ?? 0} lines
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
-                        <button
-                          type="button"
-                          className="btn-download-action variant-markdown"
-                          onClick={e => { e.stopPropagation(); handleExportMarkdown(p.id, p.name); }}
-                          disabled={isExportingMarkdown}
-                          title={`Download Markdown (.md) • Downloaded ${p.markdown_download_count ?? 0} time(s)`}
-                        >
-                          <Download size={11} />
-                          <span>MD</span>
-                          <span className="download-counter-badge" data-testid="project-md-download-count">{p.markdown_download_count ?? 0}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-download-action variant-project"
-                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
-                          disabled={isExportingProject}
-                          title={`Export Project Archive (.zip) • Downloaded ${p.project_download_count ?? 0} time(s)`}
-                        >
-                          <Download size={11} />
-                          <span>ZIP</span>
-                          <span className="download-counter-badge" data-testid="project-zip-download-count">{p.project_download_count ?? 0}</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-text-danger"
-                          onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
-                          disabled={deletingProjectId === p.id}
-                          title="Delete project"
-                          style={{ padding: '4px 5px' }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Device Target Pill (Pixel 8 / Pixel 10 with lock icon) */}
@@ -2911,6 +3057,431 @@ function AppContent() {
       )}
 
       <div className="studio-body">
+        {/* Slide-Out Left Sidebar for Fast Project & Multi-Part Bundle Selection */}
+        {showProjectDropdown ? (
+          <aside className="projects-slideout-sidebar" data-testid="projects-slideout-sidebar">
+            <div className="projects-sidebar-header">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <FolderKanban size={14} color="#00ff9d" />
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.5px' }}>
+                    PROJECTS ({projects.length})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowProjectDropdown(false)}
+                  title="Collapse Projects Left Sidebar"
+                  style={{
+                    background: 'transparent',
+                    border: '1px solid #30363d',
+                    borderRadius: '5px',
+                    color: '#8b949e',
+                    padding: '3px 5px',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  <PanelLeftClose size={13} />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-primary"
+                  onClick={() => setShowNewProjectModal(true)}
+                  style={{ padding: '3px 8px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                >
+                  <Plus size={11} />
+                  <span>New</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-xs btn-outline"
+                  data-testid="sidebar-import-project-btn"
+                  onClick={() => projectImportInputRef.current?.click()}
+                  disabled={isImportingProject}
+                  title="Import Project or Multi-Part Markdown Bundle (.zip)"
+                  style={{ padding: '3px 8px', fontSize: '10px', display: 'inline-flex', alignItems: 'center', gap: '3px', color: '#38bdf8', borderColor: '#38bdf855' }}
+                >
+                  <Upload size={11} />
+                  <span>{isImportingProject ? '...' : 'Import'}</span>
+                </button>
+                {activeProject && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-download-action variant-markdown"
+                      onClick={() =>
+                        activeProject.bundle_id
+                          ? handleExportBundleMarkdown(activeProject.bundle_id, activeProject.bundle_name || activeProject.name)
+                          : handleExportMarkdown(activeProject.id, activeProject.name)
+                      }
+                      disabled={isExportingMarkdown}
+                      title={`Download Active Markdown (.md) • Downloaded ${activeProject.markdown_download_count ?? 0} time(s)`}
+                    >
+                      <Download size={11} />
+                      <span>MD</span>
+                      <span className="download-counter-badge">{activeProject.markdown_download_count ?? 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-download-action variant-project"
+                      onClick={() => handleExportProject(activeProject.id, activeProject.name)}
+                      disabled={isExportingProject}
+                      title={`Export Active Project / Bundle Archive (.zip) • Downloaded ${activeProject.project_download_count ?? 0} time(s)`}
+                    >
+                      <Download size={11} />
+                      <span>Export</span>
+                      <span className="download-counter-badge">{activeProject.project_download_count ?? 0}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Multi-Part Auto-Chain Row */}
+            <div className="projects-sidebar-toolbar">
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '5px 8px', background: '#161b22', borderRadius: '6px', border: '1px solid #21262d', fontSize: '10.5px', width: '100%'
+              }}>
+                <span style={{ color: '#c9d1d9', fontWeight: 600 }}>
+                  📂 Multi-Part Bundle ({activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}..{activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts || 'N'})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleAutoChainMultipart(!multipartState.auto_chain_enabled)}
+                  style={{
+                    padding: '2px 7px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 800, cursor: 'pointer',
+                    border: `1px solid ${multipartState.auto_chain_enabled ? '#00ff9d66' : '#30363d'}`,
+                    background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.14)' : '#0d1117',
+                    color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e'
+                  }}
+                >
+                  Auto-Chain: {multipartState.auto_chain_enabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Project & Bundle Cards */}
+            <div className="projects-sidebar-scroll" data-testid="projects-sidebar-list">
+              {projectGroups.map(group => {
+                if (group.type === 'bundle') {
+                  const isExpanded = expandedBundleIds.has(group.bundle_id);
+                  return (
+                    <div
+                      key={group.bundle_id}
+                      className={`sidebar-bundle-card ${group.is_active ? 'active' : ''}`}
+                      data-testid="project-bundle-card"
+                      data-bundle-id={group.bundle_id}
+                    >
+                      <div
+                        className="bundle-card-header"
+                        data-testid="bundle-card-header"
+                        onClick={e => toggleBundleExpanded(group.bundle_id, e)}
+                      >
+                        <div className="bundle-card-top-row">
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                            <ChevronRight
+                              size={14}
+                              className={`bundle-chevron ${isExpanded ? 'expanded' : ''}`}
+                              style={{
+                                color: '#a371f7',
+                                flexShrink: 0,
+                                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                                transition: 'transform 0.18s ease'
+                              }}
+                            />
+                            <FolderOpen size={14} color="#a371f7" style={{ flexShrink: 0 }} />
+                            <span className="bundle-card-title" title={group.bundle_name}>
+                              {group.bundle_name}
+                            </span>
+                          </div>
+                          <span className="bundle-parts-count-pill" data-testid="bundle-parts-count">
+                            {group.total_parts_count} {group.total_parts_count === 1 ? 'Part / MD' : 'Parts / MDs'}
+                          </span>
+                        </div>
+
+                        {/* Collapsed/Summary Bundle Metrics Grid: Parts/Markdowns, Image Captures, Total Lines, Verified Lines */}
+                        <div className="bundle-metrics-grid">
+                          <div className="bundle-metric-chip" data-testid="bundle-metric-parts">
+                            <span className="metric-label">Parts / MDs</span>
+                            <span className="metric-val" style={{ color: '#d2a8ff' }}>{group.total_parts_count}</span>
+                          </div>
+                          <div className="bundle-metric-chip" data-testid="bundle-metric-captures">
+                            <span className="metric-label">Image Captures</span>
+                            <span className="metric-val" style={{ color: '#58a6ff' }}>{group.total_frames.toLocaleString()}</span>
+                          </div>
+                          <div className="bundle-metric-chip" data-testid="bundle-metric-total-lines">
+                            <span className="metric-label">Total Lines</span>
+                            <span className="metric-val" style={{ color: '#f0f6fc' }}>{group.total_lines.toLocaleString()}</span>
+                          </div>
+                          <div className="bundle-metric-chip" data-testid="bundle-metric-verified-lines">
+                            <span className="metric-label">Verified Lines</span>
+                            <span className="metric-val" style={{ color: '#00ff9d' }}>{group.verified_lines.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Bundle Action Bar */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', marginTop: '6px' }}>
+                          <button
+                            type="button"
+                            data-testid="bundle-toggle-parts-btn"
+                            onClick={e => toggleBundleExpanded(group.bundle_id, e)}
+                            style={{
+                              background: 'rgba(163, 113, 247, 0.12)',
+                              border: '1px solid rgba(163, 113, 247, 0.35)',
+                              color: '#d2a8ff',
+                              borderRadius: '5px',
+                              padding: '2px 7px',
+                              fontSize: '9.5px',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {isExpanded ? 'Hide Parts' : `View ${group.total_parts_count} Parts`}
+                          </button>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              type="button"
+                              className="btn-download-action variant-markdown"
+                              data-testid="bundle-md-export-btn"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleExportBundleMarkdown(group.bundle_id, group.bundle_name);
+                              }}
+                              disabled={isExportingMarkdown}
+                              title={`Download Combined Bundle Markdown (.md) • Downloaded ${group.markdown_download_count} time(s)`}
+                            >
+                              <Download size={11} />
+                              <span>MD</span>
+                              <span className="download-counter-badge" data-testid="bundle-md-download-count">
+                                {group.markdown_download_count}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-download-action variant-project"
+                              data-testid="bundle-zip-export-btn"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleExportBundle(group.bundle_id, group.bundle_name);
+                              }}
+                              disabled={isExportingProject}
+                              title={`Export Full Bundle Archive with All ${group.total_parts_count} Markdown Parts (.zip) • Downloaded ${group.project_download_count} time(s)`}
+                            >
+                              <Download size={11} />
+                              <span>ZIP</span>
+                              <span className="download-counter-badge" data-testid="bundle-zip-download-count">
+                                {group.project_download_count}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-text-danger"
+                              data-testid="bundle-delete-btn"
+                              onClick={e => {
+                                e.stopPropagation();
+                                handleDeleteBundle(group.bundle_id, group.bundle_name, group.total_parts_count);
+                              }}
+                              title={`Delete entire bundle "${group.bundle_name}" (${group.total_parts_count} parts)`}
+                              style={{ padding: '4px 5px' }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Expanded Individual Markdown Part Cards */}
+                      {isExpanded && (
+                        <div className="bundle-parts-drawer" data-testid="bundle-parts-drawer">
+                          {group.parts.map((part, idx) => {
+                            const partNum = part.part_number || idx + 1;
+                            const isPartActive = part.id === activeProject?.id;
+                            const partFileLabel = part.part_file_name || (part.name.toLowerCase().endsWith('.md') ? part.name : `${part.name}.md`);
+                            const partCaptures = part.frame_count ?? 0;
+                            const partTotalLines = part.total_lines ?? part.line_count ?? 0;
+                            const partVerifiedLines = part.verified_lines ?? part.line_count ?? 0;
+                            return (
+                              <div
+                                key={part.id}
+                                className={`bundle-part-card ${isPartActive ? 'active' : ''}`}
+                                data-testid="bundle-part-card"
+                                data-part-id={part.id}
+                                data-part-number={partNum}
+                                onClick={() => handleSwitchProject(part.id)}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
+                                    <span className="part-index-badge">Part {partNum}</span>
+                                    <FileText size={11} color={isPartActive ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
+                                    <span
+                                      className="part-file-name"
+                                      title={partFileLabel}
+                                      style={{
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        color: isPartActive ? '#00ff9d' : '#f0f6fc',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      {partFileLabel}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                                    <button
+                                      type="button"
+                                      className="btn-download-action variant-markdown"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        handleExportMarkdown(part.id, partFileLabel);
+                                      }}
+                                      disabled={isExportingMarkdown}
+                                      title={`Download Part ${partNum} Markdown (${partFileLabel})`}
+                                      style={{ padding: '2px 5px', fontSize: '9px' }}
+                                    >
+                                      <Download size={10} />
+                                      <span>MD</span>
+                                      <span className="download-counter-badge" data-testid="project-md-download-count">
+                                        {part.markdown_download_count ?? 0}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-text-danger"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        handleDeleteProject(part.id, part.name);
+                                      }}
+                                      disabled={deletingProjectId === part.id}
+                                      title={`Delete Part ${partNum}`}
+                                      style={{ padding: '2px 4px' }}
+                                    >
+                                      <Trash2 size={11} />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
+                                  <span style={{ color: '#58a6ff', fontWeight: 600 }}>{partCaptures} captures</span>
+                                  <span>•</span>
+                                  <span>{partTotalLines.toLocaleString()} total lines</span>
+                                  <span>•</span>
+                                  <span style={{ color: '#00ff9d', fontWeight: 600 }}>{partVerifiedLines.toLocaleString()} verified</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+
+                const p = group.parts[0];
+                const isSingleActive = p.id === activeProject?.id;
+                const pFrames = p.frame_count ?? 0;
+                const pTotalLines = p.total_lines ?? p.line_count ?? 0;
+                const pVerifiedLines = p.verified_lines ?? p.line_count ?? 0;
+                return (
+                  <div
+                    key={p.id}
+                    className={`sidebar-project-card ${isSingleActive ? 'active' : ''}`}
+                    data-testid="project-card"
+                    onClick={() => handleSwitchProject(p.id)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <span
+                            style={{
+                              width: '6px',
+                              height: '6px',
+                              borderRadius: '50%',
+                              background: isSingleActive ? '#00ff9d' : '#484f58',
+                              boxShadow: isSingleActive ? '0 0 6px #00ff9d' : 'none',
+                              flexShrink: 0
+                            }}
+                          />
+                          <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#f0f6fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.name}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
+                          {pFrames} frames • {pTotalLines} lines • <span style={{ color: '#00ff9d' }}>{pVerifiedLines} verified</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          className="btn-download-action variant-markdown"
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleExportMarkdown(p.id, p.name);
+                          }}
+                          disabled={isExportingMarkdown}
+                          title={`Download Markdown (.md) • Downloaded ${p.markdown_download_count ?? 0} time(s)`}
+                        >
+                          <Download size={11} />
+                          <span>MD</span>
+                          <span className="download-counter-badge" data-testid="project-md-download-count">
+                            {p.markdown_download_count ?? 0}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-download-action variant-project"
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleExportProject(p.id, p.name);
+                          }}
+                          disabled={isExportingProject}
+                          title={`Export Project Archive (.zip) • Downloaded ${p.project_download_count ?? 0} time(s)`}
+                        >
+                          <Download size={11} />
+                          <span>ZIP</span>
+                          <span className="download-counter-badge" data-testid="project-zip-download-count">
+                            {p.project_download_count ?? 0}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-text-danger"
+                          onClick={e => {
+                            e.stopPropagation();
+                            handleDeleteProject(p.id, p.name);
+                          }}
+                          disabled={deletingProjectId === p.id}
+                          title="Delete project"
+                          style={{ padding: '4px 5px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </aside>
+        ) : (
+          <div
+            className="projects-collapsed-rail"
+            data-testid="projects-collapsed-rail"
+            onClick={() => setShowProjectDropdown(true)}
+            title="Expand Projects Slide-Out Left Sidebar"
+          >
+            <PanelLeft size={14} color="#00ff9d" />
+            <span className="rail-vertical-label">PROJECTS ({projects.length})</span>
+          </div>
+        )}
+
         {workspaceMode === 'ocr_inspector' ? (
           <OcrLineInspectorWorkspace
             apiBase={API_BASE}
