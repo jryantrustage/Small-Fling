@@ -1,0 +1,180 @@
+   'yaml
+parameters:
+name: stageCondition
+  type: string
+  default: always()
+  name: environment
+  type: string
+  name: azureEnvironment
+  type: string
+  name: agentPool
+  type: : string
+  name: variableTemplate
+  type: string
+  name: submitRFC
+  type: boolean
+  default: false
+  name: swapSeparate
+  type: boolean
+  default: false
+
+stages:
+    stage: Deploy${{ parameters.environment }}
+    displayName: Deploy ${ parameters.environment }}
+    dependsOn: Build
+    condition: and(succeeded(), ${ parameters.stageCondition }})
+    variables:
+        group: Cherwell
+        template: ../variables/Release.yaml
+        template: ${{ parameters.variableTemplate }}
+    jobs:
+        deployment: Deploy${{ parameters.environment }}
+        displayName: Deploy ${{ parameters.environment }
+        environment: ${ parameters.azureEnvironment }
+        pool: ${{ parameters.agentPool }}
+        strategy:
+          runonce:
+            deploy:
+              steps:
+               - checkout: self
+                displayName: 'Get Deployment scripts'
+                task: ExtractFiles@1
+                displayName: 'Extract files'
+                inputs:
+                  archiveFilePatterns: '$(Pipeline.Workspace)/drop/drop.zip'
+                  destinationFolder: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/package'
+                task: PowerShell@2
+                displayName: 'Rename .env.template to .env'
+                inputs:
+                  targetType: 'inline'
+script: 'Rename-Item -Path "$(System.DefaultworkingDirectory)/.env.template" -NewName "$(System.DefaultworkingDirectory)/.env"-
+                task: PowerShell@2
+                displayName: 'Show contents of default working directory'
+                inputs:
+                  targetType: 'inline'
+                  script: 'Get-ChildItem -Path $(System.DefaultworkingDirectory)'
+- task: colinsalmcorner.colinsalmcorner-buildtasks.replace-tokens-task.ReplaceTokens@1
+                displayName: 'Replace tokens in package folder'
+                inputs:
+                  sourcePath: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/package'
+                  filePattern: '**/*.+(htmlljsljsonlcss|config)'
+                  tokenRegex: '_(Iw+)_'
+- task: colinsalmcorner.colinsalmcorner-buildtasks.replace-tokens-task.ReplaceTokens@1
+                displayName: 'Replace tokens in .env'
+                inputs:
+                  sourcePath: '$(System.DefaultworkingDirectory)'
+                  filePattern: '.env'
+                  tokenRegex: '_(Iw+)—'
+                task: AzurePowerShell@5
+                displayName: 'Show env config'
+                inputs:
+                  azureSubscription: '${{ Variables.AZURE_SUBSCRIPTION }'
+                  ScriptPath: $(System.DefaultworkingDirectory)/pipelines/scripts/showConfig.ps1
+                  ScriptArguments: '$(System.DefaultworkingDirectory) "*.env"-
+                  azurePowerShellVersion: LatestVersion
+                task: ArchiveFiles@2
+                displayName: 'Archive package folder'
+                inputs:
+                  rootFolderOrFile: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/package'
+                  includeRootFolder: false
+                  archiveFile: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/package.zip'
+                task: AzureRmWebAppDeployment@4
+                displayName: 'Azure App Service ${ variables.APP_NAME_DIX }} deploy to slot'
+                inputs:
+                  azureSubscription: '${ Variables.AZURE_SUBSCRIPTION }}'
+                  WebAppName: '${{ Variables.APP_NAME_DIX }}'
+                  deployToSlotOrASE: true
+                  ResourceGroupName: '${{ variables.APP_RG_NAME }}'
+                  SlotName: staging
+                  packageForLinux: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/package.zip'
+                  enableCustomDeployment: true
+                  RemoveAdditionalFilesFlag: true
+               - ${{ if eq(parameters.swapseparate, false) }}:
+                  task: AzureAppServiceManage@0
+                  displayName: 'Azure App Service ${{ variables.APP_NAME_DIX }} swap slot'
+                  inputs:
+                    azureSubscription: '${{ Variables.AZURE_SUBSCRIPTION }}'
+                    WebAppName: '${{ Variables.APP_NAME_DIX }}'
+                    ResourceGroupName: '${{ variables.APP_RG_NAME }}'
+                    Sourceslot: staging
+                task: ExtractFiles@1
+                displayName: 'Extract public files'
+                inputs:
+                  archiveFilePatterns: '$(Pipeline.Workspace)/drop/public.zip'
+                  destinationFolder: '$(System.DefaultWorkingDirectory)/_DIxUI/drop'
+                  cleanDestinationFolder: false
+                task: AzureCLI@2
+                displayName: 'Upload files to blob storage'
+                inputs:
+                  azureSubscription: '${ Variables.AZURE_SUBSCRIPTION }'
+                  scriptType: ps
+                  scriptLocation: inlineScript
+                  inlineScript: |
+                    az storage blob upload-batch '
+                             --account-name ${{ variables.StaticContentStorageAccountName }} '
+                             -d "'$web" '
+                             -s ./'
+                             --destination-path dix/public '
+                             --pattern * *
+                             --overwrite true *
+                             --auth-mode login
+                  workingDirectory: '$(System.DefaultWorkingDirectory)/_DIxuI/drop/public'
+                task: AzurePowerShell@5
+                displayName: 'Send Teams Notification'
+                inputs:
+                  azureSubscription: '${ Variables.AZURE_SUBSCRIPTION }}'
+ScriptPath:$(System.DefaultworkingDirectory)/pipelines/scripts/sendTeamsNotification.ps1
+ScriptArguments: -"${ variables.TeamswebhookUrl }}" "FICus DIxUI Deploying to${{ parameters.environment}}" "$(Build.QueuedBy)" "https://www.dndbeyond.com/avatars/thumbnails/30762/236/1000/1000/638061114170787382.png" "A$(Build.Reason) run of DIxuI was triggered from the $(Build.SourceBranchName) branch and is nowrunning for the ${ parameters.environment} environment. The build is completed and the releaseis approved by a team member. The release is not quite finished yet, but will be soon. Pleaseuse the button below to visit the pipeline run and check the run status." "https://dev.azure.com/cunamutual/Cxu/_build/results?buildId=$(Build.BuildId)"-
+                  azurePowerShellVersion: LatestVersion
+      - ${{ if and(eq(parameters.submitRFC, true), eq(parameters.swapSeparate, false)) }}:
+         - job: Cherwell
+          condition: always()
+          displayName: Create Cherwell RFC
+          pool: ${{ parameters.agentPool }}
+          dependson: Deploy${ parameters.environment }}
+          steps:
+              task: CreateCherwellChangeRecord@2
+              inputs:
+                Password: '$(CherwellPassword)'
+                Description: 'Individual New Business - Ficus eApp'
+                changeTemplateID: '1339'
+                rememberToSetControloptionsOrAddCondition: 'yes'
+                condition: always()
+   - ${{ if eq(parameters.swapseparate, true) }}:
+    - stage: Swap${{ parameters.environment }}
+      displayName: Swap ${ parameters.environment }}
+      dependsOn: Deploys{ parameters.environment }}
+      variables:
+        - group: Cherwell
+         - template: ../variables/Release.yaml
+         - template: ${{ parameters.variableTemplate }}
+      jobs:
+          deployment: Swap${{ parameters.environment }
+          displayName: Swap ${{ parameters.environment }
+          environment: ${ parameters.azureEnvironment }}
+          pool: ${{ parameters.agentPool }}
+          strategy:
+            runonce:
+              deploy:
+                steps:
+                    task: AzureAppServiceManage@0
+                    displayName: 'Azure App Service ${{ variables.APP_NAME_DIX }} swap slot'
+                    inputs:
+                      azureSubscription: '${{ Variables.AZURE_SUBSCRIPTION }}'
+                      WebAppName: '${ variables.APP_NAME_DIX }}'
+                      ResourceGroupName: '${{ Variables.APP_RG_NAME }}'
+                      Sourceslot: staging
+          ${{ if eq(parameters.submitRFC, true) }}:
+          - job: Cherwell
+            condition: always()
+            displayName: Create Cherwell RFC
+            pool: ${{ parameters.agentPool }
+            dependsOn: Swap${{ parameters.environment }}
+            steps:
+                task: CreateCherwellChangeRecord@2
+                inputs:
+                  Password: '$(CherwellPassword)'
+                  Description: 'Individual New Business - Ficus eApp'
+                  changeTemplateID: '1339'
+                  rememberToSetControloptionsOrAddCondition: 'yes'
+                  condition: always()

@@ -1,0 +1,277 @@
+"json"
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId":"bab7a5a1-46e8-412e-b083-8a6a3493a881",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId": "DF6B0DA0-64D0-47A9-ABF2-B47D932AE8A3",
+        "coreProduct": {
+            "name": "TruStage? Simplified Issue Term",
+            "version": 15,
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Wwhole",
+            "productTemplateId":"7F555142-BB71-4147-AB7D-75D832E9ADC8",
+            "pr0ductId":"AA751FE8-C1CA-4912-A1FC-89C7F6337183",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+        "insuranceForm": {
+            "formId": "78367CFD-9134-4CEF-86C2-FEEC18F83A17",
+            "formName": "25-03-27:1724 TruStage TAwL 2.0 Insurance Form Template",
+            "formVersion": 19,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2025-06-02T15:36:07.776Z",
+        "lastUpdated": "2025-06-02T15:37:54.170Z",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-FINAL-RATE",
+            "segmentTitle": "Final Rate",
+            "navigationTitle": "Final Rate",
+            "segmentSubTitle": "",
+            "ariaLabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 6,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[],
+            "fieldGroups":[
+                {
+                    "groupCode": "GROUP-FINAL-RATE",
+                     "groupTitle": "We've put together your best offer- check it out!",
+                     "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[]
+                },
+                {
+                    "grOupCode" : "GROUP-SUBMIT-FINAL-RATE",
+                    "groupTitle": "",
+                     "groupSubTitle": "",
+                     "grouptype": "progress",
+                    "arialabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                     "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-FINAL-RATE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                 {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value":"back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                 {
+                                     "order": 2,
+                                     "label":"CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 6,
+            "visited": true
+        },
+         "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": 0,
+            "sectionsRequired": 3,
+            "segmentsCount": 13,
+            "segmentsComplete": 5,
+            "segmentsRequired": 3,
+            "currentSection": 1,
+            "currentSegment": 6,
+            "currentSegmentCode": "SEGMENT-FINAL-RATE",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList": [
+                {
+                    "progressItemTitle": "Personal Information",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 5,
+                    "sectionNumber": 1,
+                    "startTimestamp":"2025-06-02T15:36:07.687+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Personal Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Health Questions Continued",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 5,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 6,
+                             "navigationTitle": "Final Rate",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                     "progressItemTitle": "Payment",
+                    "arialabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"7195c9a2-1269-423a-afb9-c20253d94503",
+            "policyNumber": "Lc0248534",
+            "appstatus": "InProgress",
+            "appsubstatus": "InProgress",
+            "underwritingstatus": "Approved",
+            "billingstatus":"Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingClassNotification": false,
+            "underwritingClass": "Standard Non-Tobacco",
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "finalRatesSectionNumber": 1,
+            "finalRatesSegmentNumber": 6,
+            "coverageAmount": 25000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount": "$63.42",
+            "billingFreq":"Monthly",
+            "riders":[],
+            "insuredFirstName": "Samson",
+            "insuredLastName": "Washington",
+            "insuredFullName": "Samson Washington",
+            "productCode": "2016 SITERM80",
+            "productName": "TruStage Simplified Issue Term",
+            "productType": "Whole Life",
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlSource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Doug",
+                        "lastName": "Smith"
+                    },
+                     "relationship":"CHILD"
+                }
+            ],
+             "banners": []
+        },
+         "googleAnalyticsData": {
+            "id":"7195c9a2-1269-423a-afb9-c20253d94503",
+            "eAppId":"DF6B0DA0-64D0-47A9-ABF2-B47D932AE8A38",
+            "correlationId":"bab7a5a1-46e8-412e-b083-8a6a3493a881",
+            "appsubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2016 SITERM80",
+            "coverageAmount":"2500o",
+            "premiumAmount": "63.42",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "gender": "Male",
+            "state":"Il",
+            "issueAge": "40",
+            "policyNumber": "MC0248534",
+            "policystatus": "InProgress",
+            "addressLine1": "1443 COVE DR",
+            "city": "PROSPECT HTS",
+            "zip":"60070-1908",
+            "email": "mister@gmail.com",
+            "firstName": "Samson",
+            "lastName": "Washington",
+            "phone": "(239) 323-1212",
+            "date0fBirth": "1984-10-14"
+        },

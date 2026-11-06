@@ -1,0 +1,37 @@
+、、xml
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generator: Adobe Illustrator 25.4.1, SvG Export Plug-In . SvG Version: 6.00 Build 0) -->
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.0rg/1999/xlink"="0px" y="Opx"
+     viewBox="0 0 32 32" style="enable-background:new 0 0 32 32;" xml:space="preserve">
+<style type="text/css">
+    .st0{fill:#FAE07E;}
+    .st1{fill:#0FOF3F;}
+    .st2{display:none;}
+    .st3{display:inline;}
+    .st4{fi1l:#FFFFFF;}
+</style>
+<g id="normal_icon">
+    >g>
+        <rect x="2" y="1.9" class="st0" width="21.1" height="5.8"/>
+        <rect x="24.8" y="1.9" class="st1" width="5.1" height="5.8"/>
+        <rect x="2" y="9.3" class="st0" width="15.8" height="5.8"/>
+        <rect x="19.5" y="9.3" class="st1" width="10.4" height="5.8"/>
+        <rect x="2" y="16.7" class="st0" width="10.4" height="5.8"/>
+        <rect x="14.2" y="16.7" class="st1" width="15.8" height="5.8"/>
+        <rect x="2" y="24" class="st0" width="5.1" height="5.8"/>
+        <rect x="8.8" y="24" class="st1" width="21.1" height="5.8"/>
+    </g>
+</g>
+<g id="dark_mode_icon" class="st2">
+    <g class="st3">
+        <rect x="1.9" y="1.9" class="st0" width="21.1" height="5.9"/>
+        <rect ="24.8" y="1.9" class="st4" width="5.1" height="5.9"/>
+        <rect x="1.9" y="9.3" class="st0" width="15.8" height="5.8"/>
+        <rect x="19.5" y="9.3" class="st4" width="10.4" height="5.8"/>
+        <rect x="1.9" y="16.7" class="st0" width="10.4" height="5.8"/>
+        <rect x="14.1" y="16.7" class="st4" width="15.8" height="5.8"/>
+        <rect x="1.9" y="24" class="st0" width="5.1" height="5.8"/>
+        <rect x="8.8" y="24" class="st4" width="21.1" height="5.8"/>
+    </g>
+</g>
+</svg>

@@ -1,0 +1,32 @@
+  'yaml
+trigger:
+  branches:
+    include:
+    - develop
+     release/*
+
+#name: $(Year:yy).$(Month).$(DayofMonth)$(rev:.r)
+
+stages:
+    template: templates/stages/stageBuild.yml
+    template: templates/stages/stageRelease.yml
+    parameters:
+      environment: dev
+      azureEnvironment: 'Ficus eApp Dev'
+      agentPool: Release-FICUS-AZ-NP
+      variableTemplate: ../variables/dev.yaml
+    template: templates/stages/stageRelease.yml
+    parameters:
+      environment: demo
+      azureEnvironment: 'Ficus eApp Demo'
+      agentPool: Release-FICUS-AZ-NP
+      variableTemplate: ../variables/demo.yaml
+    template: templates/stages/stageRelease.yml
+    parameters:
+      environment: prod
+      azureEnvironment: 'Ficus eApp Prod'
+      agentPool: Release-FICUS-AZ-P
+      variableTemplate: ../variables/prod.yaml
+      submitRFC: true
+      swapSeparate: true
+stageCondition: or(startswith(variables['Build.SourceBranch'J, 'refs/heads/release/'),startswith(variables['Build.SourceBranch'],'refs/heads/hotfix/'),eq(variables['Build.SourceBranch'],'refs/heads/main'))

@@ -1,0 +1,47 @@
+   'yaml
+variables:
+o96 ## New variables added for Chimera
+- name: TeamsWebhookUrl
+value:"https://defaulta00452fd8469409e91a8bb7a008e2d.a0.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/7242e311c66b40659865e200cb1260c3/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanua1%2Frun&sv=1.0&sig=cFR6CSVzsxft4vD81SHVeeJW_Dzxx7GHmmvof9j613w"
+## COMMON
+- name: ApiServicesAuthorizationMgmtUrl
+  value: $(ApiServicesBaseUrl)/authorization-management-service
+  name: ApiServicesAuthorizationMgmtV1Url
+  value: $(ApiServicesAuthorizationMgmtUrl)/v1
+  name: ApiServicesBaseUrl
+  value: /ficusapi
+  name: ApiServicesInsuranceAppUrl
+  value: $(ApiServicesBaseUrl)/insurance-app-service
+  name: ApiServicesLoanMgmtUrl
+  value: $(ApiServicesBaseUrl)/loan-management-service
+  name: ApiServicesLoanMgmtV1Url
+  value: $(ApiServicesLoanMgmtUrl)/v1
+  name: ApiServicesProductMgmtUrl
+  value: $(ApiServicesBaseUrl)/product-management-service
+  name: ApiServicesProductMgmtV1Url
+  value: $(ApiServicesProductMgmtUrl)/v1
+  name: ApiServicesResourceMgmtUrl
+  value: $(ApiServicesBaseUrl)/resource-management-service
+- name: ApiServicesResourceMgmtv1Url
+  value: $(ApiServicesResourceMgmtUrl)/v1
+  name: ApiServicesTenantUrl
+  value: $(ApiServicesBaseUrl)/tenant-service
+  name: ApiServicesTenantV1Url
+  value: $(ApiServicesTenantUrl)/v1
+  name: ApiServicesTokenMgmtUrl
+  value: $(ApiServicesBaseUrl)/token-management-service
+  name: ApiServicesTokenMgmtV1Url
+  value: $(ApiServicesTokenMgmtUrl)/v1
+  name: ApiServicesUserMgmtUrl
+  value: $(ApiServicesBaseUrl)/user-management-service
+  name: ApiServicesUserMgmtV1Url
+  value: $(ApiServicesUserMgmtUrl)/v1
+  name: veracodeAppProfile
+  value: $(Build.Repository.Name)
+## ATLAS
+  name: APP_NAME_DIX
+  Value: AS-CMFG-$(AZENV)-FICUS-DIX
+  name: APP_RG_NAME
+  Value: RG-CMFG-$(AZENV)-FICUS-APP
+  name: TF_RG_NAME
+  Value: RG-CMFG-$(AZENV)-FICUS-TF

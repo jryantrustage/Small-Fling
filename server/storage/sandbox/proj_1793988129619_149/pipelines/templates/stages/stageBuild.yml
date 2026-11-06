@@ -1,0 +1,146 @@
+   'yaml
+parameters:
+     name: nodeVersion
+      type: string
+      default: '22.x'
+      name: useLinting
+      type: boolean
+      default: true
+      name: isSonarCloudScan
+      type: boolean
+      default: false
+      name: stageName
+      type: string
+      default: 'Build'
+
+stages:
+      stage: ${{ parameters.stageName }}
+      pool:
+          vmImage: windows-latest
+      variables:
+          system.debug: false
+      jobs:
+           job: QualityAndTest
+            displayName: Quality and Test
+            steps:
+                  task: npmAuthenticate@0
+                  displayName: 'npm Authenticate .npmrc'
+                  inputs:
+                      workingFile: .npmrc
+                  task: UseNode@1
+                  displayName: 'Use Node ${{ parameters.nodeVersion }}'
+                  inputs:
+                      version: ${{ parameters.nodeVersion }
+                  task: Npm@1
+                  displayName: 'npm install'
+                  inputs:
+                      command: custom
+                      verbose: true
+                      customCommand: 'install --no-audit'
+                      customRegistry: useFeed
+                      customFeed: 'dd0130b9-a08b-4f91-9382-c8e9b81cbf75'
+                 ${ if eq(parameters.isSonarcloudScan, true) }}:
+                        task: SonarCloudPrepare@3
+                        inputs:
+                            SonarQube: 'SonarCloud-Cxu'
+                            organization: 'cunamutual'
+                             scannerMode: 'cli'
+                            configMode: 'manual'
+                            cliProjectKey: 'cunamutual_$(Build.Repository.Name)'
+                            cliProjectName: '$(Build.Repository.Name)'
+                            extraProperties: I
+                                 sonar.verbose=false
+                                 sonar.log.level=INFo
+                                 sonar.sources=src
+sonar.exclusions=.storybook/**, build/**, public/**, src/**/*.test.tsx, src/**/*.test.ts, src/**/*.stories.tsx, src/mocks/**
+sonar.coverage.exclusions=.storybook/**, build/**, public/**, src/**/*.test.tsx, src/**/*.test.ts, src/**/*.stories.tsx, src/**/types.ts, src/mocks/**,src/setupTests.ts
+                                 sonar.javascript.lcov.reportPaths=coverage/lcov.info
+                  task: Npm@1
+                  displayName: 'npm test'
+                  inputs:
+                      command: custom
+                      verbose: false
+customCommand: 'run test:only -- --coverage --reporter=default --reporter=junit --outputFile.junit=junit.xml'
+                      customRegistry: useFeed
+                      customFeed: 'dd0130b9-a08b-4f91-9382-c8e9b81cbf75'
+                  task: Npm@1
+                  displayName: 'npm run lint'
+                  inputs:
+                      command: custom
+                      verbose: false
+                      customCommand: 'run lint'
+                      customRegistry: useFeed
+                      customFeed: 'dd0130b9-a08b-4f91-9382-c8e9b81cbf75'
+                  condition: and(succeeded(), eq(${ parameters.useLinting }}, 'true'))
+                  task: PublishTestResults@2
+                  displayName: 'Publish Test Results **/junit.xml'
+                  inputs:
+                      testResultsFiles: ^**/junit.xml'
+                      failTaskOnFailedTests: true
+                  task: PublishCodeCoverageResults@2
+                  displayName: 'Publish code coverage'
+                  inputs:
+                      codeCoverageTool: 'lcov'
+                      summaryFileLocation: '$(System.DefaultworkingDirectory)/coverage/lcov.info'
+                      pathToSources: '$(System.DefaultworkingDirectory)'
+                 - ${ if eq(parameters.isSonarcloudScan, true) }}:
+                       task: SonarCloudAnalyze@3
+                        inputs:
+                            jdkversion: 'JAVA_HOME_17_X64'
+                        task: SonarCloudPublish@3
+                        inputs:
+                            pollingTimeoutSec:'300'
+           - job: Build
+            dependsOn: QualityAndTest
+            displayName: Build
+            steps: #ToDo: Figure out how to not duplicate the node and NPM install tasks
+                  task: npmAuthenticate@0
+                  displayName: 'npm Authenticate .npmrc'
+                  inputs:
+                      workingFile: .npmrc
+                  task: UseNode@1
+                  displayName: 'Use Node ${{ parameters.nodeVersion }}'
+                  inputs:
+                      version: ${{ parameters.nodeVersion }}
+                  task: Npm@1
+                  displayName: 'npm install'
+                  inputs:
+                      command: custom
+                      verbose: false
+                      customCommand: 'install --no-audit'
+                      customRegistry: useFeed
+                      customFeed: 'dd0130b9-a08b-4f91-9382-c8e9b81cbf75'
+                  task: Npm@1
+                  displayName: 'npm build'
+                  inputs:
+                      command: custom
+                      verbose: false
+                      customCommand: 'run build'
+                      customRegistry: useFeed
+                      customFeed: 'dd0130b9-a08b-4f91-9382-c8e9b81cbf75'
+env: # setting these values as environment variables so that RCA replaces the% based tokens (that are used for local development) with these underscore tokens (forenvironment specific replacement during the release step).
+                      REACT_APP_ROBOTS_TAG_CONTENT:'_REACT_APP_ROBOTS_TAG_CONTENT_'
+                      REACT_APP_RECAPTCHA_SITE_KEY:_REACT_APP_RECAPTCHA_SITE_KEY_'
+                      REACT_APP_ONETRUST_DOMAIN_URL:＇_REACT_APP_ONETRUST_DOMAIN_URL'
+REACT_APP_ONETRUST_DATA_DOMAIN_SCRIPT:'_REACT_APP_ONETRUST_DATA_DOMAIN_SCRIPT_'
+                  task: PowerShell@2
+                  displayName: 'Validate index.html tokens'
+                  inputs:
+filePath:$(System.DefaultworkingDirectory)/pipelines/scripts/validateTokens.ps1
+arguments: '-FilePath "s(System.DefaultworkingDirectory)/build/index.html" -Tokens@("__REACT_APP_ROBOTS_TAG_CONTENT__","_REACT_APP_RECAPTCHA_SITE_KEY__","—_REACT_APP_ONETRUST_DOMAIN_URL—","__REACT_APP_ONETRUST_DATA_DOMAIN_SCRIPT__")'
+                 ${ if eq(parameters.isSonarcloudScan, false) }:
+- powershell: 'Copy-Item "$(Build.SourcesDirectory)/web.config" -Destination "$(Build.SourcesDirectory)/build"-
+                        displayName: 'Copy web.config'
+                        task: ArchiveFiles@2
+                        displayName: 'Archive build'
+                        inputs:
+                             rootFolderOrFile: build
+                            includeRootFolder: false
+                            archiveFile: '$(Build.ArtifactstagingDirectory)/drop.zip'
+                        task: ArchiveFiles@2
+                        displayName: 'Archive public'
+                        inputs:
+                             rootFolderOrFile: public
+                            archiveFile: '$(Build.ArtifactstagingDirectory)/public.zip'
+                        task: PublishBuildArtifacts@1
+                        displayName: 'Publish Artifact: drop'

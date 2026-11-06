@@ -1,0 +1,71 @@
+  'yaml
+variables:
+      name: ApimAppName
+      value: DIXUI
+      name: ApimProductId
+      value: DIX
+      name: BaseUrlDixApp
+      Value: https://$(HOST_NAME_DIX)
+      name: REACT_APP_API_KEY
+      value: 27f114adef914f738a1c5dcadf20c4e5
+      name: REACT_APP_AUTHORIZATION_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesAuthorizationMgmtv1Url)
+      name: REACT_APP_BUILD_NUMBER
+      value: $(Build.BuildNumber)
+      name: REACT_APP_CHASE_SCRIPT_HOST
+      value: https://chase-var.hostedpaymentservice.net
+      name: REACT_APP_GOOGLE_TAG_MANAGER_ID
+      Value: GTM-T6Q6NG4S
+      name: REACT_APP_INSURANCE_APP_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesInsuranceAppUrl)
+      name: REACT_APP_LOAN_MGMT_API_BASE_URL
+      Value: $(BaseAppMgmtUrl)$(ApiServicesLoanMgmtV1Url)
+      name: REACT_APP_ONETRUST_DATA_DOMAIN_SCRIPT
+      value: ae07eb90-8e3b-4f47-b0e2-4bfeb5d06da7-test
+      name: REACT_APP_ONETRUST_DOMAIN_URL
+      value: https://static.trustage.com/brand/assets/scripts/onetrust.js
+      name: REACT_APP_PRODUCT_MANAGEMENT_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesProductMgmtV1Url)
+      name: REACT_APP_PUBLIC_URL
+      value: $(BaseUrlDixApp)
+      name: REACT_APP_RECAPTCHA_SITE_KEY
+      Value: 6LdQjjsrAAAAAIaCo_8WaKA7y7yBhXUE2X_kTeET
+     name: REACT_APP_RESOURCE_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesResourceMgmtV1Url)
+      name: REACT_APP_ROBOTS_TAG_CONTENT
+      value: noindex, nofollow
+      name: REACT_APP_SAFETY_NET_LOADING_TIMER
+      value: 20
+      name: REACT_APP_TENANT_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesTenantV1Url)
+      name: REACT_APP_TOKEN_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesTokenMgmtV1Url)
+      name: REACT_APP_USER_API_BASE_URL
+      value: $(BaseAppMgmtUrl)$(ApiServicesUserMgmtV1Url)
+    ## ATLAS
+     - name: AZENV
+      value: D01
+      name: AZURE_SUBSCRIPTION
+      Value: FICUS-NonProd LAH
+      name: HOST_NAME_DIX
+      value: as-cmfg-do1-ficus-dix.azurewebsites.net
+    ## COMMON
+      name: BaseAppMgmtDomain
+      value: $(EnvName)api.ficus.trustagedev.com
+     name: BaseAppMgmtUrl
+      Value: https://$(BaseAppMgmtDomain)
+      name: EnvName
+      value: dev1
+      name: StaticContentStorageAccountName
+      value: sacmfgdo1ficusstatic
+      name: BASIC_AUTHENTICATION_HEADER
+      Value: 'Basic dHJ1c3RhZ2U6VGVzdCE=|Basic RFNGOkVhcHB0ZXNOIQ=='
+      name: system.debug
+      value: true
+    ## Digicert
+      name: REACT_APP_DIGICERT_CID
+      value: qVteoC6s
+      name: REACT_APP_FOOTER_SECURITY_LOGO_URL
+      value: https://seal.digicert.com/seals/popup/images/smart-seal.png
+      name: REACT_APP_TEST_PAGE_INTERNAL_TOKEN_MGMT_URL
+      value: https://ficusdev1aks.cunamutual.com/ficusapi/token-management-service

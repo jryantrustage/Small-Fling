@@ -1,0 +1,186 @@
+```>>>
+body {
+    font-family: "GTAmerica", "Helvetica", sans-serif;
+    font-size: 14px;
+    margin: O;
+    overflow-x: hidden;
+}
+
+.hps-row {
+    padding-top: 12px;
+}
+
+.hps-submit-row {
+    padding-right: 24px;
+    display: block;
+    justify-content: space-evenly;
+    gap: 16px;
+    margin-bottom: 12px;
+
+    @media ((max-width: 374px) {
+        flex-direction: column;
+        gap: Opx;
+    }
+}
+
+.hps-custom-first-row {
+  padding-top: Opx;
+}
+.hps-custom {
+  display: flex;
+  flex-direction: column;
+
+  ＆ label {
+    padding-top: Opx;
+  }
+}
+.hps-custom-multifield {
+  display: block;
+  flex-wrap: wrap;
+  gap: 0px 16px;
+  margin-right: 48px;
+}
+
+.hps-row-month-wrap {
+  overflow: visible;
+  width: 225px;
+}
+
+.creNameLabel, .creTypeLabel, .creNumberLabel, .creCVV2Label, .creExpirationLabel, .creZipCodeLabel {
+    color: #576975;
+    margin-bottom: 8px;
+    padding-top: 24px;
+    padding-right: 12px;
+    font-size: 14px;
+}
+
+.creNameField, .creNumberField, .creCVV2Field, .creZipCodeField {
+    font-family: "GTAmerica", "Helvetica", sans-serif;
+    font-size: 14px;
+    background-color: #f3f5f5;
+    border: 1px solid #677178;
+    border-radius: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    margin-top: 8px;
+    height: 38px;
+    color: #262c30;
+    padding-bottom: Opx;
+    padding-top: Opx;
+
+    &:focus {
+        outline: none;
+        border-color: #131515;
+        box-shadow: rgba(230, 234, 235, 0.2) -1px -4px 6px 0px inset;
+    }
+
+    &::placeholder {
+      color: #576975;
+    }
+}
+
+.creTypeField, .creExpirationMonthField, .creExpirationYearField {
+    font-family: "GTAmerica", "Helvetica", sans-serif;
+    appearance: none;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #262c30;
+    border: 1px solid #677178;
+    background-color: #f3f5f5;
+    line-height: 20px;
+    font-size: 14px;
+    padding-right: 34px;
+background-image:url('data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%228%22%20viewB0x%3D%220%200%2016%208%22%20fi11%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.0rg%2F2000%2Fsvg%22%3E%0A%3Cpath%20d%3D%22M8.00122%205.50466L1.56015%200.337912L0.370117%201.56944L7.38694%207.1978L7.3882%207.1988L8.00092%207.6838L8.61431%207.19616L8.61516%207.19548L15.6324%201.56678L14.4452%200.337891L8.00122%205.50466Z%22%20fi11%3D%22%23262C30%22%2F%3E%0A%3C%2FsVg%3E');
+    background-repeat: no-repeat;
+    background-position-x: calc(100% - 10px);
+    background-position-y: 15px;
+    height: 40px;
+
+    &:focus
+        outline: none;
+        border-color: #131515;
+        box-shadow: rgba(230, 234, 235, 0.2) -1px -4px 6px 0px inset;
+    }
+}
+
+.creCVV2whatLink {
+    color: #576975;
+    margin-left: 2px;
+}
+
+.creExpirationMonthField {
+    margin-right: 16px;
+
+    @media (max-width: 374px) {
+      margin-right: 8px;
+    }
+}
+
+.creNameLabel {
+    padding-top: Opx;
+}
+
+.creNameField, .CcreNumberField {
+    width: 100%;
+    max-width: calc(100vw - 48px);
+}
+
+.creTypeField {
+    max-width: calc(100vw - 22px);
+}
+
+.creZipCodeField {
+    max-width: calc(100vw - 132px);
+    width: 160px;
+    margin-top: Opx;
+
+    @media (max-width: 374px){
+      max-width: unset;
+    }
+}
+
+.creCVV2Field {
+  margin-top: Opx;
+  max-width: calc(100vw - 12px);
+  width: 100%;
+}
+
+.mainTable {
+    width: 100%;
+}
+
+.creAmountRow, .creAmountLabel, .orderIdRow, .creOrderIdBlock {
+    display: none;
+}
+
+.completeButton {
+    font-family: "GTAmerica", "Helvetica", sans-serif;
+    background-color: #193062;
+    color: #ffffff;
+    padding: 10px 40px;
+    border-radius: 43px;
+    border: 1px solid transparent;
+    width: 100%;
+    font-size: 14px;
+    margin-top: 24px;
+    text-transform: uppercase;
+    cursor: pointer;
+
+    @media (max-width: 374px) {
+      margin-top: 12px;
+    }
+}
+
+.cancelButton {
+    font-family: "GTAmerica","Helvetica", sans-serif;
+    background-color: transparent;
+    color: #262c30;
+    padding: 10px 20px;
+    border-radius: 43px;
+    border: 1px solid #262c30;
+    width: 100%;
+    font-size: 14px;
+    margin-top: 16px;
+    text-transform: uppercase;
+    cursor: pointer;
+}

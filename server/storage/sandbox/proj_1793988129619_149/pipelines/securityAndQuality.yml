@@ -1,0 +1,145 @@
+   'yaml
+trigger: none
+pr:
+    branches:
+        include:
+            - develop
+             release/*
+schedules:
+      cron: 'o 1 ＊ ＊ o'
+      displayName: Weekly Security And Quality Gate
+      branches:
+          include:
+               - main
+      always: true
+      cron: 'o 2 ＊ ＊ 2-5'
+      displayName: Daily Development Security And Quality Gate
+      branches:
+          include:
+              - develop
+      always: true
+
+# These parameters will run when we do an Ad Hoc run
+# Just make sure your branch starts with 'feature/' and this will ensure
+# the sandbox veracode scan will be triggered
+parameters:
+    - name: isSonarCloudScan
+      displayName: Execute Sonar Cloud Scan
+      type: boolean
+      default: true
+      name: isVeracodeScan
+      displayName: Execute Veracode Scan
+      type: boolean
+      default: true
+      name: isDebugMode
+      displayName: Enable Debug Mode
+      type: boolean
+      default: false
+
+stages:
+     ${ if eq(parameters.isSonarcloudscan, true) }}:
+           : template: templates/stages/stageBuild.yml
+            parameters:
+                isSonarCloudScan: ${ parameters.isSonarCloudScan }
+                stageName: 'SonarCloudScan'
+    - ${{ if eq(parameters.isVeracodescan, true) }}:
+            stage: VeracodeScan
+            lockBehavior: sequential
+            pool:
+                vmImage: windows-latest
+            variables:
+                system.debug: ${{ parameters.isDebugMode }}
+            jobs:
+                  deployment: Veracode
+                  displayName: Veracode Upload and Scan
+                  environment: 'DIxuI Veracode Sandbox Scan'
+                  strategy:
+                      runonce:
+                          deploy:
+                               steps:
+                                   - checkout: self
+                                    task: CopyFiles@2
+displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)/drop'
+                                     inputs:
+                                         SourceFolder: '$(Build.SourcesDirectory)/src'
+                                         Contents: I
+                                             **/*.*
+                                             !**/—test/*.*
+                                             !**/_tests__/*,*
+                                             !**/mock_/*.*
+                                             !**/*.test.*
+                                             !**/*tests.*
+                                         TargetFolder: '$(Build.ArtifactstagingDirectory)/drop'
+                                    task: CopyFiles@2
+displayName: 'Copy package.json to: $(Build.ArtifactStagingDirectory)/drop'
+                                     inputs:
+                                         SourceFolder: '$(Build.SourcesDirectory)'
+                                         Contents: I
+                                             package-lock.json
+                                             package.json
+                                             yarn.lock
+                                         TargetFolder: '$(Build.ArtifactstagingDirectory)/drop'
+                                     condition: succeeded()
+                                    task: ArchiveFiles@2
+                                    displayName: 'Archive $(Build.ArtifactstagingDirectory)/drop'
+                                     inputs:
+rootFolderOrFile:'$(Build.ArtifactStagingDirectory)/drop'
+                                         includeRootFolder: false
+                                         archiveFile: '$(Build.ArtifactStagingDirectory)/drop.zip'
+                                     condition: succeeded()
+- task: Veracode.veracode-vsts-build-extension.veracode-scanner-task.Veracode@3
+displayName: 'Upload and scan: PR check Develop/feature branch'
+                                     inputs:
+                                         AnalysisService: 'Veracode-AllTeams-CxU'
+                                         veracodeAppProfile: '$(Build.Repository.Name)'
+                                         filepath: '$(Build.ArtifactstagingDirectory)/drop.zip'
+                                         sandboxName: '_automation'
+                                         optargs: '-teams DLX'
+                                         failBuildIfUploadAndScanBuildstepFails: true
+                                         importResults: true
+                                         failBuildonPolicyFail: true
+                                         maximumWaitTime: 360
+condition: and(succeeded(), or(eq(variables['System.PullRequest.TargetBranch'], 'refs/heads/develop'), startswith(variables['Build.SourceBranch'],'refs/heads/feature/')))
+                                    timeoutInMinutes: 360
+- task: Veracode.veracode-vsts-build-extension.veracode-scanner-task.Veracode@3
+                                    displayName: 'Upload and scan: PR check Release'
+                                     inputs:
+                                         AnalysisService: 'Veracode-AllTeams-CxU'
+                                         veracodeAppProfile: '$(Build.Repository.Name)'
+                                         filepath: '$(Build.ArtifactstagingDirectory)/drop.zip'
+                                         optargs: '-teams DLX'
+                                         failBuildIfUploadAndScanBuildstepFails: true
+                                         importResults: true
+                                         failBuildOnPolicyFail: true
+                                         maximumwaitTime: 360
+condition: and(succeeded(), eq(variables['System.PullRequest.TargetBranch'J, 'refs/heads/main'))
+                                    timeoutInMinutes: 360
+                                     retryCountonTaskFailure: 3
+- task: Veracode.veracode-vsts-build-extension.veracode-scanner-task.Veracode@3
+                                    displayName: 'Upload and scan: main branches check'
+                                     inputs:
+                                         AnalysisService: 'Veracode-AllTeams-CxU'
+                                         veracodeAppProfile: '$(Build.Repository.Name)'
+                                         filepath: '$(Build.ArtifactstagingDirectory)/drop.zip'
+                                         optargs: '-teams DLX'
+                                         failBuildIfUploadAndScanBuildStepFails: true
+                                         importResults: true
+                                         failBuildOnPolicyFail: true
+                                         maximumWaitTime: 360
+condition: and(succeeded(), eq(variables['Build.SourceBranch'],'refs/heads/main'))
+                                    timeoutInMinutes: 360
+                                     retryCountonTaskFailure: 3
+                                    task: Veracode Flaw Importer@3
+                                    displayName: 'Import flaws into backlog'
+                                     inputs:
+                                         AnalysisService: 'Veracode-AllTeams-CxU'
+                                         veracodeAppProfile: '$(Build.Repository.Name)'
+                                         scanType: 'Dynamic and Static Analysis'
+                                         importType: 'All Unmitigated Flaws Violating Policy'
+                                        workItemType: 'Bug'
+                                         area: 'CXU\ProductIProduct - Chimera'
+                                         overwriteAreaPathInWorkItemsOnImport: true
+                                         iterationPath: '@CurrentIteration'
+                                         overwriteIterationPath: true
+                                         flawImportLimit: '1000'
+condition: and(succeeded(), eq(variables['Build.SourceBranch'],'refs/heads/main'))

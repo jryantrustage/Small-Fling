@@ -1,0 +1,3157 @@
+"json"
+{
+    "appId":"fd5fcf69-1bb6-4e08-8a35-dc100114fe6f",
+    "maximumApplicationCoverage": 100000,
+    "quote": {
+        "productCode": "2016 SITERM80",
+        "displayName": "SIT",
+        "productType": "Term",
+        "productCategory": "Simplified Issue Term",
+        "lineofBusiness": "Life",
+        "productDescription": "sI Term to Age 8o",
+        "isApplyonline": true,
+        "errors":[],
+        "billingMethods": ["ACH/PAC", "Credit Card", "Direct Bill"],
+        "billingFrequencies":["Annual","Monthly","Quarterly","Semiannual"],
+            "coverageoptions":[
+                {
+                    "billingMethod": "ACH",
+                    "billingFrequency":"Monthly",
+                    "underwritingClassCode": "N",
+                    "underwritingDescription": "Standard",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 15.71
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 18.23
+                        },
+                        {
+                             "coverage": 7000.
+                             "premium": 20.74
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 23.26
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 25.77
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 28.29
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 30.81
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 33.32
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 35.84
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 38.35
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 40.87
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 43.39
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 45.9
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 48.42
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 50.93
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 53.45
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 55.97
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 58.48
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 61
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 63.51
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 63.42
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 65.83
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 68.24
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 70.66
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 73.07
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 75.48
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 77.89
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 80.3
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 82.71
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 85.13
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 87.54
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 89.95
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 92.36
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 94.77
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 97.18
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 99.6
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 102.01
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 104.42
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 106.83
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 109.24
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 111.65
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 114.07
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 116.48
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 118.89
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 121.3
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 119.01
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 121.33
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 123.65
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 125.97
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 128.28
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 130.6
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 132.92
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 135.24
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 137.56
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 139.87
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 142.19
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 144.51
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 146.83
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 149.14
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 151.46
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 153.78
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 156.1
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 158.41
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 160.73
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 163.05
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 165.37
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 167.69
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 170
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 172.32
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 174.64
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 176.96
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 179.27
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 181.59
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 183.91
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 186.23
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 188.54
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 190.86
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 193.18
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 195.5
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 197.82
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 200.13
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 202.45
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 204.77
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 207.09
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 209.4
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 211.72
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 214.04
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 216.36
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 218.67
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 220.99
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 223.31
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 225.63
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 227.94
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 230.26
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 232.58
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 234.9
+                        }
+                    ]
+                },
+                {
+                    "billingMethod": "ACH",
+                    "billingFrequency":"Quarterly",
+                    "underwritingClassCode":"N",
+                    "underwritingDescription": "standard",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 47.13
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 54.68
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 62.23
+                        },
+                        {
+                             "coverage": 8000.
+                             "premium": 69.77
+                        },
+                        {
+                             "coverage": 9000.
+                             "premium": 77.32
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 84.87
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 92.42
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 99.97
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 107.52
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 115.06
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 122.61
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 130.16
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 137.71
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 145.26
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 152.8
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 160.35
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 167.9
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 175.45
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 183
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 190.54
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 190.26
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 197.5
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 204.73
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 211.97
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 219.2
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 226.44
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 233.67
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 240.91
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 248.14
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 255.38
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 262.61
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 269.85
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 277.08
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 284.32
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 291.55
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 298.79
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 306.02
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 313.26
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 320.49
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 327.73
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 334.96
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 342.2
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 349.43
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 356.67
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 363.9
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 357.04
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 364
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 370.95
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 377.9
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 384.85
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 391.81
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 398.76
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 405.71
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 412.67
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 419.62
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 426.57
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 433.53
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 440.48
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 447.43
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 454.38
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 461.34
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 468.29
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 475.24
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 482.2
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 489.15
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 496.1
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 503.06
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 510.01
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 516.96
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 523.91
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 530.87
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 537.82
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 544.77
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 551.73
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 558.68
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 565.63
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 572.59
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 579.54
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 586.49
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 593.45
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 600.4
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 607.35
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 614.3
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 621.26
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 628.21
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 635.16
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 642.12
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 649.07
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 656.02
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 662.98
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 669.93
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 676.88
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 683.83
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 690.79
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 697.74
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 704.69
+                        }
+                    ]
+                },
+                {
+                    "billingMethod":"ACH",
+                    "billingFrequency": "SemiAnnually",
+                    "underwritingClassCode":"N",
+                    "underwritingDescription": "Standard",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 94.27
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 109.37
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 124.46
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 139.56
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 154.66
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 169.75
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 184.85
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 199.94
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 215.04
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 230.14
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 245.23
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 260.33
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 275.43
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 290.52
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 305.62
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 320.71
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 335.81
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 350.91
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 366
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 381.1
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 380.54
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 395.01
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 409.48
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 423.95
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 438.42
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 452.89
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 467.36
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 481.82
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 496.29
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 510.76
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 525.23
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 539.7
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 554.17
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 568.64
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 583.11
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 597.58
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 612.05
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 626.52
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 640.99
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 655.46
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 669.93
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 684.4
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 698.87
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 713.34
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 727.81
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 714.09
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 728
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 741.91
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 755.81
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 769.72
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 783.62
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 797.53
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 811.44
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 825.34
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 839.25
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 853.15
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 867.06
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 880.97
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 894.87
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 908.78
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 922.69
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 936.59
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 950.5
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 964.4
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 978.31
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 992.22
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 1006.12
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 1020.03
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 1033.93
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 1047.84
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 1061.75
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 1075.65
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 1089.56
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 1103.46
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 1117.37
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 1131.28
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 1145.18
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 1159.09
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 1172.99
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 1186.9
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 1200.81
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 1214.71
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 1228.62
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 1242.53
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 1256.43
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 1270.34
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 1284.24
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 1298.15
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 1312.06
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 1325.96
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 1339.87
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 1353.77
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 1367.68
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 1381.59
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 1395.49
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 1409.4
+                        }
+                    ]
+                },
+                {
+                    "billingMethod":"ACH",
+                    "billingFrequency":"Annually",
+                    "underwritingClassCode": "N",
+                    "underwritingDescription":"Standard",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 180.6
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 209.52
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 238.44
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 267.36
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 296.28
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 325.2
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 354.12
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 383.04
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 411.96
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 440.88
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 469.8
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 498.72
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 527.64
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 556.56
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 585.48
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 614.4
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 643.32
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 672.24
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 701.16
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 730.08
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 729
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 756.72
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 784.44
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 812.16
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 839.88
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 867.6
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 895.32
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 923.04
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 950.76
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 978.48
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 1006.2
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 1033.92
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 1061.64
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 1089.36
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 1117.08
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 1144.8
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 1172.52
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 1200.24
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 1227.96
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 1255.68
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 1283.4
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 1311.12
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 1338.84
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 1366.56
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 1394.28
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 1368
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 1394.64
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 1421.28
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 1447.92
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 1474.56
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 1501.2
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 1527.84
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 1554.48
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 1581.12
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 1607.76
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 1634.4
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 1661.04
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 1687.68
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 1714.32
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 1740.96
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 1767.6
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 1794.24
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 1820.88
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 1847.52
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 1874.16
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 1900.8
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 1927.44
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 1954.08
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 1980.72
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 2007.36
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 2034
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 2060.64
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 2087.28
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 2113.92
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 2140.56
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 2167.2
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 2193.84
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 2220.48
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 2247.12
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 2273.76
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 2300.4
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 2327.04
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 2353.68
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 2380.32
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 2406.96
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 2433.6
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 2460.24
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 2486.88
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 2513.52
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 2540.16
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 2566.8
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 2593.44
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 2620.08
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 2646.72
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 2673.36
+                        },
+                        {
+                             "coverage": 100000.
+                             "premium": 2700
+                        }
+                    ]
+                },
+                {
+                    "billingMethod": "ACH",
+                    "billingFrequency":"Monthly",
+                    "underwritingClassCode":"p",
+                    "underwritingDescription":"Preferred",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 15.03
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 17.41
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 19.79
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 22.17
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 24.55
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 26.93
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 29.31
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 31.69
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 34.07
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 36.45
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 38.83
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 41.22
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 43.6
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 45.98
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 48.36
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 50.74
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 53.12
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 55.5
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 57.88
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 60.26
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 60.29
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 62.58
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 64.86
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 67.15
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 69.43
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 71.72
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 74.01
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 76.29
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 78.58
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 80.87
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 83.15
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 85.44
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 87.73
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 90.01
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 92.3
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 94.58
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 96.87
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 99.16
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 101.44
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 103.73
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 106.02
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 108.3
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 110.59
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 112.88
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 115.16
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 112.75
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 114.94
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 117.13
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 119.33
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 121.52
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 123.71
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 125.9
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 128.1
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 130.29
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 132.48
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 134.67
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 136.87
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 139.06
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 141.25
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 143.44
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 145.64
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 147.83
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 150.02
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 152.21
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 154.41
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 156.6
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 158.79
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 160.98
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 163.18
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 165.37
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 167.56
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 169.75
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 171.94
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 174.14
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 176.33
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 178.52
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 180.71
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 182.91
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 185.1
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 187.29
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 189.48
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 191.68
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 193.87
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 196.06
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 198.25
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 200.45
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 202.64
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 204.83
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 207.02
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 209.22
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 211.41
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 213.6
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 215.79
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 217.99
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 220.18
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 222.37
+                        }
+                    ]
+                },
+                {
+                    "billingMethod":"ACH",
+                    "billingFrequency":"Quarterly",
+                    "underwritingclassCode": "p",
+                    "underwritingDescription":"Preferred",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 45.09
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 52.24
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 59.38
+                        },
+                        {
+                             "coverage": 8000.
+                             "premium": 66.52
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 73.66
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 80.8
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 87.94
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 95.08
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 102.22
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 109.36
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 116.5
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 123.65
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 130.79
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 137.93
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 145.07
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 152.21
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 159.35
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 166.49
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 173.63
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 180.77
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 180.87
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 187.73
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 194.59
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 201.44
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 208.3
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 215.16
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 222.02
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 228.88
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 235.74
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 242.6
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 249.46
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 256.32
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 263.18
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 270.04
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 276.89
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 283.75
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 290.61
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 297.47
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 304.33
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 311.19
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 318.05
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 324.91
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 331.77
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 338.63
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 345.48
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 338.25
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 344.83
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 351.4
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 357.98
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 364.56
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 371.14
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 377.71
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 384.29
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 390.87
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 397.44
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 404.02
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 410.6
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 417.18
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 423.75
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 430.33
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 436.91
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 443.49
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 450.06
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 456.64
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 463.22
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 469.79
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 476.37
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 482.95
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 489.53
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 496.1
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 502.68
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 509.26
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 515.83
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 522.41
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 528.99
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 535.57
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 542.14
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 548.72
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 555.3
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 561.87
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 568.45
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 575.03
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 581.61
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 588.18
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 594.76
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 601.34
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 607.92
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 614.49
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 621.07
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 627.65
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 634.22
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 640.8
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 647.38
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 653.96
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 660.53
+                        },
+                        {
+                             "coverage": 100000.
+                             "premium": 667.11
+                        }
+                    ]
+                },
+                {
+                    "billingMethod":"ACH",
+                    "billingFrequency": "SemiAnnually",
+                    "underwritingClassCode": "p",
+                    "underwritingDescription":"Preferred",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 90.2
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 104.48
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 118.76
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 133.05
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 147.33
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 161.61
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 175.89
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 190.17
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 204.45
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 218.74
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 233.02
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 247.3
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 261.58
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 275.86
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 290.15
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 304.43
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 318.71
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 332.99
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 347.27
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 361.56
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 361.74
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 375.46
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 389.18
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 402.9
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 416.62
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 430.33
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 444.05
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 457.77
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 471.49
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 485.21
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 498.93
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 512.64
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 526.36
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 540.08
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 553.8
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 567.52
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 581.23
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 594.95
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 608.67
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 622.39
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 636.11
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 649.83
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 663.54
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 677.26
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 690.98
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 676.51
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 689.66
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 702.82
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 715.97
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 729.13
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 742.28
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 755.44
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 768.59
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 781.75
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 794.9
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 808.05
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 821.21
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 834.36
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 847.52
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 860.67
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 873.83
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 886.98
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 900.13
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 913.29
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 926.44
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 939.6
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 952.75
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 965.91
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 979.06
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 992.22
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 1005.37
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 1018.52
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 1031.68
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 1044.83
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 1057.99
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 1071.14
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 1084.3
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 1097.45
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 1110.61
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 1123.76
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 1136.91
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 1150.07
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 1163.22
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 1176.38
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 1189.53
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 1202.69
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 1215.84
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 1228.99
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 1242.15
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 1255.3
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 1268.46
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 1281.61
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 1294.77
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 1307.92
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 1321.08
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 1334.23
+                        }
+                    ]
+                },
+                {
+                    "billingMethod": "ACH",
+                    "billingFrequency":"Annually",
+                    "underwritingClassCode":"p",
+                    "underwritingDescription":"Preferred",
+                    "coveragePremiums":[
+                        {
+                             "coverage": 5000,
+                             "premium": 172.8
+                        },
+                        {
+                             "coverage": 6000,
+                             "premium": 200.16
+                        },
+                        {
+                             "coverage": 7000,
+                             "premium": 227.52
+                        },
+                        {
+                             "coverage": 8000,
+                             "premium": 254.88
+                        },
+                        {
+                             "coverage": 9000,
+                             "premium": 282.24
+                        },
+                        {
+                             "coverage": 10000,
+                             "premium": 309.6
+                        },
+                        {
+                             "coverage": 11000,
+                             "premium": 336.96
+                        },
+                        {
+                             "coverage": 12000,
+                             "premium": 364.32
+                        },
+                        {
+                             "coverage": 13000,
+                             "premium": 391.68
+                        },
+                        {
+                             "coverage": 14000,
+                             "premium": 419.04
+                        },
+                        {
+                             "coverage": 15000,
+                             "premium": 446.4
+                        },
+                        {
+                             "coverage": 16000,
+                             "premium": 473.76
+                        },
+                        {
+                             "coverage": 17000,
+                             "premium": 501.12
+                        },
+                        {
+                             "coverage": 18000,
+                             "premium": 528.48
+                        },
+                        {
+                             "coverage": 19000,
+                             "premium": 555.84
+                        },
+                        {
+                             "coverage": 20000,
+                             "premium": 583.2
+                        },
+                        {
+                             "coverage": 21000,
+                             "premium": 610.56
+                        },
+                        {
+                             "coverage": 22000,
+                             "premium": 637.92
+                        },
+                        {
+                             "coverage": 23000,
+                             "premium": 665.28
+                        },
+                        {
+                             "coverage": 24000,
+                             "premium": 692.64
+                        },
+                        {
+                             "coverage": 25000,
+                             "premium": 693
+                        },
+                        {
+                             "coverage": 26000,
+                             "premium": 719.28
+                        },
+                        {
+                             "coverage": 27000,
+                             "premium": 745.56
+                        },
+                        {
+                             "coverage": 28000,
+                             "premium": 771.84
+                        },
+                        {
+                             "coverage": 29000,
+                             "premium": 798.12
+                        },
+                        {
+                             "coverage": 30000,
+                             "premium": 824.4
+                        },
+                        {
+                             "coverage": 31000,
+                             "premium": 850.68
+                        },
+                        {
+                             "coverage": 32000,
+                             "premium": 876.96
+                        },
+                        {
+                             "coverage": 33000,
+                             "premium": 903.24
+                        },
+                        {
+                             "coverage": 34000,
+                             "premium": 929.52
+                        },
+                        {
+                             "coverage": 35000,
+                             "premium": 955.8
+                        },
+                        {
+                             "coverage": 36000,
+                             "premium": 982.08
+                        },
+                        {
+                             "coverage": 37000,
+                             "premium": 1008.36
+                        },
+                        {
+                             "coverage": 38000,
+                             "premium": 1034.64
+                        },
+                        {
+                             "coverage": 39000,
+                             "premium": 1060.92
+                        },
+                        {
+                             "coverage": 40000,
+                             "premium": 1087.2
+                        },
+                        {
+                             "coverage": 41000,
+                             "premium": 1113.48
+                        },
+                        {
+                             "coverage": 42000,
+                             "premium": 1139.76
+                        },
+                        {
+                             "coverage": 43000,
+                             "premium": 1166.04
+                        },
+                        {
+                             "coverage": 44000,
+                             "premium": 1192.32
+                        },
+                        {
+                             "coverage": 45000,
+                             "premium": 1218.6
+                        },
+                        {
+                             "coverage": 46000,
+                             "premium": 1244.88
+                        },
+                        {
+                             "coverage": 47000,
+                             "premium": 1271.16
+                        },
+                        {
+                             "coverage": 48000,
+                             "premium": 1297.44
+                        },
+                        {
+                             "coverage": 49000,
+                             "premium": 1323.72
+                        },
+                        {
+                             "coverage": 50000,
+                             "premium": 1296
+                        },
+                        {
+                             "coverage": 51000,
+                             "premium": 1321.2
+                        },
+                        {
+                             "coverage": 52000,
+                             "premium": 1346.4
+                        },
+                        {
+                             "coverage": 53000,
+                             "premium": 1371.6
+                        },
+                        {
+                             "coverage": 54000,
+                             "premium": 1396.8
+                        },
+                        {
+                             "coverage": 55000,
+                             "premium": 1422
+                        },
+                        {
+                             "coverage": 56000,
+                             "premium": 1447.2
+                        },
+                        {
+                             "coverage": 57000,
+                             "premium": 1472.4
+                        },
+                        {
+                             "coverage": 58000,
+                             "premium": 1497.6
+                        },
+                        {
+                             "coverage": 59000,
+                             "premium": 1522.8
+                        },
+                        {
+                             "coverage": 60000,
+                             "premium": 1548
+                        },
+                        {
+                             "coverage": 61000,
+                             "premium": 1573.2
+                        },
+                        {
+                             "coverage": 62000,
+                             "premium": 1598.4
+                        },
+                        {
+                             "coverage": 63000,
+                             "premium": 1623.6
+                        },
+                        {
+                             "coverage": 64000,
+                             "premium": 1648.8
+                        },
+                        {
+                             "coverage": 65000,
+                             "premium": 1674
+                        },
+                        {
+                             "coverage": 66000,
+                             "premium": 1699.2
+                        },
+                        {
+                             "coverage": 67000,
+                             "premium": 1724.4
+                        },
+                        {
+                             "coverage": 68000,
+                             "premium": 1749.6
+                        },
+                        {
+                             "coverage": 69000,
+                             "premium": 1774.8
+                        },
+                        {
+                             "coverage": 70000,
+                             "premium": 1800
+                        },
+                        {
+                             "coverage": 71000,
+                             "premium": 1825.2
+                        },
+                        {
+                             "coverage": 72000,
+                             "premium": 1850.4
+                        },
+                        {
+                             "coverage": 73000,
+                             "premium": 1875.6
+                        },
+                        {
+                             "coverage": 74000,
+                             "premium": 1900.8
+                        },
+                        {
+                             "coverage": 75000,
+                             "premium": 1926
+                        },
+                        {
+                             "coverage": 76000,
+                             "premium": 1951.2
+                        },
+                        {
+                             "coverage": 77000,
+                             "premium": 1976.4
+                        },
+                        {
+                             "coverage": 78000,
+                             "premium": 2001.6
+                        },
+                        {
+                             "coverage": 79000,
+                             "premium": 2026.8
+                        },
+                        {
+                             "coverage": 80000,
+                             "premium": 2052
+                        },
+                        {
+                             "coverage": 81000,
+                             "premium": 2077.2
+                        },
+                        {
+                             "coverage": 82000,
+                             "premium": 2102.4
+                        },
+                        {
+                             "coverage": 83000,
+                             "premium": 2127.6
+                        },
+                        {
+                             "coverage": 84000,
+                             "premium": 2152.8
+                        },
+                        {
+                             "coverage": 85000,
+                             "premium": 2178
+                        },
+                        {
+                             "coverage": 86000,
+                             "premium": 2203.2
+                        },
+                        {
+                             "coverage": 87000,
+                             "premium": 2228.4
+                        },
+                        {
+                             "coverage": 88000,
+                             "premium": 2253.6
+                        },
+                        {
+                             "coverage": 89000,
+                             "premium": 2278.8
+                        },
+                        {
+                             "coverage": 90000,
+                             "premium": 2304
+                        },
+                        {
+                             "coverage": 91000,
+                             "premium": 2329.2
+                        },
+                        {
+                             "coverage": 92000,
+                             "premium": 2354.4
+                        },
+                        {
+                             "coverage": 93000,
+                             "premium": 2379.6
+                        },
+                        {
+                             "coverage": 94000,
+                             "premium": 2404.8
+                        },
+                        {
+                             "coverage": 95000,
+                             "premium": 2430
+                        },
+                        {
+                             "coverage": 96000,
+                             "premium": 2455.2
+                        },
+                        {
+                             "coverage": 97000,
+                             "premium": 2480.4
+                        },
+                        {
+                             "coverage": 98000,
+                             "premium": 2505.6
+                        },
+                        {
+                             "coverage": 99000,
+                             "premium": 2530.8
+                        },
+                        {
+                             "coverage": 100000,
+                             "premium": 2556
+                        }
+                    ]
+                }
+            ],
+        "perLifeMaxCoverage": "100000",
+        "productCategoryMaxCoverage": "1000000"
+    }
+}

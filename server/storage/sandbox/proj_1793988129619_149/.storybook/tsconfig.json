@@ -1,0 +1,9 @@
+  'json'
+{
+  "extends": "../tsconfig.json",
+  "compileroptions": {
+    "baseurl": "../src",
+    "noEmit": false
+  },
+  "include":["../src","../declarations.d.ts"]
+}

@@ -1,0 +1,62 @@
+、*"html
+<div id="errorMsg"></div>
+<div class="mainTable">
+    <div class="hps-row hps-custom-first-row">
+        <label for="billing_name" class="creNameLabel">Name on Card</label>
+<input type="text" id="billing_name" name="billing_name" autocomplete="cc-name" aria-label="{billing_name}" class="creNameField" required="required" placeholder="Enter name on card"
+    </div>
+    <div class="hps-row">
+        <label for="pan" class="creNumberLabel">Credit Card Number</label>
+<input type="text" id="pan" name="pan" autocomplete="cc-number" aria-label=" {card_number}" required="required" class="creNameField" placeholder="Enter credit card number" />
+    </div>
+    <div class="hps-custom-multifield">
+        <div class="hps-row hps-custom">
+            <label for="exp_month" class="creExpirationLabel">Expiration Date</label>
+            <div class="hps-row-month-wrap">
+<select id="exp_month" name="exp_month" autocomplete="cc-exp-month" aria-label=" {exp_month}" required="required" class="creExpirationMonthField">
+                    <option value="01">{month_01}</option>
+                    <option value="02">{month_02}</option>
+                    <option value="03">{month_03}</option>
+                    <option value="04">{month_04}</option>
+                    <option value="05">{month_05}</option>
+                    <option value="06">{month_06}</option>
+                    <option value="07">{month_07}</option>
+                    <option value="08">{month_08}</option>
+                    <option value="o9">{month_09}</option>
+                    <option value="10">{month_10}</option>
+                    <option value="11">{month_11}</option>
+                    <option value="12">{month_12}</option>
+                </select>
+<select id="exp_year" name="exp_year" autocomplete="cc-exp-year" aria-label=" {exp_year}" required="required" class="creExpirationYearField">
+                    <option value="2024">2024</option>
+                    <option value="2025">2025</option>
+                    <option value="2026">2026</option>
+                    <option value="2027">2027</option>
+                    <option value="2028">2028</option>
+                    <option value="2029">2029</option>
+                    <option value="2030">2030</option>
+                    <option value="2031">2031</option>
+                    <option value="2032">2032</option>
+                    <option value="2033">2033</option>
+                    <option value="2034">2034</option>
+                    <option value="2035">2035</option>
+                    <option value="2036">2036</option>
+                    <option value="2037">2037</option>
+                    <option value="2038">2038</option>
+                </select>
+            </div>
+        </div>
+        <div class="hps-row hps-custom">
+            <label for="cvv" class="creCVV2Label">{cvv} Number</label>
+<input type="text" id="cvv" name="cvv" autocomplete="cc-csc" aria-label="{cvv}" class="creCVV2Field" required="required" placeholder="Enter CVV/CVC number" />
+        </div>
+    </div>
+    <div class="hps-row hps-custom">
+        <label for="postal_code" class="creZipCodeLabel">Zip Code</label>
+<input type="text" id="postal_code" name="postal_code" autocomplete="postal-code" aria-label="{postalcode}" class="creZipCodeField" required="required" placeholder="Enter ZIP code" />
+    </div>
+    <div class="hps-submit-row">
+<button type="button" id="cancelBtn" aria-label="{cancel}" class="cancelButton">{cancel}</button>
+<button type="submit" id="submitBtn" aria-label="{submit}" class="completeButton">Submit</button>
+    </div>
+</div>
