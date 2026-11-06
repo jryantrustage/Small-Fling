@@ -4,10 +4,13 @@ Stitches verified master lines into markdown, computes completion percentage aga
 Node 1 EOF calibration, and routes loopback to Node 3 or finishes document.
 """
 
+import time
 from typing import Dict, Any, Optional
 
 from dag_nodes.base import BaseDagNode, DagBlackboard, NodeExecutionResult
 from services import state
+
+_last_markdown_disk_flush_mono: float = 0.0
 
 
 class DocumentAssembleNode(BaseDagNode):
@@ -27,12 +30,17 @@ class DocumentAssembleNode(BaseDagNode):
     config = default_config.copy()
 
     async def execute_core(self, blackboard: DagBlackboard) -> NodeExecutionResult:
+        global _last_markdown_disk_flush_mono
         cfg = blackboard.config or self.get_config()
         total_lines_target = (
             blackboard.total_lines
             or state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
         )
-        captured_count = len([k for k, v in state.document_lines.items() if str(v).strip()])
+        captured_count = sum(
+            1
+            for v in state.document_lines.values()
+            if (not v.meta.get("is_blank") if (hasattr(v, "meta") and "is_blank" in v.meta) else bool(str(v).strip()))
+        )
         latest_bottom = blackboard.bottom_line or state.latest_telemetry.get("current_bottom_line", 0)
 
         max_k = max(state.document_lines.keys()) if state.document_lines else 0
@@ -46,18 +54,6 @@ class DocumentAssembleNode(BaseDagNode):
             else:
                 doc_lines.append(str(val))
         full_markdown = "\n".join(doc_lines)
-
-        # Write out reproduced markdown file to disk
-        try:
-            from pathlib import Path
-            out_dir = Path("c:/Projects/Small-Fling/storage")
-            out_dir.mkdir(parents=True, exist_ok=True)
-            (out_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
-            data_dir = out_dir / "data"
-            data_dir.mkdir(parents=True, exist_ok=True)
-            (data_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
-        except Exception as se:
-            print(f"[DocumentAssembleNode] File write note: {se}")
 
         is_complete = False
         eof_reason = ""
@@ -85,6 +81,23 @@ class DocumentAssembleNode(BaseDagNode):
         elif is_eof_dual or eof_reached_flag:
             is_complete = True
 
+        loop_iter = (state.dag_state["nodes"].get("document_assemble", {}).get("loop_iteration") or 0) + 1
+        now_mono = time.perf_counter()
+
+        # Write out reproduced markdown file to disk (throttled during large active capture loops, immediate on completion)
+        if is_complete or max_k <= 1000 or loop_iter % 25 == 0 or (now_mono - _last_markdown_disk_flush_mono) >= 0.5:
+            _last_markdown_disk_flush_mono = now_mono
+            try:
+                from pathlib import Path
+                out_dir = Path("c:/Projects/Small-Fling/storage")
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+                data_dir = out_dir / "data"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                (data_dir / "reproduced_Matrix_main.md").write_text(full_markdown, encoding="utf-8")
+            except Exception as se:
+                print(f"[DocumentAssembleNode] File write note: {se}")
+
         if is_complete and effective_bottom > 0:
             reconciled = state.reconcile_eof_total_lines_and_complete_project(
                 actual_eof_line=effective_bottom,
@@ -94,8 +107,6 @@ class DocumentAssembleNode(BaseDagNode):
             total_lines_target = int(reconciled.get("target_total_lines") or effective_bottom)
             effective_bottom = total_lines_target
             blackboard.total_lines = total_lines_target
-
-        loop_iter = (state.dag_state["nodes"].get("document_assemble", {}).get("loop_iteration") or 0) + 1
         if is_complete:
             pct = 100.0
         else:

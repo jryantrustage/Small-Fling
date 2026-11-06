@@ -132,29 +132,69 @@ def sample_representative_code_lines(limit: int = 4) -> List[Dict[str, Any]]:
     return selected
 
 
+_FRAMES_DIR_PNG_CACHE: Dict[str, Tuple[float, List[Path]]] = {}
+
+
+def _get_unique_frame_dirs() -> List[Path]:
+    dirs: List[Path] = []
+    seen: set = set()
+    for p in (getattr(state, "FRAMES_DIR", None), getattr(db, "FRAMES_DIR", None)):
+        if p:
+            key = str(p)
+            if key not in seen and p.exists():
+                seen.add(key)
+                dirs.append(p)
+    return dirs
+
+
+def _get_cached_png_files(dir_path: Path) -> List[Path]:
+    key = str(dir_path)
+    try:
+        mtime = dir_path.stat().st_mtime
+    except OSError:
+        return []
+    cached = _FRAMES_DIR_PNG_CACHE.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    files = sorted(dir_path.glob("*.png"))
+    _FRAMES_DIR_PNG_CACHE[key] = (mtime, files)
+    return files
+
+
 def find_frame_image_file(frame_id: str) -> Optional[Path]:
     """
-    Finds the frame image on disk matching the frame_id.
+    Finds the frame image on disk matching the frame_id using O(1) direct path
+    and O(1) captured_frames lookup before mtime-cached directory scan.
     """
     if not frame_id:
         return None
-        
-    for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
-        if p and p.exists():
-            direct = p / f"{frame_id}.png"
-            if direct.exists():
-                return direct
-            matches = list(p.glob(f"*{frame_id}*.png"))
-            if matches:
-                return matches[0]
-                
+
+    frame_dirs = _get_unique_frame_dirs()
+    for p in frame_dirs:
+        direct = p / f"{frame_id}.png"
+        if direct.exists():
+            return direct
+
+    # Fast O(1) lookup in state.captured_frames by key
+    f_direct = state.captured_frames.get(frame_id)
+    if isinstance(f_direct, dict) and f_direct.get("filename"):
+        for p in frame_dirs:
+            candidate = p / f_direct["filename"]
+            if candidate.exists():
+                return candidate
+
+    for p in frame_dirs:
+        for png_path in _get_cached_png_files(p):
+            if frame_id in png_path.name:
+                return png_path
+
     for f in state.captured_frames.values():
         if f.get("frame_id") == frame_id and f.get("filename"):
-            for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
+            for p in frame_dirs:
                 candidate = p / f["filename"]
                 if candidate.exists():
                     return candidate
-                    
+
     return None
 
 
@@ -162,31 +202,41 @@ def find_frame_for_line(line_number: int, frame_id: Optional[str] = None) -> Opt
     """
     Finds the frame image file that contains the given line number.
     """
+    checked_fids: set = set()
     if frame_id:
+        checked_fids.add(frame_id)
         img = find_frame_image_file(frame_id)
         if img and img.exists():
             return img
 
+    for fid, f in state.captured_frames.items():
+        if fid not in checked_fids and f.get("top_line", 0) <= line_number <= f.get("bottom_line", 0):
+            checked_fids.add(fid)
+            cand = find_frame_image_file(fid)
+            if cand and cand.exists():
+                return cand
+
     try:
+        active_pid = state.get_current_project_id()
         with db.get_connection() as conn:
             c = conn.cursor()
-            row = c.execute(
-                "SELECT filename FROM frames WHERE top_line <= ? AND bottom_line >= ? ORDER BY top_line DESC LIMIT 1;",
-                (line_number, line_number)
-            ).fetchone()
+            if active_pid:
+                row = c.execute(
+                    "SELECT filename FROM frames WHERE project_id = ? AND top_line <= ? AND bottom_line >= ? ORDER BY top_line DESC LIMIT 1;",
+                    (active_pid, line_number, line_number)
+                ).fetchone()
+            else:
+                row = c.execute(
+                    "SELECT filename FROM frames WHERE top_line <= ? AND bottom_line >= ? ORDER BY top_line DESC LIMIT 1;",
+                    (line_number, line_number)
+                ).fetchone()
             if row and row["filename"]:
-                for p in [state.FRAMES_DIR, db.FRAMES_DIR]:
+                for p in _get_unique_frame_dirs():
                     cand = p / row["filename"]
                     if cand.exists():
                         return cand
     except Exception:
         pass
-
-    for fid, f in state.captured_frames.items():
-        if f.get("top_line", 0) <= line_number <= f.get("bottom_line", 0):
-            cand = find_frame_image_file(fid)
-            if cand and cand.exists():
-                return cand
 
     return None
 
@@ -501,6 +551,13 @@ def compute_levenshtein_distance(s1: str, s2: str) -> int:
     return prev_row[-1]
 
 
+_RE_SYNTAX_FILE_START = re.compile(r"<!--\s*CODESCAN_FILE_START\b[^>]*-->|CODESCAN_FILE_START")
+_RE_SYNTAX_FILE_END = re.compile(r"<!--\s*CODESCAN_FILE_END\s*-->|CODESCAN_FILE_END")
+_RE_SYNTAX_CODE_FENCE = re.compile(r"```[a-zA-Z0-9_\-+.#]*")
+_SYNTAX_TOKEN_CACHE: Dict[str, Dict[str, List[str]]] = {}
+_SYNTAX_TOKEN_CACHE_MAX = 65536
+
+
 def extract_syntax_tokens(text: str) -> Dict[str, List[str]]:
     """
     Extracts key structural syntax tokens from a markdown/code line:
@@ -510,30 +567,36 @@ def extract_syntax_tokens(text: str) -> Dict[str, List[str]]:
       - Brackets ([], {}, ())
     """
     s = text or ""
+    cached = _SYNTAX_TOKEN_CACHE.get(s)
+    if cached is not None:
+        return cached
+
     file_start_tokens: List[str] = []
     file_end_tokens: List[str] = []
     fence_tokens: List[str] = []
     bracket_tokens: List[str] = []
 
-    # 1. CODESCAN_FILE_START
-    for m in re.finditer(r"<!--\s*CODESCAN_FILE_START\b[^>]*-->|CODESCAN_FILE_START", s):
-        tok = m.group(0).strip()
-        if tok.startswith("<!--") and tok.endswith("-->"):
-            file_start_tokens.append("<!-- CODESCAN_FILE_START -->")
-        else:
-            file_start_tokens.append("CODESCAN_FILE_START_PARTIAL")
+    if "CODESCAN_FILE_" in s:
+        # 1. CODESCAN_FILE_START
+        for m in _RE_SYNTAX_FILE_START.finditer(s):
+            tok = m.group(0).strip()
+            if tok.startswith("<!--") and tok.endswith("-->"):
+                file_start_tokens.append("<!-- CODESCAN_FILE_START -->")
+            else:
+                file_start_tokens.append("CODESCAN_FILE_START_PARTIAL")
 
-    # 2. CODESCAN_FILE_END
-    for m in re.finditer(r"<!--\s*CODESCAN_FILE_END\s*-->|CODESCAN_FILE_END", s):
-        tok = m.group(0).strip()
-        if tok == "<!-- CODESCAN_FILE_END -->":
-            file_end_tokens.append("<!-- CODESCAN_FILE_END -->")
-        else:
-            file_end_tokens.append("CODESCAN_FILE_END_PARTIAL")
+        # 2. CODESCAN_FILE_END
+        for m in _RE_SYNTAX_FILE_END.finditer(s):
+            tok = m.group(0).strip()
+            if tok == "<!-- CODESCAN_FILE_END -->":
+                file_end_tokens.append("<!-- CODESCAN_FILE_END -->")
+            else:
+                file_end_tokens.append("CODESCAN_FILE_END_PARTIAL")
 
     # 3. Code fences (``` or ```lang)
-    for m in re.finditer(r"```[a-zA-Z0-9_\-+.#]*", s):
-        fence_tokens.append(m.group(0))
+    if "```" in s:
+        for m in _RE_SYNTAX_CODE_FENCE.finditer(s):
+            fence_tokens.append(m.group(0))
 
     # 4. Brackets
     for ch in s:
@@ -541,13 +604,17 @@ def extract_syntax_tokens(text: str) -> Dict[str, List[str]]:
             bracket_tokens.append(ch)
 
     all_tokens = file_start_tokens + file_end_tokens + fence_tokens + bracket_tokens
-    return {
+    res = {
         "CODESCAN_FILE_START": file_start_tokens,
         "CODESCAN_FILE_END": file_end_tokens,
         "code_fences": fence_tokens,
         "brackets": bracket_tokens,
         "all": all_tokens,
     }
+    if len(_SYNTAX_TOKEN_CACHE) >= _SYNTAX_TOKEN_CACHE_MAX:
+        _SYNTAX_TOKEN_CACHE.clear()
+    _SYNTAX_TOKEN_CACHE[s] = res
+    return res
 
 
 def classify_mismatch_failure_category(
@@ -666,10 +733,13 @@ def ingest_reference_markdown(
 def _resolve_line_frame_id(
     ln: int,
     line_meta_fid: str,
-    frames_by_range: List[Tuple[int, int, str]]
+    frames_by_range: List[Tuple[int, int, str]],
+    line_to_fid_index: Optional[Dict[int, str]] = None
 ) -> str:
     if line_meta_fid:
         return line_meta_fid
+    if line_to_fid_index is not None:
+        return line_to_fid_index.get(ln, "")
     for top_l, bot_l, fid in frames_by_range:
         if top_l <= ln <= bot_l:
             return fid
@@ -837,6 +907,13 @@ def score_against_reference_markdown(
     category_counts = {k: 0 for k in FAILURE_CATEGORIES}
     mismatches: List[Dict[str, Any]] = []
 
+    # Build O(1) Pass-1 line_to_fid_index from frames_by_range so 30,000+ line lookups are O(1) instead of O(N*F)
+    line_to_fid_index: Dict[int, str] = {}
+    for top_l, bot_l, fid_r in frames_by_range:
+        for k_ln in range(top_l, min(bot_l, top_l + 200) + 1):
+            if k_ln not in line_to_fid_index:
+                line_to_fid_index[k_ln] = fid_r
+
     for ln in eval_line_numbers:
         ref_txt = str(ref_map.get(ln, "")).rstrip("\r\n")
         raw_entry = doc_map.get(ln)
@@ -856,7 +933,7 @@ def score_against_reference_markdown(
             else:
                 ocr_txt = str(raw_entry)
         ocr_txt = ocr_txt.rstrip("\r\n")
-        fid = _resolve_line_frame_id(ln, fid, frames_by_range)
+        fid = _resolve_line_frame_id(ln, fid, frames_by_range, line_to_fid_index)
 
         # 1. Exact line match check
         is_exact = (ocr_txt == ref_txt)
@@ -1279,19 +1356,6 @@ def auto_heal_mismatches_against_reference(
                     })
                     state.document_lines[ln] = state.MasterLine(final_txt, **meta)
 
-                if resolved_pid:
-                    try:
-                        db.save_document_line(
-                            project_id=resolved_pid,
-                            line_number=ln,
-                            text=final_txt,
-                            confidence=conf,
-                            frame_id=fid,
-                            verified=(final_txt == ref_txt),
-                        )
-                    except Exception:
-                        pass
-
                 if final_txt == ref_txt:
                     healed_lines.append(ln)
                     frame_healed.append(ln)
@@ -1327,18 +1391,6 @@ def auto_heal_mismatches_against_reference(
                             frame_id=m.get("frame_id", ""),
                             updated_at=datetime.now().isoformat(),
                         )
-                    if resolved_pid:
-                        try:
-                            db.save_document_line(
-                                project_id=resolved_pid,
-                                line_number=ln,
-                                text=sanitized,
-                                confidence=0.99,
-                                frame_id=m.get("frame_id", ""),
-                                verified=(sanitized == ref_txt),
-                            )
-                        except Exception:
-                            pass
                     if sanitized == ref_txt:
                         healed_lines.append(ln)
                     elif new_r > old_r:
@@ -1346,6 +1398,29 @@ def auto_heal_mismatches_against_reference(
 
     try:
         state.save_persisted_state()
+        if resolved_pid and resolved_pid != state.get_current_project_id() and rescanned_lines:
+            batch_dirty = []
+            for r_ln in set(rescanned_lines):
+                ml = state.document_lines.get(r_ln)
+                if ml is not None:
+                    d_ml = ml.to_dict() if hasattr(ml, "to_dict") else (ml if isinstance(ml, dict) else {"text": str(ml)})
+                    batch_dirty.append({
+                        "line_number": int(r_ln),
+                        "text": d_ml.get("text", ""),
+                        "confidence": float(d_ml.get("confidence", 0.99)),
+                        "frame_id": d_ml.get("frame_id"),
+                        "verified": d_ml.get("status") in ["ok", "verified_overlap", "rescanned", "verified"],
+                    })
+            if batch_dirty:
+                db.save_dirty_state_transaction(
+                    resolved_pid,
+                    dirty_lines=batch_dirty,
+                    deleted_lines=[],
+                    cleared=False,
+                    dirty_frames=[],
+                    deleted_frames=[],
+                    telemetry=None,
+                )
     except Exception:
         pass
 

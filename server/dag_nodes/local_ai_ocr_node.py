@@ -125,12 +125,12 @@ class LocalAiOcrNode(BaseDagNode):
                 ]
 
                 if all_lns and not quick_scan.get("is_wrapped_continuation"):
-                    lines_detected, rescanned = await asyncio.to_thread(
-                        rescan_lines_on_image_sync,
+                    lines_detected, rescanned = rescan_lines_on_image_sync(
                         temp_calib,
                         all_lns,
                         raw_lines,
-                        raw_bboxes
+                        raw_bboxes,
+                        reuse_verified_slices=True,
                     )
                 else:
                     lines_detected = raw_lines

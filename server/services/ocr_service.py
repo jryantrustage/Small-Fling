@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import bisect
 import io
 import json
 import re
@@ -269,66 +270,10 @@ def sanitize_line_text(ln: int, text: str) -> str:
     and normalizes common OCR tag corruptions:
       - Auto-corrects '<--- CODESCAN_FILE_END ---' or '<!-- CODESCAN_FILE_END ---' to '<!-- CODESCAN_FILE_END -->'
       - Validates and normalizes '<!-- CODESCAN_FILE_START ... -->' syntax
+    Delegates to LocalOllamaStitcher.sanitize_line_text (pre-compiled regexes + C translation table + memoization cache).
     """
-    cleaned = (
-        (text or "")
-        .replace("\uff08", "(")
-        .replace("\uff09", ")")
-        .replace("\uff3b", "[")
-        .replace("\uff3d", "]")
-        .replace("\uff5b", "{")
-        .replace("\uff5d", "}")
-        .replace("\uff1a", ":")
-        .replace("\uff1b", ";")
-        .replace("\uff0c", ",")
-        .replace("\uff01", "!")
-        .replace("\uff1f", "?")
-        .rstrip()
-    )
-    stripped = cleaned.strip()
-    if not stripped:
-        return ""
-
-    # Strip synthetic [L12]: or L12: row tag if echoed by VLM
-    m_tag = re.match(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", stripped, re.IGNORECASE)
-    if m_tag:
-        cleaned_body = m_tag.group(2).rstrip()
-        stripped = cleaned_body.strip()
-        if not stripped:
-            return ""
-        cleaned = cleaned_body
-
-    if re.match(r"^\[?L\d{1,6}\]?$", stripped, re.IGNORECASE):
-        return ""
-
-    # Gutter number alone on an empty line
-    if stripped.isdigit():
-        val = int(stripped)
-        if abs(val - ln) <= 4:
-            return ""
-
-    # Gutter number prepended to markdown syntax, symbols, or word characters
-    m = re.match(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
-    if m:
-        val = int(m.group(1))
-        if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
-            cleaned = m.group(2).strip()
-            stripped = cleaned
-
-    # Tree branch characters preceded by numbers e.g. "10 ├── DevAnalysis"
-    m2 = re.match(r"^(\d{1,6})\s*([├│└].*)$", stripped)
-    if m2:
-        val = int(m2.group(1))
-        if abs(val - ln) <= 4:
-            cleaned = m2.group(2).strip()
-            stripped = cleaned
-
-    # Normalize CODESCAN_FILE_END and CODESCAN_FILE_START tags
-    normalized_tag = _normalize_codescan_tags(stripped)
-    if normalized_tag != stripped:
-        return normalized_tag
-
-    return cleaned
+    from ocr_engine import LocalOllamaStitcher
+    return LocalOllamaStitcher.sanitize_line_text(ln, text)
 
 
 def preprocess_frame_for_ocr(pil_img: Image.Image, roi_crop: bool = True, exclude_gutter: bool = True) -> Image.Image:
@@ -426,6 +371,8 @@ def render_row_anchored_visual_prompt(
     return preprocess_frame_for_ocr(out_pil, roi_crop=roi_crop, exclude_gutter=False)
 
 
+_ollama_unreachable_until: float = 0.0
+
 def call_minicpm_ollama_sync(
     image_path: Path,
     expected_top: Optional[int] = None,
@@ -434,7 +381,27 @@ def call_minicpm_ollama_sync(
     """
     Synchronous worker for invoking MiniCPM-V vision models via Ollama with Row-Anchored Visual Prompting.
     Hardware-tuned parameters for Intel Core Ultra 9 288V (32GB unified RAM, 4 Lion Cove P-cores with AVX-VNNI).
+    Includes fast reachability probe and negative-cache TTL so offline Ollama never stalls 3 x 180s per frame.
     """
+    global _ollama_unreachable_until
+    now_mono = time.perf_counter()
+    if now_mono < _ollama_unreachable_until:
+        raise urllib.error.URLError("Ollama server unreachable (cached fast-fail TTL)")
+
+    # Fast 1.0s reachability check before rendering visual prompt or waiting 180s across 3 models
+    tags_url = f"{config.OLLAMA_URL.rstrip('/')}/api/tags"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(tags_url), timeout=1.0) as _:
+            pass
+    except (urllib.error.URLError, TimeoutError, OSError) as probe_err:
+        if not isinstance(probe_err, urllib.error.HTTPError):
+            _ollama_unreachable_until = time.perf_counter() + 10.0
+            connection_stats["ollama_available"] = False
+            connection_stats["http_errors_count"] += 1
+            connection_stats["last_connection_error"] = f"[Ollama Probe] {str(probe_err)}"
+            connection_stats["last_error_timestamp"] = datetime.now().isoformat()
+            raise probe_err
+
     if ground_truth_lines is None:
         try:
             from ocr_engine import worker_scan_image
@@ -731,11 +698,12 @@ def interpolate_line_boxes(
         if ln in boxes:
             l["bbox"] = boxes[ln]
         else:
-            prev_lns = [k for k in sorted_known_lns if k < ln]
-            next_lns = [k for k in sorted_known_lns if k > ln]
+            idx_pos = bisect.bisect_left(sorted_known_lns, ln)
+            has_prev = idx_pos > 0
+            has_next = idx_pos < len(sorted_known_lns)
 
-            if prev_lns and next_lns:
-                p_ln, n_ln = prev_lns[-1], next_lns[0]
+            if has_prev and has_next:
+                p_ln, n_ln = sorted_known_lns[idx_pos - 1], sorted_known_lns[idx_pos]
                 p_box, n_box = boxes[p_ln], boxes[n_ln]
                 ratio = (ln - p_ln) / max(1, (n_ln - p_ln))
                 interp_y = int(p_box["y"] + ratio * (n_box["y"] - p_box["y"]))
@@ -747,8 +715,8 @@ def interpolate_line_boxes(
                     "line_number": ln,
                     "interpolated": True
                 }
-            elif prev_lns:
-                p_ln = prev_lns[-1]
+            elif has_prev:
+                p_ln = sorted_known_lns[idx_pos - 1]
                 p_box = boxes[p_ln]
                 delta = ln - p_ln
                 new_box = {
@@ -759,8 +727,8 @@ def interpolate_line_boxes(
                     "line_number": ln,
                     "interpolated": True
                 }
-            elif next_lns:
-                n_ln = next_lns[0]
+            elif has_next:
+                n_ln = sorted_known_lns[idx_pos]
                 n_box = boxes[n_ln]
                 delta = n_ln - ln
                 new_box = {
@@ -782,8 +750,7 @@ def interpolate_line_boxes(
                 }
             boxes[ln] = new_box
             l["bbox"] = new_box
-            sorted_known_lns.append(ln)
-            sorted_known_lns.sort()
+            sorted_known_lns.insert(idx_pos, ln)
 
         if ln in g_boxes:
             l["gutter_bbox"] = g_boxes[ln]
@@ -806,15 +773,58 @@ def rescan_lines_on_image_sync(
     image_path: Path,
     line_numbers: List[int],
     existing_lines: List[Dict[str, Any]],
-    existing_bboxes: Dict[str, Any]
+    existing_bboxes: Dict[str, Any],
+    reuse_verified_slices: bool = False
 ) -> Tuple[List[Dict[str, Any]], List[int]]:
     """
     Selectively rescans only the specified line numbers using RapidOCR on tight, non-overlapping
     row slices anchored by the deterministic gutter grid solver and gated by foreground ink pixel energy.
+    Uses SHA-256 row-slice memoization (_recognize_row_slice_cached) and optionally reuses verified slices
+    from worker_scan_image to avoid redundant multi-pass OCR on already-verified rows.
     """
     import cv2
     import numpy as np
-    from ocr_engine import get_rapid_ocr
+    from ocr_engine import (
+        get_rapid_ocr,
+        decode_short_code_glyphs,
+        verify_and_repair_ocr_line_positions,
+        join_wrapped_row_slices,
+        _recognize_row_slice_cached,
+    )
+
+    line_boxes = existing_bboxes.get("line_boxes", {})
+    gutter_boxes = existing_bboxes.get("gutter_boxes", {})
+    lines_map = {
+        int(l.get("line_number")): l
+        for l in existing_lines
+        if l.get("line_number") is not None and str(l.get("line_number")).isdigit()
+    }
+    rescanned_lns = []
+    now_hms = datetime.now().strftime("%H:%M:%S")
+
+    # Fast-path when caller just ran worker_scan_image on this exact frame and all target lines are position-verified
+    if reuse_verified_slices and line_numbers and all(
+        (ln in lines_map and lines_map[ln].get("position_verified") is True and "row_slice_text" in lines_map[ln])
+        for ln in line_numbers
+    ):
+        for ln in line_numbers:
+            tl = lines_map[ln]
+            blank_locked = bool(tl.get("blank_locked", False))
+            clean_txt = "" if blank_locked else sanitize_line_text(ln, str(tl.get("row_slice_text", tl.get("text", ""))))
+            tl["text"] = clean_txt
+            tl["row_slice_text"] = clean_txt
+            tl["is_blank"] = True if blank_locked else not bool(clean_txt.strip())
+            tl["blank_locked"] = blank_locked
+            tl["status"] = "rescanned"
+            tl["overwritten"] = True
+            tl["confidence"] = 1.0 if blank_locked else max(float(tl.get("confidence", 0.99)), 0.99)
+            tl["position_verified"] = True
+            tl["shift_detected"] = False
+            tl["row_alignment_score"] = 1.0
+            tl["rescanned_at"] = now_hms
+            rescanned_lns.append(ln)
+        existing_lines.sort(key=lambda l: l.get("line_number", 0))
+        return existing_lines, rescanned_lns
 
     img = cv2.imread(str(image_path))
     if img is None:
@@ -828,21 +838,11 @@ def rescan_lines_on_image_sync(
     if ocr is None:
         raise RuntimeError("RapidOCR engine is not available")
 
-    line_boxes = existing_bboxes.get("line_boxes", {})
-    gutter_boxes = existing_bboxes.get("gutter_boxes", {})
-    lines_map = {
-        int(l.get("line_number")): l
-        for l in existing_lines
-        if l.get("line_number") is not None and str(l.get("line_number")).isdigit()
-    }
-    rescanned_lns = []
-
     x_code_start = int(round(101 * scale_x))
     x_code_end = max(x_code_start + 1, w - 24)
     char_pitch_x = 11.4 * scale_x
     sep_end_col = max(6, int(round(14 * scale_x)))
     bleed_end_col = max(4, int(round(5 * scale_x)))
-    from ocr_engine import decode_short_code_glyphs, verify_and_repair_ocr_line_positions, join_wrapped_row_slices
 
     for ln in line_numbers:
         target_line = lines_map.get(ln)
@@ -906,7 +906,7 @@ def rescan_lines_on_image_sync(
             target_line["position_verified"] = True
             target_line["shift_detected"] = False
             target_line["row_alignment_score"] = 1.0
-            target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
+            target_line["rescanned_at"] = now_hms
             rescanned_lns.append(ln)
             continue
 
@@ -940,12 +940,9 @@ def rescan_lines_on_image_sync(
                         sx2 = min(sub_strip.shape[1], int(xs_s.max()) + 8)
                         stight = sub_strip[:, sx1:sx2]
                         if stight.size > 0:
-                            try:
-                                s_res, _ = ocr(stight, use_det=False, use_cls=False, use_rec=True)
-                                if s_res and s_res[0] and s_res[0][1]:
-                                    sub_texts.append(str(s_res[0][1]).strip())
-                            except Exception:
-                                pass
+                            s_txt, _ = _recognize_row_slice_cached(ocr, stight)
+                            if s_txt:
+                                sub_texts.append(s_txt)
             if sub_texts:
                 new_text = indent_prefix + join_wrapped_row_slices(sub_texts)
         elif not is_wrapped and ink_w <= int(round(68 * scale_x)):
@@ -1000,18 +997,14 @@ def rescan_lines_on_image_sync(
                 crop_x2 = min(code_strip.shape[1], ink_x2 + 8)
                 if crop_x2 > crop_x1 + 8:
                     tight = code_strip[:, crop_x1:crop_x2]
-                    try:
-                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
-                        if rec_res and rec_res[0] and rec_res[0][1]:
-                            rec_body = str(rec_res[0][1]).strip()
-                            rec_body = (
-                                rec_body.replace("]: [].", "]: [],")
-                                .replace("]:[],", "]: [],")
-                                .replace(".FooTER", ".FOOTER")
-                                .replace(".hssTermSelect", ".hSSTermSelect")
-                            )
-                    except Exception:
-                        pass
+                    rec_body, _ = _recognize_row_slice_cached(ocr, tight)
+                    if rec_body:
+                        rec_body = (
+                            rec_body.replace("]: [].", "]: [],")
+                            .replace("]:[],", "]: [],")
+                            .replace(".FooTER", ".FOOTER")
+                            .replace(".hssTermSelect", ".hSSTermSelect")
+                        )
 
             chosen_body = rec_body if (rec_body and len(rec_body) >= len(det_body) - 1) else det_body
             if chosen_body:
@@ -1034,7 +1027,7 @@ def rescan_lines_on_image_sync(
         target_line["position_verified"] = True
         target_line["shift_detected"] = False
         target_line["row_alignment_score"] = 1.0
-        target_line["rescanned_at"] = datetime.now().strftime("%H:%M:%S")
+        target_line["rescanned_at"] = now_hms
         rescanned_lns.append(ln)
 
     existing_lines.sort(key=lambda l: l.get("line_number", 0))
@@ -1508,205 +1501,227 @@ async def sequential_rescan_all_frames_task(
         })
 
     try:
+        # Resolve valid frame paths upfront in a single O(F) pass
+        resolved_frames: List[Tuple[int, Dict[str, Any], str, Path]] = []
         for idx, finfo in enumerate(sorted_frames):
-            if getattr(state, "cancel_sequential_rescan", False):
-                state.sequential_rescan_progress["status_message"] = "Cancelled by user"
-                break
-
             fid = finfo.get("frame_id") or finfo.get("id") or finfo.get("filename", "").replace(".png", "")
             try:
                 ipath = _get_frame_path(fid, finfo.get("filename"))
             except Exception:
                 continue
+            if ipath and ipath.exists():
+                resolved_frames.append((idx, finfo, str(fid), ipath))
 
-            if not ipath or not ipath.exists():
-                continue
+        # Bounded concurrency pool (Semaphore(4)) to pre-scan frame images in batches of 16 while preserving strict frame order
+        scan_sem = asyncio.Semaphore(4)
+        batch_size = 16
+        last_ws_broadcast_mono = 0.0
 
-            state.sequential_rescan_progress.update({
-                "current_index": idx + 1,
-                "current_frame_id": fid,
-                "status_message": f"Scanning Frame {idx + 1}/{total_frames}: {ipath.name}..."
-            })
-            if hasattr(state, "ws_manager") and state.ws_manager:
-                await state.ws_manager.broadcast({
-                    "type": "rescan_all_frames_progress",
-                    **state.sequential_rescan_progress
-                })
-
-            t_scan_start = time.perf_counter()
-            try:
-                aux = await asyncio.to_thread(worker_scan_image, str(ipath))
-            except Exception as e:
-                print(f"[sequential_rescan] worker_scan_image error on {ipath.name}: {e}")
-                continue
-
-            top_l = aux.get("top_line", 1)
-            bot_l = aux.get("bottom_line", 26)
-            lines = aux.get("lines", [])
-            bboxes = aux.get("bounding_boxes", {})
-
-            if aux.get("is_wrapped_continuation"):
-                fn_m = re.search(r"frame_(\d+)_(\d+)", str(fid))
-                tracked_l = int(finfo.get("top_line") or (int(fn_m.group(1)) if fn_m else 0) or state.sequential_rescan_progress.get("current_bottom_line") or 1)
-                top_l = tracked_l
-                bot_l = tracked_l
-                for gl in lines:
-                    gl["line_number"] = tracked_l
-                    gl["gutter_number"] = tracked_l
-                updated_lines = lines
-                rescanned = lines
-                ver_report = {
-                    "verified": True,
-                    "total_lines": len(lines),
-                    "verified_count": len(lines),
-                    "shifted_count": 0,
-                    "repaired_count": 0,
-                    "lines": lines,
-                    "bounding_boxes": bboxes,
-                }
-            else:
-                line_numbers = [l.get("line_number") for l in lines if l.get("line_number") is not None]
-                if not line_numbers and top_l and bot_l:
-                    line_numbers = list(range(top_l, bot_l + 1))
-
+        async def _bounded_worker_scan(img_p: Path) -> Tuple[Optional[Dict[str, Any]], float, Optional[Exception]]:
+            async with scan_sem:
+                t0_f = time.perf_counter()
                 try:
-                    from ocr_engine import verify_and_repair_ocr_line_positions
-                    updated_lines, rescanned = await asyncio.to_thread(
-                        rescan_lines_on_image_sync,
-                        ipath,
-                        line_numbers,
-                        lines,
-                        bboxes
-                    )
-                    ver_report = verify_and_repair_ocr_line_positions(updated_lines, lines, bboxes)
-                    updated_lines = ver_report.get("lines", updated_lines)
-                    bboxes = ver_report.get("bounding_boxes", bboxes)
-                except Exception as e:
-                    print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
-                    continue
+                    res_f = await asyncio.to_thread(worker_scan_image, str(img_p))
+                    return res_f, round((time.perf_counter() - t0_f) * 1000, 1), None
+                except Exception as ex_f:
+                    return None, round((time.perf_counter() - t0_f) * 1000, 1), ex_f
 
-            dur_ms = round((time.perf_counter() - t_scan_start) * 1000, 1)
+        for batch_start in range(0, len(resolved_frames), batch_size):
+            if getattr(state, "cancel_sequential_rescan", False):
+                state.sequential_rescan_progress["status_message"] = "Cancelled by user"
+                break
 
-            lead_cont = aux.get("leading_wrapped_continuation")
-            if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
-                state.append_wrapped_continuation_line(
-                    int(lead_cont["line_number"]),
-                    fid,
-                    lead_cont["text"],
-                    is_root_chunk=False,
-                    page_index=finfo.get("page_index"),
-                )
-
-            for l_item in updated_lines:
-                ln = l_item.get("line_number")
-                if not ln:
-                    continue
-                blank_locked = bool(l_item.get("blank_locked", False))
-                final_txt = "" if blank_locked else l_item.get("text", "")
-                if l_item.get("is_wrapped_continuation"):
-                    state.append_wrapped_continuation_line(
-                        ln,
-                        fid,
-                        final_txt,
-                        is_root_chunk=False,
-                        page_index=finfo.get("page_index"),
-                        confidence=l_item.get("confidence", 0.99),
-                    )
-                    continue
-                if l_item.get("is_wrapped") and not blank_locked:
-                    state.append_wrapped_continuation_line(
-                        ln,
-                        fid,
-                        final_txt,
-                        is_root_chunk=True,
-                        page_index=finfo.get("page_index"),
-                        confidence=l_item.get("confidence", 0.99),
-                    )
-                    continue
-                existing = state.document_lines.get(ln)
-                meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
-                meta.update({
-                    "line_number": ln,
-                    "gutter_number": ln,
-                    "is_blank": True if blank_locked else not bool(final_txt.strip()),
-                    "blank_locked": blank_locked,
-                    "status": "verified",
-                    "overwritten": True,
-                    "frame_id": fid,
-                    "page_index": finfo.get("page_index"),
-                    "updated_at": datetime.now().isoformat()
-                })
-                if l_item.get("confidence") is not None:
-                    meta["confidence"] = 1.0 if blank_locked else l_item.get("confidence")
-                if l_item.get("is_wrapped") is not None:
-                    meta["is_wrapped"] = False if blank_locked else l_item.get("is_wrapped")
-                if l_item.get("wrapped_line_count") is not None:
-                    meta["wrapped_line_count"] = 1 if blank_locked else l_item.get("wrapped_line_count")
-                state.document_lines[ln] = state.MasterLine(
-                    final_txt,
-                    **meta
-                )
-
-            if fid in state.captured_frames:
-                state.captured_frames[fid].update({
-                    "top_line": top_l,
-                    "bottom_line": bot_l,
-                    "extracted_line_count": len(updated_lines),
-                    "lines": updated_lines,
-                    "bounding_boxes": bboxes,
-                    "line_position_verification": ver_report,
-                    "status": "processed",
-                    "rescanned_at": datetime.now().isoformat()
-                })
-
-            file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
-            cache_key = f"{str(ipath.resolve())}_{file_mtime}"
-            updated_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in updated_lines)
-            _ocr_inspect_cache[cache_key] = {
-                "lines": updated_lines,
-                "bboxes": bboxes,
-                "model_used": "OpenVINO RapidOCR (Gutter Cropped)",
-                "extracted_text": updated_text,
-                "top_ln": top_l,
-                "bot_ln": bot_l,
-                "img_w": aux.get("image_width", 1920),
-                "img_h": aux.get("image_height", 1080),
-                "line_position_verification": ver_report
-            }
-
-            processed_count += 1
-            total_lines_rescanned += len(rescanned)
-
-            state.sequential_rescan_progress.update({
-                "current_index": idx + 1,
-                "current_top_line": top_l,
-                "current_bottom_line": bot_l,
-                "total_verified_lines": len(state.document_lines),
-                "status_message": f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l}) • Total {len(state.document_lines)} Lines"
-            })
-
-            state.update_headless_telemetry_session(
-                top_line=top_l,
-                bottom_line=bot_l,
-                frames_inc=1,
-                latency_ms=dur_ms,
-                event_msg=f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l})"
+            batch_slice = resolved_frames[batch_start : batch_start + batch_size]
+            batch_results = await asyncio.gather(
+                *(_bounded_worker_scan(item[3]) for item in batch_slice)
             )
 
-            if hasattr(state, "ws_manager") and state.ws_manager:
-                await state.ws_manager.broadcast({
-                    "type": "rescan_all_frames_progress",
-                    **state.sequential_rescan_progress
-                })
-                await state.ws_manager.broadcast({
-                    "type": "headless_telemetry_progress",
-                    "telemetry": state.headless_telemetry_session
-                })
-                if (idx + 1) % 2 == 0 or (idx + 1) == total_frames:
-                    await state.ws_manager.broadcast({
-                        "type": "document_updated",
-                        "data": _doc_payload()
+            for (idx, finfo, fid, ipath), (aux, scan_dur_ms, scan_err) in zip(batch_slice, batch_results):
+                if getattr(state, "cancel_sequential_rescan", False):
+                    state.sequential_rescan_progress["status_message"] = "Cancelled by user"
+                    break
+
+                if scan_err is not None or aux is None:
+                    print(f"[sequential_rescan] worker_scan_image error on {ipath.name}: {scan_err}")
+                    continue
+
+                t_merge_start = time.perf_counter()
+                top_l = aux.get("top_line", 1)
+                bot_l = aux.get("bottom_line", 26)
+                lines = aux.get("lines", [])
+                bboxes = aux.get("bounding_boxes", {})
+
+                if aux.get("is_wrapped_continuation"):
+                    fn_m = re.search(r"frame_(\d+)_(\d+)", str(fid))
+                    tracked_l = int(finfo.get("top_line") or (int(fn_m.group(1)) if fn_m else 0) or state.sequential_rescan_progress.get("current_bottom_line") or 1)
+                    top_l = tracked_l
+                    bot_l = tracked_l
+                    for gl in lines:
+                        gl["line_number"] = tracked_l
+                        gl["gutter_number"] = tracked_l
+                    updated_lines = lines
+                    rescanned = lines
+                    ver_report = {
+                        "verified": True,
+                        "total_lines": len(lines),
+                        "verified_count": len(lines),
+                        "shifted_count": 0,
+                        "repaired_count": 0,
+                        "lines": lines,
+                        "bounding_boxes": bboxes,
+                    }
+                else:
+                    line_numbers = [l.get("line_number") for l in lines if l.get("line_number") is not None]
+                    if not line_numbers and top_l and bot_l:
+                        line_numbers = list(range(top_l, bot_l + 1))
+
+                    try:
+                        from ocr_engine import verify_and_repair_ocr_line_positions
+                        updated_lines, rescanned = rescan_lines_on_image_sync(
+                            ipath,
+                            line_numbers,
+                            lines,
+                            bboxes,
+                            reuse_verified_slices=True,
+                        )
+                        ver_report = verify_and_repair_ocr_line_positions(updated_lines, lines, bboxes)
+                        updated_lines = ver_report.get("lines", updated_lines)
+                        bboxes = ver_report.get("bounding_boxes", bboxes)
+                    except Exception as e:
+                        print(f"[sequential_rescan] rescan_lines error on {ipath.name}: {e}")
+                        continue
+
+                dur_ms = round(scan_dur_ms + (time.perf_counter() - t_merge_start) * 1000, 1)
+                now_iso = datetime.now().isoformat()
+
+                lead_cont = aux.get("leading_wrapped_continuation")
+                if lead_cont and lead_cont.get("line_number") and lead_cont.get("text"):
+                    state.append_wrapped_continuation_line(
+                        int(lead_cont["line_number"]),
+                        fid,
+                        lead_cont["text"],
+                        is_root_chunk=False,
+                        page_index=finfo.get("page_index"),
+                    )
+
+                for l_item in updated_lines:
+                    ln = l_item.get("line_number")
+                    if not ln:
+                        continue
+                    blank_locked = bool(l_item.get("blank_locked", False))
+                    final_txt = "" if blank_locked else l_item.get("text", "")
+                    if l_item.get("is_wrapped_continuation"):
+                        state.append_wrapped_continuation_line(
+                            ln,
+                            fid,
+                            final_txt,
+                            is_root_chunk=False,
+                            page_index=finfo.get("page_index"),
+                            confidence=l_item.get("confidence", 0.99),
+                        )
+                        continue
+                    if l_item.get("is_wrapped") and not blank_locked:
+                        state.append_wrapped_continuation_line(
+                            ln,
+                            fid,
+                            final_txt,
+                            is_root_chunk=True,
+                            page_index=finfo.get("page_index"),
+                            confidence=l_item.get("confidence", 0.99),
+                        )
+                        continue
+                    existing = state.document_lines.get(ln)
+                    meta = getattr(existing, "meta", {}).copy() if (existing and hasattr(existing, "meta")) else (dict(existing) if isinstance(existing, dict) else {})
+                    meta.update({
+                        "line_number": ln,
+                        "gutter_number": ln,
+                        "is_blank": True if blank_locked else not bool(final_txt.strip()),
+                        "blank_locked": blank_locked,
+                        "status": "verified",
+                        "overwritten": True,
+                        "frame_id": fid,
+                        "page_index": finfo.get("page_index"),
+                        "updated_at": now_iso
                     })
+                    if l_item.get("confidence") is not None:
+                        meta["confidence"] = 1.0 if blank_locked else l_item.get("confidence")
+                    if l_item.get("is_wrapped") is not None:
+                        meta["is_wrapped"] = False if blank_locked else l_item.get("is_wrapped")
+                    if l_item.get("wrapped_line_count") is not None:
+                        meta["wrapped_line_count"] = 1 if blank_locked else l_item.get("wrapped_line_count")
+                    state.document_lines[ln] = state.MasterLine(
+                        final_txt,
+                        **meta
+                    )
+
+                if fid in state.captured_frames:
+                    state.captured_frames[fid].update({
+                        "top_line": top_l,
+                        "bottom_line": bot_l,
+                        "extracted_line_count": len(updated_lines),
+                        "lines": updated_lines,
+                        "bounding_boxes": bboxes,
+                        "line_position_verification": ver_report,
+                        "status": "processed",
+                        "rescanned_at": now_iso
+                    })
+
+                file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
+                cache_key = f"{str(ipath.resolve())}_{file_mtime}"
+                updated_text = "\n".join(f"{l.get('line_number', 0):>3}: {l.get('text', '')}" for l in updated_lines)
+                _ocr_inspect_cache[cache_key] = {
+                    "lines": updated_lines,
+                    "bboxes": bboxes,
+                    "model_used": "OpenVINO RapidOCR (Gutter Cropped)",
+                    "extracted_text": updated_text,
+                    "top_ln": top_l,
+                    "bot_ln": bot_l,
+                    "img_w": aux.get("image_width", 1920),
+                    "img_h": aux.get("image_height", 1080),
+                    "line_position_verification": ver_report
+                }
+
+                processed_count += 1
+                total_lines_rescanned += len(rescanned)
+
+                state.sequential_rescan_progress.update({
+                    "current_index": idx + 1,
+                    "current_frame_id": fid,
+                    "current_top_line": top_l,
+                    "current_bottom_line": bot_l,
+                    "total_verified_lines": len(state.document_lines),
+                    "status_message": f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l}) • Total {len(state.document_lines)} Lines"
+                })
+
+                state.update_headless_telemetry_session(
+                    top_line=top_l,
+                    bottom_line=bot_l,
+                    frames_inc=1,
+                    latency_ms=dur_ms,
+                    event_msg=f"Rescanned Frame {idx + 1}/{total_frames} (Lines {top_l}..{bot_l})"
+                )
+
+                # Throttle WebSocket progress updates to fire at most every 250ms or every 25 frames
+                now_mono = time.perf_counter()
+                if hasattr(state, "ws_manager") and state.ws_manager and (
+                    (now_mono - last_ws_broadcast_mono) >= 0.25
+                    or (idx + 1) == total_frames
+                    or processed_count % 25 == 0
+                ):
+                    last_ws_broadcast_mono = now_mono
+                    await state.ws_manager.broadcast({
+                        "type": "rescan_all_frames_progress",
+                        **state.sequential_rescan_progress
+                    })
+                    await state.ws_manager.broadcast({
+                        "type": "headless_telemetry_progress",
+                        "telemetry": state.headless_telemetry_session
+                    })
+                    if (idx + 1) == total_frames or processed_count % 25 == 0:
+                        await state.ws_manager.broadcast({
+                            "type": "document_updated",
+                            "data": _doc_payload()
+                        })
 
     finally:
         state.is_sequential_rescan_running = False

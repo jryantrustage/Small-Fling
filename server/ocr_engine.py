@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-import os, re, json, base64, urllib.request, urllib.error
+import os, re, json, base64, hashlib, copy, urllib.request, urllib.error
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -967,13 +967,10 @@ def extract_visual_editor_rows(
                 max_x_ink = x1_code + int(xs_fg.max())
                 tight = c_strip[:, ix1:ix2]
                 if tight.size > 0:
-                    try:
-                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
-                        if rec_res and rec_res[0] and rec_res[0][1]:
-                            text_str = str(rec_res[0][1]).strip()
-                            conf_val = float(rec_res[0][2])
-                    except Exception:
-                        pass
+                    rec_txt, rec_conf = _recognize_row_slice_cached(ocr, tight)
+                    if rec_txt:
+                        text_str = rec_txt
+                        conf_val = rec_conf
 
         visual_rows.append({
             "row_idx": r,
@@ -1450,6 +1447,95 @@ def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top:
     top, _ = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
     return top
 
+# Pre-compiled module-level regular expressions & translation tables (O(1) reuse across 30,000+ lines)
+_FULLWIDTH_TRANSLATE_TABLE = str.maketrans({
+    "\uff08": "(",
+    "\uff09": ")",
+    "\uff3b": "[",
+    "\uff3d": "]",
+    "\uff5b": "{",
+    "\uff5d": "}",
+    "\uff1a": ":",
+    "\uff1b": ";",
+    "\uff0c": ",",
+    "\uff01": "!",
+    "\uff1f": "?",
+})
+_STITCHER_TRANSLATE_TABLE = str.maketrans({
+    "\uff08": "(",
+    "\uff09": ")",
+    "\uff1a": ":",
+    "\uff1b": ";",
+    "\uff0c": ",",
+})
+_RE_CODESCAN_END_SEARCH = re.compile(r"<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*END\b", re.IGNORECASE)
+_RE_CODESCAN_END_MATCH = re.compile(r"^\s*<[\-!\s]*C[O0]DESCAN[_\s]*FILE[_\s]*END[\-\s>]*$", re.IGNORECASE)
+_RE_CODESCAN_START_MATCH = re.compile(r"^\s*<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*START\b(.*)$", re.IGNORECASE)
+_RE_CODESCAN_TAIL_STRIP = re.compile(r"[\-\s>]+$")
+_RE_CODESCAN_ATTR = re.compile(r'\b(path|type|size|lines|chars)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+)', re.IGNORECASE)
+_RE_CODESCAN_UNCLOSED_ATTR = re.compile(r'\b(path|type|size|lines|chars)\s*=\s*["\']([^"\'\s>]+)$', re.IGNORECASE)
+_RE_SYNTH_ROW_TAG = re.compile(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", re.IGNORECASE)
+_RE_SYNTH_ROW_ONLY = re.compile(r"^\[?L\d{1,6}\]?$", re.IGNORECASE)
+_RE_GUTTER_PREFIX = re.compile(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$")
+_RE_TREE_PREFIX = re.compile(r"^(\d{1,6})\s*([├│└].*)$")
+_RE_ALNUM_WORD_2 = re.compile(r"[A-Za-z0-9]{2,}")
+_RE_TOKEN_WORDS = re.compile(r"[A-Za-z0-9_]{2,}")
+_RE_MULTI_SPACE = re.compile(r"\s+")
+
+# Thread-safe bounded SHA-256 content-hash memoization caches for row pixel slices, frame scans, and line sanitization
+_ROW_SLICE_OCR_CACHE_LOCK = threading.Lock()
+_ROW_SLICE_OCR_CACHE: Dict[str, Tuple[str, float]] = {}
+_ROW_SLICE_OCR_CACHE_MAX = 65536
+
+_FRAME_SCAN_CACHE_LOCK = threading.Lock()
+_FRAME_SCAN_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_FRAME_SCAN_CACHE_MAX = 256
+
+_SANITIZE_LINE_CACHE: Dict[Tuple[int, str], str] = {}
+_SANITIZE_LINE_CACHE_MAX = 65536
+
+
+def _recognize_row_slice_cached(ocr_inst, tight_crop: np.ndarray) -> Tuple[str, float]:
+    """
+    Deduplicates identical 1D row pixel slices across a 30,000+ line scan using a fast SHA-256 content hash.
+    Repeated code/markdown rows ('}', '};', 'break;', '<!-- CODESCAN_FILE_END -->', overlapping frames)
+    return in O(1) without re-invoking ONNX/OpenVINO inference.
+    """
+    if ocr_inst is None or tight_crop is None or tight_crop.size == 0:
+        return "", 0.0
+    h_c, w_c = tight_crop.shape[:2]
+    digest = hashlib.sha256(np.ascontiguousarray(tight_crop).tobytes()).hexdigest()
+    cache_key = f"{h_c}x{w_c}:{digest}"
+    with _ROW_SLICE_OCR_CACHE_LOCK:
+        cached = _ROW_SLICE_OCR_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    txt_out = ""
+    conf_out = 0.0
+    try:
+        rec_res, _ = ocr_inst(tight_crop, use_det=False, use_cls=False, use_rec=True)
+        if rec_res and rec_res[0] and rec_res[0][1]:
+            txt_out = str(rec_res[0][1]).strip()
+            conf_out = float(rec_res[0][2])
+    except Exception:
+        return "", 0.0
+    with _ROW_SLICE_OCR_CACHE_LOCK:
+        if len(_ROW_SLICE_OCR_CACHE) >= _ROW_SLICE_OCR_CACHE_MAX:
+            _ROW_SLICE_OCR_CACHE.clear()
+        _ROW_SLICE_OCR_CACHE[cache_key] = (txt_out, conf_out)
+    return txt_out, conf_out
+
+
+def _fix_codescan_attr_match(m_attr: re.Match) -> str:
+    key = m_attr.group(1).lower()
+    raw_val = m_attr.group(2).strip().strip("\"'`")
+    return f'{key}="{raw_val}"'
+
+
+def _fix_codescan_unclosed_attr_match(m_attr: re.Match) -> str:
+    return f'{m_attr.group(1).lower()}="{m_attr.group(2)}"'
+
+
 def _normalize_codescan_tags(text: str) -> str:
     """
     Normalizes common OCR corruptions on CODESCAN_FILE_END and CODESCAN_FILE_START tags,
@@ -1460,60 +1546,30 @@ def _normalize_codescan_tags(text: str) -> str:
     """
     if not text:
         return text
-    # Replace fullwidth CJK punctuation from PP-OCRv3 with standard ASCII code symbols
-    text = (
-        text.replace("\uff08", "(")
-        .replace("\uff09", ")")
-        .replace("\uff3b", "[")
-        .replace("\uff3d", "]")
-        .replace("\uff5b", "{")
-        .replace("\uff5d", "}")
-        .replace("\uff1a", ":")
-        .replace("\uff1b", ";")
-        .replace("\uff0c", ",")
-        .replace("\uff01", "!")
-        .replace("\uff1f", "?")
-    )
+    # Replace fullwidth CJK punctuation from PP-OCRv3 with standard ASCII code symbols in O(len) C pass
+    text = text.translate(_FULLWIDTH_TRANSLATE_TABLE)
     stripped = text.strip()
     if not stripped:
         return text
 
+    # Fast-path guard: skip tag regexes when line cannot possibly be a CODESCAN tag (>99% of lines)
+    if "<" not in stripped and "codescan" not in stripped.lower():
+        return text
+
     # 1. Normalize CODESCAN_FILE_END variants
-    if re.search(r"<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*END\b", stripped, re.IGNORECASE) or re.match(
-        r"^\s*<[\-!\s]*C[O0]DESCAN[_\s]*FILE[_\s]*END[\-\s>]*$", stripped, re.IGNORECASE
-    ):
+    if _RE_CODESCAN_END_SEARCH.search(stripped) or _RE_CODESCAN_END_MATCH.match(stripped):
         return "<!-- CODESCAN_FILE_END -->"
 
     # 2. Validate & normalize CODESCAN_FILE_START syntax
-    m_start = re.match(
-        r"^\s*<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*START\b(.*)$",
-        stripped,
-        re.IGNORECASE,
-    )
+    m_start = _RE_CODESCAN_START_MATCH.match(stripped)
     if m_start:
         rest = m_start.group(1).strip()
         # Strip trailing comment closure variants (--->, -->, ---, --, ->, >)
-        rest = re.sub(r"[\-\s>]+$", "", rest).strip()
+        rest = _RE_CODESCAN_TAIL_STRIP.sub("", rest).strip()
         # Validate and normalize known attributes: path, type, size, lines, chars
-        # Repair unquoted or half-quoted attribute values e.g. size="2082 or lines=62
-        def _fix_attr(m_attr: re.Match) -> str:
-            key = m_attr.group(1).lower()
-            raw_val = m_attr.group(2).strip().strip("\"'`")
-            return f'{key}="{raw_val}"'
-
-        rest = re.sub(
-            r'\b(path|type|size|lines|chars)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+)',
-            _fix_attr,
-            rest,
-            flags=re.IGNORECASE,
-        )
+        rest = _RE_CODESCAN_ATTR.sub(_fix_codescan_attr_match, rest)
         # Catch trailing unclosed quote on final attribute
-        rest = re.sub(
-            r'\b(path|type|size|lines|chars)\s*=\s*["\']([^"\'\s>]+)$',
-            lambda m: f'{m.group(1).lower()}="{m.group(2)}"',
-            rest,
-            flags=re.IGNORECASE,
-        )
+        rest = _RE_CODESCAN_UNCLOSED_ATTR.sub(_fix_codescan_unclosed_attr_match, rest)
         return f"<!-- CODESCAN_FILE_START {rest} -->" if rest else "<!-- CODESCAN_FILE_START -->"
 
     return text
@@ -1652,11 +1708,11 @@ def verify_and_repair_ocr_line_positions(
             gt_by_ln[int(ln_val)] = g
 
     def _tokens(s: str) -> set:
-        return set(re.findall(r"[A-Za-z0-9_]{2,}", (s or "").lower()))
+        return set(_RE_TOKEN_WORDS.findall((s or "").lower()))
 
     def _sim(a: str, b: str) -> float:
-        na = re.sub(r"\s+", " ", (a or "").strip()).lower()
-        nb = re.sub(r"\s+", " ", (b or "").strip()).lower()
+        na = _RE_MULTI_SPACE.sub(" ", (a or "").strip()).lower()
+        nb = _RE_MULTI_SPACE.sub(" ", (b or "").strip()).lower()
         if not na and not nb:
             return 1.0
         if not na or not nb:
@@ -1841,7 +1897,22 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     """
     Top-level multi-process worker for full image OCR, deterministic RANSAC gutter grid solving,
     blank-line pixel energy gating, & non-overlapping bounding boxes.
+    Memoizes full-frame scan output by content SHA-256 + filename so duplicate scans across DAG nodes return in O(1).
     """
+    img_path_obj = Path(image_path)
+    if not img_path_obj.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
+    frame_cache_key: Optional[Tuple[str, str]] = None
+    try:
+        raw_bytes = img_path_obj.read_bytes()
+        frame_cache_key = (img_path_obj.name, hashlib.sha256(raw_bytes).hexdigest())
+        with _FRAME_SCAN_CACHE_LOCK:
+            cached_frame = _FRAME_SCAN_CACHE.get(frame_cache_key)
+        if cached_frame is not None:
+            return copy.deepcopy(cached_frame)
+    except Exception:
+        frame_cache_key = None
+
     img = cv2.imread(image_path)
     if img is None:
         raise FileNotFoundError(f"Image not found: {image_path}")
@@ -2093,13 +2164,10 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                     rx2 = min(c_strip.shape[1], int(xs_r.max()) + 8)
                     rtight = c_strip[:, rx1:rx2]
                     if rtight.size > 0:
-                        try:
-                            r_res, _ = ocr(rtight, use_det=False, use_cls=False, use_rec=True)
-                            if r_res and r_res[0] and r_res[0][1]:
-                                r_txt = str(r_res[0][1]).strip()
-                                r_conf = float(r_res[0][2])
-                        except Exception:
-                            pass
+                        rec_t, rec_c = _recognize_row_slice_cached(ocr, rtight)
+                        if rec_t:
+                            r_txt = rec_t
+                            r_conf = rec_c
         return g_ink, c_ink, r_txt, r_conf
 
     if len(valid_pairs) >= 2:
@@ -2486,7 +2554,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
         indent_spaces = max(0, int(round((indent_ref_x - code_col0_x) / max(1.0, char_pitch_x))))
         indent_prefix = " " * indent_spaces if indent_spaces >= 2 else ""
 
-        has_alnum_word = any(re.search(r"[A-Za-z0-9]{2,}", b.get("text", "")) for b in matched_words)
+        has_alnum_word = any(_RE_ALNUM_WORD_2.search(b.get("text", "")) for b in matched_words)
         short_decoded = ""
         if not is_wrapped and not has_alnum_word and ink_w <= int(round(68 * scale_x)):
             short_decoded = decode_short_code_glyphs(fg_mask[:, ink_x1 : ink_x2 + 1])
@@ -2541,21 +2609,17 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                 crop_x2 = min(code_strip.shape[1], ink_x2 + 8)
                 if crop_x2 > crop_x1 + 8:
                     tight = code_strip[:, crop_x1:crop_x2]
-                    try:
-                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
-                        if rec_res and rec_res[0] and rec_res[0][1]:
-                            rec_body = str(rec_res[0][1]).strip()
-                            rec_body = (
-                                rec_body.replace("]: [].", "]: [],")
-                                .replace("]:[],", "]: [],")
-                                .replace(".FooTER", ".FOOTER")
-                                .replace(".hssTermSelect", ".hSSTermSelect")
-                            )
-                            if len(rec_body) >= len(ws_body) - 1:
-                                ws_body = rec_body
-                                avg_conf = max(avg_conf, float(rec_res[0][2]))
-                    except Exception:
-                        pass
+                    rec_body, rec_conf = _recognize_row_slice_cached(ocr, tight)
+                    if rec_body:
+                        rec_body = (
+                            rec_body.replace("]: [].", "]: [],")
+                            .replace("]:[],", "]: [],")
+                            .replace(".FooTER", ".FOOTER")
+                            .replace(".hssTermSelect", ".hSSTermSelect")
+                        )
+                        if len(rec_body) >= len(ws_body) - 1:
+                            ws_body = rec_body
+                            avg_conf = max(avg_conf, rec_conf)
             line_str = indent_prefix + ws_body
         else:
             content_box = {
@@ -2573,13 +2637,10 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                 crop_x2 = min(code_strip.shape[1], ink_x2 + 8)
                 tight = code_strip[:, crop_x1:crop_x2] if crop_x2 > crop_x1 else code_strip[:, bleed_end_col:]
                 if not is_wrapped and tight.size > 0:
-                    try:
-                        rec_res, _ = ocr(tight, use_det=False, use_cls=False, use_rec=True)
-                        if rec_res and rec_res[0] and rec_res[0][1]:
-                            line_str = indent_prefix + str(rec_res[0][1]).strip()
-                            avg_conf = float(rec_res[0][2])
-                    except Exception:
-                        pass
+                    rec_txt, rec_conf = _recognize_row_slice_cached(ocr, tight)
+                    if rec_txt:
+                        line_str = indent_prefix + rec_txt
+                        avg_conf = rec_conf
                 if not line_str:
                     clean_crop = code_strip[:, bleed_end_col:] if code_strip.shape[1] > bleed_end_col else code_strip
                     bg_val = int(round(bg_med))
@@ -2628,7 +2689,7 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     first_line_box = line_boxes.get(top_line, {"x": content_min_x, "y": ed_top, "width": 55, "height": int(pitch_y), "line_number": top_line})
     last_line_box = line_boxes.get(bottom_line, {"x": content_min_x, "y": ed_bot - int(pitch_y), "width": 55, "height": int(pitch_y), "line_number": bottom_line})
 
-    return {
+    scan_result = {
         "top_line": top_line,
         "bottom_line": bottom_line,
         "gutter_count": gutter_count,
@@ -2650,6 +2711,12 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
             "gutter_boxes": gutter_boxes,
         },
     }
+    if frame_cache_key is not None:
+        with _FRAME_SCAN_CACHE_LOCK:
+            if len(_FRAME_SCAN_CACHE) >= _FRAME_SCAN_CACHE_MAX:
+                _FRAME_SCAN_CACHE.clear()
+            _FRAME_SCAN_CACHE[frame_cache_key] = copy.deepcopy(scan_result)
+    return scan_result
 
 class BaseOCREngine(ABC):
     @property
@@ -2666,56 +2733,69 @@ class LocalOllamaStitcher:
 
     @staticmethod
     def sanitize_line_text(ln: int, text: str) -> str:
-        cleaned = (
-            (text or "")
-            .replace("\uff08", "(")
-            .replace("\uff09", ")")
-            .replace("\uff1a", ":")
-            .replace("\uff1b", ";")
-            .replace("\uff0c", ",")
-            .rstrip()
-        )
+        if not text:
+            return ""
+        cache_key = (int(ln), text)
+        cached = _SANITIZE_LINE_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+
+        cleaned = text.translate(_FULLWIDTH_TRANSLATE_TABLE).rstrip()
         stripped = cleaned.strip()
         if not stripped:
+            _SANITIZE_LINE_CACHE[cache_key] = ""
             return ""
         # Strip synthetic row tag [L12]: or L12: if echoed by VLM
-        m_tag = re.match(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", stripped, re.IGNORECASE)
-        if m_tag:
-            cleaned_body = m_tag.group(2).rstrip()
-            stripped = cleaned_body.strip()
-            if not stripped:
+        if stripped[0] in ("[", "L", "l"):
+            m_tag = _RE_SYNTH_ROW_TAG.match(stripped)
+            if m_tag:
+                cleaned_body = m_tag.group(2).rstrip()
+                stripped = cleaned_body.strip()
+                if not stripped:
+                    _SANITIZE_LINE_CACHE[cache_key] = ""
+                    return ""
+                cleaned = cleaned_body
+            if _RE_SYNTH_ROW_ONLY.match(stripped):
+                _SANITIZE_LINE_CACHE[cache_key] = ""
                 return ""
-            cleaned = cleaned_body
-        if re.match(r"^\[?L\d{1,6}\]?$", stripped, re.IGNORECASE):
-            return ""
-        if stripped.isdigit():
-            val = int(stripped)
-            if abs(val - ln) <= 4:
-                return ""
-        m = re.match(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$", stripped)
-        if m:
-            val = int(m.group(1))
-            if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
-                cleaned = m.group(2).strip()
-                stripped = cleaned
-        m2 = re.match(r"^(\d{1,6})\s*([├│└].*)$", stripped)
-        if m2:
-            val = int(m2.group(1))
-            if abs(val - ln) <= 4:
-                cleaned = m2.group(2).strip()
-                stripped = cleaned
+        if stripped[0].isdigit():
+            if stripped.isdigit():
+                val = int(stripped)
+                if abs(val - ln) <= 4:
+                    _SANITIZE_LINE_CACHE[cache_key] = ""
+                    return ""
+            m = _RE_GUTTER_PREFIX.match(stripped)
+            if m:
+                val = int(m.group(1))
+                if abs(val - ln) <= 4 or abs(val - (ln - 1)) <= 2:
+                    cleaned = m.group(2).strip()
+                    stripped = cleaned
+            m2 = _RE_TREE_PREFIX.match(stripped)
+            if m2:
+                val = int(m2.group(1))
+                if abs(val - ln) <= 4:
+                    cleaned = m2.group(2).strip()
+                    stripped = cleaned
         normalized_tag = _normalize_codescan_tags(stripped)
-        if normalized_tag != stripped:
-            return normalized_tag
-        return cleaned
+        res = normalized_tag if normalized_tag != stripped else cleaned
+        if len(_SANITIZE_LINE_CACHE) >= _SANITIZE_LINE_CACHE_MAX:
+            _SANITIZE_LINE_CACHE.clear()
+        _SANITIZE_LINE_CACHE[cache_key] = res
+        return res
 
     def stitch_frame_lines(self, existing_lines: Dict[int, Any], new_lines: List[Dict[str, Any]], frame_id: str, model_desc: str = "Ollama") -> int:
         added = 0
         self.stitch_stats["total_stitches"] += 1
+        prev_max_ln = max(existing_lines.keys()) if existing_lines else 0
+        prev_min_ln = min(existing_lines.keys()) if existing_lines else 0
+        now_iso = datetime.now().isoformat()
+        new_lns: List[int] = []
+
         for item in new_lines:
             ln = item.get("line_number")
             if ln is None: continue
             ln = int(ln)
+            new_lns.append(ln)
             blank_locked = bool(item.get("blank_locked", False))
             if blank_locked:
                 text = ""
@@ -2746,20 +2826,24 @@ class LocalOllamaStitcher:
                 "line_number": ln, "gutter_number": gutter_num, "text": text,
                 "is_blank": is_blank, "is_wrapped": is_wrapped, "wrapped_line_count": wcount,
                 "status": st, "frame_id": frame_id, "sources": srcs,
-                "confidence": conf, "notes": notes, "updated_at": datetime.now().isoformat()
+                "confidence": conf, "notes": notes, "updated_at": now_iso
             }
             added += 1
             self.stitch_stats["stitched_lines"] += 1
 
-        if existing_lines:
-            for chk in range(min(existing_lines.keys()), max(existing_lines.keys()) + 1):
+        if existing_lines and new_lns:
+            min_new = min(new_lns)
+            max_new = max(new_lns)
+            chk_start = min(prev_max_ln + 1, min_new) if prev_max_ln > 0 else min_new
+            chk_end = max(prev_min_ln - 1, max_new) if prev_min_ln > max_new else max_new
+            for chk in range(chk_start, chk_end + 1):
                 if chk not in existing_lines:
                     existing_lines[chk] = {
                         "line_number": chk, "gutter_number": chk, "text": "",
                         "is_blank": False, "is_wrapped": False, "wrapped_line_count": 1,
                         "status": "missing", "frame_id": frame_id, "sources": [],
                         "confidence": 0.0, "notes": "Gap detected between frames",
-                        "updated_at": datetime.now().isoformat()
+                        "updated_at": now_iso
                     }
         return added
 

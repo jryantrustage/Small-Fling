@@ -1,4 +1,4 @@
-import asyncio, base64, functools, hashlib, io, json, os, re, threading
+import asyncio, base64, bisect, functools, hashlib, io, json, os, re, threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
@@ -1609,13 +1609,15 @@ async def get_verified_lines_report():
         bot = f.get("bottom_line", 0)
         expected_span = (bot - top + 1) if (bot >= top and top > 0) else 0
 
-        # Lines present in doc_lines belonging to this viewport range
-        page_doc_lines = [ln for ln in sorted_line_keys if top <= ln <= bot]
+        # Lines present in doc_lines belonging to this viewport range (O(log N) binary search via bisect)
+        lo_idx = bisect.bisect_left(sorted_line_keys, top)
+        hi_idx = bisect.bisect_right(sorted_line_keys, bot)
+        page_doc_lines = sorted_line_keys[lo_idx:hi_idx]
         extracted_cnt = len(page_doc_lines)
         pct = round((extracted_cnt / max(1, expected_span)) * 100, 1) if expected_span > 0 else 0.0
 
-        ocr_min = min(page_doc_lines) if page_doc_lines else "-"
-        ocr_max = max(page_doc_lines) if page_doc_lines else "-"
+        ocr_min = page_doc_lines[0] if page_doc_lines else "-"
+        ocr_max = page_doc_lines[-1] if page_doc_lines else "-"
         ocr_range_str = f"Ln {ocr_min} → {ocr_max}" if page_doc_lines else "None"
 
         # Check for missing lines in this page's expected range

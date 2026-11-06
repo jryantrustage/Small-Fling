@@ -228,6 +228,8 @@ async def save_analyzer_workspace_file_endpoint(
                 else ""
             )
             max_span = max(old_actual_lines, len(new_lines))
+            now_iso = datetime.now().isoformat()
+            batch_dirty_lines = []
             for idx in range(1, len(new_lines) + 1):
                 g_ln = start_md_line + idx
                 ln_txt = new_lines[idx - 1]
@@ -244,22 +246,30 @@ async def save_analyzer_workspace_file_endpoint(
                     "frame_id": fid,
                     "status": "verified",
                     "edited_in_monaco": True,
-                    "updated_at": datetime.now().isoformat(),
+                    "updated_at": now_iso,
                 })
                 state.document_lines[g_ln] = state.MasterLine(ln_txt, **meta)
                 updated_md_lines.append(g_ln)
-                if pid:
-                    try:
-                        db.save_document_line(
-                            project_id=pid,
-                            line_number=g_ln,
-                            text=ln_txt,
-                            confidence=1.0,
-                            frame_id=fid,
-                            verified=True,
-                        )
-                    except Exception:
-                        pass
+                batch_dirty_lines.append({
+                    "line_number": g_ln,
+                    "text": ln_txt,
+                    "confidence": 1.0,
+                    "frame_id": fid,
+                    "verified": True,
+                })
+            if pid and pid != state.get_current_project_id() and batch_dirty_lines:
+                try:
+                    db.save_dirty_state_transaction(
+                        pid,
+                        dirty_lines=batch_dirty_lines,
+                        deleted_lines=[],
+                        cleared=False,
+                        dirty_frames=[],
+                        deleted_frames=[],
+                        telemetry=None,
+                    )
+                except Exception:
+                    pass
     else:
         matched_entry = {
             "index": len(vfs_files) + 1,

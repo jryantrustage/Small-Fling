@@ -148,9 +148,11 @@ class MasterLine(str):
         meta_clean.pop("text", None)
         s = super().__new__(cls, str(_text) if _text is not None else "")
         s.meta = meta_clean
+        s._cached_serialized = None
         return s
 
     def _notify_dirty(self):
+        self._cached_serialized = None
         ln = self.meta.get("line_number")
         if ln is not None and isinstance(document_lines, MasterDocumentLines):
             document_lines.mark_dirty(int(ln))
@@ -187,6 +189,20 @@ class MasterLine(str):
         d.setdefault("status", "ok")
         return d
 
+    def to_serialized_dict(self, k: int) -> dict:
+        cached = getattr(self, "_cached_serialized", None)
+        if cached is not None and cached.get("line_number") == k:
+            return cached
+        d = dict(self.meta)
+        raw_txt = self.meta.get("text", super().__str__())
+        clean_txt = sanitize_line_text(k, raw_txt)
+        d["text"] = clean_txt
+        d["is_blank"] = not bool(clean_txt.strip())
+        d.setdefault("line_number", k)
+        d.setdefault("status", "ok")
+        self._cached_serialized = d
+        return d
+
 class MasterDocumentLines(dict):
     def __init__(self, *args, **kwargs):
         super().__init__()
@@ -194,10 +210,12 @@ class MasterDocumentLines(dict):
         self.deleted_lines: set = set()
         self.cleared: bool = False
         self._suppress_tracking: bool = False
+        self._version: int = 0
         if args or kwargs:
             self.update(*args, **kwargs)
 
     def mark_dirty(self, line_number: int):
+        self._version += 1
         if not self._suppress_tracking:
             ln = int(line_number)
             self.dirty_lines.add(ln)
@@ -231,6 +249,7 @@ class MasterDocumentLines(dict):
     def __delitem__(self, key: int):
         k = int(key)
         super().__delitem__(k)
+        self._version += 1
         if not self._suppress_tracking:
             self.dirty_lines.discard(k)
             self.deleted_lines.add(k)
@@ -239,9 +258,11 @@ class MasterDocumentLines(dict):
         k = int(key)
         existed = k in self
         res = super().pop(k, *args)
-        if existed and not self._suppress_tracking:
-            self.dirty_lines.discard(k)
-            self.deleted_lines.add(k)
+        if existed:
+            self._version += 1
+            if not self._suppress_tracking:
+                self.dirty_lines.discard(k)
+                self.deleted_lines.add(k)
         return res
 
     def clear(self):
@@ -249,6 +270,7 @@ class MasterDocumentLines(dict):
         super().clear()
         self.dirty_lines.clear()
         self.deleted_lines.clear()
+        self._version += 1
         if had_items and not self._suppress_tracking:
             self.cleared = True
 
@@ -2860,27 +2882,39 @@ def sanitize_line_text(ln: int, text: str) -> str:
     from ocr_engine import LocalOllamaStitcher
     return LocalOllamaStitcher.sanitize_line_text(ln, text)
 
+_serialized_lines_cache_key: Tuple[int, int] = (-1, -1)
+_serialized_lines_cache_val: List[Dict[str, Any]] = []
+
 def get_serialized_lines() -> List[Dict[str, Any]]:
+    global _serialized_lines_cache_key, _serialized_lines_cache_val
     if not document_lines:
         return []
+    ver = getattr(document_lines, "_version", -1)
+    cache_key = (ver, len(document_lines))
+    if ver >= 0 and cache_key == _serialized_lines_cache_key and _serialized_lines_cache_val:
+        return _serialized_lines_cache_val
+
     min_k = min(document_lines.keys())
     max_k = max(document_lines.keys())
     start_k = min_k
+    now_iso = datetime.now().isoformat()
 
     res = []
     for k in range(start_k, max_k + 1):
-        if k in document_lines:
-            it = document_lines[k]
-            d = (
-                it.to_dict() if hasattr(it, "to_dict")
-                else (it if isinstance(it, dict)
-                      else {"line_number": k, "gutter_number": k, "text": str(it), "status": "ok", "is_blank": not bool(str(it).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": datetime.now().isoformat()})
-            )
-            d = dict(d)
-            clean_txt = sanitize_line_text(k, d.get("text", ""))
-            d["text"] = clean_txt
-            d["is_blank"] = not bool(clean_txt.strip())
-            res.append(d)
+        it = document_lines.get(k)
+        if it is not None:
+            if hasattr(it, "to_serialized_dict"):
+                res.append(it.to_serialized_dict(k))
+            else:
+                d = (
+                    it.to_dict() if hasattr(it, "to_dict")
+                    else (dict(it) if isinstance(it, dict)
+                          else {"line_number": k, "gutter_number": k, "text": str(it), "status": "ok", "is_blank": not bool(str(it).strip()), "confidence": 1.0, "frame_id": "", "sources": [], "notes": "Master line", "updated_at": now_iso})
+                )
+                clean_txt = sanitize_line_text(k, d.get("text", ""))
+                d["text"] = clean_txt
+                d["is_blank"] = not bool(clean_txt.strip())
+                res.append(d)
         else:
             res.append({
                 "line_number": k,
@@ -2892,8 +2926,10 @@ def get_serialized_lines() -> List[Dict[str, Any]]:
                 "frame_id": "",
                 "sources": [],
                 "notes": f"Gap: Missing line #{k} (not covered in captured frames)",
-                "updated_at": datetime.now().isoformat()
+                "updated_at": now_iso
             })
+    _serialized_lines_cache_key = cache_key
+    _serialized_lines_cache_val = res
     return res
 
 def assemble_and_save_reconstructed_markdown() -> str:
@@ -3132,22 +3168,51 @@ def export_project_markdown_to_disk(
     return record
 
 
+_ISSUE_STATUS_SET = frozenset(["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"])
+
 def get_document_metrics() -> Dict[str, Any]:
-    sl = get_serialized_lines()
-    issue_lines = [ln for ln in sl if ln.get("status") in ["flagged", "missing", "gap", "overlap_conflict", "issue", "unaligned"]]
+    doc_cnt = len(document_lines)
+    if doc_cnt == 0:
+        return {
+            "document_lines": 0,
+            "total_lines": 0,
+            "verified_lines_count": 0,
+            "min_line": 0,
+            "max_line": 0,
+            "total_frames": len(captured_frames),
+            "captured_frames": len(captured_frames),
+            "pending_recaptures": len(recapture_queue),
+            "verified_overlaps": 0,
+            "verified_overlap_lines": 0,
+            "issues_count": 0,
+            "issue_count": 0
+        }
+    min_k = min(document_lines.keys())
+    max_k = max(document_lines.keys())
+    total_span = max_k - min_k + 1
+    gap_count = max(0, total_span - doc_cnt)
+    verified_overlaps = 0
+    explicit_issues = 0
+    for it in document_lines.values():
+        st = it.get("status", "ok") if hasattr(it, "get") else "ok"
+        if st == "verified_overlap":
+            verified_overlaps += 1
+        elif st in _ISSUE_STATUS_SET:
+            explicit_issues += 1
+    total_issues = gap_count + explicit_issues
     return {
-        "document_lines": len(document_lines),
-        "total_lines": len(sl),
-        "verified_lines_count": len(document_lines),
-        "min_line": min(document_lines.keys()) if document_lines else 0,
-        "max_line": max(document_lines.keys()) if document_lines else 0,
+        "document_lines": doc_cnt,
+        "total_lines": total_span,
+        "verified_lines_count": doc_cnt,
+        "min_line": min_k,
+        "max_line": max_k,
         "total_frames": len(captured_frames),
         "captured_frames": len(captured_frames),
         "pending_recaptures": len(recapture_queue),
-        "verified_overlaps": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
-        "verified_overlap_lines": sum(1 for ln in sl if ln.get("status") == "verified_overlap"),
-        "issues_count": len(issue_lines),
-        "issue_count": len(issue_lines)
+        "verified_overlaps": verified_overlaps,
+        "verified_overlap_lines": verified_overlaps,
+        "issues_count": total_issues,
+        "issue_count": total_issues
     }
 
 def get_fresh_telemetry() -> Dict[str, Any]:

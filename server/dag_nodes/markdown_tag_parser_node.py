@@ -44,6 +44,10 @@ ATTR_PAIR_RE = re.compile(
 
 CODE_FENCE_OPEN_RE = re.compile(r"^\s*`{3,}([a-zA-Z0-9_\-+.#]*)\s*$")
 CODE_FENCE_CLOSE_RE = re.compile(r"^\s*`{3,}\s*$")
+_RE_WIN_DRIVE = re.compile(r"^[a-zA-Z]:/+")
+_RE_NON_DIGITS = re.compile(r"[^\d]")
+_RE_DIR_STRUCTURE = re.compile(r"^#{1,3}\s*Directory\s+Structure\b", re.IGNORECASE)
+_RE_TREE_ENTRY_PREFIX = re.compile(r"^[│├└─\s]+")
 
 
 def normalize_vfs_path(raw_path: str) -> str:
@@ -55,7 +59,7 @@ def normalize_vfs_path(raw_path: str) -> str:
     p = (raw_path or "").strip().strip("`").strip('"').strip("'")
     p = p.replace("\\", "/")
     # Strip Windows drive prefix e.g. C:/
-    p = re.sub(r"^[a-zA-Z]:/+", "", p)
+    p = _RE_WIN_DRIVE.sub("", p)
     p = p.lstrip("/")
 
     # If path contains /src/, /public/, /packages/, /app/, /components/, anchor at the project root segment
@@ -88,7 +92,7 @@ def parse_codescan_start_attributes(line_text: str, fallback_path: str = "") -> 
     def _to_int(val: Optional[str]) -> int:
         if not val:
             return 0
-        digits = re.sub(r"[^\d]", "", str(val))
+        digits = _RE_NON_DIGITS.sub("", str(val))
         return int(digits) if digits else 0
 
     expected_size = _to_int(attrs.get("size"))
@@ -127,7 +131,7 @@ def parse_directory_structure_tree(md_lines: List[str]) -> Dict[str, Any]:
     for idx, line in enumerate(md_lines, start=1):
         stripped = line.strip()
         if not in_dir_section:
-            if re.match(r"^#{1,3}\s*Directory\s+Structure\b", stripped, re.IGNORECASE):
+            if stripped.startswith("#") and _RE_DIR_STRUCTURE.match(stripped):
                 in_dir_section = True
                 start_ln = idx
             continue
@@ -145,7 +149,7 @@ def parse_directory_structure_tree(md_lines: List[str]) -> Dict[str, Any]:
 
         tree_lines.append(line)
         # Extract path/filename from tree lines like '├── DevCode/CommonUI/...' or '│   ├── index.ts'
-        cleaned_entry = re.sub(r"^[│├└─\s]+", "", stripped).strip()
+        cleaned_entry = _RE_TREE_ENTRY_PREFIX.sub("", stripped).strip()
         if cleaned_entry and cleaned_entry != ".":
             discovered_entries.append(cleaned_entry)
 
@@ -158,10 +162,36 @@ def parse_directory_structure_tree(md_lines: List[str]) -> Dict[str, Any]:
     }
 
 
+def _build_frame_range_index(project_id: Optional[str] = None) -> List[Tuple[int, int, str]]:
+    """
+    Single-pass O(F) frame interval index builder: fetches captured_frames + db.get_frames(project_id) ONCE
+    so _collect_frames_for_line_range never queries SQLite inside a per-file loop.
+    """
+    ranges: List[Tuple[int, int, str]] = []
+    seen_fids = set()
+    all_frames = list(state.captured_frames.values())
+    if project_id:
+        try:
+            all_frames.extend(db.get_frames(project_id))
+        except Exception:
+            pass
+    for f in all_frames:
+        fid = str(f.get("frame_id") or "")
+        if not fid or fid in seen_fids:
+            continue
+        tl = int(f.get("top_line") or 0)
+        bl = int(f.get("bottom_line") or 0)
+        if tl > 0 and bl >= tl:
+            seen_fids.add(fid)
+            ranges.append((tl, bl, fid))
+    return ranges
+
+
 def _collect_frames_for_line_range(
     start_ln: int,
     end_ln: int,
-    project_id: Optional[str] = None
+    project_id: Optional[str] = None,
+    preloaded_frame_ranges: Optional[List[Tuple[int, int, str]]] = None
 ) -> List[str]:
     """
     Returns ordered list of unique frame_ids covering markdown lines [start_ln, end_ln].
@@ -180,22 +210,16 @@ def _collect_frames_for_line_range(
             seen.add(fid)
             frame_ids.append(fid)
 
-    # Also check frame top_line..bottom_line ranges
-    all_frames = list(state.captured_frames.values())
-    if project_id:
-        try:
-            all_frames.extend(db.get_frames(project_id))
-        except Exception:
-            pass
-
-    for f in all_frames:
-        fid = str(f.get("frame_id") or "")
-        tl = int(f.get("top_line") or 0)
-        bl = int(f.get("bottom_line") or 0)
-        if fid and tl > 0 and bl >= tl:
-            if tl <= end_ln and bl >= start_ln and fid not in seen:
-                seen.add(fid)
-                frame_ids.append(fid)
+    # Also check frame top_line..bottom_line ranges using preloaded Pass-1 index when provided
+    frame_ranges = (
+        preloaded_frame_ranges
+        if preloaded_frame_ranges is not None
+        else _build_frame_range_index(project_id)
+    )
+    for tl, bl, fid in frame_ranges:
+        if tl <= end_ln and bl >= start_ln and fid not in seen:
+            seen.add(fid)
+            frame_ids.append(fid)
 
     return frame_ids
 
@@ -204,7 +228,8 @@ def _self_heal_tag_line_from_png(
     md_ln: int,
     raw_line: str,
     canonical_tag: str,
-    project_id: Optional[str] = None
+    project_id: Optional[str] = None,
+    defer_db_commit: bool = False
 ) -> Tuple[str, bool, Optional[str]]:
     """
     If a CODESCAN_FILE_START or CODESCAN_FILE_END tag at md_ln is corrupted in OCR,
@@ -262,7 +287,7 @@ def _self_heal_tag_line_from_png(
         })
         state.document_lines[md_ln] = state.MasterLine(re_verified_txt, **meta)
 
-    if project_id:
+    if project_id and not defer_db_commit:
         try:
             db.save_document_line(
                 project_id=project_id,
@@ -362,6 +387,7 @@ class MarkdownTagParserNode(BaseDagNode):
 
         md_lines, sources = await asyncio.to_thread(self._load_markdown_lines, blackboard, project_id)
         dir_tree = await asyncio.to_thread(parse_directory_structure_tree, md_lines)
+        preloaded_frame_ranges = await asyncio.to_thread(_build_frame_range_index, project_id)
 
         vfs_files: List[Dict[str, Any]] = []
         repaired_tags: List[Dict[str, Any]] = []
@@ -377,9 +403,12 @@ class MarkdownTagParserNode(BaseDagNode):
             ln = idx + 1
             raw_line = md_lines[idx]
             stripped = raw_line.strip()
+            if not stripped:
+                idx += 1
+                continue
 
             # 1. Check for ### <index>. `<filepath>` heading
-            m_hdr = HEADER_FILE_RE.match(stripped)
+            m_hdr = HEADER_FILE_RE.match(stripped) if stripped[0] == "#" else None
             if m_hdr:
                 pending_header_index = int(m_hdr.group(1))
                 pending_header_path = m_hdr.group(2).strip()
@@ -388,20 +417,31 @@ class MarkdownTagParserNode(BaseDagNode):
                 continue
 
             # 2. Check for <!-- CODESCAN_FILE_START ... --> (including OCR-corrupted variants)
-            m_start = CODESCAN_START_RESILIENT_RE.match(stripped)
+            m_start = (
+                CODESCAN_START_RESILIENT_RE.match(stripped)
+                if (stripped[0] == "<" or "codescan" in stripped.lower())
+                else None
+            )
             if m_start:
                 tag_start_ln = ln
                 parsed_attrs = parse_codescan_start_attributes(stripped, fallback_path=pending_header_path)
                 canonical_start = parsed_attrs["canonical_tag"]
                 tag_was_repaired = False
 
-                if stripped != canonical_start and cfg.get("self_heal_corrupted_tags", True):
+                is_clean_start_tag = (
+                    stripped.startswith("<!-- CODESCAN_FILE_START ")
+                    and stripped.endswith("-->")
+                    and bool(parsed_attrs["path"])
+                    and stripped == _normalize_codescan_tags(stripped)
+                )
+                if not is_clean_start_tag and cfg.get("self_heal_corrupted_tags", True):
                     repaired_str, did_repair, src_fid = await asyncio.to_thread(
                         _self_heal_tag_line_from_png,
                         tag_start_ln,
                         raw_line,
                         canonical_start,
                         project_id,
+                        True,
                     )
                     md_lines[idx] = repaired_str
                     tag_was_repaired = did_repair
@@ -431,74 +471,82 @@ class MarkdownTagParserNode(BaseDagNode):
                     cur_raw = md_lines[idx]
                     cur_strip = cur_raw.strip()
 
-                    # Check if we hit CODESCAN_FILE_END directly
-                    if CODESCAN_END_RESILIENT_RE.match(cur_strip):
-                        tag_end_ln = cur_ln
-                        canonical_end = "<!-- CODESCAN_FILE_END -->"
-                        if cur_strip != canonical_end and cfg.get("self_heal_corrupted_tags", True):
-                            rep_end, did_rep_end, end_fid = await asyncio.to_thread(
-                                _self_heal_tag_line_from_png,
-                                cur_ln,
-                                cur_raw,
-                                canonical_end,
-                                project_id,
-                            )
-                            md_lines[idx] = rep_end
-                            end_tag_repaired = did_rep_end
-                            repaired_tags.append({
-                                "line_number": cur_ln,
-                                "tag_type": "CODESCAN_FILE_END",
-                                "original_text": cur_strip,
-                                "repaired_text": rep_end,
-                                "frame_id": end_fid or "",
-                            })
-                        idx += 1
-                        break
+                    if cur_strip:
+                        first_ch = cur_strip[0]
+                        is_potential_tag = (first_ch == "<" or "codescan" in cur_strip.lower())
 
-                    # Check if we hit next file header or next CODESCAN_FILE_START (missing CODESCAN_FILE_END)
-                    if HEADER_FILE_RE.match(cur_strip) or CODESCAN_START_RESILIENT_RE.match(cur_strip):
-                        tag_end_ln = cur_ln - 1
-                        break
-
-                    # Check if we hit closing code fence ```
-                    if CODE_FENCE_CLOSE_RE.match(cur_strip):
-                        # Peek ahead to see if next line is CODESCAN_FILE_END, ---, or next file header
-                        next_strip = md_lines[idx + 1].strip() if (idx + 1) < total_md_lines else ""
-                        if (
-                            not next_strip
-                            or CODESCAN_END_RESILIENT_RE.match(next_strip)
-                            or next_strip == "---"
-                            or HEADER_FILE_RE.match(next_strip)
-                            or CODESCAN_START_RESILIENT_RE.match(next_strip)
-                        ):
-                            fence_close_ln = cur_ln
+                        # Check if we hit CODESCAN_FILE_END directly
+                        if is_potential_tag and CODESCAN_END_RESILIENT_RE.match(cur_strip):
+                            tag_end_ln = cur_ln
+                            canonical_end = "<!-- CODESCAN_FILE_END -->"
+                            if cur_strip != canonical_end and cfg.get("self_heal_corrupted_tags", True):
+                                rep_end, did_rep_end, end_fid = await asyncio.to_thread(
+                                    _self_heal_tag_line_from_png,
+                                    cur_ln,
+                                    cur_raw,
+                                    canonical_end,
+                                    project_id,
+                                    True,
+                                )
+                                md_lines[idx] = rep_end
+                                end_tag_repaired = did_rep_end
+                                repaired_tags.append({
+                                    "line_number": cur_ln,
+                                    "tag_type": "CODESCAN_FILE_END",
+                                    "original_text": cur_strip,
+                                    "repaired_text": rep_end,
+                                    "frame_id": end_fid or "",
+                                })
                             idx += 1
-                            if idx < total_md_lines and CODESCAN_END_RESILIENT_RE.match(md_lines[idx].strip()):
-                                tag_end_ln = idx + 1
-                                end_raw = md_lines[idx]
-                                end_strip = end_raw.strip()
-                                canonical_end = "<!-- CODESCAN_FILE_END -->"
-                                if end_strip != canonical_end and cfg.get("self_heal_corrupted_tags", True):
-                                    rep_end, did_rep_end, end_fid = await asyncio.to_thread(
-                                        _self_heal_tag_line_from_png,
-                                        tag_end_ln,
-                                        end_raw,
-                                        canonical_end,
-                                        project_id,
-                                    )
-                                    md_lines[idx] = rep_end
-                                    end_tag_repaired = did_rep_end
-                                    repaired_tags.append({
-                                        "line_number": tag_end_ln,
-                                        "tag_type": "CODESCAN_FILE_END",
-                                        "original_text": end_strip,
-                                        "repaired_text": rep_end,
-                                        "frame_id": end_fid or "",
-                                    })
-                                idx += 1
-                            else:
-                                tag_end_ln = fence_close_ln
                             break
+
+                        # Check if we hit next file header or next CODESCAN_FILE_START (missing CODESCAN_FILE_END)
+                        if (first_ch == "#" and HEADER_FILE_RE.match(cur_strip)) or (
+                            is_potential_tag and CODESCAN_START_RESILIENT_RE.match(cur_strip)
+                        ):
+                            tag_end_ln = cur_ln - 1
+                            break
+
+                        # Check if we hit closing code fence ```
+                        if first_ch == "`" and CODE_FENCE_CLOSE_RE.match(cur_strip):
+                            # Peek ahead to see if next line is CODESCAN_FILE_END, ---, or next file header
+                            next_strip = md_lines[idx + 1].strip() if (idx + 1) < total_md_lines else ""
+                            if (
+                                not next_strip
+                                or CODESCAN_END_RESILIENT_RE.match(next_strip)
+                                or next_strip == "---"
+                                or HEADER_FILE_RE.match(next_strip)
+                                or CODESCAN_START_RESILIENT_RE.match(next_strip)
+                            ):
+                                fence_close_ln = cur_ln
+                                idx += 1
+                                if idx < total_md_lines and CODESCAN_END_RESILIENT_RE.match(md_lines[idx].strip()):
+                                    tag_end_ln = idx + 1
+                                    end_raw = md_lines[idx]
+                                    end_strip = end_raw.strip()
+                                    canonical_end = "<!-- CODESCAN_FILE_END -->"
+                                    if end_strip != canonical_end and cfg.get("self_heal_corrupted_tags", True):
+                                        rep_end, did_rep_end, end_fid = await asyncio.to_thread(
+                                            _self_heal_tag_line_from_png,
+                                            tag_end_ln,
+                                            end_raw,
+                                            canonical_end,
+                                            project_id,
+                                            True,
+                                        )
+                                        md_lines[idx] = rep_end
+                                        end_tag_repaired = did_rep_end
+                                        repaired_tags.append({
+                                            "line_number": tag_end_ln,
+                                            "tag_type": "CODESCAN_FILE_END",
+                                            "original_text": end_strip,
+                                            "repaired_text": rep_end,
+                                            "frame_id": end_fid or "",
+                                        })
+                                    idx += 1
+                                else:
+                                    tag_end_ln = fence_close_ln
+                                break
 
                     code_lines.append(cur_raw)
                     idx += 1
@@ -515,6 +563,7 @@ class MarkdownTagParserNode(BaseDagNode):
                     pending_header_ln or tag_start_ln,
                     tag_end_ln,
                     project_id=project_id,
+                    preloaded_frame_ranges=preloaded_frame_ranges,
                 )
 
                 if expected_lines > 0 and actual_lines != expected_lines:
