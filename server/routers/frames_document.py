@@ -207,8 +207,8 @@ async def inspect_ocr_image(
     file_mtime = ipath.stat().st_mtime if ipath.exists() else 0
     cache_key = f"{str(ipath.resolve())}_{file_mtime}"
 
-    ed_top = max(280, int(round(280 * (img_h / 1080.0))))
-    ed_bot = min(int(round(960 * (img_h / 1080.0))), img_h - 120)
+    ed_top = int(round(280 * (img_h / 1080.0)))
+    ed_bot = max(ed_top + 20, int(round(960 * (img_h / 1080.0))))
     def _is_valid_entry(cand_lines, cand_bboxes):
         if not cand_lines or not cand_bboxes:
             return False
@@ -235,12 +235,15 @@ async def inspect_ocr_image(
             l_boxes = {}
             scale_y = img_h / 1080.0
             scale_x = img_w / 1920.0
+            n_lines = max(1, len(cached_frame["lines"]))
+            span_y = max(10.0, float(ed_bot - ed_top))
+            step_y = min(27.0 * scale_y, span_y / max(1, n_lines))
+            hh = max(2, int(round(min(11.5 * scale_y, step_y * 0.45))))
             for idx, l_obj in enumerate(cached_frame["lines"]):
                 ln_n = int(l_obj.get("line_number") or (idx + 1))
-                yc = int(round((296.0 + idx * 27.0) * scale_y))
-                hh = max(10, int(round(11.5 * scale_y)))
-                g_boxes[str(ln_n)] = {"x": int(round(32 * scale_x)), "y": yc - hh, "width": int(round(52 * scale_x)), "height": hh * 2, "line_number": ln_n}
-                l_boxes[str(ln_n)] = {"x": int(round(94 * scale_x)), "y": yc - hh, "width": int(round((1920 - 118) * scale_x)), "height": hh * 2, "line_number": ln_n}
+                yc = int(round(ed_top + hh + idx * step_y))
+                g_boxes[str(ln_n)] = {"x": int(round(32 * scale_x)), "y": max(ed_top, yc - hh), "width": max(8, int(round(52 * scale_x))), "height": max(4, hh * 2), "line_number": ln_n}
+                l_boxes[str(ln_n)] = {"x": int(round(94 * scale_x)), "y": max(ed_top, yc - hh), "width": max(20, int(round((1920 - 118) * scale_x))), "height": max(4, hh * 2), "line_number": ln_n}
             synthesized_cb = dict(cb) if isinstance(cb, dict) else {}
             synthesized_cb["gutter_boxes"] = g_boxes
             synthesized_cb["line_boxes"] = l_boxes

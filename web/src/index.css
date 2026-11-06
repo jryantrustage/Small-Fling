@@ -3932,3 +3932,12 @@ body { background-color: var(--bg-main); color: var(--text-main); font-family: v
 .projects-collapsed-rail:hover {
   background: #131a26;
 }
+
+
+.ocr-inspector-workspace,
+.analyzer-sandbox-workspace {
+  display: flex;
+  flex-direction: row;
+  min-width: 0;
+  flex: 1;
+}

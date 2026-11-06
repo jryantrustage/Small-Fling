@@ -336,12 +336,13 @@ def _normalize_project_row(row: Any) -> Dict[str, Any]:
     d["markdown_download_count"] = int(d.get("markdown_download_count") or 0)
     frame_cnt = int(d.get("frame_count") or 0)
     line_cnt = int(d.get("line_count") or 0)
+    verified_cnt = int(d.get("verified_line_count") if d.get("verified_line_count") is not None else line_cnt)
     max_ln = int(d.get("max_line") or 0)
     target_ln = int(d.get("target_total_lines") or 0)
     d["frame_count"] = frame_cnt
     d["line_count"] = line_cnt
-    d["verified_lines"] = line_cnt
-    d["total_lines"] = max(target_ln, max_ln, line_cnt)
+    d["verified_lines"] = verified_cnt
+    d["total_lines"] = max(max_ln, line_cnt) if (max_ln > 0 or line_cnt > 0) else target_ln
     b_meta = _infer_bundle_metadata(
         name=d.get("name") or "",
         description=d.get("description") or "",
@@ -361,12 +362,14 @@ def get_active_project() -> Optional[Dict[str, Any]]:
             """SELECT p.*,
                 (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
                 (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+                (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id AND l.is_verified = 1) as verified_line_count,
                 (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
                 (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
                FROM projects p WHERE p.is_active = 1 LIMIT 1;""",
             """SELECT p.*,
                 (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
                 (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+                (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id AND l.is_verified = 1) as verified_line_count,
                 (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
                 (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
                FROM projects p ORDER BY p.created_at DESC LIMIT 1;"""
@@ -384,6 +387,7 @@ def get_projects() -> List[Dict[str, Any]]:
     SELECT p.*,
         (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
         (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+        (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id AND l.is_verified = 1) as verified_line_count,
         (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
         (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
     FROM projects p
@@ -396,6 +400,7 @@ def get_project(project_id: str) -> Optional[Dict[str, Any]]:
     SELECT p.*,
         (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
         (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+        (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id AND l.is_verified = 1) as verified_line_count,
         (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
         (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
     FROM projects p
@@ -944,7 +949,7 @@ def _extract_line_row(project_id: str, lnum: int, ld: Any, now: str) -> tuple:
         txt = ld.get("text", str(ld))
         conf = float(ld.get("confidence", 1.0) or 1.0)
         fid = str(ld.get("frame_id", "") or "")
-        ver = 1 if (ld.get("verified", False) or ld.get("status") == "verified") else 0
+        ver = 1 if (ld.get("verified", False) or ld.get("is_verified", False) or ld.get("status") == "verified") else 0
         upd = str(ld.get("updated_at") or now)
     else:
         txt = str(ld) if ld is not None else ""

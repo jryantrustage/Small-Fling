@@ -67,6 +67,7 @@ def test_delete_project_with_15_captures():
             }
 
     db.save_document_lines(proj_id, lines_dict)
+    db.activate_project(proj_id)
     state.load_persisted_state()
 
     # 3. Verify the setup before deletion
@@ -221,7 +222,11 @@ def test_multipart_bundle_storage_activation_and_import_export():
             for ln in range(1, 21)
         }
         db.save_document_lines(pid, lines)
-        db.save_project_telemetry(pid, {"current_page": part_idx, "current_top_line": 1, "current_bottom_line": 20})
+        db.save_project_telemetry(
+            pid,
+            {"current_page": part_idx, "current_top_line": 1, "current_bottom_line": 20},
+            {"total_tokens": 100 * part_idx, "total_api_calls": part_idx},
+        )
         md_disk_path = db.sync_project_part_markdown_file(pid)
         assert md_disk_path is not None and md_disk_path.exists()
         assert f"Part {part_idx} Line 1 content" in md_disk_path.read_text(encoding="utf-8")
@@ -251,8 +256,9 @@ def test_multipart_bundle_storage_activation_and_import_export():
     assert ocr_res.status_code == 200
     ocr_data = ocr_res.json()
     assert ocr_data["image_id"] == "bundle_p2_frame_001"
-    assert ocr_data["total_lines"] == 20
-    assert len(ocr_data["gutter_boxes"]) == 20
+    assert ocr_data["lines_count"] == 20
+    assert len(ocr_data["lines"]) == 20
+    assert len(ocr_data["bounding_boxes"]["gutter_boxes"]) == 20
 
     # Export the multi-part bundle ZIP archive
     export_res = client.get(f"/api/projects/bundle/{bundle_id}/export")

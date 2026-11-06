@@ -1137,6 +1137,7 @@ def _build_project_or_bundle_zip(primary_proj: Dict[str, Any], bundle_parts: Lis
             "bundle_id": primary_proj.get("bundle_id") or "",
             "bundle_name": bundle_name,
             "total_parts": max(len(parts_manifest), int(primary_proj.get("total_parts") or 0)),
+            "total_parts_count": len(parts_manifest),
             "exported_at": datetime.now().isoformat(),
             "project": primary_proj,
             "frames": primary_frames,
@@ -1425,6 +1426,7 @@ async def import_project_zip(file: UploadFile = File(...)):
         "bundle_id": active_imported.get("bundle_id") or "",
         "bundle_name": active_imported.get("bundle_name") or active_imported.get("name") or "",
         "parts_imported": len(imported_projects),
+        "parts_count": len(imported_projects),
         "message": (
             f"Successfully imported bundle '{active_imported.get('bundle_name') or active_imported.get('name')}' ({len(imported_projects)} parts)"
             if len(imported_projects) > 1

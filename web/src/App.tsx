@@ -1976,6 +1976,14 @@ function AppContent() {
           undefined,
           'system'
         );
+        if (Array.isArray(data.projects)) {
+          data.projects.forEach((p: any) => {
+            if (p?.id) deletedProjectIdsRef.current.delete(p.id);
+          });
+        }
+        if (data.project?.id) {
+          deletedProjectIdsRef.current.delete(data.project.id);
+        }
         if (Array.isArray(data.all_projects)) {
           setProjects(data.all_projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id)));
         }
@@ -2848,7 +2856,7 @@ function AppContent() {
             >
               {showProjectDropdown ? <PanelLeftClose size={13} color="#58a6ff" /> : <PanelLeft size={13} color="#00ff9d" />}
               <FolderKanban size={13} color="#00ff9d" />
-              <span className="project-badge-name" style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span className="project-badge-name" style={{ maxWidth: '130px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {activeProject ? activeProject.name : 'Select Project'}
               </span>
               {(activeProject?.part_number || multipartState.is_multipart || alignmentData.is_multipart || (alignmentData.file_name || '').toLowerCase().includes('part')) && (
@@ -2857,6 +2865,8 @@ function AppContent() {
                   fontWeight: 800,
                   padding: '1px 5px',
                   borderRadius: '4px',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                   background: multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.16)' : 'rgba(139, 148, 158, 0.2)',
                   color: multipartState.auto_chain_enabled ? '#00ff9d' : '#8b949e',
                   border: `1px solid ${multipartState.auto_chain_enabled ? 'rgba(0, 255, 157, 0.4)' : '#30363d'}`
@@ -2920,7 +2930,10 @@ function AppContent() {
             role="tab"
             aria-selected={workspaceMode === 'ocr_inspector'}
             className={`workspace-mode-pill ${workspaceMode === 'ocr_inspector' ? 'active' : ''}`}
-            onClick={() => setWorkspaceMode('ocr_inspector')}
+            onClick={() => {
+              setWorkspaceMode('ocr_inspector');
+              setShowStudioDrawer(false);
+            }}
           >
             <span>🔍 2. OCR Line Inspector</span>
           </button>
@@ -2929,7 +2942,10 @@ function AppContent() {
             role="tab"
             aria-selected={workspaceMode === 'analyzer_sandbox'}
             className={`workspace-mode-pill ${workspaceMode === 'analyzer_sandbox' ? 'active' : ''}`}
-            onClick={() => setWorkspaceMode('analyzer_sandbox')}
+            onClick={() => {
+              setWorkspaceMode('analyzer_sandbox');
+              setShowStudioDrawer(false);
+            }}
           >
             <span>🛠️ 3. Analyzer &amp; Sandbox IDE</span>
           </button>
@@ -3286,7 +3302,7 @@ function AppContent() {
                               data-testid="bundle-delete-btn"
                               onClick={e => {
                                 e.stopPropagation();
-                                handleDeleteBundle(group.bundle_id, group.bundle_name, group.total_parts_count);
+                                handleDeleteBundle(group.bundle_id, group.bundle_name, group.parts.map(pt => pt.id));
                               }}
                               title={`Delete entire bundle "${group.bundle_name}" (${group.total_parts_count} parts)`}
                               style={{ padding: '4px 5px' }}
