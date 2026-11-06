@@ -745,9 +745,28 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
             }
 
         # Check for Blank White Teams Screen (Image 3: Teams in top-left + blank white body -> Fingerprint prompt on phone)
+        # Note: Must NOT match a floating light-mode markdown window or skeleton loader (Screenshots 2 & 4) where left/right
+        # desktop margins or the Teams sub-header (y=112..205) are dark!
         header_strip = screen_img[max(0, int(32 * scale_y)):min(h, int(108 * scale_y)), max(0, int(20 * scale_x)):min(w, int(1900 * scale_x))]
         header_mean = float(np.mean(header_strip)) if header_strip.size > 0 else 0.0
-        is_blank_white_body = (body_mean >= 232.0 and body_std <= 18.0 and white_pct >= 88.0 and len(body_tokens) == 0)
+        subheader_strip = screen_img[max(0, int(112 * scale_y)):min(h, int(205 * scale_y)), max(0, int(80 * scale_x)):min(w, int(1840 * scale_x))]
+        subheader_mean = float(np.mean(subheader_strip)) if subheader_strip.size > 0 else 0.0
+        left_margin = screen_img[by1:by2, max(0, int(40 * scale_x)):min(w, int(350 * scale_x))]
+        right_margin = screen_img[by1:by2, max(0, int(1570 * scale_x)):min(w, int(1880 * scale_x))]
+        left_mean = float(np.mean(left_margin)) if left_margin.size > 0 else 0.0
+        right_mean = float(np.mean(right_margin)) if right_margin.size > 0 else 0.0
+        non_auth_keywords = (".md", "part", "saving", "almosthere", "changesarebeing", "modifiedby", "generatedby")
+        has_markdown_or_folder_tokens = any(kw in full_nospace for kw in non_auth_keywords)
+        is_blank_white_body = (
+            body_mean >= 236.0
+            and body_std <= 12.0
+            and white_pct >= 94.0
+            and left_mean >= 230.0
+            and right_mean >= 230.0
+            and subheader_mean >= 230.0
+            and len(body_tokens) == 0
+            and not has_markdown_or_folder_tokens
+        )
         if is_blank_white_body and (has_teams_top_left or header_mean >= 180.0):
             return {
                 "detected": True,
@@ -798,7 +817,9 @@ async def detect_auth_screen_type(
          STRICTLY PROHIBITS PIN ENTRY so PIN digits (e.g. 2992) are never typed into username fields!
       3. 'none': Normal application screen (clean, no auth prompt).
     """
-    # If an explicit screenshot is provided, inspect it immediately (handles Image 3 & Image 4 deterministically)
+    # If an explicit screenshot is provided, inspect it immediately (handles Image 3 & Image 4 deterministically).
+    # CRITICAL: If the external display screenshot does NOT show a PIN/fingerprint screen, do NOT fall through
+    # to dumpsys input_method history, which can falsely trigger PIN entry inside an open Markdown editor!
     if screen_img is not None:
         cv_eval = detect_teams_auth_or_fingerprint_screen_cv(screen_img)
         if cv_eval.get("detected"):
@@ -813,6 +834,14 @@ async def detect_auth_screen_type(
                 "pin_field_coords": cv_eval.get("pin_field_coords"),
                 "ok_btn_coords": cv_eval.get("ok_btn_coords"),
             }
+        return {
+            "auth_type": "none",
+            "details": "External display screenshot shows no authentication prompt",
+            "is_pin_safe": False,
+            "requires_keyguard_unlock": False,
+            "requires_mam_pin": False,
+            "requires_escape_for_pin": False,
+        }
 
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
@@ -887,12 +916,20 @@ async def detect_auth_screen_type(
         }
 
     # 3. Check Input Method / Focused Editor characteristics (inputType & hintText)
+    # Ignore historical StartInput lines and never treat an active FilePreviewActivity (Markdown editor) as a numeric PIN field!
+    is_markdown_editor_focused = ("filepreviewactivity" in combined_acts_lower)
     try:
         ime_chk = await run_adb_shell("dumpsys input_method", ser, timeout=1.2)
         ime_out = ime_chk.get("stdout", "")
+        in_history_section = False
         for line in ime_out.splitlines():
             line_str = line.strip()
-            if "mEditorInfo" in line_str or "inputType=" in line_str:
+            if "StartInputHistory" in line_str or "StartInput #" in line_str:
+                in_history_section = True
+                continue
+            if in_history_section:
+                continue
+            if "mEditorInfo" in line_str or "mCurAttribute" in line_str or "inputType=" in line_str:
                 m_type = re.search(r'inputType=0x([0-9a-fA-F]+)', line_str)
                 if m_type:
                     val = int(m_type.group(1), 16)
@@ -907,7 +944,7 @@ async def detect_auth_screen_type(
                             "requires_mam_pin": False,
                             "requires_escape_for_pin": False,
                         }
-                    if cls == 2 and (val == 0x12 or (variation & 0x10) != 0):
+                    if not is_markdown_editor_focused and cls == 2 and (val == 0x12 or (variation & 0x10) != 0):
                         return {
                             "auth_type": "pin",
                             "details": f"Focused input field is numeric PIN (inputType=0x{val:x})",
@@ -1080,6 +1117,11 @@ async def auto_handle_pin_authentication(
         # B. Blank White Teams Screen (Phone Fingerprint Prompt -> Hit ESCAPE to prompt for PIN on desktop)
         pin_coords = auth_eval.get("pin_field_coords") or [960, 635]
         ok_coords = auth_eval.get("ok_btn_coords") or [935, 725]
+        confirmed_mam_pin_prompt = bool(
+            auth_eval.get("auth_subtype") == "mam_pin_prompt"
+            or (auth_eval.get("requires_mam_pin") and not auth_eval.get("requires_escape_for_pin"))
+            or (force and not auth_eval.get("requires_keyguard_unlock"))
+        )
         if auth_eval.get("requires_escape_for_pin"):
             disp_cmd = f"input -d {ext_id} keyevent 111; " if (ext_id and ext_id > 0) else ""
             await run_adb_shell(f"{disp_cmd}input -d 0 keyevent 111", ser, timeout=2.5)
@@ -1087,7 +1129,7 @@ async def auto_handle_pin_authentication(
                 f"Sent ESCAPE (keyevent 111) on blank white Teams fingerprint screen to prompt for PIN on desktop display #{ext_id or 0}"
             )
             await asyncio.sleep(0.9)
-            # Capture fresh screenshot after Escape to confirm PIN prompt and refine PIN/OK coordinates
+            # Capture fresh screenshot after Escape to confirm PIN prompt ('Enter your PIN') before typing 2992
             try:
                 snap_after_esc = await capture_external_screenshot(ser, bypass_lock=True)
                 if snap_after_esc:
@@ -1098,11 +1140,20 @@ async def auto_handle_pin_authentication(
                             pin_coords = esc_eval["pin_field_coords"]
                         if esc_eval.get("ok_btn_coords"):
                             ok_coords = esc_eval["ok_btn_coords"]
+                        if esc_eval.get("auth_subtype") == "mam_pin_prompt" or esc_eval.get("requires_mam_pin"):
+                            confirmed_mam_pin_prompt = True
+                        else:
+                            actions.append("Post-Escape screen did not show 'Enter your PIN' prompt; skipped desktop PIN typing to prevent accidental editor input")
+                    else:
+                        confirmed_mam_pin_prompt = True
+                else:
+                    # Fallback when capture_external_screenshot is mocked or unavailable
+                    confirmed_mam_pin_prompt = True
             except Exception:
-                pass
+                confirmed_mam_pin_prompt = True
 
         # C. Intune MAM / Teams Desktop PIN Prompt Entry (e.g. PIN 2992)
-        if auth_eval.get("requires_mam_pin") or auth_eval.get("requires_escape_for_pin") or (force and not auth_eval.get("requires_keyguard_unlock")):
+        if confirmed_mam_pin_prompt:
             px, py = int(pin_coords[0]), int(pin_coords[1])
             ox, oy = int(ok_coords[0]), int(ok_coords[1])
             if ext_id and ext_id > 0:
@@ -1695,6 +1746,139 @@ async def dismiss_anr_dialogs(serial: Optional[str] = None, display_id: Optional
     except Exception as e:
         return {"anr_detected": False, "error": str(e), "actions": actions}
 
+def _detect_floating_teams_window_cv(
+    cv_img: Optional[np.ndarray],
+    disp_w: int = 1920,
+    disp_h: int = 1080,
+) -> Optional[Dict[str, Any]]:
+    """
+    Computer-vision detector for a floating freeform Teams window on the external desktop display
+    (handles white skeleton loader, dark 'Your file is almost here' loading state, and light/dark editor).
+    Returns dict with {'bounds': [bl, bt, br, bb], 'maximize_button': [mx, my], 'reason': str} if floating.
+    """
+    if cv_img is None or getattr(cv_img, "size", 0) == 0 or cv_img.shape[1] < 600:
+        return None
+    try:
+        h_img, w_img = cv_img.shape[:2]
+        scale_x = w_img / 1920.0
+        scale_y = h_img / 1080.0
+        gray_full = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+
+        def _refine_max_btn(bl: int, bt: int, br: int, bb: int) -> list:
+            mx = max(40, int(br - 117 * scale_x))
+            my = max(15, int(bt + 31 * scale_y))
+            x1 = max(0, min(w_img - 10, int(br - 155 * scale_x)))
+            x2 = max(x1 + 10, min(w_img, int(br - 80 * scale_x)))
+            y1 = max(0, min(h_img - 10, int(bt + 8 * scale_y)))
+            y2 = max(y1 + 10, min(h_img, int(bt + 56 * scale_y)))
+            roi = gray_full[y1:y2, x1:x2]
+            if roi.size > 0:
+                ys, xs = np.where(roi > 130)
+                if len(xs) >= 6:
+                    mx = int(np.mean(xs) + x1)
+                    my = int(np.mean(ys) + y1)
+            # Map from image coordinates to display coordinates if dimensions differ
+            if w_img != disp_w or h_img != disp_h:
+                mx = int(round(mx * (disp_w / float(w_img))))
+                my = int(round(my * (disp_h / float(h_img))))
+            return [mx, my]
+
+        # 1. Check for bright white floating canvas surrounded by dark left/right desktop/folder margins (Screenshots 2 & 4)
+        y_mid1, y_mid2 = int(h_img * 0.32), int(h_img * 0.72)
+        left_strip = gray_full[y_mid1:y_mid2, :max(10, int(220 * scale_x))]
+        right_strip = gray_full[y_mid1:y_mid2, max(0, w_img - int(220 * scale_x)):]
+        center_strip = gray_full[y_mid1:y_mid2, int(w_img * 0.32):int(w_img * 0.68)]
+
+        lum_left = float(np.mean(left_strip)) if left_strip.size > 0 else 0.0
+        lum_right = float(np.mean(right_strip)) if right_strip.size > 0 else 0.0
+        lum_center = float(np.mean(center_strip)) if center_strip.size > 0 else 0.0
+
+        if lum_center > 140.0 and lum_left < 55.0 and lum_right < 55.0:
+            col_means = np.mean(gray_full[y_mid1:y_mid2, :], axis=0)
+            bright_cols = np.where(col_means > 135.0)[0]
+            if len(bright_cols) >= int(300 * scale_x):
+                bl = int(bright_cols[0])
+                br = int(bright_cols[-1])
+                row_means = np.mean(gray_full[:int(h_img * 0.88), bl:br], axis=1)
+                bright_rows = np.where(row_means > 135.0)[0]
+                canvas_top = int(bright_rows[0]) if len(bright_rows) > 0 else int(268 * scale_y)
+                bb = int(bright_rows[-1]) if len(bright_rows) > 0 else int(888 * scale_y)
+                # Floating window caption bar + file header bar sits ~95px above the white canvas top
+                bt = max(int(60 * scale_y), canvas_top - int(95 * scale_y))
+                # Refine bt by looking for the top edge of the dark-gray caption bar above canvas_top
+                if canvas_top > int(60 * scale_y):
+                    cap_profile = np.mean(gray_full[max(0, canvas_top - int(130 * scale_y)):canvas_top, bl:br], axis=1)
+                    cap_rows = np.where((cap_profile >= 22.0) & (cap_profile <= 85.0))[0]
+                    if len(cap_rows) >= int(20 * scale_y):
+                        bt = max(0, canvas_top - int(130 * scale_y) + int(cap_rows[0]))
+                bounds_disp = [
+                    int(round(bl * (disp_w / float(w_img)))),
+                    int(round(bt * (disp_h / float(h_img)))),
+                    int(round(br * (disp_w / float(w_img)))),
+                    int(round(bb * (disp_h / float(h_img)))),
+                ]
+                return {
+                    "bounds": bounds_disp,
+                    "maximize_button": _refine_max_btn(bl, bt, br, bb),
+                    "reason": f"Floating white window canvas detected via CV ({bounds_disp[2] - bounds_disp[0]}x{bounds_disp[3] - bounds_disp[1]})",
+                }
+
+        # 2. Check for floating window inner 'Teams' titlebar or 'Your file is almost here' (Screenshot 3) via RapidOCR
+        from ocr_engine import get_rapid_ocr
+        ocr = get_rapid_ocr()
+        if ocr is not None:
+            res, _ = ocr(cv_img)
+            inner_teams_box = None
+            has_almost_here = False
+            for box, txt, _score in (res or []):
+                pts = np.array(box)
+                tx1, ty1 = int(pts[:, 0].min()), int(pts[:, 1].min())
+                tx2, ty2 = int(pts[:, 0].max()), int(pts[:, 1].max())
+                clean_low = str(txt).strip().lower()
+                if "almost here" in clean_low or "almosthere" in clean_low.replace(" ", ""):
+                    has_almost_here = True
+                # A fullscreen Teams window has 'Teams' at (x ~ 85, y ~ 50); a floating window has 'Teams' at x > 220, y > 105
+                if "team" in clean_low and tx1 >= int(220 * scale_x) and int(105 * scale_y) <= ty1 <= int(360 * scale_y):
+                    inner_teams_box = (tx1, ty1, tx2, ty2)
+                    break
+
+            if inner_teams_box is not None or has_almost_here:
+                if inner_teams_box is not None:
+                    tx1, ty1, tx2, ty2 = inner_teams_box
+                    bl = max(int(200 * scale_x), tx1 - int(68 * scale_x))
+                    bt = max(int(80 * scale_y), ty1 - int(22 * scale_y))
+                else:
+                    bl = int(536 * scale_x)
+                    bt = int(172 * scale_y)
+                # Find right edge br of the floating window caption bar via the 3 bright window controls ('_', '[]', 'X')
+                cap_y1 = max(0, bt + int(8 * scale_y))
+                cap_y2 = min(h_img, bt + int(54 * scale_y))
+                cap_x1 = max(bl + int(300 * scale_x), int(1050 * scale_x))
+                cap_x2 = min(w_img - int(180 * scale_x), int(1620 * scale_x))
+                cap_roi = gray_full[cap_y1:cap_y2, cap_x1:cap_x2]
+                br = int(1384 * scale_x)
+                if cap_roi.size > 0:
+                    _, xs_cap = np.where(cap_roi > 135)
+                    if len(xs_cap) >= 8:
+                        rightmost_icon_x = int(np.max(xs_cap)) + cap_x1
+                        br = min(w_img - int(100 * scale_x), rightmost_icon_x + int(36 * scale_x))
+                bb = int(888 * scale_y)
+                bounds_disp = [
+                    int(round(bl * (disp_w / float(w_img)))),
+                    int(round(bt * (disp_h / float(h_img)))),
+                    int(round(br * (disp_w / float(w_img)))),
+                    int(round(bb * (disp_h / float(h_img)))),
+                ]
+                return {
+                    "bounds": bounds_disp,
+                    "maximize_button": _refine_max_btn(bl, bt, br, bb),
+                    "reason": f"Floating Teams window caption bar detected via CV at bounds {bounds_disp}",
+                }
+    except Exception:
+        pass
+    return None
+
+
 async def is_editor_full_screen(
     serial: Optional[str] = None,
     display_id: Optional[int] = None,
@@ -1726,24 +1910,52 @@ async def is_editor_full_screen(
     d_match = re.search(rf'Display #{did}\b.*?(?=Display #|\Z)', stdout, re.DOTALL)
     search_block = d_match.group(0) if d_match else stdout
 
-    # Match active topResumedActivity or visible Task hosting FilePreviewActivity:
+    # Match active topResumedActivity or visible Task hosting FilePreviewActivity (or any floating Teams task on Display #did):
     m_top = re.search(r'(?:topResumedActivity|resumedActivity|mResumedActivity)[:=]\s*ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
     tid: Optional[int] = None
     if m_top:
         tid = int(m_top.group(1))
     else:
-        m_vis = re.search(r'Task\{[0-9a-fA-F]+\s+#(\d+)\b[^\}]*visible=true[^\}]*\}.*?ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity', search_block, re.DOTALL)
-        if m_vis:
-            tid = int(m_vis.group(1))
+        m_top_any_teams = re.search(r'(?:topResumedActivity|resumedActivity|mResumedActivity)[:=]\s*ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]+\s+t(\d+)\}', search_block)
+        if m_top_any_teams:
+            tid = int(m_top_any_teams.group(1))
         else:
-            m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
-            if not m_act:
-                m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
-            if m_act:
-                tid = int(m_act.group(1))
+            m_vis = re.search(r'Task\{[0-9a-fA-F]+\s+#(\d+)\b[^\}]*visible=true[^\}]*\}.*?ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity', search_block, re.DOTALL)
+            if m_vis:
+                tid = int(m_vis.group(1))
+            else:
+                m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', search_block)
+                if not m_act:
+                    m_act = re.search(r'ActivityRecord\{[0-9a-fA-F]+\s+u0\s+com\.microsoft\.teams/[^\s]*FilePreviewActivity\s+t(\d+)\}', stdout)
+                if m_act:
+                    tid = int(m_act.group(1))
 
     mode = "unknown"
     bounds = [0, 0, disp_w, disp_h]
+
+    def _resolve_maximize_btn(bnds: list, img_b: Optional[bytes]) -> list:
+        bl, bt, br, bb = bnds
+        mx = max(40, int(br - 117))
+        my = max(15, int(bt + 31))
+        if img_b and len(img_b) > 2000:
+            try:
+                cv_im = cv2.imdecode(np.frombuffer(img_b, np.uint8), cv2.IMREAD_COLOR)
+                if cv_im is not None:
+                    hi, wi = cv_im.shape[:2]
+                    x1 = max(0, min(wi - 10, int(br - 155)))
+                    x2 = max(x1 + 10, min(wi, int(br - 80)))
+                    y1 = max(0, min(hi - 10, int(bt + 8)))
+                    y2 = max(y1 + 10, min(hi, int(bt + 56)))
+                    roi = cv_im[y1:y2, x1:x2]
+                    if roi.size > 0:
+                        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                        ys, xs = np.where(gray > 130)
+                        if len(xs) >= 8:
+                            mx = int(np.mean(xs) + x1)
+                            my = int(np.mean(ys) + y1)
+            except Exception:
+                pass
+        return [mx, my]
 
     if tid is not None:
         # Match task header line for FilePreviewActivity (with or without leading '*')
@@ -1787,33 +1999,6 @@ async def is_editor_full_screen(
                 if ime_up:
                     is_vert_max = True
 
-            def _resolve_maximize_btn(bnds: list, img_b: Optional[bytes]) -> list:
-                bl, bt, br, bb = bnds
-                # In Android Desktop Mode (210-220 DPI), the freeform window caption bar icons
-                # ('_' at br-191, '[]' Maximize at br-117, 'X' Close at br-43) are positioned at
-                # fixed dp offsets from the window's top-right corner (br, bt), NOT scaled by disp_w/1920!
-                mx = max(40, int(br - 117))
-                my = max(15, int(bt + 31))
-                if img_b and len(img_b) > 2000:
-                    try:
-                        cv_im = cv2.imdecode(np.frombuffer(img_b, np.uint8), cv2.IMREAD_COLOR)
-                        if cv_im is not None:
-                            hi, wi = cv_im.shape[:2]
-                            x1 = max(0, min(wi - 10, int(br - 155)))
-                            x2 = max(x1 + 10, min(wi, int(br - 80)))
-                            y1 = max(0, min(hi - 10, int(bt + 8)))
-                            y2 = max(y1 + 10, min(hi, int(bt + 56)))
-                            roi = cv_im[y1:y2, x1:x2]
-                            if roi.size > 0:
-                                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                                ys, xs = np.where(gray > 130)
-                                if len(xs) >= 8:
-                                    mx = int(np.mean(xs) + x1)
-                                    my = int(np.mean(ys) + y1)
-                    except Exception:
-                        pass
-                return [mx, my]
-
             if mode == "freeform" and (not is_horiz_max or not is_vert_max):
                 return {
                     "is_fullscreen": False,
@@ -1838,6 +2023,25 @@ async def is_editor_full_screen(
                     "reason": f"Activity task #{tid} bounds ({w_span}x{h_span}) are smaller than display viewport ({disp_w}x{disp_h})"
                 }
 
+            # Even if dumpsys task #tid appears maximized, check CV if image_bytes is provided in case a child dialog/floating window is open on top
+            if image_bytes and len(image_bytes) > 2000:
+                try:
+                    cv_img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
+                    cv_floating = _detect_floating_teams_window_cv(cv_img, disp_w, disp_h)
+                    if cv_floating:
+                        return {
+                            "is_fullscreen": False,
+                            "mode": "freeform_cv",
+                            "bounds": cv_floating["bounds"],
+                            "maximize_button": cv_floating["maximize_button"],
+                            "task_id": tid,
+                            "display_id": did,
+                            "display_dimensions": [disp_w, disp_h],
+                            "reason": cv_floating["reason"],
+                        }
+                except Exception:
+                    pass
+
             return {
                 "is_fullscreen": True,
                 "mode": mode,
@@ -1853,26 +2057,17 @@ async def is_editor_full_screen(
         try:
             cv_img = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
             if cv_img is not None and cv_img.shape[1] >= 600:
-                h_img, w_img = cv_img.shape[:2]
-                left_strip = cv_img[int(h_img * 0.2):int(h_img * 0.8), :35]
-                right_strip = cv_img[int(h_img * 0.2):int(h_img * 0.8), w_img - 35:]
-                center_strip = cv_img[int(h_img * 0.3):int(h_img * 0.7), int(w_img * 0.25):int(w_img * 0.75)]
-
-                lum_left = float(np.mean(left_strip)) if left_strip.size > 0 else 0.0
-                lum_right = float(np.mean(right_strip)) if right_strip.size > 0 else 0.0
-                lum_center = float(np.mean(center_strip)) if center_strip.size > 0 else 0.0
-
-                # Only check CV margins if we have a bright white document canvas (light mode) with dark margins.
-                # In dark mode (lum_center < 80.0), borders are naturally dark and must NOT be mistaken for desktop margins!
-                if lum_center > 140.0 and (lum_left < 15.0 or lum_right < 15.0):
+                cv_floating = _detect_floating_teams_window_cv(cv_img, disp_w, disp_h)
+                if cv_floating:
                     return {
                         "is_fullscreen": False,
                         "mode": mode if mode != "unknown" else "windowed_margins",
-                        "bounds": bounds,
+                        "bounds": cv_floating["bounds"],
+                        "maximize_button": cv_floating["maximize_button"],
                         "task_id": tid,
                         "display_id": did,
                         "display_dimensions": [disp_w, disp_h],
-                        "reason": f"Display stream contains desktop margins (left lum={lum_left:.1f}, right lum={lum_right:.1f}, center lum={lum_center:.1f})"
+                        "reason": cv_floating["reason"],
                     }
         except Exception:
             pass
@@ -1922,7 +2117,9 @@ async def maximize_floating_markdown_window(
         await run_adb_shell(f"am task focus {tid} >/dev/null 2>&1", ser)
         await asyncio.sleep(0.15)
 
-    max_btn = fs_status.get("maximize_button") or [1523, 139]
+    bnds = fs_status.get("bounds") or [536, 172, 1384, 888]
+    default_max_btn = [max(40, int(bnds[2] - 117)), max(15, int(bnds[1] + 31))] if bnds[2] < 1800 else [1267, 203]
+    max_btn = fs_status.get("maximize_button") or default_max_btn
     mx, my = int(max_btn[0]), int(max_btn[1])
     disp_pfx = f"-d {did} " if (did and did > 0) else ""
 
@@ -1931,13 +2128,17 @@ async def maximize_floating_markdown_window(
     actions.append(f"Tapped floating window Maximize [] control at ({mx}, {my}) on display #{did}")
     await asyncio.sleep(0.95)
 
-    fs_after = await is_editor_full_screen(ser, did)
+    snap_after = await capture_external_screenshot(ser, bypass_lock=True)
+    fs_after = await is_editor_full_screen(ser, did, image_bytes=snap_after)
     if not fs_after.get("is_fullscreen", True):
+        if fs_after.get("maximize_button"):
+            mx, my = int(fs_after["maximize_button"][0]), int(fs_after["maximize_button"][1])
         # Fallback: try mouse tap on the Maximize [] control
         await run_adb_shell(f"input {disp_pfx}mouse tap {mx} {my}", ser, timeout=2.5)
         actions.append(f"Dispatched fallback mouse tap on Maximize [] control at ({mx}, {my})")
         await asyncio.sleep(0.85)
-        fs_after = await is_editor_full_screen(ser, did)
+        snap_after2 = await capture_external_screenshot(ser, bypass_lock=True)
+        fs_after = await is_editor_full_screen(ser, did, image_bytes=snap_after2)
 
     await dismiss_keyboard(ser, did)
     return {
@@ -3772,10 +3973,20 @@ async def check_and_update_alignment(
                 state.orchestration_state.update({"status": "PAUSED", "step_label": "PAUSED: teams markdown not aligned"})
                 state.latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({res.get('reason')})"
 
+            # Automatically switch active bundle part from QUEUED -> ACTIVE when Live Desktop detects a different open part (e.g. part2.md)
+            try:
+                if res.get("is_multipart") and res.get("part_number"):
+                    await state.auto_switch_project_if_open_part_changed(res)
+                mp_sync = state.sync_multipart_state_from_alignment()
+            except Exception as mp_err:
+                print(f"[check_and_update_alignment] Multipart sync note: {mp_err}")
+                mp_sync = state.multipart_bundle_state
+
             await state.ws_manager.broadcast({
                 "type": "alignment_status", "alignment": state.latest_alignment_status,
                 "data": state.latest_alignment_status, "classifiers": res.get("classifiers", {}),
-                "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry
+                "orchestration": state.orchestration_state, "telemetry": state.latest_telemetry,
+                "multipart_state": mp_sync,
             })
         elif not use_cached_only:
             # Screenshot failed or stream unavailable: update alignment status to avoid false positive aligned state

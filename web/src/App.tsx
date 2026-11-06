@@ -1320,6 +1320,41 @@ function AppContent() {
     await fetchData();
   };
 
+  const handleActivateBundlePart = async (
+    partNumber: number,
+    fileName?: string,
+    bundleId?: string,
+    bundleName?: string,
+    totalParts?: number
+  ) => {
+    try {
+      const res = await api('/api/dag/multipart/activate-part', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          part_number: partNumber,
+          file_name: fileName,
+          bundle_id: bundleId,
+          bundle_name: bundleName,
+          total_parts: totalParts
+        })
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.project) setActiveProject(data.project);
+        if (Array.isArray(data?.projects)) {
+          setProjects(data.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id)));
+        }
+        if (data?.multipart_state) {
+          setMultipartState(prev => ({ ...prev, ...data.multipart_state }));
+        }
+      }
+    } catch (e) {
+      console.error('[App] handleActivateBundlePart error:', e);
+    }
+    await fetchData();
+  };
+
   const isCreatingProjectRef = useRef(false);
   const handleCreateProject = async (overrideName?: string, autoStartLoop?: boolean) => {
     if (isCreatingProjectRef.current) return;
@@ -3217,7 +3252,7 @@ function AppContent() {
                 padding: '5px 8px', background: '#161b22', borderRadius: '6px', border: '1px solid #21262d', fontSize: '10.5px', width: '100%'
               }}>
                 <span style={{ color: '#c9d1d9', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  📂 Multi-Part Bundle ({activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1}..{activeProject?.total_parts || multipartState.total_parts || alignmentData.total_parts || (multipartState.predetermined_parts?.length || 'N')})
+                  📂 Multi-Part Bundle ({alignmentData.part_number || multipartState.current_part || activeProject?.part_number || 1}..{multipartState.total_parts || alignmentData.total_parts || activeProject?.total_parts || (multipartState.predetermined_parts?.length || 'N')})
                 </span>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
                   <button
@@ -3262,18 +3297,21 @@ function AppContent() {
                     Predetermined ({multipartState.predetermined_parts.length}):
                   </span>
                   {multipartState.predetermined_parts.map(pt => {
+                    const livePart = alignmentData.part_number || multipartState.current_part || activeProject?.part_number || 1;
                     const st = pt.status || 'pending';
-                    const isDone = st === 'completed';
-                    const isScan = st === 'scanning' || pt.part_number === (activeProject?.part_number || multipartState.current_part);
+                    const isScan = pt.part_number === livePart || st === 'scanning';
+                    const isDone = !isScan && (st === 'completed' || pt.part_number < livePart);
                     return (
                       <span
                         key={pt.part_number}
-                        title={`${pt.file_name} • Status: ${st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''}`}
+                        onClick={() => handleActivateBundlePart(pt.part_number, pt.file_name, activeProject?.bundle_id, activeProject?.bundle_name, multipartState.total_parts || multipartState.predetermined_parts?.length)}
+                        title={`${pt.file_name} • Status: ${isScan ? 'ACTIVE' : isDone ? 'DONE' : st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''} (Click to activate)`}
                         style={{
                           fontSize: '9px',
                           fontWeight: 800,
                           padding: '1px 5px',
                           borderRadius: '4px',
+                          cursor: 'pointer',
                           fontFamily: 'var(--font-mono, monospace)',
                           background: isDone ? 'rgba(0, 255, 157, 0.16)' : isScan ? 'rgba(56, 189, 248, 0.2)' : 'rgba(48, 54, 61, 0.45)',
                           color: isDone ? '#00ff9d' : isScan ? '#38bdf8' : '#8b949e',
@@ -3297,7 +3335,15 @@ function AppContent() {
                   const predeterminedList = (group.is_active && Array.isArray(multipartState.predetermined_parts))
                     ? multipartState.predetermined_parts
                     : [];
-                  const curActivePartNum = group.parts.find(pt => pt.id === activeProject?.id)?.part_number
+
+                  // Resolve the markdown part currently open / being scanned on the Live Desktop (e.g. DIXUI_impact_..._part2.md -> 2)
+                  const liveAlignFileName = group.is_active ? (alignmentData.file_name || multipartState.active_file_name || '') : '';
+                  const liveAlignMatch = liveAlignFileName.match(/(?:part|pt)[_\-\s#]*(\d+)/i);
+                  const liveAlignPartNum = group.is_active
+                    ? (alignmentData.part_number || (liveAlignMatch ? parseInt(liveAlignMatch[1], 10) : 0) || multipartState.current_part || 0)
+                    : 0;
+                  const curActivePartNum = liveAlignPartNum
+                    || group.parts.find(pt => pt.id === activeProject?.id)?.part_number
                     || (group.is_active ? (multipartState.current_part || 1) : 1);
 
                   // Build unified process scope queue (MD 1 / N .. MD N / N) combining scanned part projects + predetermined folder files
@@ -3317,6 +3363,12 @@ function AppContent() {
                       ...Array.from({ length: expectedTotal }, (_, i) => i + 1)
                     ])
                   ).sort((a, b) => a - b);
+
+                  const activeScanningFileName =
+                    liveAlignFileName ||
+                    predByNumber.get(curActivePartNum)?.file_name ||
+                    partByNumber.get(curActivePartNum)?.part_file_name ||
+                    `${group.bundle_name}_part${curActivePartNum}.md`;
 
                   return (
                     <div
@@ -3351,6 +3403,52 @@ function AppContent() {
                             {expectedTotal > 1
                               ? `MD ${curActivePartNum} / ${expectedTotal}`
                               : `${group.total_parts_count} ${group.total_parts_count === 1 ? 'Part / MD' : 'Parts / MDs'}`}
+                          </span>
+                        </div>
+
+                        {/* Active Scanning Markdown Indicator Banner */}
+                        <div
+                          data-testid="bundle-active-markdown-banner"
+                          style={{
+                            marginTop: '5px',
+                            marginBottom: '4px',
+                            padding: '3px 6px',
+                            borderRadius: '5px',
+                            background: 'rgba(0, 255, 157, 0.1)',
+                            border: '1px solid rgba(0, 255, 157, 0.35)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '6px',
+                            fontSize: '9.5px'
+                          }}
+                          title={`Active markdown file being scanned: ${activeScanningFileName}`}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0, flex: 1 }}>
+                            <span style={{ color: '#00ff9d', fontWeight: 800, flexShrink: 0 }}>ACTIVE ●</span>
+                            <span
+                              style={{
+                                color: '#f0f6fc',
+                                fontWeight: 700,
+                                fontFamily: 'var(--font-mono, monospace)',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              {activeScanningFileName}
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              flexShrink: 0,
+                              color: '#00ff9d',
+                              fontWeight: 800,
+                              fontFamily: 'var(--font-mono, monospace)',
+                              fontSize: '9px'
+                            }}
+                          >
+                            MD {curActivePartNum}/{expectedTotal}
                           </span>
                         </div>
 
@@ -3532,23 +3630,29 @@ function AppContent() {
                             const scopeLabel = `MD ${partNum} / ${expectedTotal}`;
 
                             if (part) {
-                              const isPartActive = part.id === activeProject?.id;
+                              const isPartScanning = group.is_active && partNum === curActivePartNum;
+                              const isPartSelected = part.id === activeProject?.id;
                               const partFileLabel =
                                 part.part_file_name ||
                                 predPt?.file_name ||
                                 (part.name.toLowerCase().endsWith('.md') ? part.name : `${part.name}.md`);
                               const partCaptures = part.frame_count ?? 0;
                               const partTotalLines = part.total_lines ?? part.line_count ?? 0;
-                              const partVerifiedLines = part.verified_lines ?? part.line_count ?? 0;
+                              const partVerifiedLines = (part.verified_lines && part.verified_lines > 0)
+                                ? part.verified_lines
+                                : (part.line_count ?? 0);
                               const isCompletedPart =
-                                predPt?.status === 'completed' ||
-                                (partTotalLines > 0 && partVerifiedLines >= partTotalLines) ||
-                                partNum < curActivePartNum;
+                                !isPartScanning && (
+                                  predPt?.status === 'completed' ||
+                                  part.status === 'completed' ||
+                                  (partTotalLines > 0 && partVerifiedLines >= partTotalLines) ||
+                                  partNum < curActivePartNum
+                                );
 
                               return (
                                 <div
                                   key={part.id}
-                                  className={`bundle-part-card ${isPartActive ? 'active' : ''}`}
+                                  className={`bundle-part-card ${(isPartScanning || (isPartSelected && !liveAlignPartNum)) ? 'active' : ''}`}
                                   data-testid="bundle-part-card"
                                   data-part-id={part.id}
                                   data-part-number={partNum}
@@ -3559,14 +3663,14 @@ function AppContent() {
                                       <span className="part-index-badge" data-testid={`part-scope-badge-${partNum}`}>
                                         {scopeLabel}
                                       </span>
-                                      <FileText size={11} color={isPartActive ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
+                                      <FileText size={11} color={isPartScanning ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
                                       <span
                                         className="part-file-name"
                                         title={partFileLabel}
                                         style={{
                                           fontSize: '11px',
                                           fontWeight: 700,
-                                          color: isPartActive ? '#00ff9d' : '#f0f6fc',
+                                          color: isPartScanning ? '#00ff9d' : '#f0f6fc',
                                           overflow: 'hidden',
                                           textOverflow: 'ellipsis',
                                           whiteSpace: 'nowrap'
@@ -3582,15 +3686,15 @@ function AppContent() {
                                           fontWeight: 800,
                                           padding: '1px 4px',
                                           borderRadius: '3px',
-                                          color: isCompletedPart ? '#00ff9d' : isPartActive ? '#38bdf8' : '#8b949e',
-                                          background: isCompletedPart
-                                            ? 'rgba(0, 255, 157, 0.14)'
-                                            : isPartActive
+                                          color: isPartScanning ? '#38bdf8' : isCompletedPart ? '#00ff9d' : '#8b949e',
+                                          background: isPartScanning
                                             ? 'rgba(56, 189, 248, 0.16)'
+                                            : isCompletedPart
+                                            ? 'rgba(0, 255, 157, 0.14)'
                                             : 'rgba(139, 148, 158, 0.15)'
                                         }}
                                       >
-                                        {isCompletedPart ? 'DONE ✓' : isPartActive ? 'ACTIVE ●' : 'READY'}
+                                        {isPartScanning ? 'ACTIVE ●' : isCompletedPart ? 'DONE ✓' : 'READY'}
                                       </span>
                                       <button
                                         type="button"
@@ -3636,33 +3740,42 @@ function AppContent() {
                             }
 
                             const queuedFileName = predPt?.file_name || `${group.bundle_name}_part${partNum}.md`;
-                            const queuedStatus = predPt?.status || 'pending';
+                            const isQueuedPartActive = (group.is_active && partNum === curActivePartNum) || predPt?.status === 'scanning';
+                            const queuedStatus = isQueuedPartActive ? 'scanning' : (predPt?.status || 'pending');
                             return (
                               <div
                                 key={`queued_part_${partNum}`}
-                                className="bundle-part-card"
+                                className={`bundle-part-card ${isQueuedPartActive ? 'active' : ''}`}
                                 data-testid="bundle-queued-part-card"
                                 data-part-number={partNum}
-                                style={{ opacity: 0.78, borderStyle: 'dashed' }}
-                                title={`Detected in Teams/OneDrive folder queue (${scopeLabel}): ${queuedFileName}`}
+                                onClick={() => handleActivateBundlePart(partNum, queuedFileName, group.bundle_id, group.bundle_name, expectedTotal)}
+                                style={{
+                                  opacity: isQueuedPartActive ? 1 : 0.78,
+                                  borderStyle: isQueuedPartActive ? 'solid' : 'dashed',
+                                  cursor: 'pointer'
+                                }}
+                                title={`Click to activate ${scopeLabel} (${queuedFileName})`}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
                                     <span
                                       className="part-index-badge"
                                       data-testid={`part-scope-badge-${partNum}`}
-                                      style={{ background: 'rgba(163, 113, 247, 0.18)', color: '#d2a8ff' }}
+                                      style={{
+                                        background: isQueuedPartActive ? 'rgba(0, 255, 157, 0.2)' : 'rgba(163, 113, 247, 0.18)',
+                                        color: isQueuedPartActive ? '#00ff9d' : '#d2a8ff'
+                                      }}
                                     >
                                       {scopeLabel}
                                     </span>
-                                    <FileText size={11} color="#8b949e" style={{ flexShrink: 0 }} />
+                                    <FileText size={11} color={isQueuedPartActive ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
                                     <span
                                       className="part-file-name"
                                       title={queuedFileName}
                                       style={{
                                         fontSize: '10.5px',
-                                        fontWeight: 600,
-                                        color: '#c9d1d9',
+                                        fontWeight: isQueuedPartActive ? 700 : 600,
+                                        color: isQueuedPartActive ? '#00ff9d' : '#c9d1d9',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
                                         whiteSpace: 'nowrap'
@@ -3671,8 +3784,18 @@ function AppContent() {
                                       {queuedFileName}
                                     </span>
                                   </div>
-                                  <span style={{ fontSize: '8.5px', color: '#a371f7', fontWeight: 800, flexShrink: 0 }}>
-                                    {queuedStatus === 'completed' ? 'DONE ✓' : queuedStatus === 'scanning' ? 'SCANNING ●' : 'QUEUED ⏳'}
+                                  <span
+                                    style={{
+                                      fontSize: '8.5px',
+                                      color: isQueuedPartActive ? '#38bdf8' : queuedStatus === 'completed' ? '#00ff9d' : '#a371f7',
+                                      background: isQueuedPartActive ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
+                                      padding: isQueuedPartActive ? '1px 4px' : undefined,
+                                      borderRadius: isQueuedPartActive ? '3px' : undefined,
+                                      fontWeight: 800,
+                                      flexShrink: 0
+                                    }}
+                                  >
+                                    {queuedStatus === 'completed' ? 'DONE ✓' : isQueuedPartActive ? 'ACTIVE ●' : 'QUEUED ⏳'}
                                   </span>
                                 </div>
                               </div>

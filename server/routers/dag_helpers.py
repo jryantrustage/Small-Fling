@@ -1340,6 +1340,15 @@ async def execute_dag_group_initialize(
         "nodes": ["frame_ocr", "arrow_down"], "status": "idle",
     })
 
+    # If the external display is showing a different bundle part (e.g. part2.md after part1 completed),
+    # automatically switch/create that part's project before checking resume frontier or clearing data!
+    try:
+        switched_res = await state.auto_switch_project_if_open_part_changed()
+        if switched_res and switched_res.get("project") and switched_res["project"].get("id"):
+            project_id = switched_res["project"]["id"]
+    except Exception as sw_err:
+        print(f"[execute_dag_group_initialize] auto_switch_project_if_open_part_changed note: {sw_err}")
+
     # Safeguard: Never wipe an in-progress project or reset to Line 1 unless force_reset=True
     resume_info = state.sync_resume_frontier_state()
     if not force_reset and resume_info.get("has_existing_progress") and resume_info.get("last_bottom_line", 0) > 0:
@@ -1512,21 +1521,7 @@ async def execute_dag_group_initialize(
         state.latest_telemetry["target_total_lines"] = total_lines
         state.latest_telemetry["status_message"] = f"DAG Group 'Initialize' complete: {total_lines:,} total lines ready for capture ✔"
 
-        state.captured_frames.clear()
-        state.document_lines.clear()
-        state.orchestration_state["page"] = 1
-        state.orchestration_state["last_arrow_count"] = 0
-        state.orchestration_state["cursor_line"] = 1
         active_pid = project_id or state.get_current_project_id()
-        if active_pid:
-            try:
-                db.clear_project_data(active_pid)
-            except Exception:
-                pass
-        state.reset_project_diagnostics_trace(
-            project_id=active_pid, project_name=f"Project {active_pid}" if active_pid else "Active Project", target_total_lines=total_lines
-        )
-
         detected_fn = None
         if active_pid:
             try:
@@ -1559,15 +1554,39 @@ async def execute_dag_group_initialize(
                                     detected_fn = clean_t + (".md" if not clean_t.endswith(".md") else "")
                                     break
                     if detected_fn:
-                        db.append_project_filename(active_pid, detected_fn)
-                        mp_sync = state.sync_multipart_state_from_alignment()
-                        updated_p = db.get_project(active_pid)
-                        if updated_p:
-                            await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p, "projects": db.get_projects()})
-                            await state.ws_manager.broadcast({"type": "project_switched", "project": updated_p})
-                        await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": mp_sync})
+                        # Switch/create the target bundle part project BEFORE clearing project data so previous parts are preserved!
+                        sw_res = await state.auto_switch_project_if_open_part_changed({"file_name": detected_fn})
+                        if sw_res and sw_res.get("project") and sw_res["project"].get("id"):
+                            active_pid = sw_res["project"]["id"]
             except Exception as fe:
-                print(f"[execute_dag_group_initialize] Filename scan note: {fe}")
+                print(f"[execute_dag_group_initialize] Pre-clear filename scan note: {fe}")
+
+        state.captured_frames.clear()
+        state.document_lines.clear()
+        state.orchestration_state["page"] = 1
+        state.orchestration_state["last_arrow_count"] = 0
+        state.orchestration_state["cursor_line"] = 1
+        if active_pid:
+            try:
+                db.clear_project_data(active_pid)
+                db.update_project_target_lines(active_pid, total_lines)
+            except Exception:
+                pass
+        state.reset_project_diagnostics_trace(
+            project_id=active_pid, project_name=f"Project {active_pid}" if active_pid else "Active Project", target_total_lines=total_lines
+        )
+
+        if active_pid and detected_fn:
+            try:
+                db.append_project_filename(active_pid, detected_fn)
+                mp_sync = state.sync_multipart_state_from_alignment()
+                updated_p = db.get_project(active_pid)
+                if updated_p:
+                    await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p, "projects": db.get_projects()})
+                    await state.ws_manager.broadcast({"type": "project_switched", "project": updated_p, "projects": db.get_projects()})
+                await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": mp_sync})
+            except Exception as fe2:
+                print(f"[execute_dag_group_initialize] Post-clear filename sync note: {fe2}")
 
         await state.ws_manager.broadcast({
             "type": "project_init_progress",

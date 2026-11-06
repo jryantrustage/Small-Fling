@@ -187,6 +187,7 @@ export interface PredeterminedBundlePart {
   file_name: string;
   part_number: number;
   total_parts?: number;
+  scope_label?: string;
   base_prefix?: string;
   visual_row_index?: number;
   tap_coords?: [number, number];
@@ -200,6 +201,8 @@ export interface MultipartBundleState {
   folder_name?: string;
   current_part?: number | null;
   total_parts?: number | null;
+  active_file_name?: string | null;
+  last_opened_file?: string | null;
   next_part_number?: number | null;
   next_file_name?: string | null;
   available_parts?: number[];

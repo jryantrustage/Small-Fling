@@ -3158,16 +3158,35 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
             for ep in (multipart_bundle_state.get("exported_parts") or [])
             if ep.get("part_number") is not None
         }
+        if proj_bundle_id:
+            try:
+                for bp in db.get_bundle_projects(str(proj_bundle_id)):
+                    bp_num = int(bp.get("part_number") or 0)
+                    bp_tot = int(bp.get("total_lines") or bp.get("target_total_lines") or 0)
+                    bp_cnt = int(bp.get("line_count") or 0)
+                    if bp_num > 0 and (bp.get("status") == "completed" or (bp_tot > 0 and bp_cnt >= bp_tot)):
+                        exported_part_nums.add(bp_num)
+            except Exception:
+                pass
         for pt in predetermined:
             pno = int(pt.get("part_number") or 0)
             tot_for_label = int(multipart_bundle_state.get("total_parts") or len(predetermined) or 1)
             pt["scope_label"] = f"MD {pno} / {tot_for_label}"
-            if pno in exported_part_nums or pno < cur_p:
-                pt["status"] = "completed"
-            elif pno == cur_p:
+            if pno == cur_p:
                 pt["status"] = "scanning"
+            elif pno in exported_part_nums or pno < cur_p:
+                pt["status"] = "completed"
             else:
                 pt["status"] = "pending"
+
+    active_fn_resolved = (
+        align.get("file_name")
+        or canonical_fn
+        or multipart_bundle_state.get("last_opened_file")
+        or ""
+    )
+    if active_fn_resolved:
+        multipart_bundle_state["active_file_name"] = active_fn_resolved
 
     # Keep dag_state["nodes"]["markdown_file_change"] synchronized with multipart_bundle_state
     mfc_node = dag_state.get("nodes", {}).get("markdown_file_change")
@@ -3177,13 +3196,234 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
         mfc_node["current_part"] = cur_p_sync
         mfc_node["total_parts"] = tot_p_sync
         mfc_node["part_progress_label"] = f"MD {cur_p_sync} / {tot_p_sync}"
-        mfc_node["active_file_name"] = candidate_name or multipart_bundle_state.get("last_opened_file")
+        mfc_node["active_file_name"] = active_fn_resolved
         mfc_node["next_file_name"] = multipart_bundle_state.get("next_file_name")
         mfc_node["detected_files"] = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
         mfc_node["predetermined_parts"] = predetermined
 
     multipart_bundle_state["updated_at"] = datetime.now().isoformat()
     return multipart_bundle_state
+
+
+async def activate_or_create_bundle_part_project(
+    part_number: int,
+    file_name: Optional[str] = None,
+    bundle_id: Optional[str] = None,
+    bundle_name: Optional[str] = None,
+    total_parts: Optional[int] = None,
+    broadcast: bool = True,
+) -> Dict[str, Any]:
+    """
+    Activates (or creates and activates) the SQLite project row for a specific markdown part
+    (e.g. MD 2 / 9) inside a multi-part bundle, preserving any previously completed part's
+    frames and lines (e.g. MD 1 / 9 with 396 captures & 8,498 lines).
+    """
+    from alignment_engine import parse_multipart_markdown_filename, normalize_bundle_identifier_ocr
+
+    target_part = max(1, int(part_number or 1))
+    active_proj = db.get_active_project() or {}
+    all_projs = db.get_projects()
+    predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
+
+    mp_parsed = parse_multipart_markdown_filename(file_name) if file_name else {}
+    eff_bundle_name = normalize_bundle_identifier_ocr(
+        bundle_name
+        or mp_parsed.get("base_prefix")
+        or multipart_bundle_state.get("base_prefix")
+        or active_proj.get("bundle_name")
+        or active_proj.get("name")
+        or "Bundle"
+    )
+    eff_bundle_name = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle_name, flags=re.IGNORECASE).strip("_- ") or "Bundle"
+    slug = re.sub(r"[^a-z0-9]+", "_", eff_bundle_name.lower()).strip("_") or "bundle"
+    eff_bundle_id = bundle_id or active_proj.get("bundle_id") or f"bundle_{slug}"
+    eff_total_parts = int(
+        total_parts
+        or mp_parsed.get("total_parts")
+        or multipart_bundle_state.get("total_parts")
+        or active_proj.get("total_parts")
+        or len(predetermined)
+        or target_part
+    )
+    pred_match = next((p for p in predetermined if int(p.get("part_number") or 0) == target_part), None)
+    eff_file_name = normalize_bundle_identifier_ocr(
+        file_name
+        or (pred_match or {}).get("file_name")
+        or f"{eff_bundle_name}_part{target_part}.md"
+    )
+    if not eff_file_name.lower().endswith(".md"):
+        eff_file_name = f"{eff_file_name}.md"
+
+    # 1. If the currently active project is a DIFFERENT part that has reached EOF, mark it completed
+    active_pid = active_proj.get("id")
+    active_pnum = int(active_proj.get("part_number") or 0)
+    active_lines = int(active_proj.get("line_count") or 0)
+    active_frames = int(active_proj.get("frame_count") or 0)
+    active_target = int(active_proj.get("total_lines") or active_proj.get("target_total_lines") or 0)
+    if active_pid and active_pnum != target_part and active_lines > 0 and active_target > 0 and active_lines >= active_target:
+        try:
+            db.update_project_status(active_pid, "completed")
+        except Exception:
+            pass
+
+    # 2. Look for an existing project in the same bundle with part_number == target_part
+    target_proj = None
+    for p in all_projs:
+        p_bid = str(p.get("bundle_id") or "")
+        p_bname = str(p.get("bundle_name") or "")
+        p_num = int(p.get("part_number") or 0)
+        if p_num == target_part and (
+            p_bid == eff_bundle_id
+            or (p_bname and p_bname.lower() == eff_bundle_name.lower())
+        ):
+            target_proj = p
+            break
+
+    if target_proj and target_proj.get("id"):
+        target_pid = target_proj["id"]
+        if target_pid != active_pid:
+            db.activate_project(target_pid)
+        db.update_project_bundle_metadata(
+            project_id=target_pid,
+            bundle_id=eff_bundle_id,
+            bundle_name=eff_bundle_name,
+            part_number=target_part,
+            total_parts=eff_total_parts,
+            part_file_name=eff_file_name,
+        )
+        db.append_project_filename(target_pid, eff_file_name)
+    elif active_pid and active_lines == 0 and active_frames == 0:
+        # Active project is empty placeholder: update it in place to represent target_part
+        target_pid = active_pid
+        db.update_project_bundle_metadata(
+            project_id=target_pid,
+            bundle_id=eff_bundle_id,
+            bundle_name=eff_bundle_name,
+            part_number=target_part,
+            total_parts=eff_total_parts,
+            part_file_name=eff_file_name,
+        )
+        db.append_project_filename(target_pid, eff_file_name)
+    else:
+        # Create and activate a dedicated SQLite project row for target_part (preserving MD 1/9's data!)
+        clean_proj_name = re.sub(r"\.(md|markdown)$", "", eff_file_name, flags=re.IGNORECASE)
+        created = db.create_project(
+            name=clean_proj_name,
+            description=f"Multi-Part Bundle Part {target_part}/{eff_total_parts} ({eff_file_name})",
+            target_total_lines=0,
+            device_model=active_proj.get("device_model", "pixel_8"),
+            device_name=active_proj.get("device_name", ""),
+            device_serial=active_proj.get("device_serial", ""),
+            target_dpi=int(active_proj.get("target_dpi") or 220),
+            display_width=int(active_proj.get("display_width") or 1920),
+            display_height=int(active_proj.get("display_height") or 1080),
+            display_id=int(active_proj.get("display_id") or 0),
+            lines_per_page=int(active_proj.get("lines_per_page") or 49),
+            step_size=int(active_proj.get("step_size") or 48),
+            scroll_padding_lines=int(active_proj.get("scroll_padding_lines") if active_proj.get("scroll_padding_lines") is not None else 4),
+            arrow_count_init=int(active_proj.get("arrow_count_init") or 56),
+            arrow_count_step=int(active_proj.get("arrow_count_step") or 28),
+            settle_delay_ms=int(active_proj.get("settle_delay_ms") or 50),
+            lock_device=bool(active_proj.get("lock_device", False)),
+            hid_config_json=active_proj.get("hid_config_json", "{}"),
+            bundle_id=eff_bundle_id,
+            bundle_name=eff_bundle_name,
+            part_number=target_part,
+            total_parts=eff_total_parts,
+            part_file_name=eff_file_name,
+        )
+        target_pid = created.get("id")
+        if target_pid:
+            db.append_project_filename(target_pid, eff_file_name)
+
+    try:
+        from routers.frames_document import clear_ocr_inspect_cache
+        clear_ocr_inspect_cache()
+    except Exception:
+        pass
+    load_persisted_state()
+
+    multipart_bundle_state["is_multipart"] = True
+    multipart_bundle_state["base_prefix"] = eff_bundle_name
+    multipart_bundle_state["current_part"] = target_part
+    multipart_bundle_state["total_parts"] = eff_total_parts
+    multipart_bundle_state["last_opened_file"] = eff_file_name
+    multipart_bundle_state["active_file_name"] = eff_file_name
+    mp_sync = sync_multipart_state_from_alignment()
+
+    switched_proj = db.get_project(target_pid) if target_pid else db.get_active_project()
+    updated_projects = db.get_projects()
+
+    if broadcast and switched_proj:
+        frames_list = db.get_frames(switched_proj["id"])
+        await ws_manager.broadcast({
+            "type": "project_switched",
+            "project": switched_proj,
+            "projects": updated_projects,
+            "dag": dag_state,
+            "telemetry": latest_telemetry,
+        })
+        await ws_manager.broadcast({
+            "type": "project_updated",
+            "project": switched_proj,
+            "projects": updated_projects,
+        })
+        await ws_manager.broadcast({
+            "type": "frame_deleted" if frames_list else "frames_purged",
+            "frames": frames_list,
+        })
+        await ws_manager.broadcast({
+            "type": "multipart_transition_status",
+            "multipart_state": mp_sync,
+        })
+
+    return {
+        "status": "success",
+        "project": switched_proj,
+        "projects": updated_projects,
+        "multipart_state": mp_sync,
+        "part_number": target_part,
+        "total_parts": eff_total_parts,
+        "file_name": eff_file_name,
+    }
+
+
+async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    When the Live Desktop OCR bounding box detects that a different markdown part of the bundle
+    is open on the external monitor (e.g. 'DIXUI_impact_26-11-05-9-43pm_part2.md' while MD 1/9 was active),
+    automatically switches (or creates and activates) the MD 2/9 project so it transitions from QUEUED -> ACTIVE.
+    """
+    if getattr(sys.modules[__name__], "capture_loop_running", False):
+        return None
+    align = alignment_status or latest_alignment_status or {}
+    align_fn = str(align.get("file_name") or "").strip()
+    if not align_fn:
+        return None
+    from alignment_engine import parse_multipart_markdown_filename
+    mp = parse_multipart_markdown_filename(align_fn)
+    if not mp.get("is_multipart") or not mp.get("part_number"):
+        return None
+
+    detected_part = int(mp["part_number"])
+    detected_prefix = str(mp.get("base_prefix") or "").strip()
+    active_proj = db.get_active_project() or {}
+    active_part = int(active_proj.get("part_number") or 0)
+    active_prefix = str(active_proj.get("bundle_name") or "").strip()
+
+    if detected_part == active_part:
+        return None
+    if active_prefix and detected_prefix and active_prefix[:8].lower() != detected_prefix[:8].lower():
+        return None
+
+    return await activate_or_create_bundle_part_project(
+        part_number=detected_part,
+        file_name=mp.get("file_name") or align_fn,
+        bundle_id=active_proj.get("bundle_id"),
+        bundle_name=detected_prefix or active_prefix,
+        total_parts=mp.get("total_parts") or multipart_bundle_state.get("total_parts") or active_proj.get("total_parts"),
+        broadcast=True,
+    )
 
 
 def export_project_markdown_to_disk(

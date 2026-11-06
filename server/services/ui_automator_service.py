@@ -438,7 +438,7 @@ async def prepare_markdown_editor_window(
     disp_id = display_id or await detect_external_display_id(ser)
     actions: List[str] = []
 
-    # 0. Wait up to 3.5s for FilePreviewActivity (Teams Markdown Editor) to be resumed on display
+    # 0. Wait up to 4.5s for FilePreviewActivity / Teams Markdown Editor to open and finish 'Your file is almost here' loading
     if "mock" not in str(ser).lower():
         for _ in range(7):
             act_chk = await run_adb_shell("dumpsys activity activities | grep -E 'topResumedActivity|resumedActivity|FilePreviewActivity'", ser, timeout=1.5)
@@ -446,11 +446,52 @@ async def prepare_markdown_editor_window(
                 break
             await asyncio.sleep(0.5)
 
-    # 1. Maximize floating markdown editor window if in freeform mode
+    # 1. Maximize floating markdown editor window if in freeform mode (works even during skeleton / 'almost here' spinner)
     max_res = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
     actions.extend(max_res.get("actions", []))
     if max_res.get("was_floating"):
         await asyncio.sleep(0.9)
+
+    # 1b. Wait for 'Your file is almost here' spinner or blank skeleton loader to finish rendering the toolbar
+    if "mock" not in str(ser).lower():
+        ocr_inst = get_rapid_ocr()
+        for _wait_idx in range(8):
+            snap_chk = await capture_external_screenshot(ser, bypass_lock=True)
+            if not snap_chk:
+                break
+            img_chk = cv2.imdecode(np.frombuffer(snap_chk, np.uint8), cv2.IMREAD_COLOR)
+            if img_chk is None:
+                break
+            # If still floating, maximize right away
+            if not max_res.get("maximized", True):
+                max_retry = await maximize_floating_markdown_window(serial=ser, display_id=disp_id, image_bytes=snap_chk)
+                actions.extend(max_retry.get("actions", []))
+                if max_retry.get("maximized"):
+                    max_res = max_retry
+            # Check if 'Your file is almost here' is still showing
+            still_loading = False
+            if ocr_inst is not None:
+                try:
+                    h_c, w_c = img_chk.shape[:2]
+                    mid_crop = img_chk[int(h_c * 0.35):int(h_c * 0.72), int(w_c * 0.28):int(w_c * 0.72)]
+                    ocr_r, _ = ocr_inst(mid_crop)
+                    mid_txt = " ".join(str(t[1]).lower() for t in (ocr_r or []))
+                    if "almost here" in mid_txt or "almosthere" in mid_txt.replace(" ", ""):
+                        still_loading = True
+                except Exception:
+                    pass
+            if not still_loading:
+                tb_chk = locate_toolbar_icons_cv(img_chk)
+                if tb_chk.get("pencil_coords") or tb_chk.get("dark_mode_coords"):
+                    break
+            await asyncio.sleep(0.65)
+
+        # Re-verify fullscreen after loading completes
+        max_res2 = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
+        if max_res2.get("was_floating"):
+            actions.extend(max_res2.get("actions", []))
+            max_res = max_res2
+            await asyncio.sleep(0.7)
 
     # 2. Switch from Read-Only to Edit Mode FIRST using automation (Pencil icon)
     #    (In Read-Only / Preview mode, the Sun/Moon theme dropdown is disabled until Edit Mode is enabled!)
@@ -629,19 +670,41 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
     if canonical_prefix and (not folder_name or folder_name.lower() == canonical_prefix.lower()):
         folder_name = canonical_prefix
 
-    # If one file in a multi-part folder had a clipped/smudged part digit, infer the single missing part number in 1..N
+    # If one file in a multi-part folder had a clipped/smudged part digit, infer the missing part number
+    # using visual row neighbor continuity first (e.g. a row between part5 and part7 is always part6, never part1!)
     known_parts = {int(f["part_number"]) for f in files if f.get("part_number") is not None}
+    for idx_f, f_item in enumerate(files):
+        if f_item.get("part_number") is None:
+            prev_p = files[idx_f - 1].get("part_number") if idx_f > 0 else None
+            next_p = files[idx_f + 1].get("part_number") if idx_f + 1 < len(files) else None
+            inferred_neighbor = None
+            if prev_p is not None and next_p is not None and int(next_p) - int(prev_p) == 2:
+                inferred_neighbor = int(prev_p) + 1
+            elif prev_p is not None and (int(prev_p) + 1) not in known_parts and idx_f + 1 < len(files):
+                inferred_neighbor = int(prev_p) + 1
+            elif next_p is not None and (int(next_p) - 1) > 0 and (int(next_p) - 1) not in known_parts:
+                inferred_neighbor = int(next_p) - 1
+            if inferred_neighbor is not None and inferred_neighbor not in known_parts:
+                f_item["part_number"] = inferred_neighbor
+                f_item["is_multipart"] = True
+                f_item["base_prefix"] = canonical_prefix or f_item.get("base_prefix") or folder_name
+                if f_item["base_prefix"]:
+                    f_item["file_name"] = f"{f_item['base_prefix']}_part{inferred_neighbor}.md"
+                known_parts.add(inferred_neighbor)
+
     unnumbered = [f for f in files if f.get("part_number") is None]
     if len(known_parts) >= 2 and len(unnumbered) == 1:
-        expected_set = set(range(1, len(files) + 1))
-        missing = sorted(expected_set - known_parts)
-        if len(missing) == 1:
-            inferred_p = missing[0]
-            unnumbered[0]["part_number"] = inferred_p
-            unnumbered[0]["is_multipart"] = True
-            unnumbered[0]["base_prefix"] = canonical_prefix or unnumbered[0].get("base_prefix") or folder_name
-            if unnumbered[0]["base_prefix"]:
-                unnumbered[0]["file_name"] = f"{unnumbered[0]['base_prefix']}_part{inferred_p}.md"
+        max_known = max(known_parts)
+        if len(files) >= max_known:
+            expected_set = set(range(1, len(files) + 1))
+            missing = sorted(expected_set - known_parts)
+            if len(missing) == 1:
+                inferred_p = missing[0]
+                unnumbered[0]["part_number"] = inferred_p
+                unnumbered[0]["is_multipart"] = True
+                unnumbered[0]["base_prefix"] = canonical_prefix or unnumbered[0].get("base_prefix") or folder_name
+                if unnumbered[0]["base_prefix"]:
+                    unnumbered[0]["file_name"] = f"{unnumbered[0]['base_prefix']}_part{inferred_p}.md"
 
     # Normalize all part file names to canonical_prefix when matching
     for f_item in files:
@@ -938,20 +1001,63 @@ async def predetermine_bundle_from_folder_screenshot(
     base_prefix = folder_scan.get("base_prefix") or folder_scan.get("folder_name") or ""
 
     if predetermined_parts:
-        part_to_open = int(detected_open_part or 1)
+        active_proj = db.get_active_project() or {}
+        eff_tot = int(total_parts or len(predetermined_parts) or 1)
+        eff_prefix = base_prefix or folder_scan.get("folder_name") or active_proj.get("bundle_name") or active_proj.get("name") or "Bundle"
+        clean_bundle_slug = re.sub(r"[^a-z0-9]+", "_", str(eff_prefix).lower()).strip("_") or "bundle"
+        bundle_id = active_proj.get("bundle_id") or f"bundle_{clean_bundle_slug}"
+
+        # Identify which parts of this bundle are already completed (so clicking Scan Folder after Part 1 finishes opens Part 2!)
+        completed_part_nums = {
+            int(ep["part_number"])
+            for ep in (state.multipart_bundle_state.get("exported_parts") or [])
+            if ep.get("part_number") is not None
+        }
+        try:
+            for p_row in db.get_projects():
+                p_bid = str(p_row.get("bundle_id") or "")
+                p_bname = str(p_row.get("bundle_name") or "")
+                p_num = int(p_row.get("part_number") or 0)
+                p_tot = int(p_row.get("total_lines") or p_row.get("target_total_lines") or 0)
+                p_cnt = int(p_row.get("line_count") or 0)
+                if p_num > 0 and (p_bid == bundle_id or (p_bname and p_bname[:8].lower() == eff_prefix[:8].lower())):
+                    if p_row.get("status") == "completed" or (p_tot > 0 and p_cnt >= p_tot):
+                        completed_part_nums.add(p_num)
+        except Exception:
+            pass
+
+        if detected_open_part is not None:
+            part_to_open = int(detected_open_part)
+        else:
+            uncompleted = [int(p) for p in available_parts if int(p) not in completed_part_nums]
+            part_to_open = min(uncompleted) if uncompleted else (min(available_parts) if available_parts else 1)
+
         if available_parts and part_to_open not in available_parts:
             part_to_open = min(available_parts)
         for pt in predetermined_parts:
-            pt["status"] = "scanning" if pt["part_number"] == part_to_open else "pending"
+            pno = int(pt["part_number"])
+            if pno == part_to_open:
+                pt["status"] = "scanning"
+            elif pno in completed_part_nums or pno < part_to_open:
+                pt["status"] = "completed"
+            else:
+                pt["status"] = "pending"
+
+        target_entry = next(
+            (p for p in predetermined_parts if p["part_number"] == part_to_open),
+            predetermined_parts[0],
+        )
+        target_fn = target_entry.get("file_name") or f"{eff_prefix}_part{part_to_open}.md"
 
         state.multipart_bundle_state.update({
             "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
-            "base_prefix": base_prefix or state.multipart_bundle_state.get("base_prefix", ""),
-            "folder_name": folder_scan.get("folder_name") or base_prefix,
+            "base_prefix": eff_prefix,
+            "folder_name": folder_scan.get("folder_name") or eff_prefix,
             "current_part": part_to_open,
-            "total_parts": total_parts or len(predetermined_parts),
+            "total_parts": eff_tot,
             "available_parts": available_parts,
             "predetermined_parts": predetermined_parts,
+            "active_file_name": target_fn,
             "next_part_number": (part_to_open + 1) if (part_to_open + 1) in available_parts else None,
             "next_file_name": next(
                 (p["file_name"] for p in predetermined_parts if p["part_number"] == part_to_open + 1),
@@ -959,43 +1065,16 @@ async def predetermine_bundle_from_folder_screenshot(
             ),
         })
 
-        target_entry = next(
-            (p for p in predetermined_parts if p["part_number"] == part_to_open),
-            predetermined_parts[0],
-        )
-
-        # Synchronize the active project in SQLite with the predetermined bundle metadata so the Left Sidebar
-        # card immediately displays the bundle & nested queue (Parts MD 1 / N .. MD N / N)
+        # Synchronize the active project in SQLite (switching/creating Part K if Part 1 was already completed)
         try:
-            active_proj = db.get_active_project()
-            eff_tot = int(total_parts or len(predetermined_parts) or 1)
-            eff_prefix = base_prefix or folder_scan.get("folder_name") or (active_proj or {}).get("bundle_name") or (active_proj or {}).get("name") or "Bundle"
-            clean_bundle_slug = re.sub(r"[^a-z0-9]+", "_", str(eff_prefix).lower()).strip("_") or "bundle"
-            bundle_id = (active_proj or {}).get("bundle_id") or f"bundle_{clean_bundle_slug}"
-            target_fn = target_entry.get("file_name") or f"{eff_prefix}_part{part_to_open}.md"
-
-            if active_proj and active_proj.get("id"):
-                db.update_project_bundle_metadata(
-                    project_id=active_proj["id"],
-                    bundle_id=bundle_id,
-                    bundle_name=eff_prefix,
-                    part_number=int(active_proj.get("part_number") or part_to_open),
-                    total_parts=eff_tot,
-                    part_file_name=active_proj.get("part_file_name") or target_fn,
-                )
-                db.append_project_filename(active_proj["id"], target_fn)
-            else:
-                new_p = db.create_project(
-                    name=target_fn[:-3] if target_fn.lower().endswith(".md") else target_fn,
-                    bundle_id=bundle_id,
-                    bundle_name=eff_prefix,
-                    part_number=part_to_open,
-                    total_parts=eff_tot,
-                    part_file_name=target_fn,
-                )
-                if new_p and new_p.get("id"):
-                    db.append_project_filename(new_p["id"], target_fn)
-            state.sync_multipart_state_from_alignment()
+            await state.activate_or_create_bundle_part_project(
+                part_number=part_to_open,
+                file_name=target_fn,
+                bundle_id=bundle_id,
+                bundle_name=eff_prefix,
+                total_parts=eff_tot,
+                broadcast=True,
+            )
         except Exception as db_sync_err:
             print(f"[predetermine_bundle_from_folder_screenshot] DB bundle metadata sync warning: {db_sync_err}")
 

@@ -658,3 +658,15 @@ async def api_predetermine_multipart_folder(payload: Optional[Dict[str, Any]] = 
         payload=payload,
     )
     return res
+@router.post("/api/dag/multipart/activate-part")
+async def api_activate_multipart_part(payload: Optional[Dict[str, Any]] = None):
+    payload = payload or {}
+    part_num = int(payload.get("part_number") or 1)
+    return await state.activate_or_create_bundle_part_project(
+        part_number=part_num,
+        file_name=payload.get("file_name"),
+        bundle_id=payload.get("bundle_id"),
+        bundle_name=payload.get("bundle_name"),
+        total_parts=payload.get("total_parts"),
+        broadcast=True,
+    )

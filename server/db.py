@@ -336,7 +336,8 @@ def _normalize_project_row(row: Any) -> Dict[str, Any]:
     d["markdown_download_count"] = int(d.get("markdown_download_count") or 0)
     frame_cnt = int(d.get("frame_count") or 0)
     line_cnt = int(d.get("line_count") or 0)
-    verified_cnt = int(d.get("verified_line_count") if d.get("verified_line_count") is not None else line_cnt)
+    raw_verified = int(d.get("verified_line_count") or 0)
+    verified_cnt = raw_verified if raw_verified > 0 else line_cnt
     max_ln = int(d.get("max_line") or 0)
     target_ln = int(d.get("target_total_lines") or 0)
     d["frame_count"] = frame_cnt

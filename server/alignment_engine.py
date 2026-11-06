@@ -24,6 +24,7 @@ def normalize_bundle_identifier_ocr(raw_name: str) -> str:
     Normalizes common RapidOCR substitutions in bundle/folder identifiers and filenames:
     - 'CommonUl_' / 'DIXUl_' / 'DIxUl_' / 'DIXUL_' -> 'CommonUI_' / 'DIXUI_'
     - 'partl' / 'partI' / 'part|' -> 'part1'
+    - 'partZ' -> 'part2', 'partS' -> 'part5', 'partG'/'partb' -> 'part6', 'partB' -> 'part8', 'partg'/'partq' -> 'part9'
     - ',md' / '.m' -> '.md'
     """
     s = (raw_name or "").strip()
@@ -32,7 +33,13 @@ def normalize_bundle_identifier_ocr(raw_name: str) -> str:
     s = re.sub(r"\bDIxU[IlL]([_\-])", r"DIXUI\1", s)
     s = re.sub(r"([A-Za-z0-9])[Uu][lL]([_\-])", r"\1UI\2", s)
     s = re.sub(r"CommonUl([_\-])", r"CommonUI\1", s)
-    s = re.sub(r"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[lI|](?=[,\.]m|\.md|\.m\b|$|\s)", "part1", s)
+    _part_tail = r"(?=[,\.]m|\.md|\.m\b|$|\s)"
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[lI|]{_part_tail}", "part1", s)
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[Zz]{_part_tail}", "part2", s)
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[Ss]{_part_tail}", "part5", s)
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[Gb]{_part_tail}", "part6", s)
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[B]{_part_tail}", "part8", s)
+    s = re.sub(rf"(?i)(?:^|(?<=[_\-\s]))part[_\-\s]*[gq]{_part_tail}", "part9", s)
     s = re.sub(r"(?i)[,\.]m(?:d)?$", ".md", s)
     return s
 

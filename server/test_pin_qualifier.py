@@ -220,3 +220,62 @@ def test_markdown_file_change_dag_node_and_group():
     assert mfc_state["part_progress_label"] == "MD 1 / 9"
     assert len(mfc_state["detected_files"]) == 9
 
+
+def test_floating_white_window_not_mistaken_for_fingerprint_and_detected_as_floating():
+    """Verify floating light-mode/skeleton window over dark folder background does NOT trigger PIN 2992 and IS detected as floating."""
+    import numpy as np
+    import cv2
+    from services.adb_service import detect_teams_auth_or_fingerprint_screen_cv, _detect_floating_teams_window_cv
+
+    # Dark background (folder view) with a central floating white window (x=536..1384, y=268..888) and dark caption bar (y=172..268)
+    img = np.full((1080, 1920, 3), 18, dtype=np.uint8)
+    img[172:268, 536:1384] = (42, 42, 46)
+    img[268:888, 536:1384] = (248, 248, 248)
+    # Draw Maximize [] icon in floating caption bar around (1267, 203)
+    cv2.rectangle(img, (1260, 196), (1274, 210), (220, 220, 220), 2)
+
+    auth_det = detect_teams_auth_or_fingerprint_screen_cv(img)
+    assert auth_det["detected"] is False
+
+    floating_det = _detect_floating_teams_window_cv(img, 1920, 1080)
+    assert floating_det is not None
+    mx, my = floating_det["maximize_button"]
+    assert 1230 <= mx <= 1300
+    assert 180 <= my <= 230
+
+
+@pytest.mark.asyncio
+async def test_auto_switch_queued_to_active_on_part2():
+    """Verify opening part2.md automatically switches MD 2/9 from QUEUED -> ACTIVE while preserving MD 1/9."""
+    import db
+    from services import state
+
+    p1 = db.create_project(
+        name="DIXUI_impact_26-11-05-9-43pm_part1",
+        bundle_id="bundle_dixui_test",
+        bundle_name="DIXUI_impact_26-11-05-9-43pm",
+        part_number=1,
+        total_parts=9,
+        part_file_name="DIXUI_impact_26-11-05-9-43pm_part1.md",
+    )
+    try:
+        state.multipart_bundle_state["predetermined_parts"] = [
+            {"part_number": i, "total_parts": 9, "file_name": f"DIXUI_impact_26-11-05-9-43pm_part{i}.md", "tap_coords": [400, 180 + i * 70], "status": "pending"}
+            for i in range(1, 10)
+        ]
+        sw = await state.auto_switch_project_if_open_part_changed({
+            "file_name": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+            "is_multipart": True,
+            "part_number": 2,
+        })
+        assert sw is not None
+        assert sw["part_number"] == 2
+        assert sw["file_name"] == "DIXUI_impact_26-11-05-9-43pm_part2.md"
+        assert state.multipart_bundle_state["current_part"] == 2
+        pred_by_num = {p["part_number"]: p for p in state.multipart_bundle_state["predetermined_parts"]}
+        assert pred_by_num[1]["status"] == "completed"
+        assert pred_by_num[2]["status"] == "scanning"
+    finally:
+        db.delete_bundle_projects("bundle_dixui_test")
+
+
