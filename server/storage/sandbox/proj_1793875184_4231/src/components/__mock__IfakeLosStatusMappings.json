@@ -1,0 +1,18 @@
+   'json'
+{
+
+    "applicationStatuses": [
+{ "los": "Approved", "dlx": "Approved"},
+{ "los": "Approved-Pending", "dlx": "Approved-Pending"},
+{ "los": "Instant Approved", "dlx": "Approved"},
+{ "los": "Cancelled", "dlx": "Not Active"},
+{ "los": "Duplicate", "dlx": "Under Review"},
+{ "los": "Fraud", "dlx": "Under Review"},
+{ "los": "Pending", "dlx": "Under Review"},
+{ "los": "Counter-Offer", "dlx": "Under Review"}
+],
+"fundingStatuses": [
+{ "los": "Funded", "dlx": "Funded"}
+]
+
+}

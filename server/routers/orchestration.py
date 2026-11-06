@@ -589,6 +589,29 @@ async def api_download_exported_markdown(file_name: str):
     exp_path = Path("c:/Projects/Small-Fling/storage/exports") / Path(file_name).name
     if not exp_path.exists():
         raise HTTPException(status_code=404, detail=f"Exported file '{exp_path.name}' not found")
+    target_pid = None
+    for item in state.multipart_bundle_state.get("exported_parts", []):
+        if item.get("file_name") == exp_path.name:
+            item["download_count"] = int(item.get("download_count") or 0) + 1
+            target_pid = item.get("project_id")
+            break
+    if not target_pid:
+        target_pid = state.get_current_project_id()
+    if target_pid:
+        try:
+            updated_proj = db.increment_project_download_count(target_pid, "markdown")
+            if updated_proj:
+                await state.ws_manager.broadcast({
+                    "type": "project_updated",
+                    "project": updated_proj,
+                    "projects": db.get_projects()
+                })
+        except Exception:
+            pass
+    try:
+        await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": state.multipart_bundle_state})
+    except Exception:
+        pass
     return PlainTextResponse(content=exp_path.read_text(encoding="utf-8"), media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{exp_path.name}"'})
 @router.post("/api/dag/multipart/transition-next")
 async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None):

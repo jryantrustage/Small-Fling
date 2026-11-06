@@ -1,0 +1,72 @@
+[
+{
+"recordState": "Draft",
+"id": "5FD4AFF8-C650-443F-86D8-4EFD796DA98B",
+"cuicCustomerNumber": "1834-8475-1000",
+"tenantTypeId": 1,
+"tenantTypeCode": "CU",
+"tenantTypeName": "Credit Union",
+"contractNumber": "00000001",
+"charterType": "State",
+"operationalStatus" : "Open For Business",
+"legalStatus": "Merged",
+"legalName": "Dupage Credit Union",
+"postalName": "Dupage CU",
+"phoneNumber": "630-999-9999",
+"addresses": [
+{
+"addressType": "Physical",
+"line1": "450 N Main Street",
+"line2": "Suite 300",
+"city": "West Chicago",
+"state": "IL",
+"postalCode": "60004",
+"country": "USA"
+},
+{
+"addressType": "Mailing",
+"line1": "PO Box 333",
+"line2": "",
+"city": "West Chicago",
+"state": "IL",
+"postalCode": "60004",
+"country": "USA"
+}
+]
+},
+{
+"recordState": "Active",
+"id": "975e83f1-51eb-4e39-baf4-4894ef1faa8b",
+"cuicCustomerNumber": "1834-8475-2000",
+"tenantTypeId": 1,
+"tenantTypeCode": "CU",
+"tenantTypeName": "Credit Union",
+"contractNumber": "00000002",
+"charterType": "State",
+"legalName": "Cook County Credit Union",
+"operationalStatus" : "Open For Business",
+"legalStatus": "Active",
+"postalName": "CCC Credit Union",
+"phoneNumber": "630-999-9999",
+"addresses": [
+{
+"addressType": "Physical",
+"line1": "222 S Riverside Pl",
+"line2": "Suite 300",
+"city": "Chicago",
+"state": "Illinois",
+"postalCode": "60606",
+"country": "USA"
+},
+{
+"addressType": "Mailing",
+"line1": "PO Box 200",
+"line2": "",
+"city": "Chicago",
+"state": "IL",
+"postalCode": "60606-2000",
+"country": "USA"
+}
+]
+}
+]

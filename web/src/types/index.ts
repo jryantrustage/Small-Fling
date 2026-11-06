@@ -27,6 +27,8 @@ export interface ProjectData {
   lock_device?: number | boolean;
   hid_config_json?: string;
   hid_config?: any;
+  project_download_count?: number;
+  markdown_download_count?: number;
 }
 
 export interface LineData {
@@ -153,6 +155,7 @@ export interface MultipartExportRecord {
   file_size_bytes: number;
   export_path: string;
   exported_at: string;
+  download_count?: number;
 }
 
 export interface MultipartBundleState {

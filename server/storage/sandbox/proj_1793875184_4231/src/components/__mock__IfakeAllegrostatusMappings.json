@@ -1,0 +1,21 @@
+   'json'
+{
+
+    "applicationStatuses": [
+{ "los": "Auto Approved As Submitted", "dlx": "Approved"},
+{ "los": "Approved As Submitted", "dlx": "Approved"},
+{ "los": "Approved With Conditions", "dlx": "Approved"},
+{ "los": "Counter Offer", "dlx": "Approved-Pending"},
+{ "los": "Counter Offer - Out The Door", "dlx": "Approved-Pending"},
+{ "los": "Need More Info", "dlx": "Approved"},
+{ "los": "Auto Declined", "dlx": "Declined"},
+{ "los": "Declined", "dlx": "Declined"},
+{ "los": "Declined Reconsider with Qual Co-X", "dlx": "Declined"},
+{ "los": "Withdrawn", "dlx": "Under Review"},
+{ "los": "Referred", "dlx": "Under Review"}
+],
+"fundingStatuses": [
+{ "los": "Funded", "dlx": "Funded"}
+]
+
+}

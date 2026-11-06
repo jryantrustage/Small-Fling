@@ -20,8 +20,23 @@ import services.ocr_service as ocr_svc
 
 router = APIRouter(tags=["Frames & Document"])
 
+def _get_unique_frame_dirs() -> List[Path]:
+    out = []
+    seen = set()
+    for d in (state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR):
+        if not d:
+            continue
+        try:
+            rk = str(Path(d).resolve()).lower()
+            if rk not in seen and Path(d).exists():
+                seen.add(rk)
+                out.append(Path(d))
+        except Exception:
+            pass
+    return out
+
 def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
-    search_dirs = [state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR]
+    search_dirs = _get_unique_frame_dirs()
 
     if filename:
         for fdir in search_dirs:
@@ -41,19 +56,6 @@ def _get_frame_path(frame_id: str, filename: Optional[str] = None) -> Path:
             temp_c = fdir / "dag_node3_capture_temp.png"
             if temp_c.exists() and temp_c.stat().st_size >= 2000:
                 return temp_c
-        for fdir in search_dirs:
-            cands = sorted(
-                [p for p in fdir.glob("*.png") if p.stat().st_size >= 2000 and not p.name.startswith("temp_")],
-                key=lambda p: p.stat().st_mtime,
-                reverse=True
-            )
-            if cands:
-                return cands[0]
-
-    for fdir in search_dirs:
-        matches = list(fdir.glob(f"*{frame_id}*.png"))
-        if matches:
-            return matches[0]
 
     finfo = state.captured_frames.get(frame_id)
     if finfo and finfo.get("filename"):
@@ -226,6 +228,23 @@ async def inspect_ocr_image(
         return True
 
     cached_frame = state.captured_frames.get(target_id)
+    if cached_frame and not force_rescan and cached_frame.get("lines"):
+        cb = cached_frame.get("bounding_boxes")
+        if not isinstance(cb, dict) or not cb.get("gutter_boxes"):
+            g_boxes = {}
+            l_boxes = {}
+            scale_y = img_h / 1080.0
+            scale_x = img_w / 1920.0
+            for idx, l_obj in enumerate(cached_frame["lines"]):
+                ln_n = int(l_obj.get("line_number") or (idx + 1))
+                yc = int(round((296.0 + idx * 27.0) * scale_y))
+                hh = max(10, int(round(11.5 * scale_y)))
+                g_boxes[str(ln_n)] = {"x": int(round(32 * scale_x)), "y": yc - hh, "width": int(round(52 * scale_x)), "height": hh * 2, "line_number": ln_n}
+                l_boxes[str(ln_n)] = {"x": int(round(94 * scale_x)), "y": yc - hh, "width": int(round((1920 - 118) * scale_x)), "height": hh * 2, "line_number": ln_n}
+            synthesized_cb = dict(cb) if isinstance(cb, dict) else {}
+            synthesized_cb["gutter_boxes"] = g_boxes
+            synthesized_cb["line_boxes"] = l_boxes
+            cached_frame["bounding_boxes"] = synthesized_cb
     n4_state = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
 
     if force_rescan:
@@ -385,6 +404,23 @@ async def rescan_ocr_lines(
     cache_key = f"{str(ipath.resolve())}_{file_mtime}"
 
     cached_frame = state.captured_frames.get(target_id)
+    if cached_frame and not force_rescan and cached_frame.get("lines"):
+        cb = cached_frame.get("bounding_boxes")
+        if not isinstance(cb, dict) or not cb.get("gutter_boxes"):
+            g_boxes = {}
+            l_boxes = {}
+            scale_y = img_h / 1080.0
+            scale_x = img_w / 1920.0
+            for idx, l_obj in enumerate(cached_frame["lines"]):
+                ln_n = int(l_obj.get("line_number") or (idx + 1))
+                yc = int(round((296.0 + idx * 27.0) * scale_y))
+                hh = max(10, int(round(11.5 * scale_y)))
+                g_boxes[str(ln_n)] = {"x": int(round(32 * scale_x)), "y": yc - hh, "width": int(round(52 * scale_x)), "height": hh * 2, "line_number": ln_n}
+                l_boxes[str(ln_n)] = {"x": int(round(94 * scale_x)), "y": yc - hh, "width": int(round((1920 - 118) * scale_x)), "height": hh * 2, "line_number": ln_n}
+            synthesized_cb = dict(cb) if isinstance(cb, dict) else {}
+            synthesized_cb["gutter_boxes"] = g_boxes
+            synthesized_cb["line_boxes"] = l_boxes
+            cached_frame["bounding_boxes"] = synthesized_cb
     n4_state = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
 
     current_lines = []
@@ -1400,6 +1436,18 @@ async def export_json():
 
 @router.get("/api/export-markdown")
 async def export_markdown():
+    pid = state.get_current_project_id()
+    if pid:
+        try:
+            updated_proj = db.increment_project_download_count(pid, "markdown")
+            if updated_proj:
+                await state.ws_manager.broadcast({
+                    "type": "project_updated",
+                    "project": updated_proj,
+                    "projects": db.get_projects()
+                })
+        except Exception:
+            pass
     if not state.document_lines:
         return PlainTextResponse("# Matrix Document\n\n(No lines transcribed yet)")
     min_ln, max_ln = min(state.document_lines.keys()), max(state.document_lines.keys())

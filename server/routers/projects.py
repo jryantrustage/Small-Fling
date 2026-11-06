@@ -363,7 +363,12 @@ async def create_project(req: ProjectCreateRequest):
         arrow_count_step=arr_step,
         settle_delay_ms=settle_ms,
         lock_device=lock_dev,
-        hid_config_json=hid_cfg
+        hid_config_json=hid_cfg,
+        bundle_id=req.bundle_id or "",
+        bundle_name=req.bundle_name or "",
+        part_number=req.part_number or 0,
+        total_parts=req.total_parts or 0,
+        part_file_name=req.part_file_name or ""
     )
     state.captured_frames.clear()
     state.document_lines.clear()
@@ -726,15 +731,102 @@ async def verify_project_home(project_id: str, request: Request):
 async def activate_project(project_id: str):
     if not db.activate_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    try:
+        from routers.frames_document import clear_ocr_inspect_cache
+        clear_ocr_inspect_cache()
+    except Exception:
+        pass
     state.load_persisted_state()
     proj = db.get_project(project_id)
-    await state.ws_manager.broadcast({"type": "project_switched", "project": proj})
-    return {"status": "success", "project": proj}
+    frames_list = db.get_frames(project_id)
+    from routers.frames_document import _doc_payload, _get_available_ocr_images
+    doc_payload = _doc_payload()
+    ocr_imgs = _get_available_ocr_images(project_id=project_id)
+    all_projs = db.get_projects()
+
+    await state.ws_manager.broadcast({
+        "type": "project_switched",
+        "project": proj,
+        "projects": all_projs,
+        "dag": state.dag_state,
+        "telemetry": state.latest_telemetry
+    })
+    await state.ws_manager.broadcast({
+        "type": "frame_deleted" if frames_list else "frames_purged",
+        "frames": frames_list
+    })
+    await state.ws_manager.broadcast({
+        "type": "document_updated",
+        "data": doc_payload
+    })
+
+    return {
+        "status": "success",
+        "project": proj,
+        "projects": all_projs,
+        "frames": frames_list,
+        "document": doc_payload,
+        "telemetry": state.latest_telemetry,
+        "token_stats": state.token_stats,
+        "dag": state.dag_state,
+        "multipart_state": state.multipart_bundle_state,
+        "ocr_images": ocr_imgs
+    }
+
+@router.delete("/api/projects/bundle/{bundle_id}")
+async def delete_project_bundle(bundle_id: str):
+    parts = db.get_bundle_projects(bundle_id)
+    part_ids = {p.get("id") for p in parts if p.get("id")}
+    if state.get_current_project_id() in part_ids and getattr(state, "capture_loop_running", False):
+        state.capture_loop_running = False
+
+    deleted_ids = db.delete_bundle_projects(bundle_id)
+    from routers.frames_document import clear_ocr_inspect_cache, _doc_payload
+    clear_ocr_inspect_cache()
+
+    state.captured_frames.clear()
+    state.document_lines.clear()
+    state.recapture_queue.clear()
+    state.load_persisted_state()
+    active_proj = db.get_active_project()
+    active_pid = active_proj["id"] if active_proj else None
+    all_projects = db.get_projects()
+
+    try:
+        for d_pid in deleted_ids:
+            await state.ws_manager.broadcast({
+                "type": "project_deleted",
+                "project_id": d_pid,
+                "active_project": active_proj,
+                "projects": all_projects
+            })
+        await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
+        await state.ws_manager.broadcast({
+            "type": "frames_purged" if not active_proj else "frame_deleted",
+            "frames": db.get_frames(active_pid)
+        })
+        await state.ws_manager.broadcast({
+            "type": "document_updated",
+            "data": _doc_payload()
+        })
+    except Exception as be:
+        print(f"[delete_project_bundle] Broadcast warning: {be}")
+
+    return {
+        "status": "success",
+        "deleted_bundle_id": bundle_id,
+        "deleted_project_ids": deleted_ids,
+        "active_project": active_proj,
+        "projects": all_projects
+    }
 
 @router.delete("/api/projects/{project_id}")
 async def delete_project(project_id: str):
-    if not db.delete_project(project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    was_current = (state.get_current_project_id() == project_id)
+    if was_current and getattr(state, "capture_loop_running", False):
+        state.capture_loop_running = False
+
+    db.delete_project(project_id)
     from routers.frames_document import clear_ocr_inspect_cache
     clear_ocr_inspect_cache()
 
@@ -746,11 +838,13 @@ async def delete_project(project_id: str):
                 tmp_p.unlink()
             except Exception:
                 pass
-    for calib_p in state.FRAMES_DIR.glob(f"calib_end_{project_id}*.png"):
-        try:
-            calib_p.unlink()
-        except Exception:
-            pass
+    for calib_name in [f"calib_end_{project_id}.png", f"calib_home_{project_id}.png"]:
+        calib_p = state.FRAMES_DIR / calib_name
+        if calib_p.exists():
+            try:
+                calib_p.unlink()
+            except Exception:
+                pass
 
     state.captured_frames.clear()
     state.document_lines.clear()
@@ -773,15 +867,42 @@ async def delete_project(project_id: str):
             })
         state.dag_state["current_active_node"] = None
         state.dag_state["current_active_group"] = None
+        state.latest_telemetry["target_total_lines"] = 0
+        state.latest_telemetry["current_top_line"] = 0
+        state.latest_telemetry["current_bottom_line"] = 0
+        state.latest_telemetry["current_page"] = 0
+        state.orchestration_state["eof_reached"] = False
+        state.orchestration_state["manual_attention_required"] = False
+        state.orchestration_state["halt_reason"] = None
+        state.orchestration_state["status"] = "IDLE"
+        if hasattr(state, "project_diagnostics_trace") and isinstance(state.project_diagnostics_trace, dict):
+            state.project_diagnostics_trace.update({
+                "project_id": None,
+                "project_name": "",
+                "target_total_lines": 0,
+                "highest_line_acquired": 0,
+                "is_completed": False,
+                "current_status": "IDLE",
+                "last_stop_reason": None,
+                "backfilled_up_to_frame_count": 0,
+                "stop_and_restart_log": [],
+                "loop_runs": [],
+                "lifecycle_events": [],
+            })
+            try:
+                state.save_diagnostics_trace()
+            except Exception:
+                pass
         state.save_persisted_state()
 
+    all_projects = db.get_projects()
     # Broadcast project deletion and state synchronization to all connected clients
     try:
         await state.ws_manager.broadcast({
             "type": "project_deleted",
             "project_id": project_id,
             "active_project": active_proj,
-            "projects": db.get_projects()
+            "projects": all_projects
         })
         await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
         await state.ws_manager.broadcast({
@@ -800,7 +921,7 @@ async def delete_project(project_id: str):
         "status": "success",
         "deleted_project_id": project_id,
         "active_project": active_proj,
-        "projects": db.get_projects()
+        "projects": all_projects
     }
 
 @router.post("/api/projects/{project_id}/abort")
@@ -822,24 +943,52 @@ async def clear_project_data(project_id: str):
     return {"status": "success", "message": f"Project '{project_id}' data cleared."}
 
 def _find_frame_file(frame_id: str, filename: Optional[str] = None) -> Optional[Path]:
-    search_dirs = [state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR, getattr(db, "STORAGE_FRAMES_DIR", None)]
+    raw_dirs = [state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR, getattr(db, "STORAGE_FRAMES_DIR", None)]
+    unique_dirs = []
+    seen = set()
+    for d in raw_dirs:
+        if not d:
+            continue
+        try:
+            rk = str(Path(d).resolve()).lower()
+            if rk not in seen and Path(d).exists():
+                seen.add(rk)
+                unique_dirs.append(Path(d))
+        except Exception:
+            pass
+
     clean_id = frame_id[:-4] if frame_id.endswith(".png") else frame_id
     candidates = []
     if filename:
         candidates.append(filename)
-    candidates.extend([f"{frame_id}.png", frame_id, f"{clean_id}.png"])
+    for c in (f"{frame_id}.png", frame_id, f"{clean_id}.png"):
+        if c not in candidates:
+            candidates.append(c)
 
-    for fdir in search_dirs:
-        if not fdir or not fdir.exists():
-            continue
+    for fdir in unique_dirs:
         for cand in candidates:
-            p = fdir / cand
-            if p.exists() and p.stat().st_size > 0:
-                return p
-        matches = list(fdir.glob(f"*{clean_id}*.png"))
-        if matches:
-            return matches[0]
+            try:
+                p = fdir / cand
+                if p.exists() and p.stat().st_size > 0:
+                    return p
+            except OSError:
+                pass
     return None
+
+def _reconstruct_project_markdown(project_id: str) -> str:
+    lines_dict = db.get_document_lines(project_id)
+    if not lines_dict:
+        if state.get_current_project_id() == project_id:
+            serialized = state.get_serialized_lines()
+            return "\n".join(l.get("text", "") for l in serialized)
+        return ""
+    sorted_keys = sorted(lines_dict.keys())
+    min_k = sorted_keys[0] if sorted_keys else 1
+    max_k = sorted_keys[-1] if sorted_keys else 0
+    return "\n".join(
+        lines_dict[k].get("text", "") if k in lines_dict else ""
+        for k in range(min_k, max_k + 1)
+    )
 
 @router.get("/api/projects/{project_id}/export-markdown")
 async def export_project_markdown(project_id: str):
@@ -847,30 +996,64 @@ async def export_project_markdown(project_id: str):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    lines_dict = db.get_document_lines(project_id)
-    if not lines_dict:
-        if state.get_current_project_id() == project_id:
-            serialized = state.get_serialized_lines()
-            content = "\n".join(l.get("text", "") for l in serialized)
-        else:
-            content = ""
-    else:
-        sorted_keys = sorted(lines_dict.keys())
-        min_k = sorted_keys[0] if sorted_keys else 1
-        max_k = sorted_keys[-1] if sorted_keys else 0
-        content_lines = []
-        for k in range(min_k, max_k + 1):
-            if k in lines_dict:
-                content_lines.append(lines_dict[k].get("text", ""))
-            else:
-                content_lines.append("")
-        content = "\n".join(content_lines)
+    content = _reconstruct_project_markdown(project_id)
+    updated_proj = db.increment_project_download_count(project_id, "markdown") or proj
+    md_count = int(updated_proj.get("markdown_download_count") or 1)
+    try:
+        await state.ws_manager.broadcast({
+            "type": "project_updated",
+            "project": updated_proj,
+            "projects": db.get_projects()
+        })
+    except Exception:
+        pass
 
     safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', proj.get("name") or "document").strip('_')
+    if safe_name.lower().endswith(".md"):
+        safe_name = safe_name[:-3]
     return PlainTextResponse(
         content,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}.md"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}.md"',
+            "X-Markdown-Download-Count": str(md_count),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Markdown-Download-Count, X-Project-Download-Count"
+        }
+    )
+
+@router.get("/api/projects/bundle/{bundle_id}/export-markdown")
+async def export_bundle_markdown(bundle_id: str):
+    bundle_parts = db.get_bundle_projects(bundle_id)
+    if not bundle_parts:
+        raise HTTPException(status_code=404, detail="Project bundle not found")
+
+    sections = []
+    total_md_count = 0
+    for p in bundle_parts:
+        pid = p["id"]
+        part_md = _reconstruct_project_markdown(pid)
+        sections.append(part_md)
+        upd = db.increment_project_download_count(pid, "markdown") or p
+        total_md_count = max(total_md_count, int(upd.get("markdown_download_count") or 1))
+
+    try:
+        await state.ws_manager.broadcast({
+            "type": "projects_updated",
+            "projects": db.get_projects()
+        })
+    except Exception:
+        pass
+
+    b_name = bundle_parts[0].get("bundle_name") or bundle_parts[0].get("name") or bundle_id
+    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', b_name).strip('_')
+    return PlainTextResponse(
+        "\n\n".join(sections),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}_bundle.md"',
+            "X-Markdown-Download-Count": str(total_md_count),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Markdown-Download-Count, X-Project-Download-Count"
+        }
     )
 
 @router.get("/api/document/export-markdown")
@@ -889,103 +1072,334 @@ async def export_active_document_markdown():
         )
     return await export_project_markdown(pid)
 
+def _build_project_or_bundle_zip(primary_proj: Dict[str, Any], bundle_parts: List[Dict[str, Any]]) -> Tuple[bytes, str, int]:
+    primary_id = primary_proj["id"]
+    is_bundle = len(bundle_parts) > 1 or bool(primary_proj.get("bundle_id"))
+    parts_to_package = bundle_parts if bundle_parts else [primary_proj]
+
+    parts_manifest: List[Dict[str, Any]] = []
+    added_files = set()
+    zip_buffer = io.BytesIO()
+
+    primary_frames = db.get_frames(primary_id, include_boxes=True)
+    primary_lines_dict = db.get_document_lines(primary_id)
+    primary_telemetry = db.get_project_telemetry(primary_id)
+    primary_md = _reconstruct_project_markdown(primary_id)
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for idx, p_proj in enumerate(parts_to_package, start=1):
+            p_id = p_proj["id"]
+            p_frames = db.get_frames(p_id, include_boxes=True)
+            p_lines_dict = db.get_document_lines(p_id)
+            p_tel = db.get_project_telemetry(p_id)
+            p_md = _reconstruct_project_markdown(p_id)
+            p_num = int(p_proj.get("part_number") or idx)
+            raw_p_fn = p_proj.get("part_file_name") or p_proj.get("name") or f"part{p_num}.md"
+            safe_p_fn = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', raw_p_fn).strip('_')
+            if not safe_p_fn.lower().endswith(".md"):
+                safe_p_fn = f"{safe_p_fn}.md"
+
+            part_arc_path = f"parts/{safe_p_fn}"
+            zf.writestr(part_arc_path, p_md)
+            if is_bundle and safe_p_fn not in added_files:
+                added_files.add(safe_p_fn)
+                zf.writestr(safe_p_fn, p_md)
+
+            parts_manifest.append({
+                "part_number": p_num,
+                "part_file_name": safe_p_fn,
+                "markdown_path": part_arc_path,
+                "markdown_content": p_md,
+                "project": p_proj,
+                "frames": p_frames,
+                "document_lines": list(p_lines_dict.values()),
+                "telemetry": p_tel
+            })
+
+            for f in p_frames:
+                fid = f.get("frame_id")
+                fn = f.get("filename") or f"{fid}.png"
+                fpath = _find_frame_file(fid, fn)
+                if fpath and fpath.exists() and fpath.name not in added_files:
+                    added_files.add(fpath.name)
+                    zf.write(fpath, arcname=f"frames/{fpath.name}")
+
+            for calib_name in [f"calib_end_{p_id}.png", f"calib_home_{p_id}.png"]:
+                calib_path = _find_frame_file(calib_name, calib_name)
+                if calib_path and calib_path.exists() and calib_path.name not in added_files:
+                    added_files.add(calib_path.name)
+                    zf.write(calib_path, arcname=f"frames/{calib_path.name}")
+
+        bundle_name = primary_proj.get("bundle_name") or primary_proj.get("name") or "project"
+        manifest = {
+            "version": 2,
+            "is_bundle": is_bundle,
+            "bundle_id": primary_proj.get("bundle_id") or "",
+            "bundle_name": bundle_name,
+            "total_parts": max(len(parts_manifest), int(primary_proj.get("total_parts") or 0)),
+            "exported_at": datetime.now().isoformat(),
+            "project": primary_proj,
+            "frames": primary_frames,
+            "document_lines": list(primary_lines_dict.values()),
+            "telemetry": primary_telemetry,
+            "parts": parts_manifest
+        }
+
+        safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', (bundle_name if len(parts_manifest) > 1 else (primary_proj.get("name") or "project"))).strip('_')
+        if safe_name.lower().endswith(".md"):
+            safe_name = safe_name[:-3]
+
+        zf.writestr("project_data.json", json.dumps(manifest, indent=2))
+        root_md_name = f"{safe_name}.md"
+        if root_md_name not in added_files:
+            zf.writestr(root_md_name, primary_md)
+
+    zip_filename = f"{safe_name}_{primary_id}.zip"
+    dl_count = int(primary_proj.get("project_download_count") or 1)
+    return zip_buffer.getvalue(), zip_filename, dl_count
+
+@router.get("/api/projects/bundle/{bundle_id}/export")
+async def export_bundle_zip(bundle_id: str):
+    bundle_parts = db.get_bundle_projects(bundle_id)
+    if not bundle_parts:
+        raise HTTPException(status_code=404, detail="Project bundle not found")
+
+    updated_parts = []
+    max_dl_count = 1
+    for p in bundle_parts:
+        upd = db.increment_project_download_count(p["id"], "project") or p
+        updated_parts.append(upd)
+        max_dl_count = max(max_dl_count, int(upd.get("project_download_count") or 1))
+
+    try:
+        await state.ws_manager.broadcast({
+            "type": "projects_updated",
+            "projects": db.get_projects()
+        })
+    except Exception:
+        pass
+
+    primary_proj = next((p for p in updated_parts if p.get("is_active")), updated_parts[0])
+    zip_bytes, zip_filename, _ = _build_project_or_bundle_zip(primary_proj, updated_parts)
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+            "X-Project-Download-Count": str(max_dl_count),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Markdown-Download-Count, X-Project-Download-Count"
+        }
+    )
+
 @router.get("/api/projects/{project_id}/export")
-async def export_project_zip(project_id: str):
+async def export_project_zip(project_id: str, include_bundle: bool = True):
     proj = db.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    frames = db.get_frames(project_id)
-    lines_dict = db.get_document_lines(project_id)
-    telemetry = db.get_project_telemetry(project_id)
+    b_id = proj.get("bundle_id")
+    bundle_parts = db.get_bundle_projects(b_id) if (include_bundle and b_id) else []
 
-    sorted_keys = sorted(lines_dict.keys())
-    if sorted_keys:
-        min_k = sorted_keys[0]
-        max_k = sorted_keys[-1]
-        md_lines = [lines_dict[k].get("text", "") if k in lines_dict else "" for k in range(min_k, max_k + 1)]
+    if bundle_parts and len(bundle_parts) > 1:
+        updated_parts = []
+        updated_proj = proj
+        for p in bundle_parts:
+            upd = db.increment_project_download_count(p["id"], "project") or p
+            updated_parts.append(upd)
+            if p["id"] == project_id:
+                updated_proj = upd
+        proj_dl_count = int(updated_proj.get("project_download_count") or 1)
     else:
-        md_lines = []
-    markdown_content = "\n".join(md_lines)
+        updated_proj = db.increment_project_download_count(project_id, "project") or proj
+        updated_parts = [updated_proj]
+        proj_dl_count = int(updated_proj.get("project_download_count") or 1)
 
-    manifest = {
-        "version": 1,
-        "exported_at": datetime.now().isoformat(),
-        "project": proj,
-        "frames": frames,
-        "document_lines": list(lines_dict.values()),
-        "telemetry": telemetry
-    }
+    try:
+        await state.ws_manager.broadcast({
+            "type": "project_updated",
+            "project": updated_proj,
+            "projects": db.get_projects()
+        })
+    except Exception:
+        pass
 
-    safe_name = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', proj.get("name") or "project").strip('_')
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("project_data.json", json.dumps(manifest, indent=2))
-        zf.writestr(f"{safe_name}.md", markdown_content)
-
-        added_files = set()
-        for f in frames:
-            fid = f.get("frame_id")
-            fn = f.get("filename") or f"{fid}.png"
-            fpath = _find_frame_file(fid, fn)
-            if fpath and fpath.exists() and fpath.name not in added_files:
-                added_files.add(fpath.name)
-                zf.write(fpath, arcname=f"frames/{fpath.name}")
-
-        for calib_name in [f"calib_end_{project_id}.png", f"calib_home_{project_id}.png"]:
-            calib_path = _find_frame_file(calib_name, calib_name)
-            if calib_path and calib_path.exists() and calib_path.name not in added_files:
-                added_files.add(calib_path.name)
-                zf.write(calib_path, arcname=f"frames/{calib_path.name}")
-
-    zip_bytes = zip_buffer.getvalue()
-    zip_filename = f"{safe_name}_{project_id}.zip"
+    zip_bytes, zip_filename, _ = _build_project_or_bundle_zip(updated_proj, updated_parts)
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'}
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_filename}"',
+            "X-Project-Download-Count": str(proj_dl_count),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Markdown-Download-Count, X-Project-Download-Count"
+        }
     )
+
+def _markdown_text_to_document_lines(md_text: str) -> List[Dict[str, Any]]:
+    if not md_text:
+        return []
+    now = datetime.now().isoformat()
+    return [
+        {
+            "line_number": idx,
+            "text": line_str,
+            "confidence": 1.0,
+            "frame_id": "",
+            "verified": True,
+            "is_verified": 1,
+            "updated_at": now
+        }
+        for idx, line_str in enumerate(md_text.splitlines(), start=1)
+    ]
 
 @router.post("/api/projects/import")
 async def import_project_zip(file: UploadFile = File(...)):
-    if not file.filename.endswith(".zip"):
+    if not (file.filename or "").lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a .zip project archive")
+
+    imported_projects: List[Dict[str, Any]] = []
+    total_frames_imported = 0
+    total_lines_imported = 0
 
     try:
         contents = await file.read()
         zip_buf = io.BytesIO(contents)
         with zipfile.ZipFile(zip_buf, "r") as zf:
             namelist = zf.namelist()
-            if "project_data.json" not in namelist:
-                raise HTTPException(status_code=400, detail="Archive missing project_data.json metadata")
-
-            raw_data = zf.read("project_data.json").decode("utf-8")
-            data = json.loads(raw_data)
-
-            proj_meta = data.get("project", {})
-            frames_meta = data.get("frames", [])
-            lines_meta = data.get("document_lines", [])
-            tel_meta = data.get("telemetry", {})
-
             config.FRAMES_DIR.mkdir(parents=True, exist_ok=True)
             for name in namelist:
                 if name.startswith("frames/") and not name.endswith("/"):
                     fname = Path(name).name
-                    if fname.endswith(".png") or fname.endswith(".jpg"):
+                    if fname.lower().endswith((".png", ".jpg", ".jpeg")):
                         img_bytes = zf.read(name)
                         dest_path = config.FRAMES_DIR / fname
                         dest_path.write_bytes(img_bytes)
                         if getattr(db, "STORAGE_FRAMES_DIR", None) and db.STORAGE_FRAMES_DIR.exists():
                             (db.STORAGE_FRAMES_DIR / fname).write_bytes(img_bytes)
 
-            imported_proj = db.import_project_data(proj_meta, frames_meta, lines_meta, tel_meta)
-            new_pid = imported_proj["id"]
+            if "project_data.json" in namelist:
+                raw_data = zf.read("project_data.json").decode("utf-8")
+                data = json.loads(raw_data)
+                parts_list = data.get("parts") if isinstance(data.get("parts"), list) else []
+
+                if len(parts_list) > 0:
+                    orig_bundle_id = data.get("bundle_id") or ""
+                    orig_bundle_name = data.get("bundle_name") or ""
+                    existing_projs_by_id = {p["id"] for p in db.get_projects()}
+                    any_id_collides = any(
+                        (pt.get("project") or {}).get("id") in existing_projs_by_id
+                        for pt in parts_list
+                    )
+                    override_b_id = None
+                    if orig_bundle_id and any_id_collides:
+                        override_b_id = f"{orig_bundle_id}_imp_{int(datetime.now().timestamp())}"
+                    elif orig_bundle_id:
+                        override_b_id = orig_bundle_id
+
+                    sorted_parts = sorted(
+                        parts_list,
+                        key=lambda pt: int(pt.get("part_number") or (pt.get("project") or {}).get("part_number") or 999)
+                    )
+                    tot_parts_count = max(len(sorted_parts), int(data.get("total_parts") or 0))
+
+                    for idx, pt in enumerate(sorted_parts, start=1):
+                        p_meta = dict(pt.get("project") or {})
+                        p_num = int(pt.get("part_number") or p_meta.get("part_number") or idx)
+                        p_fn = pt.get("part_file_name") or p_meta.get("part_file_name") or p_meta.get("name") or f"part{p_num}.md"
+                        p_meta["part_number"] = p_num
+                        p_meta["total_parts"] = tot_parts_count
+                        p_meta["part_file_name"] = p_fn
+                        if orig_bundle_name and not p_meta.get("bundle_name"):
+                            p_meta["bundle_name"] = orig_bundle_name
+
+                        p_frames = pt.get("frames") or []
+                        p_lines = pt.get("document_lines") or []
+                        if not p_lines:
+                            md_txt = pt.get("markdown_content") or ""
+                            if not md_txt and pt.get("markdown_path") and pt["markdown_path"] in namelist:
+                                md_txt = zf.read(pt["markdown_path"]).decode("utf-8", errors="replace")
+                            if md_txt:
+                                p_lines = _markdown_text_to_document_lines(md_txt)
+
+                        p_tel = pt.get("telemetry") or {}
+                        imp_p = db.import_project_data(
+                            p_meta,
+                            p_frames,
+                            p_lines,
+                            p_tel,
+                            activate=(idx == 1),
+                            override_bundle_id=override_b_id,
+                            override_bundle_name=orig_bundle_name or None
+                        )
+                        imported_projects.append(imp_p)
+                        total_frames_imported += len(p_frames)
+                        total_lines_imported += len(p_lines)
+                else:
+                    proj_meta = data.get("project", {})
+                    frames_meta = data.get("frames", [])
+                    lines_meta = data.get("document_lines", [])
+                    if not lines_meta:
+                        md_files = [n for n in namelist if n.lower().endswith(".md") and not n.endswith("/")]
+                        if md_files:
+                            md_txt = zf.read(md_files[0]).decode("utf-8", errors="replace")
+                            lines_meta = _markdown_text_to_document_lines(md_txt)
+                    tel_meta = data.get("telemetry", {})
+                    imp_p = db.import_project_data(proj_meta, frames_meta, lines_meta, tel_meta, activate=True)
+                    imported_projects.append(imp_p)
+                    total_frames_imported += len(frames_meta)
+                    total_lines_imported += len(lines_meta)
+            else:
+                # Fallback: ZIP archive containing one or more .md part files directly
+                md_entries = [n for n in namelist if n.lower().endswith((".md", ".markdown")) and not n.endswith("/") and not Path(n).name.startswith(".")]
+                if not md_entries:
+                    raise HTTPException(status_code=400, detail="Archive missing project_data.json metadata and contains no .md files")
+
+                parsed_entries = []
+                for entry_name in md_entries:
+                    fname = Path(entry_name).name
+                    b_meta = db._infer_bundle_metadata(name=fname, part_file_name=fname)
+                    parsed_entries.append((int(b_meta.get("part_number") or 999), fname, entry_name, b_meta))
+                parsed_entries.sort(key=lambda x: (x[0], x[1]))
+
+                shared_b_id = parsed_entries[0][3].get("bundle_id") or f"bundle_{re.sub(r'[^a-z0-9]+', '_', Path(file.filename or 'bundle').stem.lower()).strip('_')}"
+                shared_b_name = parsed_entries[0][3].get("bundle_name") or Path(file.filename or "Bundle").stem
+                tot_parts = len(parsed_entries)
+
+                for idx, (p_num, fname, entry_name, b_meta) in enumerate(parsed_entries, start=1):
+                    md_txt = zf.read(entry_name).decode("utf-8", errors="replace")
+                    lines_meta = _markdown_text_to_document_lines(md_txt)
+                    eff_part = p_num if p_num < 999 else idx
+                    proj_meta = {
+                        "name": fname,
+                        "description": f"File: {fname} (Multi-Part Bundle Part {eff_part} of {tot_parts})",
+                        "target_total_lines": len(lines_meta),
+                        "bundle_id": shared_b_id,
+                        "bundle_name": shared_b_name,
+                        "part_number": eff_part,
+                        "total_parts": tot_parts,
+                        "part_file_name": fname,
+                    }
+                    imp_p = db.import_project_data(
+                        proj_meta,
+                        [],
+                        lines_meta,
+                        {},
+                        activate=(idx == 1),
+                        override_bundle_id=shared_b_id,
+                        override_bundle_name=shared_b_name
+                    )
+                    imported_projects.append(imp_p)
+                    total_lines_imported += len(lines_meta)
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to unpack project archive: {str(e)}")
 
+    if not imported_projects:
+        raise HTTPException(status_code=400, detail="No valid projects found in archive")
+
+    active_imported = imported_projects[0]
+    new_pid = active_imported["id"]
     db.activate_project(new_pid)
     state.load_persisted_state()
 
@@ -995,9 +1409,10 @@ async def import_project_zip(file: UploadFile = File(...)):
     except Exception:
         pass
 
+    all_projs = db.get_projects()
     try:
-        await state.ws_manager.broadcast({"type": "project_switched", "project": imported_proj})
-        await state.ws_manager.broadcast({"type": "projects_updated", "projects": db.get_projects()})
+        await state.ws_manager.broadcast({"type": "project_switched", "project": active_imported, "projects": all_projs})
+        await state.ws_manager.broadcast({"type": "projects_updated", "projects": all_projs})
         await state.ws_manager.broadcast({"type": "frames_purged", "frames": db.get_frames(new_pid)})
         from routers.frames_document import _doc_payload
         await state.ws_manager.broadcast({"type": "document_updated", "data": _doc_payload()})
@@ -1006,9 +1421,19 @@ async def import_project_zip(file: UploadFile = File(...)):
 
     return {
         "status": "success",
-        "message": f"Successfully imported project '{imported_proj.get('name')}'",
-        "project": imported_proj,
-        "frames_imported": len(frames_meta),
-        "lines_imported": len(lines_meta)
+        "is_bundle": len(imported_projects) > 1 or bool(active_imported.get("bundle_id")),
+        "bundle_id": active_imported.get("bundle_id") or "",
+        "bundle_name": active_imported.get("bundle_name") or active_imported.get("name") or "",
+        "parts_imported": len(imported_projects),
+        "message": (
+            f"Successfully imported bundle '{active_imported.get('bundle_name') or active_imported.get('name')}' ({len(imported_projects)} parts)"
+            if len(imported_projects) > 1
+            else f"Successfully imported project '{active_imported.get('name')}'"
+        ),
+        "project": active_imported,
+        "projects": imported_projects,
+        "all_projects": all_projs,
+        "frames_imported": total_frames_imported,
+        "lines_imported": total_lines_imported
     }
 

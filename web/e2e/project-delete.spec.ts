@@ -7,63 +7,95 @@ test.describe('Project Lifecycle & Deletion Suite with 15 Captures', () => {
   let projectName: string = 'Matrix_15_Captures_Delete_Test';
 
   test.beforeAll(async () => {
-    // Run setup script that initializes 15 captures, image files, and document lines
-    const scriptPath = path.resolve('..', 'scripts', 'setup_test_project_15_captures.py');
-    const out = execSync(`python "${scriptPath}"`, { encoding: 'utf-8' });
-    const parsed = JSON.parse(out.trim());
+    const serverDir = path.resolve('..', 'server');
+    const pyScript = `
+import sys, json, urllib.request
+from pathlib import Path
+from PIL import Image
+sys.path.insert(0, r"${serverDir}")
+import db, config
+for existing in db.get_projects():
+    if existing.get("name") == "Matrix_15_Captures_Delete_Test":
+        db.delete_project(existing["id"])
+p = db.create_project("Matrix_15_Captures_Delete_Test", "E2E test project", 450)
+pid = p["id"]
+db.activate_project(pid)
+frames_dir = Path(config.FRAMES_DIR)
+frames_dir.mkdir(parents=True, exist_ok=True)
+dummy_img = Image.new("RGB", (160, 120), color=(15, 23, 42))
+lines = {}
+for i in range(1, 16):
+    top_ln, bot_ln = (i - 1) * 30 + 1, i * 30
+    fid = f"e2e_frame_{i:03d}"
+    fn = f"{fid}.png"
+    img_path = frames_dir / fn
+    dummy_img.save(img_path)
+    db.save_frame(pid, fid, fn, top_ln, bot_ln, i, img_path.stat().st_size, "processed", 30)
+    for ln in range(top_ln, bot_ln + 1):
+        lines[ln] = {"line_number": ln, "text": f"Line {ln}", "confidence": 0.99, "frame_id": fid, "is_verified": 1}
+db.save_document_lines(pid, lines)
+try:
+    req = urllib.request.Request(f"http://127.0.0.1:8000/api/projects/{pid}/activate", method="POST")
+    urllib.request.urlopen(req, timeout=5).read()
+except Exception:
+    pass
+print(json.dumps({"project_id": pid, "project_name": p["name"], "frame_count": 15}))
+`;
+    const out = execSync('python -', { input: pyScript, encoding: 'utf-8' });
+    const parsed = JSON.parse(out.trim().split('\n').pop()!);
     createdProjectId = parsed.project_id;
     projectName = parsed.project_name;
     expect(createdProjectId).toBeTruthy();
     expect(parsed.frame_count).toBe(15);
   });
 
-  test('should load studio with 15 captures, open sidebar without squishing, and delete project', async ({ page }) => {
+  test('should load project dropdown, increment MD & ZIP download counters, and delete project', async ({ page }) => {
     page.on('console', msg => console.log('PAGE LOG:', msg.text()));
     await page.goto('/');
     await page.waitForSelector('#root', { state: 'visible', timeout: 15000 });
 
-    // 1. Verify project name in header badge
-    const badge = page.locator('.project-badge-name');
-    await expect(badge).toContainText(projectName, { timeout: 10000 });
+    // 1. Open the project dropdown in the top header
+    const dropdownBtn = page.locator('.project-badge');
+    await expect(dropdownBtn).toBeVisible({ timeout: 10000 });
+    await expect(dropdownBtn).toContainText(projectName, { timeout: 10000 });
+    await dropdownBtn.click();
 
-    // 2. Verify 15 captures are displayed in the frames panel
-    const framesHeader = page.locator('.frames-feed-panel .panel-header');
-    await expect(framesHeader).toContainText('Captured Frames (15)', { timeout: 10000 });
+    const popover = page.locator('.project-dropdown-popover');
+    await expect(popover).toBeVisible();
+    await expect(popover).toContainText(projectName);
+    await expect(popover).toContainText('15 frames');
 
-    // Ensure 15 frame cards exist in the feed
-    const frameCards = page.locator('.frame-card');
-    await expect(frameCards).toHaveCount(15, { timeout: 10000 });
+    // 2. Verify MD and ZIP download buttons and initial counters (0)
+    const mdCountBadge = popover.locator('[data-testid="project-md-download-count"]').first();
+    const zipCountBadge = popover.locator('[data-testid="project-zip-download-count"]').first();
+    await expect(mdCountBadge).toHaveText('0');
+    await expect(zipCountBadge).toHaveText('0');
 
-    // Capture screenshot of UI with 15 captures
-    await page.screenshot({ path: 'test-results/screenshots/15_captures_active_project.png', fullPage: true });
+    // 3. Click MD download button and verify counter increments to 1
+    const mdBtn = popover.locator('button.btn-download-action.variant-markdown').nth(1);
+    const [mdDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      mdBtn.click()
+    ]);
+    expect(mdDownload.suggestedFilename()).toContain('.md');
+    await expect(mdCountBadge).toHaveText('1', { timeout: 5000 });
 
-    // 3. Open the projects sidebar
-    const sidebar = page.locator('.projects-sidebar');
-    const isCollapsed = await sidebar.evaluate(el => el.classList.contains('collapsed'));
-    if (isCollapsed) {
-      const rail = page.locator('.projects-sidebar-rail, .project-badge');
-      await rail.first().click();
-      await page.waitForTimeout(400);
-    }
+    // 4. Click ZIP download button and verify counter increments to 1
+    const zipBtn = popover.locator('button.btn-download-action.variant-project').nth(1);
+    const [zipDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      zipBtn.click()
+    ]);
+    expect(zipDownload.suggestedFilename()).toContain('.zip');
+    await expect(zipCountBadge).toHaveText('1', { timeout: 5000 });
 
-    // 4. Verify sidebar is expanded and not crushed (width >= 250px)
-    const sidebarWidth = await sidebar.evaluate(el => el.getBoundingClientRect().width);
-    expect(sidebarWidth).toBeGreaterThanOrEqual(250);
+    // Capture screenshot of the styled download buttons & counters
+    await page.screenshot({ path: 'test-results/screenshots/dropdown_download_counters.png' });
 
-    // Verify active project card details in sidebar
-    const activeCard = page.locator('.project-card.active');
-    await expect(activeCard).toBeVisible();
-    await expect(activeCard).toContainText(projectName);
-    await expect(activeCard).toContainText('15 frames');
-
-    // Capture screenshot of sidebar with 15 frames stats
-    await page.screenshot({ path: 'test-results/screenshots/sidebar_expanded_with_stats.png' });
-
-    // 5. Click the delete project button on the card
-    const deleteBtn = activeCard.locator('button.btn-text-danger');
+    // 5. Click the delete project button on the row
+    const deleteBtn = popover.locator('button.btn-text-danger').first();
     await expect(deleteBtn).toBeVisible();
     await deleteBtn.click();
-    await page.waitForTimeout(400);
 
     // 6. Verify confirmation modal is open
     const modal = page.locator('.modal-overlay');
@@ -71,23 +103,20 @@ test.describe('Project Lifecycle & Deletion Suite with 15 Captures', () => {
     await expect(modal).toContainText('Delete Project');
     await expect(modal).toContainText(projectName);
 
-    // Capture screenshot of confirmation modal
-    await page.screenshot({ path: 'test-results/screenshots/delete_project_modal.png' });
-
     // 7. Confirm deletion
     const confirmBtn = modal.locator('.modal-btn-confirm');
     await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
-    await page.waitForTimeout(1000);
 
-    // 8. Verify the project card is no longer in the projects list
-    const deletedCard = page.locator(`.project-card:has-text("${projectName}")`);
-    await expect(deletedCard).toHaveCount(0);
-
-    // 9. Verify UI transitioned cleanly (no hanging frames from deleted project)
+    // 8. Verify the project is removed from the header, dropdown, and backend
+    await expect(dropdownBtn).toContainText('Select Project', { timeout: 5000 });
+    if (!(await popover.isVisible())) {
+      await dropdownBtn.click();
+    }
+    await expect(popover).toBeVisible();
+    await expect(popover).not.toContainText(projectName, { timeout: 5000 });
     await page.screenshot({ path: 'test-results/screenshots/after_project_deletion.png', fullPage: true });
 
-    // 10. Check backend API to ensure project was deleted
     const verifyRes = await page.request.get(`http://127.0.0.1:8000/api/projects`);
     const projectList = await verifyRes.json();
     const stillExists = projectList.some((p: any) => p.id === createdProjectId);

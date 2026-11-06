@@ -198,7 +198,7 @@ export const ConfirmProvider: React.FC<{ children: ReactNode }> = ({ children })
           confirmIcon={opts?.confirmIcon ?? DefaultIcon}
           cancelIcon={opts?.cancelIcon}
           width={opts?.width || '480px'}
-          autoFocus={opts?.autoFocus || (variant === 'danger' ? 'cancel' : 'confirm')}
+          autoFocus={opts?.autoFocus || 'confirm'}
         >
           <div className="confirm-modal-content">
             {opts?.message && <div className="confirm-modal-message">{opts.message}</div>}

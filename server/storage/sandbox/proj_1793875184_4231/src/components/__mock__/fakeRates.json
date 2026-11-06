@@ -1,0 +1,149 @@
+  'json'
+{
+"id": "06FB89F6-321B-4F35-BE5C-E01E3446AC0E",
+"productId":"F4AED4AB-CF8D-48DE-9106-667AB34DA5F6",
+"recordState":"Active",
+"source":"Manually Entered",
+"startDate":"10/15/2019",
+"endDate":"11/15/2019",
+"metadataJSON":"",
+"valuesJSON":
+{
+"rateTables":[
+{
+"displayOrder":1,
+"rateTableName":"Table 1",
+"modelYearStart":"2018",
+"modelYearEnd":"2019",
+"andOlder":false,
+"terms":[
+{
+"title":"3 Years",
+"termLength":36,
+"termUnits":"months",
+"valueUnits":"percent",
+"creditRangeRate0":2,
+"creditRangeRate1":2.25,
+"creditRangeRate2":2.5,
+"creditRangeRate3":2.75,
+"creditRangeRate4":3
+},
+{
+"title":"5 Years",
+"termLength":60,
+"termUnits":"months",
+"valueUnits":"percent",
+"creditRangeRate0":2.25,
+"creditRangeRate1":2.5,
+"creditRangeRate2":2.75,
+"creditRangeRate3":3,
+"creditRangeRate4":3.5
+}
+]
+},
+{
+"displayOrder":2,
+"rateTableName":"Table 1",
+"modelYearStart":"2017",
+"modelYearEnd":null,
+"andOlder":true,
+"terms":[
+{
+"title":"3 Years",
+"termLength":36,
+"termUnits":"months",
+"valueUnits":"percent",
+"creditRangeRate0":2.25,
+"creditRangeRate1":2.5,
+"creditRangeRate2":2.75,
+"creditRangeRate3":3,
+"creditRangeRate4":3.5
+},
+{
+"title":"5 Years",
+"termLength":60,
+"termUnits":"months",
+"valueUnits":"percent",
+"creditRangeRate0":2.75,
+"creditRangeRate1":3,
+"creditRangeRate2":3.25,
+"creditRangeRate3":3.5,
+"creditRangeRate4":4
+}
+]
+}
+]
+},
+"specificationJSON":
+{
+"minRateTables":1,
+"maxRateTables":4,
+"RateTableListName":"rateTables",
+"rateTableTags":{
+"displayRows":2,
+"diaplayCols":1,
+"tags":[
+{
+"tagId":1,
+"title":"Model Year Range Start",
+"dataType":"year",
+"required":true,
+"display":true,
+"row":1,
+"col":1,
+"valueTagName":"modelYearStart"
+},
+{
+"tagId":2,
+"title":"Model Year Range End",
+"dataType":"year",
+"required":false,
+"display":true,
+"row":2,
+"col":1,
+"valueTagName":"modelYearEnd"
+},
+{
+"tagId":3,
+"title":"And Older",
+"dataType":"checkbox",
+"required":false,
+"display":true,
+"row":2,
+"col":1,
+"valueTagName":"andOlder"
+}
+]
+},
+"RateTableTermListName":"terms",
+"minRateTableTerms":1,
+"maxRateTableTerms":10,
+"termRangeValues":[
+{
+"order":1,
+"name":"Excellent",
+"valueName":"creditRangeRate0"
+},
+{
+"order":2,
+"name":"Very Good",
+"valueName":"creditRangeRate1"
+},
+{
+"order":3,
+"name":"Good",
+"valueName":"creditRangeRate2"
+},
+{
+"order":4,
+"name":"Average",
+"valueName":"creditRangeRate3"
+},
+{
+"order":5,
+"name":"Below Average",
+"valueName":"creditRangeRate4"
+}
+]
+}
+}

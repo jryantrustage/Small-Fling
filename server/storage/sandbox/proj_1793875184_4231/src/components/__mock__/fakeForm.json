@@ -1,0 +1,8 @@
+  'json'
+{
+"name" : "Test Loan Form Name",
+"description": "Test loan form description",
+"versionDescription": "Test loan form version description",
+"specificationJSON": "{\"testSpecField\":\"testSpecValue\"}",
+"formId": "1059BADC-5DC1-484D-8D62-EA419C10E390"
+}

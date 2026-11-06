@@ -3087,6 +3087,16 @@ def export_project_markdown_to_disk(
     export_path = exports_dir / safe_base
     export_path.write_text(full_markdown, encoding="utf-8")
 
+    # Also store individual markdown part inside storage/bundles/<bundle_id>/<safe_base>
+    b_id = proj_info.get("bundle_id")
+    if b_id:
+        try:
+            b_dir = Path("c:/Projects/Small-Fling/storage/bundles") / re.sub(r'[<>:"/\\|?*]+', '_', str(b_id))
+            b_dir.mkdir(parents=True, exist_ok=True)
+            (b_dir / safe_base).write_text(full_markdown, encoding="utf-8")
+        except Exception:
+            pass
+
     # Also keep reproduced_Matrix_main.md updated
     try:
         out_dir = Path("c:/Projects/Small-Fling/storage")
@@ -3165,9 +3175,34 @@ def load_persisted_state():
                 document_lines.clear()
                 for k, v in lines_db.items():
                     document_lines[k] = v
+                frames_db = db.get_frames(pid, include_boxes=True)
+                for f in frames_db:
+                    t_ln = int(f.get("top_line") or 0)
+                    b_ln = int(f.get("bottom_line") or 0)
+                    if t_ln > 0 and b_ln >= t_ln and not f.get("lines"):
+                        f["lines"] = [
+                            {
+                                "line_number": ln,
+                                "gutter_number": ln,
+                                "text": lines_db[ln].get("text", ""),
+                                "row_slice_text": lines_db[ln].get("text", ""),
+                                "confidence": lines_db[ln].get("confidence", 1.0),
+                                "verified": bool(lines_db[ln].get("verified", True)),
+                                "position_verified": True,
+                                "status": "verified" if lines_db[ln].get("verified", True) else "ok",
+                            }
+                            for ln in range(t_ln, b_ln + 1)
+                            if ln in lines_db
+                        ]
                 captured_frames.clear()
-                captured_frames.update({f["frame_id"]: f for f in db.get_frames(pid)})
+                captured_frames.update({f["frame_id"]: f for f in frames_db})
                 tel = db.get_project_telemetry(pid)
+                max_db_ln = max(lines_db.keys()) if lines_db else 0
+                last_fr = frames_db[-1] if frames_db else {}
+                latest_telemetry["target_total_lines"] = int(p.get("target_total_lines") or max_db_ln or 0)
+                latest_telemetry["current_top_line"] = int(last_fr.get("top_line") or (min(lines_db.keys()) if lines_db else 1))
+                latest_telemetry["current_bottom_line"] = int(last_fr.get("bottom_line") or max_db_ln or 0)
+                latest_telemetry["current_page"] = int(last_fr.get("page_index") or len(frames_db) or 1)
                 if tel.get("telemetry"):
                     latest_telemetry.update(tel["telemetry"])
                 if tel.get("token_stats"):
@@ -3178,6 +3213,10 @@ def load_persisted_state():
                 if vfs_db:
                     ws = analyzer_workspaces.setdefault(pid, {"project_id": pid})
                     ws.setdefault("vfs_files", vfs_db)
+                try:
+                    sync_multipart_state_from_alignment()
+                except Exception:
+                    pass
             else:
                 document_lines.clear()
                 captured_frames.clear()

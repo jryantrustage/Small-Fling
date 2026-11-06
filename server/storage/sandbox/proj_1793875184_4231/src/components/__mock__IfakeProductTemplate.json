@@ -1,0 +1,665 @@
+  'json'
+{
+
+    "recordState":"Active",
+"name":"Sprint 6 template",
+"description":"Includes setup and rates sections.",
+"category":"Lending",
+"type":"Auto",
+"subtype":"New",
+"version":"1",
+"versionDescription":"",
+"templateMetadataJSON":{},
+"templateBusinessRulesJSON":{},
+"templateSpecificationJSON": {
+"form": {
+"layout": {
+"row": {
+                    ``;``; {
+"col": {
+"1": [ "SETUP", "DISBURSEMENT" ],
+"2": [ "MEMBERSHIP", "ANCILLARY-PRODUCTS" ]
+}
+},
+"2": {
+"col": {
+                                   "RATES" J
+}
+},
+"3": {
+"col": {
+"1": [ "COLLATERAL" ],
+"2": [ "INTEGRATIONS" ]
+}
+},
+"4":
+{
+                        ``>>]``;
+{
+"1": ["LENDING-DASHBOARD"],
+"2": []
+}
+}
+}
+}
+},
+"sections": [
+{
+"sectionCode": "SETUP",
+"sectionTitle": "Product Setup",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 1,
+"settings": [
+{
+"settingCode": "CORE-PRODUCT-START-DATE",
+"displayOrder" : 1,
+"type": "text-entry",
+"label": "Start Date",
+"valueType": "date",
+"required": true,
+"inHeader": true
+},
+{
+"settingCode": "CORE-PRODUCT-END-DATE",
+"displayOrder" : 2,
+"type": "text-entry",
+"label": "End Date",
+"valueType": "date",
+"required": false,
+"inHeader": true
+},
+{
+"settingCode": "CORE-PRODUCT-NAME",
+"displayOrder" : 1,
+"type": "text-entry",
+"label": "Core Product Name",
+"valueType": "text",
+"required": true,
+"requiredForDraft": true,
+"disabled": false,
+"maxLength": 50
+},
+{
+"settingCode": "CORE-PRODUCT-CATEGORY",
+"displayOrder" : 2,
+"type": "text-entry",
+"label": "Core Product Category",
+"valueType": "text",
+"required": true,
+"disabled": true
+},
+{
+"settingCode": "CORE-PRODUCT-TYPE",
+"displayOrder" : 3,
+"type": "text-entry",
+"label": "Core Product Type",
+"valueType": "text",
+"required": true,
+"disabled": true
+},
+{
+"settingCode": "CORE-PRODUCT-SUBTYPE",
+"displayOrder" : 4,
+"type": "text-entry",
+"label": "Core Product Sub-type",
+"valueType": "text",
+"required": true,
+"disabled": true
+},
+{
+"settingCode": "VEHICLE-TYPE",
+"displayOrder" : 5,
+"type": "single-select-list",
+"style": "dropdown",
+"showNoSelection": false,
+"noSelectionLabel": "",
+"label": "Vehicle Type",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "AUTO",
+"displayValue": "Auto",
+"enabled": true,
+"selected": true
+}
+]
+},
+{
+"settingCode": "DEFAULT-VEHICLE-PRICE",
+"displayOrder" : 6,
+"type": "text-entry",
+"label": "Default Vehicle Price",
+"valueType": "number",
+"required": true
+},
+{
+"settingCode": "MAX-LOAN-AMOUNT",
+"displayOrder" : 7,
+"type": "text-entry",
+"label": "Max Loan Amount",
+"valueType": "number"
+},
+{
+"settingCode": "MIN-LOAN-AMOUNT",
+"displayOrder" : 8,
+"type": "text-entry",
+"label": "Min Loan Amount",
+"valueType": "number",
+"required": true
+},
+{
+"settingCode": "LOAN-APPLICATION-IDLE-DURATION",
+"displayOrder" : 9,
+"type": "text-entry",
+"label": "Application Idle Duration",
+"valueType": "integer",
+"required": false,
+"rules": [
+
+                            {
+"type": "numeric comparison",
+"definition": {
+"operator": "<",
+"otherSetting": "LOAN-APPLICATION-EXPIRY-DURATION",
+"violationMessage": "Idle duration must be less than expiry duration"
+}
+}
+
+                        ]
+},
+{
+"settingCode": "LOAN-APPLICATION-EXPIRY-DURATION",
+"displayOrder" : 10,
+"type": "text-entry",
+"label": "Application Expiry Duration",
+"valueType": "integer",
+"required": true
+},
+{
+"settingCode": "ASSOC-TO-ALL-MERCHANTS",
+"displayOrder" : 11,
+"type": "on-off",
+"style": "switch",
+"label": "Associate Core Product to All Merchants",
+"valueType": "Boolean",
+"required": true,
+"enabled": true,
+"selected": true
+},
+{
+"settingCode": "ALLOW-SIMULATION",
+"displayOrder" : 12,
+"type": "on-off",
+"style": "switch",
+"label": "Allow Simulation",
+"valueType": "Boolean",
+"required": true,
+"enabled": true,
+"selected": true
+},
+{
+"type": "combo-text-field",
+"displayOrder" : 13,
+"settingCode": "MIN-MONTHLY-PAYMENT",
+"comboSettingLabel": "Minimum Monthly Payment",
+"firstSettingCode": "MIN-MONTHLY-PAYMENT-DOLLARS",
+"firstSettingType": "number",
+"firstSettingDisplayLabel": "Minimum Monthly Payment ($)",
+"secondSettingCode": "MIN-MONTHLY-PAYMENT-PERCENTAGE",
+"secondSettingType": "integer",
+"secondSettingDisplayLabel": "Minimum Monthly Payment (%)",
+"textBefore": "$",
+"textBetween": " and/or ",
+"textAfter": "%",
+"bothRequired": false,
+"oneRequired": true,
+"requiredForDraft": true
+}
+]
+},
+{
+"sectionCode": "MEMBERSHIP",
+"sectionTitle": "Membership",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 2,
+"settings": [
+{
+"settingCode": "ELIGIBILITY",
+"displayOrder" : 1,
+"type": "single-select-list",
+"style": "radiobutton",
+"label": "Who Can Apply",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "MEMBERS",
+"displayValue": "Members Only",
+"enabled": true,
+"selected": true
+},
+{
+"order": 2,
+"value": "MEMBERS-AND-NONMEMBERS",
+"displayValue": "Members and Non Members",
+"enabled": true,
+"selected": false
+}
+]
+}
+]
+},
+{
+"sectionCode": "ANCILLARY-PRODUCTS",
+"sectionTitle": "Ancillary Products",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 2,
+"componentReference": "ANCILLARY-PRODUCTS"
+},
+{
+"sectionCode": "DISBURSEMENT",
+"sectionTitle": "Disbursement Methods",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 4,
+"settings": [
+{
+"settingCode": "DISBURSEMENT-METHODS",
+"displayOrder" : 1,
+"type": "multi-select-list",
+"style": "checkbox",
+"minimumSelections": 1,
+"label": "Select Fund Disbursement Methods Offered",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "CHECK-TO-DEALER",
+"displayValue": "Check to Dealer",
+"enabled": true,
+"selected": false
+},
+{
+"order": 2,
+"value": "DIRECT-DEPOSIT-BORROWER-ACCT",
+"displayValue": "Direct Deposit to Borrower Account",
+"enabled": true,
+"selected": false
+},
+{
+"order": 3,
+"value": "CHECK-TO-BORROWER",
+"displayValue": "Check to Borrower",
+"enabled": true,
+"selected": false
+}
+]
+}
+]
+},
+{
+"sectionCode": "RATES",
+"sectionTitle": "Rates",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 2,
+"componentReference": "RATES_AUTO"
+},
+{
+"sectionCode": "COLLATERAL",
+"sectionTitle": "Collateral",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 6,
+"settings": [
+{
+"settingCode": "COLLATERAL-VIN-REQUIRED",
+"displayOrder" : 1,
+"type": "on-off",
+"style": "switch",
+"label": "VIN Required",
+"valueType": "Boolean",
+"required": true,
+"enabled": true,
+"selected": true
+}
+]
+},
+{
+"sectionCode": "INTEGRATIONS",
+"sectionTitle": "Integrations",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"displayLocation": {
+"startColumn": 2,
+"endColumn": 4,
+"startRow": 5,
+"endrow": 5
+},
+"flowOrder": 7,
+"settings": [
+{
+"settingCode": "INTEGRATIONS-CORE-BANKING",
+"displayOrder" : 1,
+"type": "single-select-list",
+"style": "dropdown",
+"showNoSelection": true,
+"noSelectionLabel": "Choose One",
+"label": "Core",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "SYMITAR",
+"displayValue": "Symitar",
+"enabled": true,
+"selected": false
+}
+]
+},
+{
+"settingCode": "INTEGRATIONS-HOME-BANKING",
+"displayOrder" : 2,
+"type": "single-select-list",
+"style": "dropdown",
+"showNoSelection": true,
+"noSelectionLabel": "Choose One",
+"label": "Home Banking",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "SYMITAR",
+"displayValue": "Symitar",
+"enabled": true,
+"selected": false
+}
+]
+},
+{
+"settingCode": "INTEGRATIONS-LOS",
+"displayOrder" : 3,
+"type": "single-select-list",
+"style": "dropdown",
+"showNoSelection": true,
+"noSelectionLabel": "Choose One",
+"label": "LOS",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "MERIDIAN-LINK",
+"displayValue": "Meridian Link",
+"enabled": true,
+"selected": false
+}
+]
+},
+{
+"settingCode": "INTEGRATIONS-VALUATION",
+"displayOrder" : 4,
+"type": "single-select-list",
+"style": "dropdown",
+"showNoSelection": true,
+"noSelectionLabel": "Choose One",
+"label": "Valuation",
+"valueType": "code",
+"required": true,
+"options": [
+{
+"order": 1,
+"value": "KBB",
+"displayValue": "KBB",
+"enabled": true,
+"selected": false
+}
+]
+}
+]
+},
+{
+"sectionCode": "LENDING-DASHBOARD",
+"sectionTitle": "Lending Dashboard",
+"showTitle": true,
+"isUsed": true,
+"isDisplayed": true,
+"flowOrder": 8,
+"settings": [
+{
+"settingCode": "DASHBOARD-RATES-LINK",
+"displayOrder": 1,
+"type": "text-entry",
+"label": "Rates Link",
+"valueType": "url",
+"required": true,
+"disabled": false
+},
+{
+"settingCode": "DASHBOARD-PRODUCT-DESCRIPTION",
+"displayOrder": 2,
+"type": "textbox",
+"label": "Dashboard Description",
+"required": true,
+"disabled": false,
+"multiline": true,
+"rowsMax": 5
+}
+]
+}
+]
+},
+"productBusinessRulesJSON":{},
+"productSpecificationJSON": {
+"sections": [
+{
+"sectionCode": "SETUP",
+"isUsed": true,
+"settings": [
+{
+"settingCode": "CORE-PRODUCT-START-DATE",
+"valueType": "text-entry",
+"value": "10/10/2000",
+"displayValue": "10/10/2000"
+},
+{
+"settingCode": "CORE-PRODUCT-END-DATE",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+},
+{
+"settingCode": "CORE-PRODUCT-NAME",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+},
+{
+"settingCode": "CORE-PRODUCT-CATEGORY",
+"valueType": "text-entry",
+"value": "Lending",
+"displayValue": "Lending"
+},
+{
+"settingCode": "CORE-PRODUCT-TYPE",
+"valueType": "text-entry",
+"value": "Auto",
+"displayValue": "Auto"
+},
+{
+"settingCode": "CORE-PRODUCT-SUBTYPE",
+"valueType": "text-entry",
+"value": "New",
+"displayValue": "New"
+},
+{
+"settingCode": "VEHICLE-TYPE",
+"valueType": "code",
+"value": "AUTO",
+"displayValue": "Auto"
+},
+{
+"settingCode": "DEFAULT-VEHICLE-PRICE",
+"valueType": "number",
+"value": "20000"
+},
+{
+"settingCode": "MAX-LOAN-AMOUNT",
+"valueType": "number",
+"value": "80000"
+},
+{
+"settingCode": "MIN-LOAN-AMOUNT",
+"valueType": "number",
+"value": "1000"
+},
+{
+"settingCode": "LOAN-APPLICATION-IDLE-DURATION",
+"valueType": "integer",
+"value": "20"
+},
+{
+"settingCode": "LOAN-APPLICATION-EXPIRY-DURATION",
+"valueType": "integer",
+"value": "30"
+},
+{
+"settingCode": "ASSOC-TO-ALL-MERCHANTS",
+"valueType": "boolean",
+"value": false
+},
+{
+"settingCode": "ALLOW-SIMULATION",
+"valueType": "boolean",
+"value": true
+},
+{
+"settingCode": "MIN-MONTHLY-PAYMENT-DOLLARS",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+},
+{
+"settingCode": "MIN-MONTHLY-PAYMENT-PERCENTAGE",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+}
+]
+},
+{
+"sectionCode": "MEMBERSHIP",
+"isUsed": true,
+"settings": [
+{
+"settingCode": "ELIGIBILITY",
+"valueType": "code",
+"value":"MEMBERS",
+"displayValue": "Members Only"
+}
+]
+},
+{
+"sectionCode": "DISBURSEMENT",
+"isUsed": true,
+"settings": [
+
+{
+"settingCode": "CHECK-TO-DEALER",
+"valueType": "boolean",
+"value": false
+},
+
+{
+"settingCode": "DIRECT-DEPOSIT-BORROWER-ACCT",
+"valueType": "boolean",
+"value": false
+},
+
+{
+"settingCode": "CHECK-TO-BORROWER",
+"valueType": "boolean",
+"value": false
+}
+]
+},
+{
+"sectionCode": "COLLATERAL",
+"isUsed": true,
+"settings": [
+{
+"order": 1,
+"settingCode": "COLLATERAL-VIN-REQUIRED",
+"valueType": "boolean",
+"value": false
+}
+]
+},
+{
+"sectionCode": "INTEGRATIONS",
+"isUsed": true,
+"settings": [
+{
+"settingCode": "INTEGRATIONS-CORE-BANKING",
+"valueType": "code",
+"value": "SYMITAR",
+"displayValue": "Symitar"
+},
+{
+"settingCode": "INTEGRATIONS-HOME-BANKING",
+"valueType": "code",
+"value": "SYMITAR",
+"displayValue": "Symitar"
+},
+{
+"settingCode": "INTEGRATIONS-LOS",
+"valueType": "code",
+"value": "MERIDIAN-LINK",
+"displayValue": "Meridian Link"
+},
+{
+"settingCode": "INTEGRATIONS-VALUATION",
+"valueType": "code",
+"value": "KBB",
+"displayValue": "KBB"
+}
+]
+},
+{
+"sectionCode": "LENDING-DASHBOARD",
+"isUsed": true,
+"settings": [
+{
+"settingCode": "DASHBOARD-PRODUCT-DESCRIPTION",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+},
+{
+"settingCode": "DASHBOARD-RATES-LINK",
+"valueType": "text-entry",
+"value": "",
+"displayValue": ""
+}
+]
+}
+]
+}
+
+}

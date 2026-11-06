@@ -105,8 +105,62 @@ def test_delete_project_with_15_captures():
         stem = Path(fn).stem
         assert list(storage_frames.glob(f"*{stem}*")) == [], f"Associated files for {stem} still exist!"
 
-    # 7. Verify state reload
+    # 7. Verify state reload and idempotent repeat delete
     state.load_persisted_state()
     if db.get_active_project() is None:
         assert len(state.captured_frames) == 0
         assert len(state.document_lines) == 0
+
+    res_repeat = client.delete(f"/api/projects/{proj_id}")
+    assert res_repeat.status_code == 200
+    assert res_repeat.json()["status"] == "success"
+
+
+def test_project_and_markdown_download_counters():
+    proj = db.create_project("Counter_Test_Project", "Verify download counters", 100)
+    proj_id = proj["id"]
+    db.activate_project(proj_id)
+    db.save_document_lines(proj_id, {
+        1: {"line_number": 1, "text": "# Heading 1", "confidence": 0.99, "frame_id": "f1", "is_verified": 1},
+        2: {"line_number": 2, "text": "Body text", "confidence": 0.99, "frame_id": "f1", "is_verified": 1},
+    })
+    state.load_persisted_state()
+
+    initial = db.get_project(proj_id)
+    assert initial["project_download_count"] == 0
+    assert initial["markdown_download_count"] == 0
+
+    # 1. Export markdown via project endpoint
+    md_res1 = client.get(f"/api/projects/{proj_id}/export-markdown")
+    assert md_res1.status_code == 200
+    assert md_res1.headers.get("x-markdown-download-count") == "1"
+    assert db.get_project(proj_id)["markdown_download_count"] == 1
+
+    # 2. Export markdown via active document endpoint
+    md_res2 = client.get("/api/document/export-markdown")
+    assert md_res2.status_code == 200
+    assert md_res2.headers.get("x-markdown-download-count") == "2"
+    assert db.get_project(proj_id)["markdown_download_count"] == 2
+
+    # 3. Export project zip archive twice
+    zip_res1 = client.get(f"/api/projects/{proj_id}/export")
+    assert zip_res1.status_code == 200
+    assert zip_res1.headers.get("x-project-download-count") == "1"
+    assert db.get_project(proj_id)["project_download_count"] == 1
+
+    zip_res2 = client.get(f"/api/projects/{proj_id}/export")
+    assert zip_res2.status_code == 200
+    assert zip_res2.headers.get("x-project-download-count") == "2"
+
+    # Verify /api/projects list includes both counters
+    list_res = client.get("/api/projects")
+    assert list_res.status_code == 200
+    matched = next((p for p in list_res.json() if p["id"] == proj_id), None)
+    assert matched is not None
+    assert matched["project_download_count"] == 2
+    assert matched["markdown_download_count"] == 2
+
+    # Clean up test project
+    del_res = client.delete(f"/api/projects/{proj_id}")
+    assert del_res.status_code == 200
+

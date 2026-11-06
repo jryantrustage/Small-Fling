@@ -110,7 +110,14 @@ def init_db():
             ("arrow_count_step", "INTEGER DEFAULT 28"),
             ("settle_delay_ms", "INTEGER DEFAULT 50"),
             ("lock_device", "INTEGER DEFAULT 0"),
-            ("hid_config_json", "TEXT DEFAULT '{}'")
+            ("hid_config_json", "TEXT DEFAULT '{}'"),
+            ("project_download_count", "INTEGER DEFAULT 0"),
+            ("markdown_download_count", "INTEGER DEFAULT 0"),
+            ("bundle_id", "TEXT DEFAULT ''"),
+            ("bundle_name", "TEXT DEFAULT ''"),
+            ("part_number", "INTEGER DEFAULT 0"),
+            ("total_parts", "INTEGER DEFAULT 0"),
+            ("part_file_name", "TEXT DEFAULT ''")
         ]
         for col_name, col_def in columns_to_add:
             if col_name not in existing_cols:
@@ -235,16 +242,141 @@ def delete_device_profile(profile_id: str) -> bool:
         conn.commit()
         return c.rowcount > 0
 
+BUNDLES_DIR = DATA_DIR.parent / "storage" / "bundles"
+EXPORTS_DIR = DATA_DIR.parent / "storage" / "exports"
+
+def _infer_bundle_metadata(
+    name: str,
+    description: str = "",
+    bundle_id: str = "",
+    bundle_name: str = "",
+    part_number: int = 0,
+    total_parts: int = 0,
+    part_file_name: str = ""
+) -> Dict[str, Any]:
+    import re
+    raw_name = (name or "").strip()
+    raw_desc = (description or "").strip()
+    b_id = (bundle_id or "").strip()
+    b_name = (bundle_name or "").strip()
+    p_num = int(part_number or 0)
+    t_parts = int(total_parts or 0)
+    p_fn = (part_file_name or "").strip()
+
+    # Check description for "Part X of Y"
+    if t_parts <= 0 and raw_desc:
+        m_tot = re.search(r"Part\s*(\d+)\s*of\s*(\d+)", raw_desc, re.IGNORECASE)
+        if m_tot:
+            if p_num <= 0:
+                p_num = int(m_tot.group(1))
+            t_parts = int(m_tot.group(2))
+
+    # Extract explicit file from description if present
+    desc_file = ""
+    if raw_desc:
+        m_df = re.search(r"([A-Za-z0-9_\-.]+_part\d+\.(?:md|markdown|txt))", raw_desc, re.IGNORECASE)
+        if m_df:
+            desc_file = m_df.group(1)
+        else:
+            m_f = re.search(r"File:\s*([^\s(|]+)", raw_desc, re.IGNORECASE)
+            if m_f:
+                desc_file = m_f.group(1).strip()
+
+    candidates = [c for c in (p_fn, desc_file, raw_name) if c]
+    part_pattern = re.compile(
+        r"^(?P<prefix>.+?)(?:[_\-\s]+|\b)part[_\-\s]*(?P<part>\d+)(?:\s*(?:of|/)\s*(?P<total>\d+))?(?:\s*\(Imported\))?(?P<ext>\.md|\.markdown|\.txt)?$",
+        re.IGNORECASE
+    )
+
+    matched_prefix = ""
+    for cand in candidates:
+        clean_cand = re.sub(r"\s*\(Imported\)\s*$", "", cand.strip(), flags=re.IGNORECASE)
+        m = part_pattern.match(clean_cand)
+        if m:
+            matched_prefix = (m.group("prefix") or "").strip(" _-.")
+            if p_num <= 0:
+                p_num = int(m.group("part"))
+            if t_parts <= 0 and m.group("total"):
+                t_parts = int(m.group("total"))
+            if not p_fn:
+                ext = m.group("ext") or ".md"
+                safe_pfx = re.sub(r"\s+", "_", matched_prefix)
+                p_fn = f"{safe_pfx}_part{p_num}{ext}"
+            break
+
+    if matched_prefix and not b_name:
+        # Normalize triple-repeated typo characters in display name if any (e.g. "commmon" -> "common")
+        b_name = re.sub(r"([a-zA-Z])\1{2,}", r"\1\1", matched_prefix)
+
+    if (matched_prefix or b_name) and not b_id:
+        base_for_slug = b_name or matched_prefix
+        norm_slug = re.sub(r"([a-zA-Z])\1{2,}", r"\1\1", base_for_slug.lower())
+        norm_slug = re.sub(r"[^a-z0-9]+", "_", norm_slug).strip("_")
+        if norm_slug:
+            b_id = f"bundle_{norm_slug}"
+
+    if b_id and not p_fn and raw_name:
+        safe_n = re.sub(r'[<>:"/\\|?*]+', "_", raw_name)
+        if not safe_n.lower().endswith(".md"):
+            safe_n = f"{safe_n}.md"
+        p_fn = safe_n
+
+    return {
+        "bundle_id": b_id,
+        "bundle_name": b_name,
+        "part_number": p_num,
+        "total_parts": t_parts,
+        "part_file_name": p_fn,
+        "is_bundle_part": bool(b_id and p_num > 0)
+    }
+
+def _normalize_project_row(row: Any) -> Dict[str, Any]:
+    d = dict(row)
+    d["project_download_count"] = int(d.get("project_download_count") or 0)
+    d["markdown_download_count"] = int(d.get("markdown_download_count") or 0)
+    frame_cnt = int(d.get("frame_count") or 0)
+    line_cnt = int(d.get("line_count") or 0)
+    max_ln = int(d.get("max_line") or 0)
+    target_ln = int(d.get("target_total_lines") or 0)
+    d["frame_count"] = frame_cnt
+    d["line_count"] = line_cnt
+    d["verified_lines"] = line_cnt
+    d["total_lines"] = max(target_ln, max_ln, line_cnt)
+    b_meta = _infer_bundle_metadata(
+        name=d.get("name") or "",
+        description=d.get("description") or "",
+        bundle_id=d.get("bundle_id") or "",
+        bundle_name=d.get("bundle_name") or "",
+        part_number=int(d.get("part_number") or 0),
+        total_parts=int(d.get("total_parts") or 0),
+        part_file_name=d.get("part_file_name") or ""
+    )
+    d.update(b_meta)
+    return d
+
 def get_active_project() -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
         c = conn.cursor()
-        for q in ["SELECT * FROM projects WHERE is_active = 1 LIMIT 1;", "SELECT * FROM projects ORDER BY created_at DESC LIMIT 1;"]:
+        for q in [
+            """SELECT p.*,
+                (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
+                (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+                (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
+                (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
+               FROM projects p WHERE p.is_active = 1 LIMIT 1;""",
+            """SELECT p.*,
+                (SELECT COUNT(*) FROM frames f WHERE f.project_id = p.id) as frame_count,
+                (SELECT COUNT(*) FROM document_lines l WHERE l.project_id = p.id) as line_count,
+                (SELECT MIN(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as min_line,
+                (SELECT MAX(l.line_number) FROM document_lines l WHERE l.project_id = p.id) as max_line
+               FROM projects p ORDER BY p.created_at DESC LIMIT 1;"""
+        ]:
             c.execute(q); row = c.fetchone()
             if row:
                 if not row["is_active"]:
                     c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (row["id"],))
                     conn.commit()
-                return dict(row)
+                return _normalize_project_row(row)
         return None
 
 def get_projects() -> List[Dict[str, Any]]:
@@ -257,7 +389,7 @@ def get_projects() -> List[Dict[str, Any]]:
     FROM projects p
     ORDER BY p.created_at DESC;
     """
-    return [dict(r) for r in _execute(sql, fetchall=True)]
+    return [_normalize_project_row(r) for r in _execute(sql, fetchall=True)]
 
 def get_project(project_id: str) -> Optional[Dict[str, Any]]:
     sql = """
@@ -270,7 +402,93 @@ def get_project(project_id: str) -> Optional[Dict[str, Any]]:
     WHERE p.id = ?;
     """
     r = _execute(sql, (project_id,), fetchone=True)
-    return dict(r) if r else None
+    return _normalize_project_row(r) if r else None
+
+def get_bundle_projects(bundle_id: str) -> List[Dict[str, Any]]:
+    if not bundle_id:
+        return []
+    all_projs = get_projects()
+    matched = [p for p in all_projs if p.get("bundle_id") == bundle_id]
+    matched.sort(key=lambda p: (int(p.get("part_number") or 999), p.get("created_at") or ""))
+    return matched
+
+def sync_project_part_markdown_file(project_id: str) -> Optional[Path]:
+    import re
+    proj = get_project(project_id)
+    if not proj:
+        return None
+    lines_dict = get_document_lines(project_id)
+    if not lines_dict:
+        content = ""
+    else:
+        sorted_keys = sorted(lines_dict.keys())
+        min_k = sorted_keys[0] if sorted_keys else 1
+        max_k = sorted_keys[-1] if sorted_keys else 0
+        content = "\n".join(
+            lines_dict[k].get("text", "") if k in lines_dict else ""
+            for k in range(min_k, max_k + 1)
+        )
+    raw_fn = proj.get("part_file_name") or proj.get("name") or f"{project_id}.md"
+    safe_fn = re.sub(r'[<>:"/\\|?*]+', "_", raw_fn.strip())
+    if not safe_fn.lower().endswith(".md"):
+        safe_fn = f"{safe_fn}.md"
+
+    written_path: Optional[Path] = None
+    b_id = proj.get("bundle_id")
+    if b_id:
+        try:
+            b_dir = BUNDLES_DIR / re.sub(r'[<>:"/\\|?*]+', "_", b_id)
+            b_dir.mkdir(parents=True, exist_ok=True)
+            b_path = b_dir / safe_fn
+            b_path.write_text(content, encoding="utf-8")
+            written_path = b_path
+        except Exception:
+            pass
+    try:
+        EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        e_path = EXPORTS_DIR / safe_fn
+        e_path.write_text(content, encoding="utf-8")
+        if written_path is None:
+            written_path = e_path
+    except Exception:
+        pass
+    return written_path
+
+def delete_bundle_projects(bundle_id: str) -> List[str]:
+    import shutil, re
+    parts = get_bundle_projects(bundle_id)
+    deleted_ids = []
+    for p in parts:
+        pid = p.get("id")
+        if pid and delete_project(pid):
+            deleted_ids.append(pid)
+    if bundle_id:
+        try:
+            b_dir = BUNDLES_DIR / re.sub(r'[<>:"/\\|?*]+', "_", bundle_id)
+            if b_dir.exists():
+                shutil.rmtree(b_dir, ignore_errors=True)
+        except Exception:
+            pass
+    return deleted_ids
+
+def increment_project_download_count(project_id: str, download_type: str = "project") -> Optional[Dict[str, Any]]:
+    if not project_id:
+        return None
+    col = "markdown_download_count" if download_type == "markdown" else "project_download_count"
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        try:
+            c.execute(f"UPDATE projects SET {col} = COALESCE({col}, 0) + 1, updated_at = ? WHERE id = ?;", (now, project_id))
+        except sqlite3.OperationalError:
+            for cname in ("project_download_count", "markdown_download_count"):
+                try:
+                    c.execute(f"ALTER TABLE projects ADD COLUMN {cname} INTEGER DEFAULT 0;")
+                except sqlite3.OperationalError:
+                    pass
+            c.execute(f"UPDATE projects SET {col} = COALESCE({col}, 0) + 1, updated_at = ? WHERE id = ?;", (now, project_id))
+        conn.commit()
+    return get_project(project_id)
 
 def create_project(
     name: str,
@@ -290,9 +508,23 @@ def create_project(
     arrow_count_step: int = 28,
     settle_delay_ms: int = 50,
     lock_device: bool = False,
-    hid_config_json: str = "{}"
+    hid_config_json: str = "{}",
+    bundle_id: str = "",
+    bundle_name: str = "",
+    part_number: int = 0,
+    total_parts: int = 0,
+    part_file_name: str = ""
 ) -> Dict[str, Any]:
-    now, pid = datetime.now().isoformat(), f"proj_{int(datetime.now().timestamp())}_{abs(hash(name)) % 10000}"
+    now, pid = datetime.now().isoformat(), f"proj_{int(datetime.now().timestamp() * 1000)}_{abs(hash(name)) % 10000}"
+    b_meta = _infer_bundle_metadata(
+        name=name,
+        description=description,
+        bundle_id=bundle_id,
+        bundle_name=bundle_name,
+        part_number=part_number,
+        total_parts=total_parts,
+        part_file_name=part_file_name
+    )
     with get_connection() as conn:
         c = conn.cursor()
         c.execute("UPDATE projects SET is_active = 0;")
@@ -300,8 +532,9 @@ def create_project(
             """INSERT INTO projects (
                 id, name, description, target_total_lines, status, is_active, created_at, updated_at,
                 device_model, device_name, device_serial, target_dpi, display_width, display_height, display_id,
-                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
+                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json,
+                bundle_id, bundle_name, part_number, total_parts, part_file_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);""",
             (
                 pid, name.strip(), description.strip(), target_total_lines, "active", 1, now, now,
                 (device_model or "pixel_8").strip().lower(),
@@ -318,7 +551,12 @@ def create_project(
                 int(arrow_count_step or 28),
                 int(settle_delay_ms or 50),
                 1 if lock_device else 0,
-                hid_config_json or "{}"
+                hid_config_json or "{}",
+                b_meta["bundle_id"],
+                b_meta["bundle_name"],
+                b_meta["part_number"],
+                b_meta["total_parts"],
+                b_meta["part_file_name"]
             )
         )
         c.execute("INSERT INTO project_telemetry VALUES (?, ?, ?, ?);", (pid, "{}", "{}", now))
@@ -458,44 +696,98 @@ THUMBNAILS_DIR = Path(__file__).parent / "data" / "thumbnails"
 ALL_FRAMES_DIRS = [FRAMES_DIR, STORAGE_FRAMES_DIR, THUMBNAILS_DIR]
 
 def _remove_frame_files(filenames: List[str], project_id: Optional[str] = None):
+    import os
+    import re
+    seen_dirs = set()
+    unique_dirs = []
     for fdir in ALL_FRAMES_DIRS:
-        if not fdir.exists():
+        if not fdir or not fdir.exists():
             continue
+        try:
+            resolved = str(fdir.resolve()).lower()
+        except Exception:
+            resolved = str(fdir).lower()
+        if resolved not in seen_dirs:
+            seen_dirs.add(resolved)
+            unique_dirs.append(fdir)
+
+    stems = {Path(fn).stem for fn in filenames if fn}
+    small_stems = list(stems) if len(stems) <= 60 else []
+
+    for fdir in unique_dirs:
+        # 1. Fast O(1) direct unlinks for known filenames
         for fn in filenames:
-            (fdir / fn).unlink(missing_ok=True)
-            stem = Path(fn).stem
-            for extra in fdir.glob(f"*{stem}*"):
-                extra.unlink(missing_ok=True)
+            if not fn:
+                continue
+            try:
+                (fdir / fn).unlink(missing_ok=True)
+            except OSError:
+                pass
         if project_id:
-            for extra in fdir.glob(f"*{project_id}*"):
-                extra.unlink(missing_ok=True)
+            for prefix in ("calib_end_", "calib_home_"):
+                try:
+                    (fdir / f"{prefix}{project_id}.png").unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        # 2. Single O(M) directory scan instead of O(N * M) repeated globs
+        if not stems and not project_id:
+            continue
+        try:
+            with os.scandir(fdir) as it:
+                for entry in it:
+                    if not entry.is_file():
+                        continue
+                    ename = entry.name
+                    estem = Path(ename).stem
+                    matched = False
+                    if project_id and project_id in ename:
+                        matched = True
+                    elif estem in stems:
+                        matched = True
+                    elif estem.startswith("raw_capture_"):
+                        stripped = re.sub(r"^raw_capture_p\d+_", "", estem)
+                        if stripped in stems:
+                            matched = True
+                    elif small_stems and any(s in ename for s in small_stems):
+                        matched = True
+                    if matched:
+                        try:
+                            Path(entry.path).unlink(missing_ok=True)
+                        except OSError:
+                            pass
+        except OSError:
+            pass
 
 def delete_project(project_id: str) -> bool:
+    fns: List[str] = []
     with get_connection() as conn:
         c = conn.cursor()
         row = c.execute("SELECT is_active FROM projects WHERE id = ?;", (project_id,)).fetchone()
         if not row:
             return False
         was_active = bool(row["is_active"])
-        fns = [r["filename"] for r in c.execute("SELECT filename FROM frames WHERE project_id = ?;", (project_id,)).fetchall()]
+        try:
+            fns = [r["filename"] for r in c.execute("SELECT filename FROM frames WHERE project_id = ?;", (project_id,)).fetchall()]
+        except sqlite3.OperationalError:
+            fns = []
         
         # Explicitly clean up related tables to ensure thorough deletion
-        c.execute("DELETE FROM frames WHERE project_id = ?;", (project_id,))
-        c.execute("DELETE FROM document_lines WHERE project_id = ?;", (project_id,))
-        c.execute("DELETE FROM vfs_files WHERE project_id = ?;", (project_id,))
-        c.execute("DELETE FROM project_telemetry WHERE project_id = ?;", (project_id,))
-        c.execute("DELETE FROM project_reference_lines WHERE project_id = ?;", (project_id,))
+        for tbl in ("frames", "document_lines", "vfs_files", "project_telemetry", "project_reference_lines"):
+            try:
+                c.execute(f"DELETE FROM {tbl} WHERE project_id = ?;", (project_id,))
+            except sqlite3.OperationalError:
+                pass
         c.execute("DELETE FROM projects WHERE id = ?;", (project_id,))
-        conn.commit()
-
-        _remove_frame_files(fns, project_id)
 
         if was_active:
             fb = c.execute("SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;").fetchone()
             if fb:
                 c.execute("UPDATE projects SET is_active = 1 WHERE id = ?;", (fb["id"],))
-                conn.commit()
-        return True
+        conn.commit()
+
+    _remove_frame_files(fns, project_id)
+    return True
 
 def _purge_project_data(project_id: str, new_status: str) -> bool:
     with get_connection() as conn:
@@ -739,39 +1031,63 @@ def import_project_data(
     project_row: Dict[str, Any],
     frames: List[Dict[str, Any]],
     document_lines: List[Dict[str, Any]],
-    telemetry: Dict[str, Any]
+    telemetry: Dict[str, Any],
+    activate: bool = True,
+    override_bundle_id: Optional[str] = None,
+    override_bundle_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Inserts a complete imported project with its frames, document lines,
-    and telemetry into the database and marks it active.
+    and telemetry into the database and optionally marks it active.
     """
     now = datetime.now().isoformat()
     with get_connection() as conn:
         c = conn.cursor()
         existing = c.execute("SELECT id FROM projects WHERE id = ?;", (project_row.get("id"),)).fetchone()
+        was_remapped = False
         if existing:
+            was_remapped = True
             orig_id = project_row.get("id", "proj")
-            new_id = f"{orig_id}_imp_{int(datetime.now().timestamp())}"
-            new_name = f"{project_row.get('name', 'Imported Project')} (Imported)"
+            new_id = f"{orig_id}_imp_{int(datetime.now().timestamp() * 1000)}"
+            new_name = project_row.get("name", "Imported Project")
+            if "(Imported)" not in new_name and not override_bundle_id:
+                new_name = f"{new_name} (Imported)"
         else:
-            new_id = project_row.get("id") or f"proj_{int(datetime.now().timestamp())}_{abs(hash(project_row.get('name', 'imp'))) % 10000}"
+            new_id = project_row.get("id") or f"proj_{int(datetime.now().timestamp() * 1000)}_{abs(hash(project_row.get('name', 'imp'))) % 10000}"
             new_name = project_row.get("name", "Imported Project")
 
-        # Deactivate all projects and make this one active
-        c.execute("UPDATE projects SET is_active = 0;")
+        b_meta = _infer_bundle_metadata(
+            name=new_name,
+            description=project_row.get("description", ""),
+            bundle_id=override_bundle_id or project_row.get("bundle_id") or "",
+            bundle_name=override_bundle_name or project_row.get("bundle_name") or "",
+            part_number=int(project_row.get("part_number") or 0),
+            total_parts=int(project_row.get("total_parts") or 0),
+            part_file_name=project_row.get("part_file_name") or ""
+        )
+
+        if activate:
+            c.execute("UPDATE projects SET is_active = 0;")
+
+        target_lines_val = int(project_row.get("target_total_lines", 0) or 0)
+        if target_lines_val <= 0 and document_lines:
+            max_dl_ln = max((int(dl.get("line_number") or 0) for dl in document_lines if dl.get("line_number") is not None), default=0)
+            target_lines_val = max(max_dl_ln, len(document_lines))
 
         c.execute("""
             INSERT INTO projects (
                 id, name, description, target_total_lines, status, is_active, created_at, updated_at,
                 device_model, device_name, device_serial, target_dpi, display_width, display_height, display_id,
-                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json
-            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                lines_per_page, step_size, scroll_padding_lines, arrow_count_init, arrow_count_step, settle_delay_ms, lock_device, hid_config_json,
+                bundle_id, bundle_name, part_number, total_parts, part_file_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """, (
             new_id,
             new_name,
             project_row.get("description", ""),
-            int(project_row.get("target_total_lines", 0)),
+            target_lines_val,
             project_row.get("status", "active"),
+            1 if activate else 0,
             project_row.get("created_at", now),
             now,
             project_row.get("device_model", "pixel_8"),
@@ -788,14 +1104,28 @@ def import_project_data(
             int(project_row.get("arrow_count_step", 28)),
             int(project_row.get("settle_delay_ms", 50)),
             1 if project_row.get("lock_device") else 0,
-            project_row.get("hid_config_json", "{}")
+            project_row.get("hid_config_json", "{}"),
+            b_meta["bundle_id"],
+            b_meta["bundle_name"],
+            b_meta["part_number"],
+            b_meta["total_parts"],
+            b_meta["part_file_name"]
         ))
 
+        frame_id_map: Dict[str, str] = {}
+        suffix = new_id[-8:]
         # Insert frames
         for f in frames:
-            fid = f.get("frame_id")
-            if not fid:
+            orig_fid = f.get("frame_id")
+            if not orig_fid:
                 continue
+            existing_frame = c.execute("SELECT project_id FROM frames WHERE frame_id = ?;", (orig_fid,)).fetchone()
+            if was_remapped or (existing_frame and existing_frame["project_id"] != new_id):
+                fid = f"{orig_fid}_{suffix}"
+            else:
+                fid = orig_fid
+            frame_id_map[orig_fid] = fid
+
             tok_json = json.dumps(f.get("token_usage", {})) if isinstance(f.get("token_usage"), dict) else (f.get("token_usage_json") or "{}")
             bbox_json = json.dumps(f.get("bounding_boxes", {})) if isinstance(f.get("bounding_boxes"), dict) else (f.get("bounding_boxes_json") or "{}")
             c.execute("""
@@ -807,7 +1137,7 @@ def import_project_data(
             """, (
                 fid,
                 new_id,
-                f.get("filename", f"{fid}.png"),
+                f.get("filename", f"{orig_fid}.png"),
                 int(f.get("top_line", 0)),
                 int(f.get("bottom_line", 0)),
                 int(f.get("page_index", 0)),
@@ -827,6 +1157,8 @@ def import_project_data(
             lnum = dl.get("line_number")
             if lnum is None:
                 continue
+            raw_fid = dl.get("frame_id", "")
+            mapped_fid = frame_id_map.get(raw_fid, raw_fid)
             c.execute("""
                 INSERT OR REPLACE INTO document_lines (
                     project_id, line_number, line_text, confidence, frame_id, is_verified, updated_at
@@ -836,8 +1168,8 @@ def import_project_data(
                 int(lnum),
                 dl.get("text", dl.get("line_text", "")),
                 float(dl.get("confidence", 1.0)),
-                dl.get("frame_id", ""),
-                1 if (dl.get("verified") or dl.get("is_verified")) else 0,
+                mapped_fid,
+                1 if (dl.get("verified") or dl.get("is_verified") or dl.get("status") == "verified" or dl.get("verified") is None) else 0,
                 dl.get("updated_at", now)
             ))
 
@@ -855,6 +1187,11 @@ def import_project_data(
             now
         ))
         conn.commit()
+
+    try:
+        sync_project_part_markdown_file(new_id)
+    except Exception:
+        pass
 
     return get_project(new_id) or {}
 

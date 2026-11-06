@@ -1,0 +1,748 @@
+  *'snap
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`routes hook Should return tenant routes enabled 1`] = `
+<div>
+<div>
+{
+"routes": [
+{
+"path": "/admin/system",
+"name": "System",
+"icon": "Key",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemDocuments",
+"name": "Document Management",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/smsallowlist",
+"name": "Sms Allowlist",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/reports",
+"name": "Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/dsf-reports",
+"name": "DSF Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/entity-upgrader-reports",
+"name": "EntityUpgrader Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates",
+"name": "Integration Templates",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/loan-form-templates",
+"name": "Loan Form Templates",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/coreProductTemplates",
+"name": "Core Product Templates",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/loan-form-templates/:productTemplateId/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/loan-form-templates/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemRoles/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemRoles/:roleId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/create/:tenantType",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenants",
+"name": "Tenants",
+"icon": "Key",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/view",
+"name": "View Tenant",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/edit",
+"name": "Edit Tenant",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/map-core-product-templates",
+"name": "Core Product Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products",
+"name": "Core Products",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products/:templateId/:productId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true,
+"selfSubNavName": "Configuration"
+},
+{
+"path": "/admin/tenant/:tenantId/merchant",
+"name": "Merchants",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/credit-score-ranges",
+"name": "Credit Score Ranges",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/:merchantId/edit",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/create",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/:merchantId/view",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-branding",
+"name": "Branding",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/map-loan-templates",
+"name": "Loan Template Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms/:templateId/:coreProductId/:viewMode",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-form/:loanFormId/:viewMode",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms/:templateId/:coreProductId/upgrade/:formId",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings",
+"name": "Loan App Status Mapping",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/MeridianLink",
+"name": "Meridian Link Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "MeridianLink"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Allegro",
+"name": "Allegro Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Allegro"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Temenos",
+"name": "Temenos Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Temenos"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Sync1",
+"name": "Sync1 Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Sync1"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/membership",
+"name": "Membership",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types",
+"name": "Task and Asset Configuration",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types/:productType/task-templates",
+"name": "Task Templates",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types/:productType/asset-types",
+"name": "Asset Types",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-roles",
+"name": "User Role Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-integration-profiles",
+"name": "Integration Profiles",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-integration-profiles/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/documents",
+"name": "Documents",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+}
+],
+"decisionRoutes": [
+{
+"path": "/admin/tenant/:tenantId/core-product/:productId/rule-sets",
+"name": "Decisioning",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+}
+]
+}
+</div>
+</div>
+`;
+
+exports[`routes hook Should return tenant routes hidden 1`] = `
+<div>
+<div>
+{
+"routes": [
+{
+"path": "/admin/system",
+"name": "System",
+"icon": "Key",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemDocuments",
+"name": "Document Management",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/smsallowlist",
+"name": "Sms Allowlist",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/reports",
+"name": "Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/dsf-reports",
+"name": "DSF Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/entity-upgrader-reports",
+"name": "EntityUpgrader Reports",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates",
+"name": "Integration Templates",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/loan-form-templates",
+"name": "Loan Form Templates",
+"icon": "",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/coreProductTemplates",
+"name": "Core Product Templates",
+"hidden": false,
+"isHomeRoute": true,
+"parent": "Templates"
+},
+{
+"path": "/admin/loan-form-templates/:productTemplateId/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/loan-form-templates/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/integration-templates/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemRoles/create",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/systemRoles/:roleId/:viewMode",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/create/:tenantType",
+"name": "",
+"hidden": true,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenants",
+"name": "Tenants",
+"icon": "Key",
+"hidden": false,
+"isHomeRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/view",
+"name": "View Tenant",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/edit",
+"name": "Edit Tenant",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true
+},
+{
+"path": "/admin/tenant/:tenantId/map-core-product-templates",
+"name": "Core Product Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products",
+"name": "Core Products",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/core-products/:templateId/:productId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true,
+"selfSubNavName": "Configuration"
+},
+{
+"path": "/admin/tenant/:tenantId/merchant",
+"name": "Merchants",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/credit-score-ranges",
+"name": "Credit Score Ranges",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/:merchantId/edit",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/create",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/merchant/:merchantId/view",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-branding",
+"name": "Branding",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/map-loan-templates",
+"name": "Loan Template Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms/:templateId/:coreProductId/:viewMode",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-form/:loanFormId/:viewMode",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/loan-app-forms/:templateId/:coreProductId/upgrade/:formId",
+"name": "Loan App Forms",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings",
+"name": "Loan App Status Mapping",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/MeridianLink",
+"name": "Meridian Link Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "MeridianLink"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Allegro",
+"name": "Allegro Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Allegro"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Temenos",
+"name": "Temenos Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Temenos"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/los-status-mappings/Sync1",
+"name": "Sync1 Loan App Status Mapping",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true,
+"parent": "/admin/tenant/:tenantId/los-status-mappings",
+"props": {
+"losId": "Sync1"
+}
+},
+{
+"path": "/admin/tenant/:tenantId/membership",
+"name": "Membership",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types",
+"name": "Task and Asset Configuration",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types/:productType/task-templates",
+"name": "Task Templates",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/product-types/:productType/asset-types",
+"name": "Asset Types",
+"icon": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-roles",
+"name": "User Role Association",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-integration-profiles",
+"name": "Integration Profiles",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/tenant-integration-profiles/:templateId/:viewMode",
+"name": "",
+"hidden": true,
+"useTenantContainer": true
+},
+{
+"path": "/admin/tenant/:tenantId/documents",
+"name": "Documents",
+"icon": "",
+"hidden": true,
+"isTenantRoute": true,
+"useTenantContainer": true
+}
+],
+"decisionRoutes": [
+{
+"path": "/admin/tenant/:tenantId/core-product/:productId/rule-sets",
+"name": "Decisioning",
+"icon": "",
+"hidden": false,
+"isTenantRoute": true,
+"useTenantContainer": true
+}
+]
+}
+</div>
+</div>
+`;

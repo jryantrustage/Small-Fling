@@ -1,0 +1,75 @@
+[
+{
+"name": "GAP",
+"recordState": "Active",
+"category": "Lending",
+"type": "GAP",
+"subTypes": [
+{
+"id": "11111111-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Option 1",
+"metadataJson": "{}",
+"active": true,
+"enabled": true
+},
+{
+"id": "22222222-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Option 2",
+"metadataJson": "{}",
+"active": true,
+"enabled": true
+},
+{
+"id": "33333333-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Option 3",
+"metadataJson": "{}",
+"active": true,
+"enabled": true
+}
+]
+},
+{
+"name": "MRC",
+"recordState": "Active",
+"category": "Lending",
+"type": "MRC",
+"subTypes": [
+{
+"id": "90C2A5BB-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Plan #1",
+"metadataJson": "{}",
+"active": false,
+"enabled": true
+},
+{
+"id": "11111111-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Plan #2",
+"metadataJson": "{}",
+"active": true,
+"enabled": true
+}
+]
+},
+{
+"name": "Anc Prod #3",
+"recordState": "Active",
+"category": "Lending",
+"type": "Anc Prod #3",
+"subTypes": [
+{
+"id": "11111111-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Plan #1",
+"metadataJson": "{}",
+"active": false,
+"enabled": true
+},
+{
+"id": "22222222-6482-23A4-6B3D-5A2C37363A3B",
+"name": "Plan #2",
+"metadataJson": "{}",
+"active": false,
+"enabled": true
+}
+]
+}
+]

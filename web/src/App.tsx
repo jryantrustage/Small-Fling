@@ -411,6 +411,8 @@ function AppContent() {
   const [isBatchDeletingFrames, setIsBatchDeletingFrames] = useState(false);
   const [selectedLineNumbers, setSelectedLineNumbers] = useState<Set<number>>(new Set());
   const [isBatchDeletingLines, setIsBatchDeletingLines] = useState(false);
+  const deletedProjectIdsRef = useRef<Set<string>>(new Set());
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
 
   // Auto-Fix & Calibrate States
   const [_isAutoFixingViewport, setIsAutoFixingViewport] = useState(false);
@@ -1038,15 +1040,15 @@ function AppContent() {
     finally { setIsPairing(false); }
   };
 
+  const isFetchingDeviceRef = useRef(false);
   const fetchData = useCallback(async () => {
     if (!isDocVisibleRef.current || isFetchingRef.current) return;
     isFetchingRef.current = true;
     const t0 = performance.now();
     try {
-      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes, devRes, alignRes, deskRes] = await Promise.all([
+      const [projRes, docRes, framesRes, queueRes, cfgRes, modeRes, telRes] = await Promise.all([
         api('/api/projects'), api('/api/document?summary_only=true'), api('/api/frames'), api('/api/recapture-queue'),
-        api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry'), api('/api/device/info'), api('/api/device/alignment'),
-        api('/api/device/kiosk/desktop-mode')
+        api('/api/config'), api('/api/pipeline/mode'), api('/api/telemetry')
       ]);
       setLatencyMs(Math.round(performance.now() - t0));
       const isConnected = projRes.ok || docRes.ok || framesRes.ok || cfgRes.ok || telRes.ok;
@@ -1055,9 +1057,14 @@ function AppContent() {
         try {
           const pList = await projRes.json();
           if (Array.isArray(pList)) {
-            setProjects(pList);
-            const act = pList.find((p: any) => p.is_active) || pList[0] || null;
+            const filtered = pList.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id));
+            setProjects(filtered);
+            const act = filtered.find((p: any) => p.is_active) || filtered[0] || null;
             setActiveProject(act);
+            if (!act) {
+              setFrames([]);
+              setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+            }
           }
         } catch {}
       }
@@ -1125,18 +1132,30 @@ function AppContent() {
       }
       if (modeRes.ok) { try { const m = await modeRes.json(); setPipelineMode(m.pipeline_mode); } catch {} }
       if (telRes.ok) { try { setTelemetry(await telRes.json()); } catch {} }
-      if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
-      if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
-      if (deskRes.ok) {
-        try {
-          const d = await deskRes.json();
-          if (typeof d.desktop_mode_enabled === 'boolean') setDesktopModeEnabled(d.desktop_mode_enabled);
-          if (typeof d.desktop_keyboard_prohibited === 'boolean') setDesktopKeyboardProhibited(d.desktop_keyboard_prohibited);
-          setDesktopVerification(d);
-        } catch {}
-      }
     } catch { setBackendConnected(false); }
     finally { isFetchingRef.current = false; }
+
+    if (!isFetchingDeviceRef.current) {
+      isFetchingDeviceRef.current = true;
+      Promise.all([
+        api('/api/device/info'),
+        api('/api/device/alignment'),
+        api('/api/device/desktop-mode')
+      ]).then(async ([devRes, alignRes, deskRes]) => {
+        if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
+        if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
+        if (deskRes.ok) {
+          try {
+            const d = await deskRes.json();
+            if (typeof d.desktop_mode_enabled === 'boolean') setDesktopModeEnabled(d.desktop_mode_enabled);
+            if (typeof d.desktop_keyboard_prohibited === 'boolean') setDesktopKeyboardProhibited(d.desktop_keyboard_prohibited);
+            setDesktopVerification(d);
+          } catch {}
+        }
+      }).catch(() => {}).finally(() => {
+        isFetchingDeviceRef.current = false;
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -1586,54 +1605,97 @@ function AppContent() {
     console.log('[App] confirm modal result:', ok);
     if (!ok) return;
 
+    const wasActiveBeforeDelete = activeProjectRef.current?.id === id;
+    deletedProjectIdsRef.current.add(id);
+    setDeletingProjectId(id);
+    setProjects(prev => {
+      const remaining = prev.filter(p => p.id !== id);
+      if (wasActiveBeforeDelete) {
+        const nextActive = remaining.find(p => p.is_active) || remaining[0] || null;
+        setActiveProject(nextActive);
+      }
+      return remaining;
+    });
+    if (wasActiveBeforeDelete) {
+      setFrames([]);
+      setSelectedFrameId(null);
+      setSelectedFrameIds(new Set());
+      setSelectedLineNumbers(new Set());
+      setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+      setInspectorMode('live');
+      setOcrInspectImageId('');
+    }
+
     try {
       console.log(`[App] Sending DELETE /api/projects/${id}`);
       const res = await api(`/api/projects/${id}`, { method: 'DELETE' });
       console.log(`[App] DELETE /api/projects/${id} response status:`, res.status, res.ok);
-      if (res.ok) {
+      if (res.ok || res.status === 404) {
         const delData = await res.json().catch(() => null);
-        if (delData?.projects) {
-          setProjects(delData.projects);
-          setActiveProject(delData.active_project || null);
-        } else {
-          setProjects(prev => prev.filter(p => p.id !== id));
-          if (activeProjectRef.current?.id === id) {
-            setActiveProject(null);
+        if (Array.isArray(delData?.projects)) {
+          const filtered = delData.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id));
+          setProjects(filtered);
+          const nextAct = (delData.active_project && !deletedProjectIdsRef.current.has(delData.active_project.id))
+            ? delData.active_project
+            : (filtered.find((p: any) => p.is_active) || filtered[0] || null);
+          setActiveProject(nextAct);
+          if (!nextAct) {
+            setFrames([]);
+            setSelectedFrameId(null);
+            setSelectedFrameIds(new Set());
+            setSelectedLineNumbers(new Set());
+            setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+            setInspectorMode('live');
+            setOcrInspectImageId('');
           }
-        }
-        const wasActive = activeProjectRef.current?.id === id || delData?.deleted_project_id === activeProjectRef.current?.id || !delData?.active_project;
-        if (wasActive) {
-          setFrames([]);
-          setSelectedFrameId(null);
-          setSelectedFrameIds(new Set());
-          setSelectedLineNumbers(new Set());
-          setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
-          setInspectorMode('live');
-          setOcrInspectImageId('');
         }
         addTelemetryEvent('SYSTEM', `Deleted project "${projName}" (${id})`);
       } else {
+        deletedProjectIdsRef.current.delete(id);
+        await fetchData();
         const err = await res.json().catch(() => ({ detail: 'Failed to delete project' }));
         console.error('[App] DELETE failed:', err);
         await showAlert({ title: 'Delete Failed', message: err.detail || 'Failed to delete project.', variant: 'danger' });
       }
     } catch (e: any) {
+      deletedProjectIdsRef.current.delete(id);
+      await fetchData();
       console.error('[App] DELETE exception:', e);
       await showAlert({ title: 'Delete Error', message: e.message || 'Network error deleting project.', variant: 'danger' });
+    } finally {
+      setDeletingProjectId(null);
     }
   };
 
-  const handleExportMarkdown = async () => {
+  const handleExportMarkdown = async (projectIdOrEvent?: string | React.MouseEvent, projectName?: string) => {
+    const targetPid = typeof projectIdOrEvent === 'string' && projectIdOrEvent.trim() ? projectIdOrEvent.trim() : activeProject?.id;
+    const targetName = projectName || (targetPid ? projects.find(p => p.id === targetPid)?.name : undefined) || activeProject?.name || 'document';
     setIsExportingMarkdown(true);
     try {
-      const res = await fetch(`${API_BASE}/api/document/export-markdown`);
+      const endpoint = targetPid
+        ? `${API_BASE}/api/projects/${encodeURIComponent(targetPid)}/export-markdown`
+        : `${API_BASE}/api/document/export-markdown`;
+      const res = await fetch(endpoint);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to export markdown file');
       }
+      const headerCount = Number(res.headers.get('x-markdown-download-count'));
+      if (targetPid) {
+        setProjects(prev => prev.map(p => {
+          if (p.id !== targetPid) return p;
+          const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((p.markdown_download_count ?? 0) + 1);
+          return { ...p, markdown_download_count: nextCount };
+        }));
+        setActiveProject(prev => {
+          if (!prev || prev.id !== targetPid) return prev;
+          const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((prev.markdown_download_count ?? 0) + 1);
+          return { ...prev, markdown_download_count: nextCount };
+        });
+      }
       const blob = await res.blob();
       const disposition = res.headers.get('content-disposition');
-      let filename = `${activeProject?.name || 'document'}.md`;
+      let filename = `${targetName}.md`;
       if (disposition && disposition.includes('filename=')) {
         const match = disposition.match(/filename="?([^";]+)"?/);
         if (match && match[1]) filename = match[1];
@@ -1663,6 +1725,17 @@ function AppContent() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Failed to export project archive');
       }
+      const headerCount = Number(res.headers.get('x-project-download-count'));
+      setProjects(prev => prev.map(p => {
+        if (p.id !== projectId) return p;
+        const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((p.project_download_count ?? 0) + 1);
+        return { ...p, project_download_count: nextCount };
+      }));
+      setActiveProject(prev => {
+        if (!prev || prev.id !== projectId) return prev;
+        const nextCount = Number.isFinite(headerCount) && headerCount > 0 ? headerCount : ((prev.project_download_count ?? 0) + 1);
+        return { ...prev, project_download_count: nextCount };
+      });
       const blob = await res.blob();
       const disposition = res.headers.get('content-disposition');
       let filename = `${projectName || projectId}.zip`;
@@ -1833,8 +1906,11 @@ function AppContent() {
             setSelectedFrameId(null);
             setSelectedFrameIds(new Set());
           } else if (msg.type === 'project_deleted') {
+            if (msg.project_id) {
+              deletedProjectIdsRef.current.add(msg.project_id);
+            }
             if (msg.projects) {
-              setProjects(msg.projects);
+              setProjects(msg.projects.filter((item: any) => item && !deletedProjectIdsRef.current.has(item.id)));
             } else {
               setProjects(p => p.filter(item => item.id !== msg.project_id));
             }
@@ -1851,13 +1927,20 @@ function AppContent() {
               }
             }
           } else if (msg.type === 'project_switched' || msg.type === 'project_updated') {
-            const isDifferentProject = msg.type === 'project_switched' || (msg.project?.id && msg.project.id !== activeProjectRef.current?.id);
-            setActiveProject(msg.project || null);
-            if (isDifferentProject) {
-              setInspectorMode('live');
-              setOcrInspectImageId('');
+            if (msg.type === 'project_updated' && msg.project?.id) {
+              setProjects(prev => prev.map(p => p.id === msg.project.id ? { ...p, ...msg.project } : p));
+              if (activeProjectRef.current?.id === msg.project.id || msg.project.is_active) {
+                setActiveProject(msg.project);
+              }
+            } else {
+              const isDifferentProject = msg.type === 'project_switched' || (msg.project?.id && msg.project.id !== activeProjectRef.current?.id);
+              setActiveProject(msg.project || null);
+              if (isDifferentProject) {
+                setInspectorMode('live');
+                setOcrInspectImageId('');
+              }
+              fetchData();
             }
-            fetchData();
           } else if (msg.type === 'document_updated') {
             const docObj = msg.data || msg.document;
             if (docObj) {
@@ -2537,16 +2620,30 @@ function AppContent() {
                       <span>{isImportingProject ? '...' : 'Import'}</span>
                     </button>
                     {activeProject && (
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-outline"
-                        onClick={() => handleExportProject(activeProject.id, activeProject.name)}
-                        disabled={isExportingProject}
-                        style={{ padding: '2px 7px', fontSize: '10px', display: 'flex', alignItems: 'center', gap: '3px', color: '#00ff9d', borderColor: '#00ff9d55' }}
-                      >
-                        <Download size={11} />
-                        <span>Export</span>
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="btn-download-action variant-markdown"
+                          onClick={() => handleExportMarkdown(activeProject.id, activeProject.name)}
+                          disabled={isExportingMarkdown}
+                          title={`Download Markdown (.md) • Downloaded ${activeProject.markdown_download_count ?? 0} time(s)`}
+                        >
+                          <Download size={11} />
+                          <span>MD</span>
+                          <span className="download-counter-badge">{activeProject.markdown_download_count ?? 0}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-download-action variant-project"
+                          onClick={() => handleExportProject(activeProject.id, activeProject.name)}
+                          disabled={isExportingProject}
+                          title={`Export Project Archive (.zip) • Downloaded ${activeProject.project_download_count ?? 0} time(s)`}
+                        >
+                          <Download size={11} />
+                          <span>Export</span>
+                          <span className="download-counter-badge">{activeProject.project_download_count ?? 0}</span>
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -2583,7 +2680,8 @@ function AppContent() {
                         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         padding: '6px 8px', borderRadius: '6px', cursor: 'pointer',
                         background: p.id === activeProject?.id ? 'rgba(56, 139, 253, 0.15)' : '#161b22',
-                        border: `1px solid ${p.id === activeProject?.id ? '#58a6ff66' : '#21262d'}`
+                        border: `1px solid ${p.id === activeProject?.id ? '#58a6ff66' : '#21262d'}`,
+                        gap: '8px'
                       }}
                     >
                       <div style={{ minWidth: 0, flex: 1 }}>
@@ -2594,22 +2692,36 @@ function AppContent() {
                           {p.frame_count ?? 0} frames • {p.line_count ?? 0} lines
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexShrink: 0 }}>
                         <button
                           type="button"
-                          className="btn-text-secondary"
-                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
-                          title="Export .zip"
-                          style={{ padding: '3px', color: '#58a6ff' }}
+                          className="btn-download-action variant-markdown"
+                          onClick={e => { e.stopPropagation(); handleExportMarkdown(p.id, p.name); }}
+                          disabled={isExportingMarkdown}
+                          title={`Download Markdown (.md) • Downloaded ${p.markdown_download_count ?? 0} time(s)`}
                         >
-                          <Download size={12} />
+                          <Download size={11} />
+                          <span>MD</span>
+                          <span className="download-counter-badge" data-testid="project-md-download-count">{p.markdown_download_count ?? 0}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-download-action variant-project"
+                          onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
+                          disabled={isExportingProject}
+                          title={`Export Project Archive (.zip) • Downloaded ${p.project_download_count ?? 0} time(s)`}
+                        >
+                          <Download size={11} />
+                          <span>ZIP</span>
+                          <span className="download-counter-badge" data-testid="project-zip-download-count">{p.project_download_count ?? 0}</span>
                         </button>
                         <button
                           type="button"
                           className="btn-text-danger"
                           onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                          disabled={deletingProjectId === p.id}
                           title="Delete project"
-                          style={{ padding: '3px' }}
+                          style={{ padding: '4px 5px' }}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -3022,12 +3134,15 @@ function AppContent() {
                 {activeProject && (
                   <button
                     type="button"
-                    className="btn btn-xs btn-outline"
-                    onClick={handleExportMarkdown}
-                    style={{ color: '#00ff9d', borderColor: '#00ff9d66', fontSize: '11px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                    className="btn-download-action variant-markdown"
+                    onClick={() => handleExportMarkdown(activeProject.id, activeProject.name)}
+                    disabled={isExportingMarkdown}
+                    style={{ fontSize: '11px', padding: '4px 10px', gap: '6px' }}
+                    title={`Export verified lines as Markdown (.md) • Downloaded ${activeProject.markdown_download_count ?? 0} time(s)`}
                   >
                     <Download size={12} />
                     <span>Export Current Markdown (.md)</span>
+                    <span className="download-counter-badge">{activeProject.markdown_download_count ?? 0}</span>
                   </button>
                 )}
               </div>
@@ -3055,6 +3170,7 @@ function AppContent() {
                       <Download size={13} />
                       <span>{exp.file_name}</span>
                       <span style={{ fontSize: '11px', color: '#94a3b8' }}>({exp.line_count} lines)</span>
+                      <span className="download-counter-badge" title="Times downloaded">{exp.download_count ?? 0}</span>
                     </a>
                   ))}
                 </div>
@@ -3736,14 +3852,15 @@ function AppContent() {
                 <button className={`btn btn-sm ${filterMode === 'issues' ? 'btn-primary' : 'btn-outline'}`} onClick={() => setFilterMode('issues')} style={{ padding: '2px 8px', fontSize: '10.5px' }}>Issues ({documentData.issue_count})</button>
                 <button
                   type="button"
-                  className="btn btn-sm btn-outline"
-                  onClick={handleExportMarkdown}
+                  className="btn-download-action variant-markdown"
+                  onClick={() => handleExportMarkdown()}
                   disabled={isExportingMarkdown || documentData.total_lines === 0}
-                  title="Save entire contents of verified lines as Markdown (.md) file"
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px', fontSize: '10.5px', color: '#00ff9d', borderColor: '#00ff9d55' }}
+                  title={`Save entire contents of verified lines as Markdown (.md) file • Downloaded ${activeProject?.markdown_download_count ?? 0} time(s)`}
+                  style={{ padding: '2px 8px', fontSize: '10.5px' }}
                 >
                   <Download size={11} color="#00ff9d" />
                   <span>{isExportingMarkdown ? 'Saving...' : 'Save MD'}</span>
+                  <span className="download-counter-badge">{activeProject?.markdown_download_count ?? 0}</span>
                 </button>
                 <button
                   type="button"
@@ -4173,7 +4290,7 @@ function AppContent() {
               }}>
                 <span style={{ color: '#8b949e', fontWeight: 600 }}>Existing Projects:</span>
                 {projects.map(p => (
-                  <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '5px', overflow: 'hidden' }}>
+                  <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', overflow: 'hidden', gap: '2px', paddingRight: '2px' }}>
                     <button
                       type="button"
                       onClick={() => handleSwitchProject(p.id)}
@@ -4188,8 +4305,31 @@ function AppContent() {
                     </button>
                     <button
                       type="button"
+                      className="btn-download-action variant-markdown"
+                      onClick={e => { e.stopPropagation(); handleExportMarkdown(p.id, p.name); }}
+                      title={`Download Markdown (.md) • Downloaded ${p.markdown_download_count ?? 0} time(s)`}
+                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                    >
+                      <Download size={10} />
+                      <span>MD</span>
+                      <span className="download-counter-badge">{p.markdown_download_count ?? 0}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-download-action variant-project"
+                      onClick={e => { e.stopPropagation(); handleExportProject(p.id, p.name); }}
+                      title={`Download Project Archive (.zip) • Downloaded ${p.project_download_count ?? 0} time(s)`}
+                      style={{ padding: '2px 5px', fontSize: '9.5px' }}
+                    >
+                      <Download size={10} />
+                      <span>ZIP</span>
+                      <span className="download-counter-badge">{p.project_download_count ?? 0}</span>
+                    </button>
+                    <button
+                      type="button"
                       className="btn-text-danger"
                       onClick={e => { e.stopPropagation(); handleDeleteProject(p.id, p.name); }}
+                      disabled={deletingProjectId === p.id}
                       style={{ padding: '3px 6px', borderLeft: '1px solid #30363d', background: 'transparent' }}
                     >
                       <Trash2 size={11} />

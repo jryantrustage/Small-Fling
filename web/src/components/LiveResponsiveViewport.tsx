@@ -75,23 +75,31 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
     }
   };
 
+  const resolveDirectBackendUrl = (url: string) => {
+    if (!url) return '';
+    if (url.startsWith('/api/device/')) {
+      const host = typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1';
+      const streamHost = host === 'localhost' ? '127.0.0.1' : 'localhost';
+      return `http://${streamHost}:8000${url}`;
+    }
+    return url;
+  };
+
   // Compute active stream and fallback URLs dynamically based on effective live mode
   const activeStreamUrl = useMemo(() => {
     if (!streamUrl) return '';
-    if (streamUrl.includes('mode=')) {
-      return streamUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`);
-    }
-    const sep = streamUrl.includes('?') ? '&' : '?';
-    return `${streamUrl}${sep}mode=${effectiveLiveMode}`;
+    const withMode = streamUrl.includes('mode=')
+      ? streamUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`)
+      : `${streamUrl}${streamUrl.includes('?') ? '&' : '?'}mode=${effectiveLiveMode}`;
+    return resolveDirectBackendUrl(withMode);
   }, [streamUrl, effectiveLiveMode]);
 
   const activeFallbackUrl = useMemo(() => {
     if (!fallbackUrl) return '';
-    if (fallbackUrl.includes('mode=')) {
-      return fallbackUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`);
-    }
-    const sep = fallbackUrl.includes('?') ? '&' : '?';
-    return `${fallbackUrl}${sep}mode=${effectiveLiveMode}`;
+    const withMode = fallbackUrl.includes('mode=')
+      ? fallbackUrl.replace(/mode=(desktop|phone)/, `mode=${effectiveLiveMode}`)
+      : `${fallbackUrl}${fallbackUrl.includes('?') ? '&' : '?'}mode=${effectiveLiveMode}`;
+    return resolveDirectBackendUrl(withMode);
   }, [fallbackUrl, effectiveLiveMode]);
 
   // ResizeObserver on the container to measure available viewport space responsively
@@ -123,9 +131,15 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
 
   // Ensure DOM element resets to new stream URL when device/mode/streamKey updates
   useEffect(() => {
-    if (imgRef.current && activeStreamUrl) {
-      imgRef.current.src = activeStreamUrl;
+    const img = imgRef.current;
+    if (img && activeStreamUrl) {
+      img.src = activeStreamUrl;
     }
+    return () => {
+      if (img) {
+        img.src = '';
+      }
+    };
   }, [activeStreamUrl]);
 
   // Image load handler to capture true stream aspect ratio and resolution

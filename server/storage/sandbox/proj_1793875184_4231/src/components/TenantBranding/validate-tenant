@@ -1,0 +1,295 @@
+export const allFieldsValid = (data, setErrorField) => {
+console.log(`Validating all Fields - ${JSON.stringify(data)}`);
+const validationResults = [
+validateLink(data.link, setErrorField),
+validateFooter(data.footer, setErrorField),
+validateVanityUrl(data.vanityUrl, data.isDlxLicensed, setErrorField),
+validateOffersLandingPageVanityUrl(
+data.offersLandingPageVanityUrl,
+data.isCnxLicensed,
+setErrorField,
+    ],
+validateFiLoginPageUrl(data.fiLoginPageUrl, setErrorField),
+validateMarketingSimRedirectUrl(
+data.marketingSimRedirectUrl,
+setErrorField,
+    ],
+
+    validateEmailSignature(data.signature, setErrorField),
+validateEmailDisclaimer(data.disclaimer, setErrorField),
+validateEmailFromAddress(data.fromEmail, setErrorField),
+validateEmailDisplayName(data.displayName, setErrorField),
+
+    validateContactPhone(data.contactPhone, setErrorField),
+validateContactEmail(data.contactEmail, setErrorField),
+validateContactLocations(data.contactLocations, setErrorField),
+validateContactFeedback(data.contactFeedback, setErrorField),
+validateLoxHomeLink(data.loxHomeLink, setErrorField),
+validateAoxBoHomeLink(data.aoxBoHomeLink, setErrorField),
+validateCnxBoHomeLink(data.cnxBoHomeLink, setErrorField),
+validateCdxBaseUrl(data.cdxBaseUrl, setErrorField),
+
+    data.socialMediaLinks.every((x, index) =>
+validateSocialMediaLink(x.url, index, setErrorField),
+    ],
+];
+return validationResults.every((x) => x);
+};
+
+function validateLength(errorFieldName, length, value, setErrorField) {
+if ((value || '').length <= length) {
+setErrorField(errorFieldName, '');
+return true;
+}
+
+  setErrorField(
+errorFieldName,
+`Value must be less than ${length} characters long.`,
+  ];
+return false;
+}
+
+function validateLastChar(errorFieldName, value, setErrorField) {
+if (!value || value.length === 0) {
+return true;
+}
+
+  const lastChar = value[value.length - 1];
+
+  if (/[^\W_]/.test(lastChar)) {
+setErrorField(errorFieldName, '');
+return true;
+}
+
+  setErrorField(errorFieldName, `The URL must not end with a "${lastChar}"`);
+return false;
+}
+
+export function validateRequired(errorFieldName, value, setErrorField) {
+if (!value || value.length == 0) {
+setErrorField(errorFieldName, 'A value must be provided.');
+return false;
+}
+
+  setErrorField(errorFieldName, '');
+return true;
+}
+
+function validateEmail(errorFieldName, length, value, setErrorField) {
+if ((value || '').length === 0) return true;
+
+  if (!validateLength(errorFieldName, length, value, setErrorField))
+return false;
+
+  const re =
+/^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+
+  if (!re.test(value)) {
+setErrorField(errorFieldName, 'Value must be in valid email format.');
+return false;
+}
+
+  setErrorField(errorFieldName, '');
+return true;
+}
+
+export const fieldMaxLength = {
+link: 500,
+footer: 1000,
+
+  emailSignature: 1000,
+emailDisclaimer: 1000,
+emailFromAddress: 250,
+emailDisplayName: 250,
+
+  contactPhone: 50,
+contactEmail: 250,
+contactLocations: 1000,
+contactFeedback: 1000,
+
+  socialMediaLink: 500,
+};
+
+export const validateLink = (value, setErrorField) =>
+validateLength('link', fieldMaxLength.link, value, setErrorField);
+export const validateFooter = (value, setErrorField) =>
+validateLength('footer', fieldMaxLength.footer, value, setErrorField);
+export const validateVanityUrl = (value, isDlxLicensed, setErrorField) => {
+if (!isDlxLicensed) {
+return (
+validateLength(
+'vanityUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+) && validateLastChar('vanityUrl', value, setErrorField)
+    ];
+}
+return (
+validateRequired('vanityUrl', value, setErrorField) &&
+validateLength(
+'vanityUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+) &&
+validateLastChar('vanityUrl', value, setErrorField)
+  ];
+};
+
+export const validateOffersLandingPageVanityUrl = (
+value,
+isCnxLicensed,
+setErrorField,
+) => {
+if (!isCnxLicensed) {
+return (
+validateLength(
+'offersLandingPageVanityUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+) && validateLastChar('offersLandingPageVanityUrl', value, setErrorField)
+    ];
+}
+return (
+validateRequired('offersLandingPageVanityUrl', value, setErrorField) &&
+validateLength(
+'offersLandingPageVanityUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+) &&
+validateLastChar('offersLandingPageVanityUrl', value, setErrorField)
+  ];
+};
+
+export const validateFiLoginPageUrl = (value, setErrorField) =>
+validateRequired('fiLoginPageUrl', value, setErrorField) &&
+validateLength(
+'fiLoginPageUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+
+export const validateMarketingSimRedirectUrl = (value, setErrorField) =>
+validateLength(
+'marketingSimRedirectUrl',
+fieldMaxLength.link,
+value,
+setErrorField,
+  ];
+
+export const validateEmailSignature = (value, setErrorField) =>
+validateLength(
+'emailSignature',
+fieldMaxLength.emailSignature,
+value,
+setErrorField,
+  ];
+export const validateEmailDisclaimer = (value, setErrorField) =>
+validateLength(
+'emailDisclaimer',
+fieldMaxLength.emailDisclaimer,
+value,
+setErrorField,
+  ];
+export const validateEmailFromAddress = (value, setErrorField) => {
+if (!validateRequired('emailFromAddress', value, setErrorField)) return false;
+return validateEmail(
+'emailFromAddress',
+fieldMaxLength.emailFromAddress,
+value,
+setErrorField,
+  ];
+};
+export const validateEmailDisplayName = (value, setErrorField) =>
+validateLength(
+'emailDisplayName',
+fieldMaxLength.emailDisplayName,
+value,
+setErrorField,
+  ];
+
+export const validateContactPhone = (value, setErrorField) =>
+validateLength(
+'contactPhone',
+fieldMaxLength.contactPhone,
+value,
+setErrorField,
+  ];
+export const validateContactEmail = (value, setErrorField) =>
+validateEmail(
+'contactEmail',
+fieldMaxLength.contactEmail,
+value,
+setErrorField,
+  ];
+export const validateContactLocations = (value, setErrorField) =>
+validateLength(
+'contactLocations',
+fieldMaxLength.contactLocations,
+value,
+setErrorField,
+  ];
+export const validateContactFeedback = (value, setErrorField) =>
+validateLength(
+'contactFeedback',
+fieldMaxLength.contactFeedback,
+value,
+setErrorField,
+  ];
+
+export const validateLoxHomeLink = (value, setErrorField) =>
+validateRequired('loxHomeLink', value, setErrorField) &&
+validateLength(
+'loxHomeLink',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+
+export const validateAoxBoHomeLink = (value, setErrorField) =>
+validateLength(
+'aoxBoHomeLink',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+
+export const validateCnxBoHomeLink = (value, setErrorField) =>
+validateLength(
+'cnxBoHomeLink',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+
+export const validateCdxBaseUrl = (value, setErrorField) =>
+validateRequired('cdxBaseUrl', value, setErrorField) &&
+validateLength(
+'cdxBaseUrl',
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+
+export const validateSocialMediaLink = (value, index, setErrorField) => {
+if (
+!validateRequired(
+getIndexedKey('socialMediaLink', index),
+value,
+setErrorField,
+    ]
+  ]
+return false;
+return validateLength(
+getIndexedKey('socialMediaLink', index),
+fieldMaxLength.socialMediaLink,
+value,
+setErrorField,
+  ];
+};
+
+export const getIndexedKey = (key, index) => `${key}${index}`;

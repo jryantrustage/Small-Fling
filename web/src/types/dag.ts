@@ -106,6 +106,7 @@ export interface DagEdge {
 }
 
 export interface LoopDiagnosisData {
+  status?: string;
   project_id?: string | null;
   project_name?: string | null;
   loop_running: boolean;
@@ -117,6 +118,7 @@ export interface LoopDiagnosisData {
   completion_percent: number;
   is_complete: boolean;
   total_frames: number;
+  captured_frames_count?: number;
   regressed_frames_count: number;
   manual_attention_required: boolean;
   can_resume: boolean;

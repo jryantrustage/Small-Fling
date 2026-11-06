@@ -20,6 +20,11 @@ class ProjectCreateRequest(BaseModel):
     settle_delay_ms: Optional[int] = None
     lock_device: Optional[bool] = False
     hid_config: Optional[Dict[str, Any]] = None
+    bundle_id: Optional[str] = None
+    bundle_name: Optional[str] = None
+    part_number: Optional[int] = None
+    total_parts: Optional[int] = None
+    part_file_name: Optional[str] = None
 
 class ProjectDeviceSettingsRequest(BaseModel):
     device_model: Optional[str] = None
