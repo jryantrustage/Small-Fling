@@ -17,6 +17,7 @@ from dag_nodes.executor import (
     graph_executor,
 )
 
+from dag_nodes.markdown_file_change_node import MarkdownFileChangeNode
 from dag_nodes.init_end_node import InitEndNode
 from dag_nodes.reset_home_node import ResetHomeNode
 from dag_nodes.frame_acquire_node import FrameAcquireNode
@@ -47,6 +48,7 @@ __all__ = [
     "dag_graph_executor",
     "graph_executor",
     # Node Classes
+    "MarkdownFileChangeNode",
     "InitEndNode",
     "ResetHomeNode",
     "FrameAcquireNode",

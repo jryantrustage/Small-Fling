@@ -55,6 +55,7 @@ except ImportError:
 
 
 NODE_ALIAS_MAP = {
+    "node_0": "markdown_file_change", "markdown_file_change": "markdown_file_change", "file_change": "markdown_file_change", "scan_folder": "markdown_file_change",
     "node_1": "init_end", "node_1_end": "init_end", "init_end": "init_end",
     "node_2": "reset_home", "node_2_home": "reset_home", "reset_home": "reset_home",
     "node_3": "frame_acquire", "frame_acquire": "frame_acquire", "frame_capture": "frame_acquire", "capture": "frame_acquire",
@@ -951,6 +952,373 @@ async def align_viewport_for_auto_resume(
         return {"status": "warning", "expected_top": expected_top, "last_bottom_line": last_bot, "error": str(ex)}
 
 
+async def execute_dag_group_markdown_file_change(
+    serial: Optional[str] = None,
+    project_id: Optional[str] = None,
+    display_id: Optional[int] = None,
+    mode: str = "scan_folder",
+    reopen_editor: bool = True,
+    force_rescan: bool = True,
+    handoff_to_init: bool = False,
+    handoff_to_phase3: bool = True,
+    payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes the 'markdown_file_change' DAG node group (Node 0):
+    - mode == 'scan_folder': Runs when 'Scan Folder' is clicked. Captures the Teams/OneDrive folder screenshot,
+      determines the ordered queue of markdown files (MD 1 / N .. MD N / N), updates the active project & bundle card
+      in SQLite, maximizes Fullscreen + switches to Dark Mode & Edit Mode, and optionally hands off to Phase I Initialize.
+    - mode == 'switch_next': Runs when a markdown file completes (100% EOF). Determines the next file in the bundle queue,
+      switches to it, opens Fullscreen + switches to Dark Mode & Edit Mode before handing off to Phase I Initialize ->
+      Phase II Capture & OCR Loop; or when all files in the bundle are completed, hands off to Phase III Post-Capture
+      Analysis & Sandbox.
+    """
+    from services.ui_automator_service import (
+        predetermine_bundle_from_folder_screenshot,
+        ensure_teams_maximized_and_dark_mode,
+    )
+
+    payload = dict(payload or {})
+    if payload.get("mode"):
+        mode = str(payload["mode"]).lower()
+    if "reopen_editor" in payload:
+        reopen_editor = bool(payload["reopen_editor"])
+    if "force_rescan" in payload:
+        force_rescan = bool(payload["force_rescan"])
+    if "handoff_to_init" in payload:
+        handoff_to_init = bool(payload["handoff_to_init"])
+    if "handoff_to_phase3" in payload:
+        handoff_to_phase3 = bool(payload["handoff_to_phase3"])
+
+    active_serial = await get_active_adb_serial(serial or payload.get("serial"))
+    disp_id = display_id if display_id is not None else await detect_external_display_id(active_serial)
+
+    state.dag_state.setdefault("groups", {})
+    mfc_group = state.dag_state["groups"].setdefault("markdown_file_change", {
+        "id": "markdown_file_change",
+        "title": "Markdown File Change",
+        "description": "Scans Teams/OneDrive folder queue (MD 1 / N .. MD N / N), switches to next markdown file on EOF, opens Fullscreen + Dark Mode before handing off to Phase I Initialize or Phase III Post-Capture Analyzer",
+        "nodes": ["markdown_file_change"],
+        "status": "idle",
+        "progress": None,
+    })
+    mfc_node = state.dag_state.setdefault("nodes", {}).setdefault("markdown_file_change", {
+        "id": "markdown_file_change",
+        "group": "markdown_file_change",
+        "title": "0. Markdown File Change (Folder Queue & Part Switch)",
+        "status": "idle",
+        "mode": mode,
+        "current_part": 1,
+        "total_parts": 1,
+        "part_progress_label": "MD 1 / 1",
+        "active_file_name": None,
+        "next_file_name": None,
+        "detected_files": [],
+        "predetermined_parts": [],
+        "bundle_completed": False,
+        "fullscreen_verified": False,
+        "dark_mode_verified": False,
+        "is_active": False,
+    })
+
+    t_start = time.perf_counter()
+    start_dt = datetime.now()
+    mfc_group["status"] = "active"
+    mfc_node.update({
+        "status": "active",
+        "is_active": True,
+        "mode": mode,
+        "started_at": start_dt.strftime("%H:%M:%S"),
+        "started_at_iso": start_dt.isoformat(),
+        "finished_at": None,
+        "error": None,
+    })
+    state.dag_state["current_active_group"] = "markdown_file_change"
+    state.dag_state["current_active_node"] = "markdown_file_change"
+
+    stage_msg = (
+        "Switching to next markdown in bundle queue, maximizing Fullscreen & enabling Dark Mode..."
+        if mode == "switch_next"
+        else "Scanning Teams / OneDrive folder to queue markdown files (MD 1 / N)..."
+    )
+    mfc_group["progress"] = {"percent": 25, "stage": stage_msg, "status": "running"}
+    state.latest_telemetry["status_message"] = stage_msg
+    await state.ws_manager.broadcast({
+        "type": "dag_updated",
+        "dag": state.dag_state,
+        "running_node": "markdown_file_change",
+        "node_id": "markdown_file_change",
+        "is_active": True,
+        "telemetry": state.latest_telemetry,
+    })
+
+    try:
+        if mode == "switch_next":
+            trans_res = await transition_to_next_multipart_project(
+                serial=active_serial,
+                display_id=disp_id,
+                explicit_next_part=payload.get("next_part_number"),
+                current_project_id=project_id,
+            )
+            mp_state = state.sync_multipart_state_from_alignment()
+            predetermined = list(mp_state.get("predetermined_parts") or [])
+            cur_part = int(mp_state.get("current_part") or 1)
+            tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
+            bundle_done = bool(trans_res.get("bundle_completed"))
+            part_label = f"MD {cur_part} / {tot_parts}"
+            detected_files = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
+
+            dur_ms = max(1, int((time.perf_counter() - t_start) * 1000))
+            end_dt = datetime.now()
+            passed = trans_res.get("status") in ("success", "bundle_completed")
+
+            mfc_node.update({
+                "status": "completed" if passed else "error",
+                "is_active": False,
+                "mode": "switch_next",
+                "current_part": cur_part,
+                "total_parts": tot_parts,
+                "part_progress_label": part_label,
+                "active_file_name": (trans_res.get("project") or {}).get("part_file_name") or trans_res.get("opened_file_name") or mp_state.get("last_opened_file"),
+                "next_file_name": mp_state.get("next_file_name"),
+                "detected_files": detected_files,
+                "predetermined_parts": predetermined,
+                "bundle_completed": bundle_done,
+                "fullscreen_verified": True,
+                "dark_mode_verified": True,
+                "finished_at": end_dt.strftime("%H:%M:%S"),
+                "finished_at_iso": end_dt.isoformat(),
+                "duration_ms": dur_ms,
+                "timings": {
+                    "started_at": mfc_node.get("started_at"),
+                    "finished_at": end_dt.strftime("%H:%M:%S"),
+                    "duration_ms": dur_ms,
+                    "action_ms": dur_ms,
+                    "timestamp_iso": end_dt.isoformat(),
+                },
+                "evaluator": {
+                    "type": "markdown_file_change_switch",
+                    "passed": passed,
+                    "expected": "Open next markdown in Fullscreen + Dark Mode or reach Bundle EOF",
+                    "actual": f"{part_label} ({'Bundle Complete' if bundle_done else (mfc_node.get('active_file_name') or 'switched')})",
+                },
+            })
+            mfc_group["status"] = "completed" if passed else "error"
+            mfc_group["progress"] = {
+                "percent": 100 if passed else 50,
+                "stage": (
+                    f"All {tot_parts} bundle files completed ({part_label})! Handing off to Phase III Post-Capture Analysis & Sandbox ✔"
+                    if bundle_done
+                    else f"Opened {mfc_node.get('active_file_name') or part_label} ({part_label}) in Fullscreen + Dark Mode! Handing off to Phase I Initialize ✔"
+                    if passed
+                    else f"Failed to switch markdown part: {trans_res.get('message', '')}"
+                ),
+                "status": "completed" if passed else "error",
+            }
+            state.dag_state["current_active_node"] = None
+
+            updated_projects = db.get_projects()
+            active_proj_now = db.get_active_project()
+            if active_proj_now:
+                await state.ws_manager.broadcast({"type": "project_updated", "project": active_proj_now, "projects": updated_projects})
+            await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": mp_state, "transition": trans_res})
+            await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "node_id": "markdown_file_change", "telemetry": state.latest_telemetry})
+
+            init_res = None
+            phase3_res = None
+            if bundle_done:
+                comp_bundle_msg = (
+                    f"🏆 Multi-Part Bundle Complete! All {tot_parts} markdown files scanned & OCR completed "
+                    f"({len(mp_state.get('exported_parts', []))} exported). Handing off to Phase III Analyzer & Sandbox..."
+                )
+                state.latest_telemetry["status_message"] = comp_bundle_msg
+                await emit_dag_telemetry_event(
+                    category="SYSTEM",
+                    message=comp_bundle_msg,
+                    dag="markdown_file_change",
+                    level="success",
+                    serial=active_serial,
+                )
+                if handoff_to_phase3 and (
+                    state.is_edge_connected("markdown_file_change", "markdown_tag_parser")
+                    or state.is_edge_connected("document_assemble", "markdown_tag_parser")
+                ):
+                    try:
+                        phase3_res = await execute_dag_group_post_capture_analyzer(project_id=state.get_current_project_id())
+                    except Exception as pca_err:
+                        print(f"[execute_dag_group_markdown_file_change] Phase III handoff note: {pca_err}")
+            elif passed:
+                # Reset Phase I Initialize group status so Phase I runs next for the new markdown part
+                if "initialize" in state.dag_state.get("groups", {}):
+                    state.dag_state["groups"]["initialize"]["status"] = "idle"
+                state.dag_state["nodes"]["init_end"]["status"] = "idle"
+                state.dag_state["nodes"]["init_end"]["total_lines"] = 0
+                state.dag_state["nodes"]["reset_home"]["status"] = "idle"
+                state.dag_state["nodes"]["reset_home"]["verified"] = False
+                await emit_dag_telemetry_event(
+                    category="SYSTEM",
+                    message=f"📂 Markdown File Change ({part_label}): Opened '{mfc_node.get('active_file_name')}' in Fullscreen + Dark Mode -> Handing off to Phase I Initialize...",
+                    dag="markdown_file_change",
+                    level="success",
+                    serial=active_serial,
+                )
+                if handoff_to_init and state.is_edge_connected("markdown_file_change", "init_end"):
+                    init_res = await execute_dag_group_initialize(
+                        serial=active_serial,
+                        project_id=(active_proj_now or {}).get("id"),
+                        force_reset=True,
+                    )
+
+            return {
+                "status": "success" if passed else "error",
+                "group": "markdown_file_change",
+                "mode": "switch_next",
+                "bundle_completed": bundle_done,
+                "current_part": cur_part,
+                "total_parts": tot_parts,
+                "part_progress_label": part_label,
+                "detected_files": detected_files,
+                "predetermined_parts": predetermined,
+                "transition": trans_res,
+                "project": active_proj_now,
+                "projects": updated_projects,
+                "multipart_state": mp_state,
+                "initialize_handoff": init_res,
+                "post_capture_analyzer": phase3_res,
+            }
+
+        # Default: mode == 'scan_folder'
+        scan_res = await predetermine_bundle_from_folder_screenshot(
+            serial=active_serial,
+            display_id=disp_id,
+            target_part_number=payload.get("target_part_number"),
+            reopen_editor=reopen_editor,
+            force_rescan=force_rescan,
+        )
+        if reopen_editor and active_serial and "mock" not in str(active_serial).lower():
+            try:
+                await ensure_teams_maximized_and_dark_mode(
+                    active_serial,
+                    disp_id,
+                    enable_edit_mode=True,
+                    enable_dark_mode=True,
+                )
+            except Exception as fs_err:
+                print(f"[execute_dag_group_markdown_file_change] Fullscreen/Dark mode check note: {fs_err}")
+
+        mp_state = state.sync_multipart_state_from_alignment()
+        predetermined = list(mp_state.get("predetermined_parts") or [])
+        cur_part = int(mp_state.get("current_part") or 1)
+        tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
+        part_label = f"MD {cur_part} / {tot_parts}"
+        detected_files = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
+
+        dur_ms = max(1, int((time.perf_counter() - t_start) * 1000))
+        end_dt = datetime.now()
+        passed = bool(scan_res.get("status") in ("success", "cached", "single_file") or len(detected_files) > 0)
+
+        mfc_node.update({
+            "status": "completed" if passed else "warning",
+            "is_active": False,
+            "mode": "scan_folder",
+            "current_part": cur_part,
+            "total_parts": tot_parts,
+            "part_progress_label": part_label,
+            "active_file_name": scan_res.get("opened_file_name") or (detected_files[0] if detected_files else None),
+            "next_file_name": mp_state.get("next_file_name"),
+            "detected_files": detected_files,
+            "predetermined_parts": predetermined,
+            "bundle_completed": False,
+            "fullscreen_verified": bool(reopen_editor),
+            "dark_mode_verified": bool(reopen_editor),
+            "finished_at": end_dt.strftime("%H:%M:%S"),
+            "finished_at_iso": end_dt.isoformat(),
+            "duration_ms": dur_ms,
+            "timings": {
+                "started_at": mfc_node.get("started_at"),
+                "finished_at": end_dt.strftime("%H:%M:%S"),
+                "duration_ms": dur_ms,
+                "action_ms": dur_ms,
+                "timestamp_iso": end_dt.isoformat(),
+            },
+            "evaluator": {
+                "type": "markdown_file_change_scan_folder",
+                "passed": passed,
+                "expected": "Detect Teams/OneDrive folder markdown files & populate MD 1 / N queue",
+                "actual": f"{len(detected_files)} markdown files queued ({part_label})",
+            },
+        })
+        mfc_group["status"] = "completed" if passed else "warning"
+        mfc_group["progress"] = {
+            "percent": 100,
+            "stage": f"Detected {len(detected_files)} markdown files in folder queue ({part_label}) ✔",
+            "status": "completed",
+        }
+        state.dag_state["current_active_node"] = None
+        state.latest_telemetry["status_message"] = (
+            f"📂 Folder Scan Complete: {len(detected_files)} files queued ({part_label}) — "
+            f"{', '.join(detected_files[:3])}{'...' if len(detected_files) > 3 else ''}"
+            if detected_files
+            else "📂 Folder Scan Complete"
+        )
+
+        updated_projects = db.get_projects()
+        active_proj_now = db.get_active_project()
+        if active_proj_now:
+            await state.ws_manager.broadcast({
+                "type": "project_updated",
+                "project": active_proj_now,
+                "projects": updated_projects,
+            })
+        await state.ws_manager.broadcast({
+            "type": "multipart_transition_status",
+            "multipart_state": mp_state,
+            "predetermined": scan_res,
+        })
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "node_id": "markdown_file_change",
+            "telemetry": state.latest_telemetry,
+        })
+
+        init_res = None
+        if handoff_to_init and state.is_edge_connected("markdown_file_change", "init_end"):
+            init_res = await execute_dag_group_initialize(
+                serial=active_serial,
+                project_id=(active_proj_now or {}).get("id"),
+                force_reset=bool(payload.get("force_reset", False)),
+            )
+
+        return {
+            "status": "success",
+            "group": "markdown_file_change",
+            "mode": "scan_folder",
+            **scan_res,
+            "current_part": cur_part,
+            "total_parts": tot_parts,
+            "part_progress_label": part_label,
+            "detected_files": detected_files,
+            "predetermined_parts": predetermined,
+            "project": active_proj_now,
+            "projects": updated_projects,
+            "multipart_state": mp_state,
+            "initialize_handoff": init_res,
+        }
+    except Exception as exc:
+        err_str = str(exc)
+        mfc_group["status"] = "error"
+        mfc_node.update({"status": "error", "is_active": False, "error": err_str})
+        state.dag_state["current_active_node"] = None
+        await state.ws_manager.broadcast({
+            "type": "dag_updated",
+            "dag": state.dag_state,
+            "node_id": "markdown_file_change",
+            "error": err_str,
+        })
+        return {"status": "error", "group": "markdown_file_change", "error": err_str}
+
+
 async def execute_dag_group_initialize(
     serial: Optional[str] = None,
     project_id: Optional[str] = None,
@@ -1737,24 +2105,23 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                             category="SYSTEM",
                             message=(
                                 f"📂 Multi-Part Markdown Part {mp_state.get('current_part')} complete! "
-                                f"Exiting via Back Arrow to open Part {mp_state.get('next_part_number')}..."
+                                f"Running DAG Group 'Markdown File Change' to open Part {mp_state.get('next_part_number')}..."
                             ),
-                            dag="verify_assemble",
+                            dag="markdown_file_change",
                             serial=active_serial,
                         )
-                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
-                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                        mfc_res = await execute_dag_group_markdown_file_change(
+                            serial=active_serial,
+                            display_id=disp_id,
+                            mode="switch_next",
+                            handoff_to_init=False,
+                            handoff_to_phase3=True,
+                        )
+                        if mfc_res.get("status") == "success" and not mfc_res.get("bundle_completed") and state.capture_loop_running:
                             await asyncio.sleep(0.35)
                             continue
-                        elif trans_res.get("bundle_completed"):
-                            comp_bundle_msg = (
-                                f"🏆 Multi-Part Bundle Complete! All parts exported "
-                                f"({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
-                            )
-                            state.latest_telemetry["status_message"] = comp_bundle_msg
-                            await emit_dag_telemetry_event(
-                                category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial
-                            )
+                        stop_reason_logged = True
+                        break
                     if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
                         try:
                             await execute_dag_group_post_capture_analyzer(project_id=state.get_current_project_id())
@@ -1917,18 +2284,27 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                     if mp_state_rec.get("is_multipart") and mp_state_rec.get("auto_chain_enabled", True) and state.capture_loop_running:
                                         await emit_dag_telemetry_event(
                                             category="SYSTEM",
-                                            message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state_rec.get('next_part_number')}...",
-                                            dag="verify_assemble",
+                                            message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Running DAG Group 'Markdown File Change' to open Part {mp_state_rec.get('next_part_number')}...",
+                                            dag="markdown_file_change",
                                             serial=active_serial,
                                         )
-                                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
-                                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                                        mfc_res = await execute_dag_group_markdown_file_change(
+                                            serial=active_serial,
+                                            display_id=disp_id,
+                                            mode="switch_next",
+                                            handoff_to_init=False,
+                                            handoff_to_phase3=True,
+                                        )
+                                        if mfc_res.get("status") == "success" and not mfc_res.get("bundle_completed") and state.capture_loop_running:
                                             advance_to_next_multipart = True
                                             break
-                                        elif trans_res.get("bundle_completed"):
-                                            comp_bundle_msg = f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
-                                            state.latest_telemetry["status_message"] = comp_bundle_msg
-                                            await emit_dag_telemetry_event(category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial)
+                                        stop_reason_logged = True
+                                        break
+                                    if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
+                                        try:
+                                            await execute_dag_group_post_capture_analyzer(project_id=state.get_current_project_id())
+                                        except Exception as pca_err:
+                                            print(f"[CaptureLoop] Post-capture analyzer note: {pca_err}")
                                     stop_reason_logged = True
                                     break
                                 if n8_rec.get("status") != "error":
@@ -1974,18 +2350,27 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                                 if mp_state_rec.get("is_multipart") and mp_state_rec.get("auto_chain_enabled", True) and state.capture_loop_running:
                                     await emit_dag_telemetry_event(
                                         category="SYSTEM",
-                                        message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state_rec.get('next_part_number')}...",
-                                        dag="verify_assemble",
+                                        message=f"📂 Multi-Part Markdown Part {mp_state_rec.get('current_part')} complete! Running DAG Group 'Markdown File Change' to open Part {mp_state_rec.get('next_part_number')}...",
+                                        dag="markdown_file_change",
                                         serial=active_serial,
                                     )
-                                    trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
-                                    if trans_res.get("status") == "success" and state.capture_loop_running:
+                                    mfc_res = await execute_dag_group_markdown_file_change(
+                                        serial=active_serial,
+                                        display_id=disp_id,
+                                        mode="switch_next",
+                                        handoff_to_init=False,
+                                        handoff_to_phase3=True,
+                                    )
+                                    if mfc_res.get("status") == "success" and not mfc_res.get("bundle_completed") and state.capture_loop_running:
                                         advance_to_next_multipart = True
                                         break
-                                    elif trans_res.get("bundle_completed"):
-                                        comp_bundle_msg = f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
-                                        state.latest_telemetry["status_message"] = comp_bundle_msg
-                                        await emit_dag_telemetry_event(category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial)
+                                    stop_reason_logged = True
+                                    break
+                                if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
+                                    try:
+                                        await execute_dag_group_post_capture_analyzer(project_id=state.get_current_project_id())
+                                    except Exception as pca_err:
+                                        print(f"[CaptureLoop] Post-capture analyzer note: {pca_err}")
                                 stop_reason_logged = True
                                 break
                             state.record_diagnostics_trace_event(
@@ -2068,17 +2453,25 @@ async def run_continuous_capture_loop_worker(serial: Optional[str] = None, resum
                     mp_state = state.sync_multipart_state_from_alignment()
                     if mp_state.get("is_multipart") and mp_state.get("auto_chain_enabled", True) and state.capture_loop_running:
                         await emit_dag_telemetry_event(
-                            category="SYSTEM", message=f"📂 Multi-Part Markdown Part {mp_state.get('current_part')} complete! Exiting via Back Arrow to open Part {mp_state.get('next_part_number')}...",
-                            dag="verify_assemble", serial=active_serial,
+                            category="SYSTEM",
+                            message=f"📂 Multi-Part Markdown Part {mp_state.get('current_part')} complete! Running DAG Group 'Markdown File Change' to open Part {mp_state.get('next_part_number')}...",
+                            dag="markdown_file_change",
+                            serial=active_serial,
                         )
-                        trans_res = await transition_to_next_multipart_project(serial=active_serial, display_id=disp_id)
-                        if trans_res.get("status") == "success" and state.capture_loop_running:
+                        mfc_res = await execute_dag_group_markdown_file_change(
+                            serial=active_serial,
+                            display_id=disp_id,
+                            mode="switch_next",
+                            handoff_to_init=False,
+                            handoff_to_phase3=True,
+                        )
+                        if mfc_res.get("status") == "success" and not mfc_res.get("bundle_completed") and state.capture_loop_running:
                             advance_to_next_multipart = True
                             break
-                        elif trans_res.get("bundle_completed"):
-                            comp_bundle_msg = f"🏆 Multi-Part Bundle Complete! All parts exported ({len(state.multipart_bundle_state.get('exported_parts', []))} markdown files)."
-                            state.latest_telemetry["status_message"] = comp_bundle_msg
-                            await emit_dag_telemetry_event(category="SYSTEM", message=comp_bundle_msg, dag="verify_assemble", level="success", serial=active_serial)
+                        stop_reason_logged = True
+                        if is_headless:
+                            state.headless_telemetry_session["total_lines_reached"] = True
+                        break
 
                     if state.is_edge_connected("document_assemble", "markdown_tag_parser"):
                         try:
@@ -2347,10 +2740,15 @@ async def transition_to_next_multipart_project(
     serial: Optional[str] = None,
     display_id: Optional[int] = None,
     explicit_next_part: Optional[int] = None,
+    current_project_id: Optional[str] = None,
+    broadcast_fn: Optional[Any] = None,
 ) -> Dict[str, Any]:
     from models import ProjectCreateRequest
     from routers.projects import create_project
-    from services.ui_automator_service import select_and_open_next_markdown_part
+    from services.ui_automator_service import (
+        select_and_open_next_markdown_part,
+        ensure_teams_maximized_and_dark_mode,
+    )
 
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -2370,7 +2768,7 @@ async def transition_to_next_multipart_project(
     cur_part = mp_state.get("current_part")
     if explicit_next_part is not None and explicit_next_part > 1:
         cur_part = explicit_next_part - 1
-    base_prefix = mp_state.get("base_prefix") or ""
+    base_prefix = mp_state.get("base_prefix") or active_proj.get("bundle_name") or ""
 
     state.multipart_bundle_state["transition_status"] = "transitioning"
     state.multipart_bundle_state["last_transition_message"] = f"Exiting {cur_file or 'current markdown'} via Back Arrow and opening Part {(cur_part or 1) + 1}..."
@@ -2398,6 +2796,13 @@ async def transition_to_next_multipart_project(
         await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": state.multipart_bundle_state, "transition": trans_res})
         return {**trans_res, "multipart_state": state.multipart_bundle_state}
 
+    # Ensure Fullscreen, Edit Mode, and Dark Mode are active before handing off to Phase I Initialize
+    if ser and "mock" not in str(ser).lower():
+        try:
+            await ensure_teams_maximized_and_dark_mode(ser, disp_id, enable_edit_mode=True, enable_dark_mode=True)
+        except Exception as fs_e:
+            print(f"[transition_to_next_multipart_project] Fullscreen/Dark mode verify note: {fs_e}")
+
     opened_file = (
         trans_res.get("opened_file_name")
         or state.latest_alignment_status.get("file_name")
@@ -2405,6 +2810,23 @@ async def transition_to_next_multipart_project(
     )
     next_part_num = trans_res.get("next_part_number") or trans_res.get("part_number")
     tot_parts = trans_res.get("total_parts") or state.multipart_bundle_state.get("total_parts")
+
+    eff_bundle_name = active_proj.get("bundle_name") or base_prefix or re.sub(r"[_\-\s]*part[_\-\s]*\d+.*$", "", opened_file, flags=re.IGNORECASE).strip() or "Bundle"
+    clean_slug = re.sub(r"[^a-z0-9]+", "_", str(eff_bundle_name).lower()).strip("_") or "bundle"
+    eff_bundle_id = active_proj.get("bundle_id") or f"bundle_{clean_slug}"
+
+    if active_proj.get("id") and not active_proj.get("bundle_id"):
+        try:
+            db.update_project_bundle_metadata(
+                project_id=active_proj["id"],
+                bundle_id=eff_bundle_id,
+                bundle_name=eff_bundle_name,
+                part_number=int(cur_part or 1),
+                total_parts=int(tot_parts or 0) if tot_parts else None,
+                part_file_name=cur_file or f"{eff_bundle_name}_part{cur_part or 1}.md",
+            )
+        except Exception:
+            pass
 
     # Reset headless telemetry session target so Part N+1 calibrates its own total_lines in DAG Group 1
     state.headless_telemetry_session["target_total_lines"] = 0
@@ -2430,8 +2852,8 @@ async def transition_to_next_multipart_project(
             arrow_count_step=active_proj.get("arrow_count_step"),
             settle_delay_ms=active_proj.get("settle_delay_ms"),
             lock_device=bool(active_proj.get("lock_device", True)),
-            bundle_id=active_proj.get("bundle_id") or None,
-            bundle_name=active_proj.get("bundle_name") or base_prefix or None,
+            bundle_id=eff_bundle_id,
+            bundle_name=eff_bundle_name,
             part_number=int(next_part_num or 0) if next_part_num else None,
             total_parts=int(tot_parts or 0) if tot_parts else None,
             part_file_name=opened_file,

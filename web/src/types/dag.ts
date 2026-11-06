@@ -53,13 +53,14 @@ export interface PerformanceDiagnosis {
 }
 
 export type DagGroup =
+  | 'markdown_file_change'
   | 'initialize'
   | 'capture_entire_markdown'
   | 'position_navigation'
   | 'verify_assemble'
   | 'post_capture_analyzer';
 
-export type DagPhase = 'phase1_init' | 'phase2_capture' | 'phase3_analyzer';
+export type DagPhase = 'phase0_file_change' | 'phase1_init' | 'phase2_capture' | 'phase3_analyzer';
 
 export interface NodeMeta {
   id: string;
@@ -163,6 +164,17 @@ export interface DagStatusData {
 }
 
 export const NODES_METADATA: NodeMeta[] = [
+  {
+    id: 'markdown_file_change',
+    step: '0',
+    shortName: 'Markdown File Change',
+    fullName: '0. MARKDOWN FILE CHANGE & FOLDER QUEUE',
+    subhead: 'Scan Folder Queue & Switch Part',
+    desc: 'Scans Teams/OneDrive folder to queue detected markdown files (MD 1 / N .. MD N / N), and on markdown completion switches to the next file, opens Fullscreen, and switches to Dark Mode before handing off to Phase I Initialize or Phase III Post-Capture Analysis.',
+    group: 'markdown_file_change',
+    accentColor: '#d2a8ff',
+    hasConfig: true
+  },
   {
     id: 'init_end',
     step: '1',

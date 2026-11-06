@@ -655,6 +655,11 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
         [f for f in files if f.get("is_multipart") and f.get("part_number") is not None],
         key=lambda f: int(f["part_number"]),
     )
+    if not part_files and files:
+        for idx, f_item in enumerate(files, start=1):
+            f_copy = dict(f_item)
+            f_copy["part_number"] = idx
+            part_files.append(f_copy)
     part_numbers = sorted({int(f["part_number"]) for f in part_files})
     total_parts = max(part_numbers) if part_numbers else len(files)
     is_folder_view = bool(len(files) >= 1 and (has_modified_by or len(files) >= 2 or folder_name))
@@ -663,6 +668,7 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
         {
             "part_number": int(pf["part_number"]),
             "total_parts": total_parts,
+            "scope_label": f"MD {int(pf['part_number'])} / {total_parts}",
             "file_name": pf["file_name"],
             "base_prefix": pf.get("base_prefix") or canonical_prefix or folder_name,
             "tap_coords": pf["tap_coords"],
@@ -836,6 +842,8 @@ async def predetermine_bundle_from_folder_screenshot(
     target_part_number: Optional[int] = None,
     reopen_editor: bool = True,
     force_rescan: bool = False,
+    disp_id: Optional[int] = None,
+    reopen_current_file: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Predetermines the list of markdown files in a multi-part bundle during Project Initialization
@@ -845,8 +853,15 @@ async def predetermine_bundle_from_folder_screenshot(
     - If inside the Teams Markdown editor, clicks Back Arrow to take the folder screenshot,
       catalogs all parts (even if out of order on screen like part2..part9, part1), and re-opens the active markdown part.
     """
+    import db
+    import re
     from alignment_engine import detect_teams_markdown_alignment, parse_multipart_markdown_filename
     from services import state
+
+    if display_id is None and disp_id is not None:
+        display_id = disp_id
+    if reopen_current_file is not None:
+        reopen_editor = bool(reopen_current_file)
 
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
@@ -944,11 +959,47 @@ async def predetermine_bundle_from_folder_screenshot(
             ),
         })
 
+        target_entry = next(
+            (p for p in predetermined_parts if p["part_number"] == part_to_open),
+            predetermined_parts[0],
+        )
+
+        # Synchronize the active project in SQLite with the predetermined bundle metadata so the Left Sidebar
+        # card immediately displays the bundle & nested queue (Parts MD 1 / N .. MD N / N)
+        try:
+            active_proj = db.get_active_project()
+            eff_tot = int(total_parts or len(predetermined_parts) or 1)
+            eff_prefix = base_prefix or folder_scan.get("folder_name") or (active_proj or {}).get("bundle_name") or (active_proj or {}).get("name") or "Bundle"
+            clean_bundle_slug = re.sub(r"[^a-z0-9]+", "_", str(eff_prefix).lower()).strip("_") or "bundle"
+            bundle_id = (active_proj or {}).get("bundle_id") or f"bundle_{clean_bundle_slug}"
+            target_fn = target_entry.get("file_name") or f"{eff_prefix}_part{part_to_open}.md"
+
+            if active_proj and active_proj.get("id"):
+                db.update_project_bundle_metadata(
+                    project_id=active_proj["id"],
+                    bundle_id=bundle_id,
+                    bundle_name=eff_prefix,
+                    part_number=int(active_proj.get("part_number") or part_to_open),
+                    total_parts=eff_tot,
+                    part_file_name=active_proj.get("part_file_name") or target_fn,
+                )
+                db.append_project_filename(active_proj["id"], target_fn)
+            else:
+                new_p = db.create_project(
+                    name=target_fn[:-3] if target_fn.lower().endswith(".md") else target_fn,
+                    bundle_id=bundle_id,
+                    bundle_name=eff_prefix,
+                    part_number=part_to_open,
+                    total_parts=eff_tot,
+                    part_file_name=target_fn,
+                )
+                if new_p and new_p.get("id"):
+                    db.append_project_filename(new_p["id"], target_fn)
+            state.sync_multipart_state_from_alignment()
+        except Exception as db_sync_err:
+            print(f"[predetermine_bundle_from_folder_screenshot] DB bundle metadata sync warning: {db_sync_err}")
+
         if reopen_editor:
-            target_entry = next(
-                (p for p in predetermined_parts if p["part_number"] == part_to_open),
-                predetermined_parts[0],
-            )
             tx, ty = target_entry["tap_coords"]
             await run_adb_shell(f"input {disp_pfx}tap {tx} {ty}", ser, timeout=2.5)
             actions.append(
@@ -959,6 +1010,8 @@ async def predetermine_bundle_from_folder_screenshot(
             prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
             actions.extend(prep_res.get("actions", []))
             detected_open_file = target_entry["file_name"]
+            state.multipart_bundle_state["last_opened_file"] = detected_open_file
+            state.sync_multipart_state_from_alignment()
 
     return {
         "status": "success" if predetermined_parts else "single_file",
@@ -1165,4 +1218,18 @@ async def select_and_open_next_markdown_part(
         "actions": actions,
         "message": f"Opened '{opened_name}' (Part {next_part} of {resolved_total_parts or '?'}), maximized editor, selected Dark Mode, and switched to Edit Mode (Pencil) ✔"
     }
+
+
+async def ensure_teams_maximized_and_dark_mode(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    enable_edit_mode: bool = True,
+    enable_dark_mode: bool = True,
+) -> Dict[str, Any]:
+    """
+    Ensures the Teams Markdown editor is maximized to Fullscreen, switched to Dark Mode,
+    and switched to Edit Mode (Pencil icon).
+    """
+    return await prepare_markdown_editor_window(serial=serial, display_id=display_id)
+
 

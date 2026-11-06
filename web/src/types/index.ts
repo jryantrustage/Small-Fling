@@ -465,7 +465,7 @@ export interface TelemetryEvent {
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;
-  dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'system' | 'all';
+  dag?: 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer' | 'system' | 'all';
   device?: string;
   nodeId?: string;
   level?: 'info' | 'warning' | 'error' | 'success';

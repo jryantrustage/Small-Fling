@@ -103,7 +103,7 @@ function AppContent() {
   const [workspaceMode, setWorkspaceMode] = useState<'capture_dag' | 'ocr_inspector' | 'analyzer_sandbox'>('capture_dag');
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
   const [_showDag, setShowDag] = useState(true);
-  const [selectedDag, setSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>('all');
+  const [selectedDag, setSelectedDag] = useState<'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('init_end');
   const [showGotoModal, setShowGotoModal] = useState(false);
   const [gotoTargetLine, setGotoTargetLine] = useState<number | string>('');
@@ -580,23 +580,50 @@ function AppContent() {
     setIsScanningFolderBundle(true);
     try {
       const activeSer = deviceInfo?.active_serial || deviceInfo?.target_serial;
-      const res = await api('/api/dag/multipart/predetermine-folder', {
+      const res = await api('/api/dag/groups/markdown_file_change/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serial: activeSer, reopen_editor: reopenEditor, force_rescan: true })
+        body: JSON.stringify({
+          mode: 'scan_folder',
+          serial: activeSer,
+          project_id: activeProject?.id,
+          reopen_editor: reopenEditor,
+          force_rescan: true
+        })
       });
       if (res.ok) {
         const d = await res.json();
         if (d.multipart_state) setMultipartState(d.multipart_state);
+        if (Array.isArray(d.projects)) setProjects(d.projects);
+        if (d.project) {
+          setActiveProject(d.project);
+          const bid = d.project.bundle_id || (
+            (d.base_prefix || d.folder_name || d.project.name)
+              ? `bundle_${String(d.base_prefix || d.folder_name || d.project.name).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`
+              : ''
+          );
+          if (bid) {
+            setExpandedBundleIds(prev => {
+              const next = new Set(prev);
+              next.add(bid);
+              return next;
+            });
+          }
+        }
         const partsCount = d.predetermined_parts?.length || d.multipart_state?.predetermined_parts?.length || 0;
         if (partsCount > 0) {
-          addTelemetryEvent('SYSTEM', `Predetermined ${partsCount} markdown part(s) from OneDrive/Teams folder screenshot ✔`, d, 'initialize');
+          addTelemetryEvent(
+            'SYSTEM',
+            `DAG Node 0 (Markdown File Change): Queued ${partsCount} markdown file(s) from Teams/OneDrive folder (MD 1 / ${partsCount}) ✔`,
+            d,
+            'markdown_file_change'
+          );
         }
         setStreamKey(Date.now());
         await fetchData();
       }
     } catch (e) {
-      console.error('Failed to predetermine folder bundle', e);
+      console.error('Failed to predetermine folder bundle via markdown_file_change DAG group', e);
     } finally {
       setIsScanningFolderBundle(false);
     }
@@ -781,7 +808,7 @@ function AppContent() {
     setArmedSplitter(null);
   }, []);
 
-  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'system' | 'all') => {
+  const addTelemetryEvent = useCallback((category: TelemetryEvent['category'], message: string, data?: any, dag?: TelemetryEvent['dag']) => {
     let inferredDag = dag;
     if (!inferredDag) {
       const msg = message.toLowerCase();
@@ -2796,6 +2823,10 @@ function AppContent() {
       if (m && m[1]) {
         return `bundle_${m[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
       }
+      if ((p.total_parts && p.total_parts > 1) || (p.id === activeProject?.id && (multipartState.is_multipart || (multipartState.predetermined_parts && multipartState.predetermined_parts.length > 0)))) {
+        const rawPrefix = p.bundle_name || multipartState.base_prefix || multipartState.folder_name || p.name || 'bundle';
+        return `bundle_${String(rawPrefix).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
+      }
       return '';
     };
 
@@ -2869,6 +2900,21 @@ function AppContent() {
     }
     return groups;
   }, [projects, activeProject?.id, multipartState.total_parts, multipartState.predetermined_parts]);
+
+  // Automatically expand the active bundle card when folder scan populates predetermined_parts
+  useEffect(() => {
+    if (Array.isArray(multipartState.predetermined_parts) && multipartState.predetermined_parts.length > 0) {
+      const activeGroup = projectGroups.find(g => g.type === 'bundle' && g.is_active);
+      if (activeGroup) {
+        setExpandedBundleIds(prev => {
+          if (prev.has(activeGroup.bundle_id)) return prev;
+          const next = new Set(prev);
+          next.add(activeGroup.bundle_id);
+          return next;
+        });
+      }
+    }
+  }, [multipartState.predetermined_parts?.length, projectGroups]);
 
   return (
     <div className="studio-root" data-testid="matrix-capture-studio">
@@ -3248,10 +3294,30 @@ function AppContent() {
                 if (group.type === 'bundle') {
                   const isExpanded = expandedBundleIds.has(group.bundle_id);
                   const expectedTotal = Math.max(group.total_parts_count, group.expected_total_parts || group.total_parts_count);
-                  const scannedPartNums = new Set(group.parts.map((pt, i) => pt.part_number || i + 1));
-                  const pendingPredetermined = (group.is_active && Array.isArray(multipartState.predetermined_parts))
-                    ? multipartState.predetermined_parts.filter(pt => !scannedPartNums.has(pt.part_number))
+                  const predeterminedList = (group.is_active && Array.isArray(multipartState.predetermined_parts))
+                    ? multipartState.predetermined_parts
                     : [];
+                  const curActivePartNum = group.parts.find(pt => pt.id === activeProject?.id)?.part_number
+                    || (group.is_active ? (multipartState.current_part || 1) : 1);
+
+                  // Build unified process scope queue (MD 1 / N .. MD N / N) combining scanned part projects + predetermined folder files
+                  const partByNumber = new Map<number, ProjectData>();
+                  group.parts.forEach((pt, idx) => {
+                    const pNum = pt.part_number || idx + 1;
+                    partByNumber.set(pNum, pt);
+                  });
+                  const predByNumber = new Map<number, typeof predeterminedList[number]>();
+                  predeterminedList.forEach(pt => {
+                    if (pt.part_number) predByNumber.set(pt.part_number, pt);
+                  });
+                  const allPartNums = Array.from(
+                    new Set<number>([
+                      ...Array.from(partByNumber.keys()),
+                      ...Array.from(predByNumber.keys()),
+                      ...Array.from({ length: expectedTotal }, (_, i) => i + 1)
+                    ])
+                  ).sort((a, b) => a - b);
+
                   return (
                     <div
                       key={group.bundle_id}
@@ -3282,8 +3348,8 @@ function AppContent() {
                             </span>
                           </div>
                           <span className="bundle-parts-count-pill" data-testid="bundle-parts-count">
-                            {expectedTotal > group.total_parts_count
-                              ? `${group.total_parts_count}/${expectedTotal} Parts`
+                            {expectedTotal > 1
+                              ? `MD ${curActivePartNum} / ${expectedTotal}`
                               : `${group.total_parts_count} ${group.total_parts_count === 1 ? 'Part / MD' : 'Parts / MDs'}`}
                           </span>
                         </div>
@@ -3293,7 +3359,7 @@ function AppContent() {
                           <div className="bundle-metric-chip" data-testid="bundle-metric-parts">
                             <span className="metric-label">Parts / MDs</span>
                             <span className="metric-val" style={{ color: '#d2a8ff' }}>
-                              {expectedTotal > group.total_parts_count ? `${group.total_parts_count} / ${expectedTotal}` : group.total_parts_count}
+                              {expectedTotal > 1 ? `MD ${curActivePartNum} / ${expectedTotal}` : group.total_parts_count}
                             </span>
                           </div>
                           <div className="bundle-metric-chip" data-testid="bundle-metric-captures">
@@ -3309,6 +3375,63 @@ function AppContent() {
                             <span className="metric-val" style={{ color: '#00ff9d' }}>{group.verified_lines.toLocaleString()}</span>
                           </div>
                         </div>
+
+                        {/* Detected Teams / OneDrive Folder Files Summary */}
+                        {predeterminedList.length > 0 && (
+                          <div
+                            data-testid="bundle-card-detected-files"
+                            style={{
+                              marginTop: '6px',
+                              padding: '4px 6px',
+                              borderRadius: '5px',
+                              background: 'rgba(13, 17, 23, 0.78)',
+                              border: '1px solid rgba(163, 113, 247, 0.25)',
+                              fontSize: '9.5px',
+                              color: '#c9d1d9'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                              <span style={{ color: '#d2a8ff', fontWeight: 800 }}>
+                                📂 Teams / OneDrive Folder Queue ({predeterminedList.length} files)
+                              </span>
+                              <span style={{ color: '#00ff9d', fontWeight: 700, fontFamily: 'var(--font-mono, monospace)' }}>
+                                MD {curActivePartNum} / {expectedTotal}
+                              </span>
+                            </div>
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '1px',
+                                maxHeight: isExpanded ? '68px' : '36px',
+                                overflowY: 'auto',
+                                fontFamily: 'var(--font-mono, monospace)',
+                                fontSize: '9px',
+                                color: '#8b949e'
+                              }}
+                            >
+                              {predeterminedList.map(pt => (
+                                <div
+                                  key={`folder_file_${pt.part_number}`}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '4px',
+                                    color: pt.part_number === curActivePartNum ? '#00ff9d' : '#c9d1d9'
+                                  }}
+                                >
+                                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    • {pt.file_name}
+                                  </span>
+                                  <span style={{ flexShrink: 0, color: '#a371f7', fontWeight: 700 }}>
+                                    MD {pt.part_number} / {expectedTotal}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Bundle Action Bar */}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', marginTop: '6px' }}>
@@ -3327,7 +3450,7 @@ function AppContent() {
                               cursor: 'pointer'
                             }}
                           >
-                            {isExpanded ? 'Hide Parts' : `View ${expectedTotal} Parts`}
+                            {isExpanded ? 'Hide Queue' : `Queue (${allPartNums.length} MDs)`}
                           </button>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -3382,120 +3505,179 @@ function AppContent() {
                         </div>
                       </div>
 
-                      {/* Expanded Individual Markdown Part Cards */}
+                      {/* Expanded Process Scope Queue (Parts MD 1 / N .. MD N / N) */}
                       {isExpanded && (
                         <div className="bundle-parts-drawer" data-testid="bundle-parts-drawer">
-                          {group.parts.map((part, idx) => {
-                            const partNum = part.part_number || idx + 1;
-                            const isPartActive = part.id === activeProject?.id;
-                            const partFileLabel = part.part_file_name || (part.name.toLowerCase().endsWith('.md') ? part.name : `${part.name}.md`);
-                            const partCaptures = part.frame_count ?? 0;
-                            const partTotalLines = part.total_lines ?? part.line_count ?? 0;
-                            const partVerifiedLines = part.verified_lines ?? part.line_count ?? 0;
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '2px 4px 4px 4px',
+                              fontSize: '9px',
+                              fontWeight: 800,
+                              color: '#d2a8ff',
+                              letterSpacing: '0.4px',
+                              textTransform: 'uppercase',
+                              borderBottom: '1px solid rgba(163, 113, 247, 0.2)',
+                              marginBottom: '4px'
+                            }}
+                          >
+                            <span>Process Scope Queue ({allPartNums.length} Files)</span>
+                            <span>Parts MD 1 / {expectedTotal} → {expectedTotal} / {expectedTotal}</span>
+                          </div>
+                          {allPartNums.map(partNum => {
+                            const part = partByNumber.get(partNum);
+                            const predPt = predByNumber.get(partNum);
+                            const scopeLabel = `MD ${partNum} / ${expectedTotal}`;
+
+                            if (part) {
+                              const isPartActive = part.id === activeProject?.id;
+                              const partFileLabel =
+                                part.part_file_name ||
+                                predPt?.file_name ||
+                                (part.name.toLowerCase().endsWith('.md') ? part.name : `${part.name}.md`);
+                              const partCaptures = part.frame_count ?? 0;
+                              const partTotalLines = part.total_lines ?? part.line_count ?? 0;
+                              const partVerifiedLines = part.verified_lines ?? part.line_count ?? 0;
+                              const isCompletedPart =
+                                predPt?.status === 'completed' ||
+                                (partTotalLines > 0 && partVerifiedLines >= partTotalLines) ||
+                                partNum < curActivePartNum;
+
+                              return (
+                                <div
+                                  key={part.id}
+                                  className={`bundle-part-card ${isPartActive ? 'active' : ''}`}
+                                  data-testid="bundle-part-card"
+                                  data-part-id={part.id}
+                                  data-part-number={partNum}
+                                  onClick={() => handleSwitchProject(part.id)}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
+                                      <span className="part-index-badge" data-testid={`part-scope-badge-${partNum}`}>
+                                        {scopeLabel}
+                                      </span>
+                                      <FileText size={11} color={isPartActive ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
+                                      <span
+                                        className="part-file-name"
+                                        title={partFileLabel}
+                                        style={{
+                                          fontSize: '11px',
+                                          fontWeight: 700,
+                                          color: isPartActive ? '#00ff9d' : '#f0f6fc',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        {partFileLabel}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+                                      <span
+                                        style={{
+                                          fontSize: '8.5px',
+                                          fontWeight: 800,
+                                          padding: '1px 4px',
+                                          borderRadius: '3px',
+                                          color: isCompletedPart ? '#00ff9d' : isPartActive ? '#38bdf8' : '#8b949e',
+                                          background: isCompletedPart
+                                            ? 'rgba(0, 255, 157, 0.14)'
+                                            : isPartActive
+                                            ? 'rgba(56, 189, 248, 0.16)'
+                                            : 'rgba(139, 148, 158, 0.15)'
+                                        }}
+                                      >
+                                        {isCompletedPart ? 'DONE ✓' : isPartActive ? 'ACTIVE ●' : 'READY'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        className="btn-download-action variant-markdown"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          handleExportMarkdown(part.id, partFileLabel);
+                                        }}
+                                        disabled={isExportingMarkdown}
+                                        title={`Download ${scopeLabel} Markdown (${partFileLabel})`}
+                                        style={{ padding: '2px 5px', fontSize: '9px' }}
+                                      >
+                                        <Download size={10} />
+                                        <span>MD</span>
+                                        <span className="download-counter-badge" data-testid="project-md-download-count">
+                                          {part.markdown_download_count ?? 0}
+                                        </span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="btn-text-danger"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          handleDeleteProject(part.id, part.name);
+                                        }}
+                                        disabled={deletingProjectId === part.id}
+                                        title={`Delete ${scopeLabel}`}
+                                        style={{ padding: '2px 4px' }}
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
+                                    <span style={{ color: '#58a6ff', fontWeight: 600 }}>{partCaptures} captures</span>
+                                    <span>•</span>
+                                    <span>{partTotalLines.toLocaleString()} total lines</span>
+                                    <span>•</span>
+                                    <span style={{ color: '#00ff9d', fontWeight: 600 }}>{partVerifiedLines.toLocaleString()} verified</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+
+                            const queuedFileName = predPt?.file_name || `${group.bundle_name}_part${partNum}.md`;
+                            const queuedStatus = predPt?.status || 'pending';
                             return (
                               <div
-                                key={part.id}
-                                className={`bundle-part-card ${isPartActive ? 'active' : ''}`}
-                                data-testid="bundle-part-card"
-                                data-part-id={part.id}
+                                key={`queued_part_${partNum}`}
+                                className="bundle-part-card"
+                                data-testid="bundle-queued-part-card"
                                 data-part-number={partNum}
-                                onClick={() => handleSwitchProject(part.id)}
+                                style={{ opacity: 0.78, borderStyle: 'dashed' }}
+                                title={`Detected in Teams/OneDrive folder queue (${scopeLabel}): ${queuedFileName}`}
                               >
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
-                                    <span className="part-index-badge">Part {partNum}</span>
-                                    <FileText size={11} color={isPartActive ? '#00ff9d' : '#8b949e'} style={{ flexShrink: 0 }} />
+                                    <span
+                                      className="part-index-badge"
+                                      data-testid={`part-scope-badge-${partNum}`}
+                                      style={{ background: 'rgba(163, 113, 247, 0.18)', color: '#d2a8ff' }}
+                                    >
+                                      {scopeLabel}
+                                    </span>
+                                    <FileText size={11} color="#8b949e" style={{ flexShrink: 0 }} />
                                     <span
                                       className="part-file-name"
-                                      title={partFileLabel}
+                                      title={queuedFileName}
                                       style={{
-                                        fontSize: '11px',
-                                        fontWeight: 700,
-                                        color: isPartActive ? '#00ff9d' : '#f0f6fc',
+                                        fontSize: '10.5px',
+                                        fontWeight: 600,
+                                        color: '#c9d1d9',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
                                         whiteSpace: 'nowrap'
                                       }}
                                     >
-                                      {partFileLabel}
+                                      {queuedFileName}
                                     </span>
                                   </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
-                                    <button
-                                      type="button"
-                                      className="btn-download-action variant-markdown"
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        handleExportMarkdown(part.id, partFileLabel);
-                                      }}
-                                      disabled={isExportingMarkdown}
-                                      title={`Download Part ${partNum} Markdown (${partFileLabel})`}
-                                      style={{ padding: '2px 5px', fontSize: '9px' }}
-                                    >
-                                      <Download size={10} />
-                                      <span>MD</span>
-                                      <span className="download-counter-badge" data-testid="project-md-download-count">
-                                        {part.markdown_download_count ?? 0}
-                                      </span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="btn-text-danger"
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        handleDeleteProject(part.id, part.name);
-                                      }}
-                                      disabled={deletingProjectId === part.id}
-                                      title={`Delete Part ${partNum}`}
-                                      style={{ padding: '2px 4px' }}
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
-                                  <span style={{ color: '#58a6ff', fontWeight: 600 }}>{partCaptures} captures</span>
-                                  <span>•</span>
-                                  <span>{partTotalLines.toLocaleString()} total lines</span>
-                                  <span>•</span>
-                                  <span style={{ color: '#00ff9d', fontWeight: 600 }}>{partVerifiedLines.toLocaleString()} verified</span>
+                                  <span style={{ fontSize: '8.5px', color: '#a371f7', fontWeight: 800, flexShrink: 0 }}>
+                                    {queuedStatus === 'completed' ? 'DONE ✓' : queuedStatus === 'scanning' ? 'SCANNING ●' : 'QUEUED ⏳'}
+                                  </span>
                                 </div>
                               </div>
                             );
                           })}
-                          {pendingPredetermined.map(pendingPt => (
-                            <div
-                              key={`pending_part_${pendingPt.part_number}`}
-                              className="bundle-part-card"
-                              style={{ opacity: 0.65, borderStyle: 'dashed' }}
-                              title={`Predetermined from folder screenshot: ${pendingPt.file_name} (Queued for Auto-Chain)`}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flex: 1 }}>
-                                  <span className="part-index-badge" style={{ background: 'rgba(139, 148, 158, 0.18)', color: '#8b949e' }}>
-                                    Part {pendingPt.part_number}
-                                  </span>
-                                  <FileText size={11} color="#8b949e" style={{ flexShrink: 0 }} />
-                                  <span
-                                    className="part-file-name"
-                                    style={{
-                                      fontSize: '10.5px',
-                                      fontWeight: 600,
-                                      color: '#8b949e',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                  >
-                                    {pendingPt.file_name}
-                                  </span>
-                                </div>
-                                <span style={{ fontSize: '9px', color: '#a371f7', fontWeight: 700 }}>
-                                  QUEUED
-                                </span>
-                              </div>
-                            </div>
-                          ))}
                         </div>
                       )}
                     </div>

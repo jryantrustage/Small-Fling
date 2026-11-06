@@ -23,7 +23,7 @@ export interface FlowDagProps {
   currentPage?: number;
   isOrchestrating?: boolean;
   onRefresh?: () => void;
-  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer';
+  selectedDag?: 'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer';
   onSelectDag?: (dag: any) => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
@@ -61,10 +61,12 @@ interface RibbonStepConfig {
   id: string;
   stepNum: number;
   label: string;
-  phase: 1 | 2 | 3;
+  phase: 0 | 1 | 2 | 3;
 }
 
 const RIBBON_STEPS: RibbonStepConfig[] = [
+  // Phase 0 — Markdown File Change (Folder Queue & Part Switch)
+  { id: 'markdown_file_change', stepNum: 0, label: '0. Markdown File Change', phase: 0 },
   // Phase I — Initialize
   { id: 'init_end', stepNum: 1, label: '1. EOF Total Lines', phase: 1 },
   { id: 'reset_home', stepNum: 2, label: '2. Home Line 1', phase: 1 },
@@ -199,8 +201,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         ? frontierBottomLine + 1
         : 1;
 
-  // Run an entire phase group (Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
-  const handleRunPhase = async (phase: 1 | 2 | 3) => {
+  // Run an entire phase group (Phase 0: markdown_file_change, Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
+  const handleRunPhase = async (phase: 0 | 1 | 2 | 3) => {
     let forceReset = false;
     if (phase === 1 && frontierBottomLine > 0) {
       const ok = window.confirm(
@@ -211,6 +213,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
     setRunningPhase(phase);
     const groupMap: Record<number, DagGroup> = {
+      0: 'markdown_file_change',
       1: 'initialize',
       2: 'capture_entire_markdown',
       3: 'post_capture_analyzer',
@@ -223,6 +226,9 @@ export const FlowDag: React.FC<FlowDagProps> = ({
         body: JSON.stringify({
           project_id: activeProjectId,
           serial: activeDeviceSerial,
+          mode: phase === 0 ? 'scan_folder' : undefined,
+          reopen_editor: phase === 0 ? true : undefined,
+          force_rescan: phase === 0 ? true : undefined,
           force_reset: forceReset || undefined,
           resume_from_line: phase === 2 && frontierBottomLine > 0 ? autoResumeTopLine : undefined,
         }),
@@ -377,7 +383,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     : [];
 
   const renderPhaseGroup = (
-    phaseNum: 1 | 2 | 3,
+    phaseNum: 0 | 1 | 2 | 3,
     phaseTitle: string,
     phaseAccent: string
   ) => {
@@ -525,6 +531,8 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   return (
     <div className="dag-pipeline-ribbon-wrapper" data-testid="interactive-dag-ribbon">
       <div className="dag-pipeline-ribbon">
+        {renderPhaseGroup(0, 'Markdown File Change', '#d2a8ff')}
+        <span className="dag-phase-divider">➔</span>
         {renderPhaseGroup(1, 'Phase I — Initialize', '#58a6ff')}
         <span className="dag-phase-divider">➔</span>
         {renderPhaseGroup(2, 'Phase II — Capture & OCR Loop', '#00ff9d')}

@@ -36,6 +36,8 @@ export function filterNodeTelemetry(nodeId: string, ev: { message?: string; cate
   const cat = (ev.category || '').toUpperCase();
 
   const matchers: Record<string, () => boolean> = {
+    markdown_file_change: () => msg.includes('markdown_file_change') || msg.includes('file change') ||
+      msg.includes('folder') || msg.includes('multi-part') || msg.includes('part ') || msg.includes('bundle'),
     init_end: () => msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
       msg.includes('end') || msg.includes('eof') || msg.includes('node 1') || msg.includes('total_lines'),
     reset_home: () => msg.includes('home') || msg.includes('ctrl+home') || msg.includes('node 2') ||
@@ -117,6 +119,31 @@ export function calculateNodeLiveStatus(
   let color = '#8b949e';
 
   switch (nodeId) {
+    case 'markdown_file_change': {
+      const isMfcDone = !isError && nodeData.status === 'completed';
+      isDone = isMfcDone;
+      const curPart = Number(nodeData.current_part || 1);
+      const totParts = Number(nodeData.total_parts || (Array.isArray(nodeData.predetermined_parts) ? nodeData.predetermined_parts.length : 1) || 1);
+      const filesCount = Array.isArray(nodeData.detected_files) ? nodeData.detected_files.length : (Array.isArray(nodeData.predetermined_parts) ? nodeData.predetermined_parts.length : 0);
+      const bundleDone = Boolean(nodeData.bundle_completed);
+      const partLabel = nodeData.part_progress_label || `MD ${curPart} / ${totParts}`;
+      defaultEvaluator = 'Folder Queue & Part Switch Evaluator';
+      metricLabel = healingStep || (
+        isThisActive
+          ? (nodeData.mode === 'switch_next' ? `Switching ${partLabel}...` : 'Scanning Folder...')
+          : (filesCount > 0 || totParts > 1 ? `${partLabel} (${filesCount || totParts} Files)` : (isMfcDone ? partLabel : 'Scan Folder Queue'))
+      );
+      statusLabel = isThisActive
+        ? (nodeData.mode === 'switch_next' ? 'SWITCHING' : 'SCANNING')
+        : (isError ? 'FAILED' : (bundleDone ? 'BUNDLE EOF' : (isMfcDone ? (nodeData.mode === 'switch_next' ? 'SWITCHED' : 'QUEUED') : 'READY')));
+      defaultInsight = bundleDone
+        ? `All ${totParts} bundle markdown files completed -> Handed off to Phase III`
+        : (isMfcDone
+            ? `Folder queue active (${partLabel}): ${nodeData.active_file_name || 'Fullscreen + Dark Mode verified'}`
+            : 'Scans Teams/OneDrive folder queue & switches markdown files on EOF');
+      color = isError ? '#ff7b72' : (isMfcDone ? '#00ff9d' : '#d2a8ff');
+      break;
+    }
     case 'init_end': {
       const isCalibrated = !isError && nodeData.status === 'completed' && (nodeData.total_lines || 0) > 0;
       isDone = isCalibrated;

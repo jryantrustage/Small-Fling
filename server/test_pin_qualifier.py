@@ -189,3 +189,34 @@ def test_blank_white_teams_fingerprint_detection():
     assert det["auth_subtype"] == "fingerprint_blank_teams"
     assert det["requires_escape_for_pin"] is True
     assert det["auth_type"] == "pin"
+
+
+def test_markdown_file_change_dag_node_and_group():
+    """Verify markdown_file_change DAG node & group registration, edges, and MD 1 / 9 queue sync."""
+    from dag_nodes import dag_node_registry, MarkdownFileChangeNode
+    from services import state
+
+    node = dag_node_registry.get_node("markdown_file_change")
+    assert node is not None
+    assert isinstance(node, MarkdownFileChangeNode)
+    assert dag_node_registry.get_node("node_0") is node
+    assert "markdown_file_change" in state.dag_state["groups"]
+    assert "markdown_file_change" in state.dag_state["nodes"]
+    assert state.is_edge_connected("markdown_file_change", "init_end") is True
+    assert state.is_edge_connected("document_assemble", "markdown_file_change") is True
+    assert state.is_edge_connected("markdown_file_change", "markdown_tag_parser") is True
+
+    # Simulate 9 predetermined parts in folder queue (part1..part9)
+    state.multipart_bundle_state["predetermined_parts"] = [
+        {"part_number": i, "total_parts": 9, "file_name": f"DIXUI_impact_26-11-05-9-43pm_part{i}.md", "tap_coords": [400, 180 + i * 70]}
+        for i in range(1, 10)
+    ]
+    state.multipart_bundle_state["current_part"] = 1
+    state.multipart_bundle_state["total_parts"] = 9
+    synced = state.sync_multipart_state_from_alignment()
+    assert synced["predetermined_parts"][0]["scope_label"] == "MD 1 / 9"
+    assert synced["predetermined_parts"][8]["scope_label"] == "MD 9 / 9"
+    mfc_state = state.dag_state["nodes"]["markdown_file_change"]
+    assert mfc_state["part_progress_label"] == "MD 1 / 9"
+    assert len(mfc_state["detected_files"]) == 9
+

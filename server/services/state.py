@@ -1333,6 +1333,14 @@ def clear_dag2_loop_history() -> None:
 
 dag_state: Dict[str, Any] = {
     "groups": {
+        "markdown_file_change": {
+            "id": "markdown_file_change",
+            "title": "Markdown File Change",
+            "description": "Scans Teams/OneDrive folder queue (MD 1 / N .. MD N / N), switches to next markdown file on EOF, opens Fullscreen + Dark Mode before handing off to Phase I Initialize or Phase III Post-Capture Analyzer",
+            "nodes": ["markdown_file_change"],
+            "status": "idle",
+            "progress": None
+        },
         "initialize": {
             "id": "initialize",
             "title": "Initialize",
@@ -1380,6 +1388,43 @@ dag_state: Dict[str, Any] = {
     "semaphore_group2_to_3_status": "open",
     "semaphore_group3_to_4_status": "open",
     "nodes": {
+        "markdown_file_change": {
+            "id": "markdown_file_change",
+            "group": "markdown_file_change",
+            "title": "0. Markdown File Change (Folder Queue & Part Switch)",
+            "description": "Scans folder screenshot to queue all markdown parts (MD 1 / N .. MD N / N), and on part completion switches to the next file, opens Fullscreen, enables Edit Mode & Dark Mode before handing off to Phase I Initialize or Phase III Sandbox.",
+            "status": "idle",
+            "mode": "scan_folder",
+            "current_part": 1,
+            "total_parts": 1,
+            "part_progress_label": "MD 1 / 1",
+            "active_file_name": None,
+            "next_file_name": None,
+            "detected_files": [],
+            "predetermined_parts": [],
+            "bundle_completed": False,
+            "fullscreen_verified": False,
+            "dark_mode_verified": False,
+            "evaluator": None,
+            "healing_step": None,
+            "telemetry_insight": None,
+            "timings": None,
+            "dag_context": None,
+            "trace_insights": None,
+            "started_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "is_active": False,
+            "config": {
+                "mode": "auto",
+                "reopen_editor": True,
+                "ensure_fullscreen": True,
+                "ensure_dark_mode": True,
+                "ensure_edit_mode": True,
+                "auto_handoff_phase1": True,
+                "auto_handoff_phase3_on_bundle_complete": True
+            }
+        },
         "init_end": {
             "id": "init_end",
             "group": "initialize",
@@ -1734,6 +1779,7 @@ dag_state: Dict[str, Any] = {
         }
     },
     "edges": [
+        {"id": "markdown_file_change->init_end", "from": "markdown_file_change", "to": "init_end", "enabled": True},
         {"id": "init_end->reset_home", "from": "init_end", "to": "reset_home", "enabled": True},
         {"id": "reset_home->frame_acquire", "from": "reset_home", "to": "frame_acquire", "enabled": True},
         {"id": "frame_acquire->local_ai_ocr", "from": "frame_acquire", "to": "local_ai_ocr", "enabled": True},
@@ -1743,6 +1789,8 @@ dag_state: Dict[str, Any] = {
         {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True},
         {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True},
         {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True},
+        {"id": "document_assemble->markdown_file_change", "from": "document_assemble", "to": "markdown_file_change", "enabled": True, "condition": "ON_PART_EOF"},
+        {"id": "markdown_file_change->markdown_tag_parser", "from": "markdown_file_change", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_BUNDLE_EOF"},
         {"id": "document_assemble->markdown_tag_parser", "from": "document_assemble", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_EOF"},
         {"id": "markdown_tag_parser->ast_compiler_validator", "from": "markdown_tag_parser", "to": "ast_compiler_validator", "enabled": True, "condition": "ON_SUCCESS"},
         {"id": "ast_compiler_validator->sandbox_ide", "from": "ast_compiler_validator", "to": "sandbox_ide", "enabled": True, "condition": "ON_SUCCESS"}
@@ -1753,6 +1801,7 @@ dag_state: Dict[str, Any] = {
 }
 
 DEFAULT_DAG_EDGES = [
+    {"id": "markdown_file_change->init_end", "from": "markdown_file_change", "to": "init_end", "enabled": True, "label": "Fullscreen + Dark Mode -> Phase I Init"},
     {"id": "init_end->reset_home", "from": "init_end", "to": "reset_home", "enabled": True, "label": "Calibrate to Line 1"},
     {"id": "reset_home->frame_acquire", "from": "reset_home", "to": "frame_acquire", "enabled": True, "label": "Start Page Capture"},
     {"id": "frame_acquire->local_ai_ocr", "from": "frame_acquire", "to": "local_ai_ocr", "enabled": True, "label": "Send Image to MiniCPM-V"},
@@ -1762,6 +1811,8 @@ DEFAULT_DAG_EDGES = [
     {"id": "verification_trigger->document_assemble", "from": "verification_trigger", "to": "document_assemble", "enabled": True, "label": "Append Verified Text"},
     {"id": "document_assemble->frame_acquire", "from": "document_assemble", "to": "frame_acquire", "enabled": True, "is_loopback": True, "label": "Continuous Loopback Track"},
     {"id": "document_assemble->batch_frames_ocr", "from": "document_assemble", "to": "batch_frames_ocr", "enabled": True, "label": "Run Sequential Batch Rescan"},
+    {"id": "document_assemble->markdown_file_change", "from": "document_assemble", "to": "markdown_file_change", "enabled": True, "condition": "ON_PART_EOF", "label": "Part Complete -> Switch Next Markdown"},
+    {"id": "markdown_file_change->markdown_tag_parser", "from": "markdown_file_change", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_BUNDLE_EOF", "label": "All Bundle Parts Complete -> Phase III Sandbox"},
     {"id": "document_assemble->markdown_tag_parser", "from": "document_assemble", "to": "markdown_tag_parser", "enabled": True, "condition": "ON_EOF", "label": "100% Complete -> Parse VFS Tags"},
     {"id": "markdown_tag_parser->ast_compiler_validator", "from": "markdown_tag_parser", "to": "ast_compiler_validator", "enabled": True, "condition": "ON_SUCCESS", "label": "Validate AST & TypeScript in VFS"},
     {"id": "ast_compiler_validator->sandbox_ide", "from": "ast_compiler_validator", "to": "sandbox_ide", "enabled": True, "condition": "ON_SUCCESS", "label": "Materialize Sandbox & Monaco VFS"}
@@ -3109,12 +3160,27 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
         }
         for pt in predetermined:
             pno = int(pt.get("part_number") or 0)
+            tot_for_label = int(multipart_bundle_state.get("total_parts") or len(predetermined) or 1)
+            pt["scope_label"] = f"MD {pno} / {tot_for_label}"
             if pno in exported_part_nums or pno < cur_p:
                 pt["status"] = "completed"
             elif pno == cur_p:
                 pt["status"] = "scanning"
             else:
                 pt["status"] = "pending"
+
+    # Keep dag_state["nodes"]["markdown_file_change"] synchronized with multipart_bundle_state
+    mfc_node = dag_state.get("nodes", {}).get("markdown_file_change")
+    if isinstance(mfc_node, dict):
+        cur_p_sync = int(multipart_bundle_state.get("current_part") or proj_part_num or 1)
+        tot_p_sync = int(multipart_bundle_state.get("total_parts") or proj_total_parts or max(len(predetermined), 1))
+        mfc_node["current_part"] = cur_p_sync
+        mfc_node["total_parts"] = tot_p_sync
+        mfc_node["part_progress_label"] = f"MD {cur_p_sync} / {tot_p_sync}"
+        mfc_node["active_file_name"] = candidate_name or multipart_bundle_state.get("last_opened_file")
+        mfc_node["next_file_name"] = multipart_bundle_state.get("next_file_name")
+        mfc_node["detected_files"] = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
+        mfc_node["predetermined_parts"] = predetermined
 
     multipart_bundle_state["updated_at"] = datetime.now().isoformat()
     return multipart_bundle_state

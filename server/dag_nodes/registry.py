@@ -15,6 +15,10 @@ from dag_nodes.base import BaseDagNode
 logger = logging.getLogger("dag_node_registry")
 
 CANONICAL_ALIASES = {
+    "node_0": "markdown_file_change",
+    "markdown_file_change": "markdown_file_change",
+    "file_change": "markdown_file_change",
+    "scan_folder": "markdown_file_change",
     "node_1": "init_end",
     "node_2": "reset_home",
     "node_3": "frame_acquire",

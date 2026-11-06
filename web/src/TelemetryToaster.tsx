@@ -13,7 +13,7 @@ export interface TelemetryEvent {
   category: 'PACER' | 'FRAME' | 'OCR' | 'WS' | 'SYSTEM' | 'ERROR';
   message: string;
   data?: any;
-  dag?: 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'system' | 'all';
+  dag?: 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer' | 'system' | 'all';
   device?: string;
   nodeId?: string;
   level?: 'info' | 'warning' | 'error' | 'success';
@@ -40,7 +40,7 @@ export interface CaptureTelemetry {
   error?: string | null;
 }
 
-const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'): boolean => {
+const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'): boolean => {
   if (targetDag === 'all') return true;
   if (ev.dag) {
     if (ev.dag === 'all') return true;
@@ -48,6 +48,9 @@ const isEventForDag = (ev: TelemetryEvent, targetDag: 'all' | 'initialize' | 'ca
   }
   const msg = (ev.message || '').toLowerCase();
   const cat = (ev.category || '').toUpperCase();
+  if (targetDag === 'markdown_file_change') {
+    return msg.includes('markdown_file_change') || msg.includes('file change') || msg.includes('folder') || msg.includes('multi-part') || msg.includes('bundle');
+  }
   if (targetDag === 'initialize') {
     return msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
            msg.includes('ctrl+home') || msg.includes('gutter bounds') || msg.includes('line 1') ||
@@ -73,6 +76,9 @@ const isEventForNode = (ev: TelemetryEvent, nodeId: string): boolean => {
   const msg = (ev.message || '').toLowerCase();
   const cat = (ev.category || '').toUpperCase();
   switch (nodeId) {
+    case 'markdown_file_change':
+      return msg.includes('markdown_file_change') || msg.includes('file change') ||
+             msg.includes('folder') || msg.includes('multi-part') || msg.includes('node 0');
     case 'init_end':
       return msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
              msg.includes('end') || msg.includes('eof') || msg.includes('node 1') || msg.includes('total_lines');
@@ -106,6 +112,7 @@ const isEventForNode = (ev: TelemetryEvent, nodeId: string): boolean => {
 };
 
 const NODE_LABELS: Record<string, { step: string; name: string }> = {
+  markdown_file_change: { step: '0', name: 'Markdown File Change' },
   init_end: { step: '1', name: 'Determine Lines' },
   reset_home: { step: '2', name: 'Reset Line 1' },
   frame_acquire: { step: '3', name: 'Capture Screen' },
@@ -176,8 +183,8 @@ export interface TelemetryToasterProps {
   isAligned?: boolean;
   onReturnAlignmentOverlay?: () => void;
   onOpenStudio?: () => void;
-  selectedDag?: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble';
-  onSelectDag?: (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => void;
+  selectedDag?: 'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer';
+  onSelectDag?: (dag: 'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer') => void;
   selectedNodeId?: string | null;
   onSelectNodeId?: (nodeId: string | null) => void;
   apiBase?: string;
@@ -198,7 +205,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   isExpanded: controlledExpanded, isMaximized: controlledMaximized, onMaximizedChange,
   activeTab: controlledActiveTab, onActiveTabChange
 }) => {
-  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble'>(selectedDag);
+  const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
   const [isNodeTracingActive, setIsNodeTracingActive] = useState<boolean>(Boolean(selectedNodeId));
   const [isGrabbingNode3, setIsGrabbingNode3] = useState(false);
@@ -237,7 +244,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     }
   }, [selectedDag]);
 
-  const handleSelectDag = (dag: 'all' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble') => {
+  const handleSelectDag = (dag: 'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer') => {
     setIsNodeTracingActive(false);
     if (onSelectDag) onSelectDag(dag);
     else setInternalSelectedDag(dag);

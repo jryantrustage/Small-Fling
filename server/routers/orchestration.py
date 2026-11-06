@@ -453,7 +453,19 @@ async def reset_dag_connectors():
 async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
     payload = payload or {}
     serial = payload.get("serial")
-    if group_id in {"initialize", "init"}:
+    if group_id in {"markdown_file_change", "file_change", "scan_folder", "dag_0", "group_0"}:
+        return await execute_dag_group_markdown_file_change(
+            serial=serial,
+            project_id=payload.get("project_id"),
+            display_id=payload.get("display_id"),
+            mode=str(payload.get("mode") or "scan_folder"),
+            reopen_editor=bool(payload.get("reopen_editor", True)),
+            force_rescan=bool(payload.get("force_rescan", True)),
+            handoff_to_init=bool(payload.get("handoff_to_init", False)),
+            handoff_to_phase3=bool(payload.get("handoff_to_phase3", True)),
+            payload=payload,
+        )
+    elif group_id in {"initialize", "init"}:
         return await execute_dag_group_initialize(serial=serial, project_id=payload.get("project_id"), force_reset=bool(payload.get("force_reset", False)))
     elif group_id in {"capture_entire_markdown", "capture"}:
         return await execute_dag_group_capture_markdown(serial=serial) if payload.get("single_cycle") else await start_dag_loop(payload)
@@ -617,9 +629,16 @@ async def api_download_exported_markdown(file_name: str):
 async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None):
     global capture_loop_task
     payload = payload or {}
-    next_part = payload.get("next_part_number")
-    res = await transition_to_next_multipart_project(serial=payload.get("serial"), display_id=payload.get("display_id"), explicit_next_part=int(next_part) if next_part is not None else None)
-    if res.get("status") == "success" and payload.get("auto_start_loop") and not getattr(state, "capture_loop_running", False):
+    res = await execute_dag_group_markdown_file_change(
+        serial=payload.get("serial"),
+        project_id=payload.get("project_id"),
+        display_id=payload.get("display_id"),
+        mode="switch_next",
+        handoff_to_init=bool(payload.get("handoff_to_init", False)),
+        handoff_to_phase3=bool(payload.get("handoff_to_phase3", True)),
+        payload=payload,
+    )
+    if res.get("status") == "success" and not res.get("bundle_completed") and payload.get("auto_start_loop") and not getattr(state, "capture_loop_running", False):
         state.capture_loop_running = True
         capture_loop_task = asyncio.create_task(run_continuous_capture_loop_worker(payload.get("serial")))
         res["loop_started"] = True
@@ -627,21 +646,15 @@ async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None
 @router.post("/api/dag/multipart/predetermine-folder")
 @router.post("/api/dag/multipart/scan-folder")
 async def api_predetermine_multipart_folder(payload: Optional[Dict[str, Any]] = None):
-    from services.ui_automator_service import predetermine_bundle_from_folder_screenshot
     payload = payload or {}
-    ser = await get_active_adb_serial(payload.get("serial"))
-    disp_id = payload.get("display_id") or await detect_external_display_id(ser)
-    res = await predetermine_bundle_from_folder_screenshot(
-        serial=ser,
-        display_id=disp_id,
-        target_part_number=payload.get("target_part_number"),
+    res = await execute_dag_group_markdown_file_change(
+        serial=payload.get("serial"),
+        project_id=payload.get("project_id"),
+        display_id=payload.get("display_id"),
+        mode=str(payload.get("mode") or "scan_folder"),
         reopen_editor=bool(payload.get("reopen_editor", True)),
         force_rescan=bool(payload.get("force_rescan", True)),
+        handoff_to_init=bool(payload.get("handoff_to_init", False)),
+        payload=payload,
     )
-    mp_state = state.sync_multipart_state_from_alignment()
-    await state.ws_manager.broadcast({
-        "type": "multipart_transition_status",
-        "multipart_state": mp_state,
-        "predetermined": res,
-    })
-    return {"status": "success", **res, "multipart_state": mp_state}
+    return res
