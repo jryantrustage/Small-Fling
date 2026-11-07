@@ -589,10 +589,201 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
             _screencap_lock.release()
 
 
+_phone_ui_xml_cache: Dict[str, Dict[str, Any]] = {}
+_phone_ui_refresh_lock: Dict[str, bool] = {}
+_phone_last_wake_ts: Dict[str, float] = {}
+
+
+async def _refresh_phone_ui_xml_async(serial: str) -> Optional[str]:
+    """
+    Asynchronously refreshes the Display #0 UIAutomator XML hierarchy in `/sdcard/uidump.xml`
+    without blocking the MJPEG stream loop.
+    """
+    if _phone_ui_refresh_lock.get(serial):
+        return _phone_ui_xml_cache.get(serial, {}).get("xml")
+    _phone_ui_refresh_lock[serial] = True
+    try:
+        now = time.time()
+        if now - _phone_last_wake_ts.get(serial, 0.0) > 3.5:
+            _phone_last_wake_ts[serial] = now
+            await run_adb_shell("input -d 0 keyevent 224", serial, timeout=1.5)
+        res = await run_adb_shell(
+            "uiautomator dump /sdcard/uidump.xml >/dev/null 2>&1 && cat /sdcard/uidump.xml",
+            serial,
+            timeout=6.0,
+        )
+        out = res.get("stdout", "") or ""
+        idx = out.find("<?xml")
+        if idx >= 0:
+            xml_str = out[idx:]
+            _phone_ui_xml_cache[serial] = {"xml": xml_str, "ts": time.time()}
+            return xml_str
+    except Exception:
+        pass
+    finally:
+        _phone_ui_refresh_lock[serial] = False
+    return _phone_ui_xml_cache.get(serial, {}).get("xml")
+
+
+def _render_phone_ui_hierarchy_canvas(xml_str: str, width: int = 1080, height: int = 2404) -> np.ndarray:
+    """
+    Renders a crisp, pixel-accurate 1080x2404 visual representation of Display #0 from its
+    live UIAutomator XML hierarchy when Android SurfaceFlinger redacts a FLAG_SECURE window
+    (such as SystemUI NotificationShade / Keyguard Bouncer) to black in `screencap`.
+    """
+    import xml.etree.ElementTree as ET
+
+    canvas = np.zeros((height, width, 3), dtype=np.uint8)
+    canvas[:] = (28, 20, 14)  # Deep Material Dark background (#0e141c in BGR)
+
+    # Top status banner
+    cv2.rectangle(canvas, (0, 0), (width, 145), (38, 28, 18), -1)
+    cv2.putText(
+        canvas,
+        "PHONE DISPLAY #0  |  LIVE UI MIRROR",
+        (48, 56),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.92,
+        (157, 255, 0),
+        2,
+        cv2.LINE_AA,
+    )
+    xml_low = (xml_str or "").lower()
+    if "pin_pad_grid" in xml_low or "pinentry" in xml_low or "keyguard_bouncer" in xml_low:
+        sub_banner = "ANDROID OS LOCKSCREEN  |  PHONE UNLOCK PIN = 1213 (NEVER 2992)"
+        sub_color = (80, 210, 255)
+    elif "access teams" in xml_low or "biometric" in xml_low or "fingerprint sensor" in xml_low:
+        sub_banner = "TEAMS BIOMETRIC PROMPT  |  DISMISS -> TEAMS PASSCODE = 2992"
+        sub_color = (255, 195, 80)
+    else:
+        sub_banner = "SECURE SURFACE MIRROR  |  PHONE PIN: 1213  |  TEAMS PIN: 2992"
+        sub_color = (200, 210, 220)
+    cv2.putText(
+        canvas,
+        sub_banner,
+        (48, 112),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.72,
+        sub_color,
+        2,
+        cv2.LINE_AA,
+    )
+
+    if not xml_str or "<?xml" not in xml_str:
+        cv2.putText(
+            canvas,
+            "Waking Phone Screen (Display #0)...",
+            (180, height // 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.1,
+            (220, 210, 200),
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.rectangle(canvas, (390, height - 56), (690, height - 42), (235, 235, 235), -1)
+        return canvas
+
+    try:
+        idx = xml_str.find("<?xml")
+        root = ET.fromstring(xml_str[idx:])
+        b_re = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+        for el in root.iter("node"):
+            b_str = el.attrib.get("bounds", "")
+            m = b_re.search(b_str)
+            if not m:
+                continue
+            x1, y1, x2, y2 = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            bw, bh = x2 - x1, y2 - y1
+            if bw <= 4 or bh <= 4:
+                continue
+
+            rid = el.attrib.get("resource-id", "") or ""
+            txt = (el.attrib.get("text", "") or "").strip()
+            desc = (el.attrib.get("content-desc", "") or "").strip()
+            cls = el.attrib.get("class", "") or ""
+            clickable = el.attrib.get("clickable", "false") == "true"
+
+            # 1. PIN Entry Field
+            if "pinEntry" in rid:
+                cv2.rectangle(canvas, (x1, y1), (x2, y2), (48, 36, 24), -1)
+                cv2.rectangle(canvas, (x1, y1), (x2, y2), (248, 189, 56), 3)
+                display_pin = "* " * len(txt) if txt else "PIN Entry Area"
+                font_scale = 1.6 if txt else 1.05
+                color = (255, 255, 255) if txt else (170, 160, 150)
+                (tw, th), _ = cv2.getTextSize(display_pin.strip(), cv2.FONT_HERSHEY_SIMPLEX, font_scale, 2)
+                tx = x1 + max(16, (bw - tw) // 2)
+                ty = y1 + (bh + th) // 2
+                cv2.putText(canvas, display_pin.strip(), (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 2, cv2.LINE_AA)
+                continue
+
+            # 2. Clickable Keypad / Action Buttons
+            if clickable and bw < int(width * 0.85) and bh < 360:
+                is_enter = "key_enter" in rid or desc.lower() == "enter"
+                is_del = "delete_button" in rid or desc.lower() == "delete"
+                fill_bgr = (180, 105, 35) if is_enter else ((52, 42, 34) if not is_del else (48, 38, 48))
+                border_bgr = (255, 190, 90) if is_enter else (95, 80, 68)
+                pad = 8
+                cv2.rectangle(canvas, (x1 + pad, y1 + pad), (x2 - pad, y2 - pad), fill_bgr, -1)
+                cv2.rectangle(canvas, (x1 + pad, y1 + pad), (x2 - pad, y2 - pad), border_bgr, 2)
+
+                label = txt or desc
+                if is_enter and not txt:
+                    label = "ENTER"
+                elif is_del and not txt:
+                    label = "DEL"
+                if label:
+                    f_scale = 1.9 if len(label) == 1 else (1.05 if len(label) <= 9 else 0.85)
+                    thick = 3 if len(label) == 1 else 2
+                    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, f_scale, thick)
+                    tx = x1 + max(10, (bw - tw) // 2)
+                    ty = y1 + (bh + th) // 2
+                    cv2.putText(canvas, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, f_scale, (250, 250, 250), thick, cv2.LINE_AA)
+                continue
+
+            # 3. Non-button Text Labels (e.g. "Enter PIN", "Added security required...", Clock, etc.)
+            if txt and "Button" not in cls:
+                f_scale = 1.45 if bh > 75 and len(txt) <= 16 else 0.92
+                thick = 2
+                words = txt.split()
+                lines: List[str] = []
+                cur = ""
+                max_w = max(240, bw - 80)
+                for w_tok in words:
+                    cand = f"{cur} {w_tok}".strip()
+                    (tw, _), _ = cv2.getTextSize(cand, cv2.FONT_HERSHEY_SIMPLEX, f_scale, thick)
+                    if tw <= max_w or not cur:
+                        cur = cand
+                    else:
+                        lines.append(cur)
+                        cur = w_tok
+                if cur:
+                    lines.append(cur)
+
+                line_h = int(42 * f_scale)
+                total_h = len(lines) * line_h
+                start_y = y1 + max(32, (bh - total_h) // 2 + int(28 * f_scale))
+                for i, ln_str in enumerate(lines[:3]):
+                    (tw, _), _ = cv2.getTextSize(ln_str, cv2.FONT_HERSHEY_SIMPLEX, f_scale, thick)
+                    tx = x1 + max(24, (bw - tw) // 2)
+                    ty = min(height - 20, start_y + i * line_h)
+                    cv2.putText(canvas, ln_str, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, f_scale, (240, 244, 248), thick, cv2.LINE_AA)
+    except Exception:
+        pass
+
+    # Bottom navigation gesture pill
+    cv2.rectangle(canvas, (390, height - 56), (690, height - 42), (235, 235, 235), -1)
+    return canvas
+
+
 async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s: float = 0.35, bypass_lock: bool = True) -> Optional[bytes]:
     """
     Explicitly captures a screenshot from the internal phone display (Display #0),
     keeping it strictly isolated from the external desktop display frame cache.
+    If Display #0 is dimmed or showing a FLAG_SECURE surface (such as the SystemUI
+    NotificationShade / Keyguard Bouncer which SurfaceFlinger redacts to black),
+    wakes Display #0 and renders the live Display #0 UI hierarchy so the phone screen
+    is always visible when selected.
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -616,6 +807,11 @@ async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s
                 return cached["raw_png"]
 
     try:
+        # Keep phone screen awake while Phone Mirror View is actively polled
+        if now - _phone_last_wake_ts.get(ser, 0.0) > 4.0:
+            _phone_last_wake_ts[ser] = now
+            asyncio.create_task(run_adb_shell("input -d 0 keyevent 224", ser, timeout=1.5))
+
         disp_map = await detect_surfaceflinger_displays(ser)
         phone_id = disp_map.get("phone", "0")
         cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if (phone_id and len(str(phone_id)) > 4) else ["-s", ser, "exec-out", "screencap", "-p"]
@@ -623,6 +819,31 @@ async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s
         if res.returncode != 0 or not res.stdout:
             res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
         if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
+            # Check if SurfaceFlinger redacted Display #0 due to FLAG_SECURE (mean < 2.2 above navbar)
+            try:
+                img = cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    h, w = img.shape[:2]
+                    upper_mean = float(np.mean(img[: int(h * 0.90), :]))
+                    if upper_mean < 2.2:
+                        cached_xml_entry = _phone_ui_xml_cache.get(ser)
+                        xml_str = cached_xml_entry.get("xml", "") if cached_xml_entry else ""
+                        xml_age = (now - cached_xml_entry.get("ts", 0.0)) if cached_xml_entry else 999.0
+                        if not xml_str:
+                            cat_res = await run_adb_shell("cat /sdcard/uidump.xml", ser, timeout=1.2)
+                            cat_out = cat_res.get("stdout", "") or ""
+                            if "<?xml" in cat_out:
+                                xml_str = cat_out[cat_out.find("<?xml") :]
+                                _phone_ui_xml_cache[ser] = {"xml": xml_str, "ts": now - 1.5}
+                        if xml_age > 12.0 and not _phone_ui_refresh_lock.get(ser):
+                            asyncio.create_task(_refresh_phone_ui_xml_async(ser))
+                        synth_img = _render_phone_ui_hierarchy_canvas(xml_str, width=w or 1080, height=h or 2404)
+                        ok_enc, enc_buf = cv2.imencode(".png", synth_img)
+                        if ok_enc:
+                            png_bytes = enc_buf.tobytes()
+            except Exception:
+                pass
+
             _update_frame_cache(ser, "phone", png_bytes)
             return png_bytes
         if cached and cached.get("raw_png") and (time.time() - cached.get("ts", 0.0) < 5.0):
@@ -707,15 +928,17 @@ async def direct_hid_to_display(
         if focus_coords and len(focus_coords) >= 2:
             fx, fy = int(focus_coords[0]), int(focus_coords[1])
             await run_adb_shell(
-                f"settings put secure show_ime_with_hard_keyboard 1; "
-                f"input -d 0 tap {fx} {fy} >/dev/null 2>&1",
+                f"input -d 0 keyevent 224; settings put secure show_ime_with_hard_keyboard 1; "
+                f"input touchscreen -d 0 tap {fx} {fy} >/dev/null 2>&1",
                 ser,
-                timeout=2.0,
+                timeout=2.5,
             )
             actions.append(f"Directed HID to phone display #0 at ({fx}, {fy})")
         else:
-            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 1", ser, timeout=1.5)
-            actions.append("Directed HID to phone display #0 (restored phone soft IME without tapping active phone app)")
+            await run_adb_shell("input -d 0 keyevent 224; settings put secure show_ime_with_hard_keyboard 1", ser, timeout=2.0)
+            actions.append("Directed HID to phone display #0 (woke Display #0 and restored phone soft IME)")
+        _frame_cache.pop((ser, "phone"), None)
+        asyncio.create_task(_refresh_phone_ui_xml_async(ser))
 
     try:
         from services import kiosk_service, state as app_state
@@ -782,18 +1005,17 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
                 if jpg:
                     _frame_cache[cache_key] = {"bytes": jpg, "raw_png": raw_bytes, "ts": time.time()}
                     return jpg
-        else: # mode == "phone"
-            disp_map = await detect_surfaceflinger_displays(ser)
-            phone_id = disp_map.get("phone", "0")
-            cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if (phone_id and len(str(phone_id)) > 4) else ["-s", ser, "exec-out", "screencap", "-p"]
-            res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
-            if res.returncode != 0 or not res.stdout:
-                res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
-            if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
-                _frame_cache[cache_key] = {"bytes": None, "raw_png": png_bytes, "ts": time.time()}
-                jpg = _png_to_jpeg(png_bytes, quality, max_dim)
+        else:  # mode == "phone"
+            raw_bytes = await capture_phone_screenshot(ser, bypass_lock=True)
+            if raw_bytes:
+                cached = _frame_cache.get(cache_key)
+                if cached:
+                    jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
+                    if jpg:
+                        return jpg
+                jpg = _png_to_jpeg(raw_bytes, quality, max_dim)
                 if jpg:
-                    _frame_cache[cache_key]["bytes"] = jpg
+                    _frame_cache[cache_key] = {"bytes": jpg, "raw_png": raw_bytes, "ts": time.time()}
                     return jpg
     finally:
         if acquired:
@@ -1115,7 +1337,13 @@ async def auto_handle_pin_authentication(
       - Explicitly directs Mouse & Keyboard HID between phone and desktop mode as necessary.
     """
     import config
-    active_pin = pin or getattr(config, "DEVICE_PIN", "2992") or "2992"
+    teams_pin_default = getattr(config, "TEAMS_PIN", None) or getattr(config, "DEVICE_PIN", "2992") or "2992"
+    phone_unlock_pin_val = getattr(config, "PHONE_UNLOCK_PIN", "1213") or "1213"
+    # STRICT TWO-PIN SEPARATION GUARD: Never allow Phone Unlock PIN (1213) to be entered into Teams PIN prompt!
+    if not pin or str(pin).strip() == str(phone_unlock_pin_val).strip():
+        active_pin = teams_pin_default
+    else:
+        active_pin = str(pin).strip()
     auto_pin_enabled = getattr(config, "AUTO_ENTER_PIN", True)
 
     if not auto_pin_enabled and not force:
@@ -1297,15 +1525,217 @@ async def auto_handle_pin_authentication(
             "actions": actions
         }
 
-async def configure_display_awake_policies(serial: Optional[str] = None, pin: Optional[str] = None) -> Dict[str, Any]:
+# Exact verified Pixel 8 (1080x2404) Android SystemUI Keyguard Bouncer keypad coordinates on Display #0
+PHONE_KEYPAD_COORDS_1080X2404: Dict[str, Tuple[int, int]] = {
+    "1": (235, 1016),
+    "2": (541, 1016),
+    "3": (847, 1016),
+    "4": (235, 1285),
+    "5": (541, 1285),
+    "6": (847, 1285),
+    "7": (235, 1554),
+    "8": (541, 1554),
+    "9": (847, 1554),
+    "DEL": (235, 1823),
+    "0": (541, 1823),
+    "ENTER": (847, 1823),
+}
+
+
+async def detect_phone_lockscreen_state(serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Inspects Display #0 window policy and active window focus to distinguish:
+      1. Android OS Phone Lockscreen (`keyguard_showing=True` or `input_restricted=True`):
+         -> Requires Phone Unlock PIN `1213` (NEVER `2992`).
+      2. Teams Biometric Prompt on Display #0 (`has_teams_biometric=True`, `keyguard_showing=False`):
+         -> Dismiss with Escape (keyevent 111), then enter Teams Passcode `2992` on Teams PIN prompt.
+      3. Unlocked Phone Screen (`keyguard_showing=False`, `input_restricted=False`):
+         -> Phone is already unlocked; no Phone PIN (`1213`) entry needed.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {
+            "status": "mock",
+            "keyguard_showing": False,
+            "input_restricted": False,
+            "has_teams_biometric": False,
+            "focused_window": "",
+            "required_pin_type": "none",
+        }
+
+    res = await run_adb_shell(
+        "dumpsys window policy | grep -E 'showing=|inputRestricted=|bouncerShowing='; "
+        "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'",
+        ser,
+        timeout=2.5,
+    )
+    out = res.get("stdout", "") or ""
+    out_low = out.lower()
+
+    keyguard_showing = bool(re.search(r"\bshowing=true\b", out_low))
+    input_restricted = bool(re.search(r"\binputrestricted=true\b", out_low))
+    has_teams_biometric = any(k in out_low for k in ("biometricprompt", "authcontroller")) and not keyguard_showing
+
+    if keyguard_showing or input_restricted:
+        req_pin = "phone_unlock_1213"
+    elif has_teams_biometric:
+        req_pin = "teams_biometric_escape_then_2992"
+    else:
+        req_pin = "none"
+
+    return {
+        "status": "ok",
+        "keyguard_showing": keyguard_showing,
+        "input_restricted": input_restricted,
+        "has_teams_biometric": has_teams_biometric,
+        "focused_window": out.strip(),
+        "required_pin_type": req_pin,
+    }
+
+
+async def unlock_phone_screen_1213(
+    serial: Optional[str] = None,
+    phone_pin: Optional[str] = None,
+    handle_teams_auth_after: bool = False,
+) -> Dict[str, Any]:
+    """
+    Wakes Display #0 and unlocks the Android OS Phone Lockscreen using strictly the
+    Phone Unlock PIN (`1213`).
+
+    CRITICAL SAFETY INVARIANTS (NEVER MIX UP THE TWO PINS):
+      1. Phone OS Lockscreen (`Display #0`, `KeyguardServiceDelegate showing=true` / `com.android.systemui:id/pin_pad_grid`):
+         -> Uses ONLY `1213` (`config.PHONE_UNLOCK_PIN`), tapped via `input touchscreen -d 0 tap <x> <y>`.
+         -> NEVER enters `2992` on the Phone OS Lockscreen!
+      2. Microsoft Teams Passcode (`2992`, `config.TEAMS_PIN`):
+         -> Used ONLY when Microsoft Teams prompts for `"Enter your PIN"` (`mam_pin_prompt`).
+         -> NEVER enters `1213` into Microsoft Teams!
+    """
+    import config
+
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {"status": "mock", "keyguard_unlocked": True, "pin_used": "1213", "actions": []}
+
+    default_phone_pin = getattr(config, "PHONE_UNLOCK_PIN", "1213") or "1213"
+    teams_pin_val = getattr(config, "TEAMS_PIN", "2992") or "2992"
+
+    # Guard against accidentally passing Teams PIN (2992) into Phone Unlock function
+    if not phone_pin or str(phone_pin).strip() == str(teams_pin_val).strip():
+        active_phone_pin = str(default_phone_pin).strip()
+    else:
+        active_phone_pin = str(phone_pin).strip()
+
+    actions: List[str] = []
+
+    # 1. Wake Display #0 and check lockscreen state
+    await run_adb_shell("input -d 0 keyevent 224", ser, timeout=1.5)
+    lock_state = await detect_phone_lockscreen_state(ser)
+    actions.append(
+        f"Checked Display #0 state: keyguard_showing={lock_state.get('keyguard_showing')}, "
+        f"input_restricted={lock_state.get('input_restricted')}, "
+        f"required_pin_type={lock_state.get('required_pin_type')}"
+    )
+
+    keyguard_unlocked = False
+    if lock_state.get("keyguard_showing") or lock_state.get("input_restricted"):
+        # Kill any in-flight uiautomator dump so touchscreen tap commands on Display #0 never block
+        await run_adb_shell("pkill -f uiautomator || true", ser, timeout=1.5)
+
+        # Reveal Keyguard Bouncer keypad on Display #0
+        await run_adb_shell(
+            "input -d 0 keyevent 224; "
+            "input -d 0 keyevent 82; "
+            "input touchscreen -d 0 swipe 540 1900 540 600 250",
+            ser,
+            timeout=3.0,
+        )
+        await asyncio.sleep(0.35)
+
+        # Build single shell command to clear any partial digits (DEL x6) and tap 1-2-1-3 + ENTER on Display #0
+        del_x, del_y = PHONE_KEYPAD_COORDS_1080X2404["DEL"]
+        ent_x, ent_y = PHONE_KEYPAD_COORDS_1080X2404["ENTER"]
+        cmd_parts = [f"input touchscreen -d 0 tap {del_x} {del_y}" for _ in range(6)]
+        cmd_parts.append("sleep 0.15")
+        for ch in active_phone_pin:
+            if ch in PHONE_KEYPAD_COORDS_1080X2404:
+                kx, ky = PHONE_KEYPAD_COORDS_1080X2404[ch]
+                cmd_parts.append(f"input touchscreen -d 0 tap {kx} {ky}")
+                cmd_parts.append("sleep 0.12")
+        cmd_parts.append(f"input touchscreen -d 0 tap {ent_x} {ent_y}")
+
+        await run_adb_shell("; ".join(cmd_parts), ser, timeout=8.0)
+        actions.append(
+            f"Entered Phone Unlock PIN ({active_phone_pin}) + ENTER on Display #0 Android Keyguard keypad via touchscreen -d 0"
+        )
+        await asyncio.sleep(0.55)
+
+        post_state = await detect_phone_lockscreen_state(ser)
+        keyguard_unlocked = not (post_state.get("keyguard_showing") or post_state.get("input_restricted"))
+        actions.append(
+            f"Post-unlock Display #0 verification: keyguard_showing={post_state.get('keyguard_showing')}, "
+            f"unlocked={keyguard_unlocked}"
+        )
+        lock_state = post_state
+    else:
+        keyguard_unlocked = True
+        actions.append("Phone Display #0 is already unlocked (showing=false); skipped entering 1213")
+
+    # 2. If Teams BiometricPrompt ('Access Teams' / 'Touch the fingerprint sensor') is active on Display #0,
+    #    dismiss it with ESCAPE so Teams can prompt for Teams PIN 2992 on desktop mode.
+    if lock_state.get("has_teams_biometric"):
+        await run_adb_shell("input -d 0 keyevent 111", ser, timeout=1.5)
+        actions.append("Dismissed Teams BiometricPrompt on Display #0 via ESCAPE (keyevent 111)")
+        await asyncio.sleep(0.3)
+
+    # Clear cached phone frame so UI immediately sees live unlocked phone screen
+    _frame_cache.pop((ser, "phone"), None)
+
+    teams_auth_result = None
+    if handle_teams_auth_after:
+        teams_auth_result = await auto_handle_pin_authentication(
+            serial=ser,
+            pin=teams_pin_val,
+            force=True,
+        )
+        if teams_auth_result.get("actions"):
+            actions.extend(teams_auth_result["actions"])
+
+    return {
+        "status": "ok",
+        "keyguard_unlocked": keyguard_unlocked,
+        "phone_pin_used": active_phone_pin if (not lock_state.get("keyguard_showing")) else None,
+        "teams_pin_configured": teams_pin_val,
+        "lock_state": lock_state,
+        "teams_auth": teams_auth_result,
+        "actions": actions,
+    }
+
+
+async def configure_display_awake_policies(
+    serial: Optional[str] = None,
+    pin: Optional[str] = None,
+    unlock_phone: bool = True,
+    handle_teams_pin: bool = False,
+) -> Dict[str, Any]:
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
         return {"status": "mock", "stay_on": True}
 
-    result = {"status": "ok", "stay_on": True, "keyguard_unlocked": False, "auth_handled": False}
+    import config
+    phone_pin_val = getattr(config, "PHONE_UNLOCK_PIN", "1213") or "1213"
+
+    result: Dict[str, Any] = {
+        "status": "ok",
+        "stay_on": True,
+        "keyguard_unlocked": False,
+        "auth_handled": False,
+        "phone_unlock_pin": phone_pin_val,
+        "teams_pin": getattr(config, "TEAMS_PIN", "2992") or "2992",
+    }
     try:
-        # Enforce permanent stay-awake policy across all power connections without typing PINs in background
+        # 1. Enforce permanent stay-awake policy across all power connections & wake Display #0
         await run_adb_shell(
+            "input -d 0 keyevent 224; "
             "svc power stayon true; "
             "settings put global stay_on_while_plugged_in 7; "
             "settings put system screen_off_timeout 2147483647; "
@@ -1313,8 +1743,19 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: Op
             "settings put secure lock_screen_lock_after_timeout 2147483647; "
             "settings put secure doze_enabled 0",
             ser,
-            timeout=2.0
+            timeout=2.5
         )
+        # 2. If unlock_phone is enabled, check & unlock Display #0 OS Lockscreen strictly with 1213 (never 2992)
+        if unlock_phone:
+            unlock_res = await unlock_phone_screen_1213(
+                serial=ser,
+                phone_pin=phone_pin_val,
+                handle_teams_auth_after=handle_teams_pin,
+            )
+            result["keyguard_unlocked"] = bool(unlock_res.get("keyguard_unlocked", False))
+            result["unlock_details"] = unlock_res
+            if unlock_res.get("teams_auth") and unlock_res["teams_auth"].get("pin_submitted"):
+                result["auth_handled"] = True
     except Exception as e:
         print(f"[configure_display_awake_policies] Note: {e}")
         result["error"] = str(e)

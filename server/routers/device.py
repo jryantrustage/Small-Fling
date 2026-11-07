@@ -423,9 +423,35 @@ async def device_unlock_and_awake_endpoint(req: Request):
     data = {}
     try: data = await req.json()
     except Exception: pass
-    pin = data.get("pin") or getattr(config, "DEVICE_PIN", "2992") or "2992"
+    phone_pin = data.get("phone_pin") or getattr(config, "PHONE_UNLOCK_PIN", "1213") or "1213"
     serial = data.get("serial")
-    res = await adb.configure_display_awake_policies(serial, pin=pin)
+    unlock_phone = bool(data.get("unlock_phone", True))
+    handle_teams_pin = bool(data.get("handle_teams_pin", True))
+    res = await adb.configure_display_awake_policies(
+        serial,
+        pin=phone_pin,
+        unlock_phone=unlock_phone,
+        handle_teams_pin=handle_teams_pin,
+    )
+    return {"status": "ok", "details": res}
+
+@router.post("/api/device/unlock-phone")
+async def unlock_phone_screen_endpoint(req: Request):
+    """
+    Explicitly wakes Display #0 and unlocks the Android OS Phone Lockscreen using strictly
+    the Phone Unlock PIN (1213), never mixing it up with the Microsoft Teams passcode (2992).
+    """
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    phone_pin = data.get("phone_pin") or getattr(config, "PHONE_UNLOCK_PIN", "1213") or "1213"
+    handle_teams_after = bool(data.get("handle_teams_auth_after", False))
+    res = await adb.unlock_phone_screen_1213(
+        serial=serial,
+        phone_pin=phone_pin,
+        handle_teams_auth_after=handle_teams_after,
+    )
     return {"status": "ok", "details": res}
 
 @router.get("/api/system/hardware-profile")
@@ -510,6 +536,42 @@ async def set_hid_target_endpoint(req: Request):
         focus_coords=focus_coords,
     )
     return {"status": "ok", "details": res}
+
+
+@router.post("/api/device/phone-tap")
+async def phone_tap_endpoint(req: Request):
+    """
+    Sends a touch tap directly to the Phone Screen (Display #0) at normalized (norm_x, norm_y)
+    or pixel (x, y) coordinates, wakes Display #0, and refreshes the phone UI mirror.
+    """
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    ser = await adb.get_active_adb_serial(data.get("serial"))
+    if not ser:
+        return {"status": "error", "message": "No active ADB device"}
+
+    w, h = 1080, 2404
+    cached = adb._frame_cache.get((ser, "phone"))
+    if cached and cached.get("raw_png"):
+        try:
+            import cv2, numpy as np
+            img = cv2.imdecode(np.frombuffer(cached["raw_png"], np.uint8), cv2.IMREAD_COLOR)
+            if img is not None and img.size > 0:
+                h, w = img.shape[:2]
+        except Exception:
+            pass
+
+    if "norm_x" in data and "norm_y" in data:
+        tx = max(0, min(w - 1, int(round(float(data["norm_x"]) * w))))
+        ty = max(0, min(h - 1, int(round(float(data["norm_y"]) * h))))
+    else:
+        tx = int(data.get("x", w // 2))
+        ty = int(data.get("y", h // 2))
+
+    await adb.run_adb_shell(f"input -d 0 keyevent 224 && input touchscreen -d 0 tap {tx} {ty}", ser, timeout=3.0)
+    adb._frame_cache.pop((ser, "phone"), None)
+    return {"status": "ok", "serial": ser, "display_id": 0, "x": tx, "y": ty, "resolution": f"{w}x{h}"}
 
 @router.post("/api/device/undo-edits")
 async def undo_markdown_edits_endpoint(req: Request):

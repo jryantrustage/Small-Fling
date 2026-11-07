@@ -1,50 +1,70 @@
 ---
 name: teams-onedrive-markdown-navigator
 description: >-
-  Automates opening Microsoft Teams on the Android Desktop Display, handling
-  PIN 2992 authentication safely, navigating through OneDrive -> Markdowns ->
-  ficus-platform -> <bundle_folder> -> <part_file>.md, and ensuring the
-  Markdown editor opens in Fullscreen, Dark Mode, and Single-Pane Edit Mode.
-  Use when opening, switching, or recovering a multi-part Markdown bundle file
-  in Teams OneDrive.
+  Automates waking and unlocking the Android Phone Screen (Display #0) using the
+  Phone Unlock PIN 1213, opening Microsoft Teams on the Android Desktop Display,
+  handling the Microsoft Teams Passcode 2992 prompt (including the Blank White
+  Teams Fingerprint screen -> Escape -> Desktop PIN 2992), navigating through
+  OneDrive -> Markdowns -> ficus-platform -> <bundle_folder> -> <part_file>.md,
+  and assuring the Markdown editor opens in Fullscreen, Dark Mode, and
+  Single-Pane Edit Mode. Strictly separates Phone Unlock PIN 1213 from Teams
+  Passcode 2992 to prevent device or app lockout.
 ---
 
-# Teams OneDrive Markdown Navigator & Editor Preparation Skill
+# Teams OneDrive Markdown Navigator & Dual-PIN Authentication Skill
+
+## Critical Rule: Strict Separation Between Phone Unlock PIN (`1213`) and Teams Passcode (`2992`)
+
+> [!CAUTION]
+> **NEVER mix up the two PINs (`1213` vs `2992`) — mixing them up will cause an Android OS lockout or Microsoft Teams Intune lockout:**
+>
+> | Credential | Value | Target Display | Exact Screen / Condition | Entry Method |
+> | :--- | :--- | :--- | :--- | :--- |
+> | **Phone Unlock PIN** | **`1213`** | **Phone Screen (`Display #0`)** | `dumpsys window policy` has `showing=true` / `inputRestricted=true` (`com.android.systemui:id/pin_pad_grid` / `com.android.systemui:id/pinEntry`) | `input touchscreen -d 0 tap <x> <y>` on the `1080×2404` keypad (`1`: `235,1016`, `2`: `541,1016`, `1`: `235,1016`, `3`: `847,1016`, `Enter`: `847,1823`) |
+> | **Teams Passcode** | **`2992`** | **Desktop Display (`Display #<ext_id>`)** | Microsoft Teams / Intune `"Enter your PIN"` (`mam_pin_prompt`) or Blank White Teams Fingerprint Screen $\rightarrow$ `Escape` (`keyevent 111`) $\rightarrow$ `"Enter your PIN"` | `input -d <ext_id> text 2992` + `Enter` (`keyevent 66`) |
+
+---
 
 ## Overview
 
-This skill automates the end-to-end operation of opening or recovering a target Markdown file inside a multi-part bundle in Microsoft Teams on the external Android Desktop Display:
+This skill automates unlocking the phone, authenticating Microsoft Teams, and opening or recovering a target Markdown file inside a multi-part bundle on the external Android Desktop Display (`Display #<ext_id>`):
 
-1. **PIN `2992` Authentication**:
-   - If the Android OS Keyguard bouncer (`element:BouncerContent` / `com.android.systemui:id/pin_pad_grid` with `KeyguardServiceDelegate showing=true`) is locking the display, unlocks the verified SystemUI PIN pad using `2992` (with $\ge 400\text{ ms}$ inter-tap spacing so double-Digits like `99` are not coalesced into a double-tap).
-   - If Microsoft Teams on the Desktop Display (`Display #<ext_id>`) shows the **Blank White Teams Fingerprint Screen**, sends `Escape` (`keyevent 111`) to prompt for the desktop PIN, then enters `2992` into the verified Teams `"Enter your PIN"` field.
-   - **Strict Safety Guard**: Never types `2992` into the Markdown editor (`body_mean < 200` or gutter line numbers present) or into non-keyguard phone apps.
-2. **Teams OneDrive Folder Path Navigation**:
-   - Opens/focuses Microsoft Teams (`com.microsoft.teams`) on the external Desktop Display (`--display <ext_id>`).
-   - Navigates step-by-step through the OneDrive folder hierarchy:
+1. **Phone Screen Wake & Unlock (`1213` on `Display #0` ONLY)**:
+   - Wakes `Display #0` (`input -d 0 keyevent 224`) and checks `detect_phone_lockscreen_state`.
+   - **Only when `showing=true` or `inputRestricted=true`**, kills any background `uiautomator` process (`pkill -f uiautomator || true`), brings up the Android SystemUI Keyguard bouncer, clears any partial digits (`DEL` at `235, 1823`), and taps **`1213`** + `Enter` via `input touchscreen -d 0 tap`.
+   - **Never** enters `2992` on the Android Phone Lockscreen!
+2. **Teams Passcode `2992` Authentication (Teams Prompt ONLY)**:
+   - Directs HID to the Desktop Display (`Display #<ext_id>`) and opens/focuses the Microsoft Teams app (`com.microsoft.teams/com.microsoft.skype.teams.Launcher`).
+   - When Microsoft Teams on the Desktop Display shows the **Blank White Teams Fingerprint Screen** (`"Teams"` header at top-left over a blank white window while the phone prompts `"Access Teams"` / `"Touch the fingerprint sensor"`), sends `Escape` (`keyevent 111`) to dismiss the biometric prompt and display `"Enter your PIN"`, then enters Teams Passcode **`2992`** into the verified Teams `"Enter your PIN"` field and clicks `OK` / `Enter`.
+   - **Never** enters `1213` into the Teams PIN prompt, and **never** enters `2992` into the Markdown editor!
+3. **Teams OneDrive Folder Path Navigation**:
+   - Navigates step-by-step inside Microsoft Teams on the Desktop Display through the OneDrive folder hierarchy:
      $$\text{Teams App} \rightarrow \texttt{"OneDrive"} \rightarrow \texttt{"Markdowns"} \rightarrow \texttt{"ficus-platform"} \rightarrow \texttt{"<bundle\_folder>"} \rightarrow \texttt{"<target\_file>.md"}$$
-   - Catalogs all markdown parts in the bundle folder (`MD 1 / N .. MD N / N`) into the Process Scope Queue.
-3. **Fullscreen + Dark Mode + Edit Mode Assurance**:
-   - Maximizes the Teams Markdown editor window if floating (`_detect_floating_teams_window_cv` / `is_editor_full_screen`).
-   - Switches the theme to **Dark Mode** (Moon icon in toolbar).
-   - Switches the editor to **Single-Pane Edit Mode** (Pencil icon in toolbar, closing any Side-by-Side preview pane) so gutter line numbers (`1..N`) are crisp and aligned.
+   - Catalogs all markdown parts in the bundle folder (`MD 1 / N .. MD N / N`) into `multipart_bundle_state["predetermined_parts"]` for the Process Scope Queue.
+   - Re-checks for the Teams PIN `2992` prompt at each transition step.
+4. **Fullscreen + Dark Mode + Edit Mode Assurance**:
+   - Assures the Markdown editor opens on the Desktop Display.
+   - Maximizes the Teams Markdown editor window to **Fullscreen** if floating (`_detect_floating_teams_window_cv` / `is_editor_full_screen`).
+   - Assures **Dark Mode** is enabled (Moon icon in the formatting toolbar).
+   - Assures **Single-Pane Edit Mode** is active (Pencil icon in the formatting toolbar, closing any Side-by-Side preview pane) so gutter line numbers (`1..N`) are crisp and aligned.
 
 ---
 
 ## Quick Start
 
-Run the helper CLI script [navigate_teams_markdown.py](./scripts/navigate_teams_markdown.py) to perform the full operation for a specific bundle and markdown file:
+Run the helper CLI script [navigate_teams_markdown.py](./scripts/navigate_teams_markdown.py) to perform the full operation (Phone wake/unlock with `1213` if locked $\rightarrow$ Teams auth with `2992` if prompted $\rightarrow$ OneDrive navigation $\rightarrow$ Fullscreen Dark Edit Mode) for a specific bundle and markdown file:
 
 ```powershell
 python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py full-run `
   --bundle "DIXUI_impact_26-11-05-9-43pm" `
   --file "DIXUI_impact_26-11-05-9-43pm_part5.md" `
   --part 5 `
+  --phone-pin 1213 `
   --pin 2992 `
   --output storage/navigation_result.json
 ```
 
-Or invoke the live backend endpoint directly:
+Or call the live FastAPI endpoint directly:
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/device/navigate-onedrive-markdown" `
@@ -56,30 +76,31 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8000/api/device/navigate-o
 
 ## Utility Scripts
 
-The CLI script [scripts/navigate_teams_markdown.py](./scripts/navigate_teams_markdown.py) provides four subcommands (all writing structured JSON to `--output`):
+The CLI script [scripts/navigate_teams_markdown.py](./scripts/navigate_teams_markdown.py) provides four subcommands (all writing structured JSON results to `--output`):
 
 ### 1. `full-run`
-Executes PIN `2992` unlock/authentication, navigates `Teams -> OneDrive -> Markdowns -> ficus-platform -> <bundle> -> <file>`, and enforces Fullscreen + Dark Mode + Edit Mode.
+Opens Teams on the Desktop Display, handles the Teams PIN `2992` prompt if shown, navigates `"OneDrive"` $\rightarrow$ `"Markdowns"` $\rightarrow$ `"ficus-platform"` $\rightarrow$ `<bundle>` $\rightarrow$ `<file>`, and assures the Markdown editor is in Fullscreen + Dark Mode + Edit Mode.
 
 ```powershell
 python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py full-run `
   --bundle "DIXUI_impact_26-11-05-9-43pm" `
   --file "DIXUI_impact_26-11-05-9-43pm_part5.md" `
   --part 5 `
+  --pin 2992 `
   --output storage/nav_full_run.json
 ```
 
-### 2. `unlock-and-auth`
-Verifies and unlocks the SystemUI Keyguard (`showing=true` + `com.android.systemui:id/pin_pad_grid`) or Teams MAM PIN prompt (`Enter your PIN`) using PIN `2992`.
+### 2. `auth-teams-pin`
+Checks the Desktop Display screenshot via `detect_teams_auth_or_fingerprint_screen_cv` and, if Teams is prompting for authentication (Blank White Teams Fingerprint screen or `"Enter your PIN"`), sends `Escape` (if needed) and enters PIN `2992` on the Desktop Display.
 
 ```powershell
-python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py unlock-and-auth `
+python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py auth-teams-pin `
   --pin 2992 `
   --output storage/auth_result.json
 ```
 
 ### 3. `navigate`
-Navigates from the Teams main screen through `"OneDrive"` $\rightarrow$ `"Markdowns"` $\rightarrow$ `"ficus-platform"` $\rightarrow$ `<bundle>` $\rightarrow$ `<file>`.
+Navigates from the Teams app through `"OneDrive"` $\rightarrow$ `"Markdowns"` $\rightarrow$ `"ficus-platform"` $\rightarrow$ `<bundle>` $\rightarrow$ `<file>`, handling any Teams PIN `2992` prompt along the way.
 
 ```powershell
 python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py navigate `
@@ -90,7 +111,7 @@ python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_m
 ```
 
 ### 4. `prepare-editor`
-Verifies that the currently open Teams Markdown editor on the Desktop Display is maximized to **Fullscreen**, switched to **Dark Mode**, and in **Single-Pane Edit Mode** (with Undo `↶` button check if accidental edits occurred).
+Verifies and enforces that the open Teams Markdown editor on the Desktop Display is maximized to **Fullscreen**, switched to **Dark Mode**, and in **Single-Pane Edit Mode** (and checks the Undo `↶` button state).
 
 ```powershell
 python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_markdown.py prepare-editor `
@@ -108,11 +129,11 @@ python .agents/skills/teams-onedrive-markdown-navigator/scripts/navigate_teams_m
 
 ---
 
-## Common Pitfalls & Safety Rules
+## Common Mistakes to Avoid
 
-1. **Inter-Tap Delay on Repeated Digits (`9` $\rightarrow$ `9` in `2992`)**:
-   - When tapping `2992` on a Compose PIN pad (`com.android.systemui:id/pin_pad_grid`), always wait $\ge 400\text{ ms}$ between taps so the two taps on `9` are not interpreted by Android's `DoubleTapTimeout` ($300\text{ ms}$) as a single double-tap gesture.
-2. **Never Type `2992` Into the Markdown Editor**:
-   - Always check `detect_teams_auth_or_fingerprint_screen_cv(img)` before sending `input -d <ext_id> text 2992`. Dark-mode editors (`body_mean < 200`) and screens with gutter line numbers must never receive PIN keystrokes.
+1. **Never Enter `2992` on the Phone Display (`Display #0`) or in the Markdown Editor**:
+   - Always capture explicitly from the Desktop Display (`capture_display_screenshot("desktop")`) and verify `detect_teams_auth_or_fingerprint_screen_cv(img)["detected"] == True` before sending `2992`.
+2. **Always Check for Teams PIN Prompt After Opening Teams or Tapping a Markdown File**:
+   - Microsoft Teams may display the Blank White Fingerprint screen or `"Enter your PIN"` either when launching Teams or when opening a `.md` file from OneDrive. Always run `_ensure_teams_authenticated_if_needed` before and after tapping the file.
 3. **Preserve Native Desktop Density (`131` DPI on `1280x1024`)**:
    - Do not override desktop density to `220` DPI during navigation, as `wm density` recreates the Teams activity surface and hides the Undo (`↶`) button.

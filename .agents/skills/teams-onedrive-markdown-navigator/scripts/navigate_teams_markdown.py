@@ -2,11 +2,13 @@
 """
 CLI Helper Script for `teams-onedrive-markdown-navigator` Skill.
 Performs:
-  1. Safe PIN 2992 authentication (unlocking SystemUI keyguard bouncer if `showing=true`
-     and/or handling the Teams Desktop PIN / Blank White Fingerprint prompt).
+  1. Safe Teams PIN 2992 authentication on the Desktop Mode screen ONLY:
+     - Handles the Blank White Teams Fingerprint screen -> Escape -> Desktop PIN 2992.
+     - Handles the Teams "Enter your PIN" / "Managed by your organization" screen -> PIN 2992.
+     - NEVER types 2992 on the phone display (Display #0) or inside the Markdown editor.
   2. Navigating Microsoft Teams on the external Desktop Display through:
      Teams App -> "OneDrive" -> "Markdowns" -> "ficus-platform" -> "<bundle_folder>" -> "<target_file>.md"
-  3. Ensuring the opened Teams Markdown editor is in Fullscreen, Dark Mode, and Single-Pane Edit Mode.
+  3. Assuring the opened Teams Markdown editor is in Fullscreen, Dark Mode, and Single-Pane Edit Mode.
 
 All subcommands write structured JSON results to `--output`.
 """
@@ -23,80 +25,36 @@ SERVER_DIR = REPO_ROOT / "server"
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
 
-# Canonical Pixel 8 Pro (1080x2404 override) SystemUI Compose Bouncer ('com.android.systemui:id/pin_pad_grid') coordinates
-SYSTEMUI_PIN_PAD_COORDS: Dict[str, tuple[int, int]] = {
-    "1": (235, 1016),
-    "2": (541, 1016),
-    "3": (847, 1016),
-    "4": (235, 1285),
-    "5": (541, 1285),
-    "6": (847, 1285),
-    "7": (235, 1554),
-    "8": (541, 1554),
-    "9": (847, 1554),
-    "delete": (235, 1823),
-    "0": (541, 1823),
-    "enter": (847, 1823),
-}
 
-
-async def check_and_unlock_keyguard_if_showing(
-    serial: str,
-    pin: str = "2992",
-) -> Dict[str, Any]:
+async def run_unlock_phone(phone_pin: str = "1213", serial: Optional[str] = None) -> Dict[str, Any]:
     """
-    Checks `dumpsys window policy` for `KeyguardServiceDelegate showing=true`.
-    If `showing=true`, wakes the screen and immediately taps the digits of `pin` + Enter
-    within the 10-second lockscreen wake window (never running a slow uiautomator dump
-    between `keyevent 224` and the taps).
+    Wakes Display #0 and unlocks the Android OS Phone Lockscreen using strictly
+    the Phone Unlock PIN (1213). Never enters 2992 on the Phone Lockscreen.
     """
     from services import adb_service
 
-    actions: List[str] = []
-    pol = await adb_service.run_adb_shell("dumpsys window policy", serial, timeout=3.0)
-    pol_out = pol.get("stdout", "") or ""
-    is_showing = "showing=true" in pol_out and "inputRestricted=true" in pol_out
+    ser = await adb_service.get_active_adb_serial(serial)
+    if not ser:
+        return {"status": "error", "message": "No active ADB device connected"}
 
-    if not is_showing:
-        return {
-            "keyguard_was_showing": False,
-            "keyguard_unlocked": True,
-            "actions": ["Keyguard already unlocked (showing=false)"],
-        }
-
-    # Dismiss any pending biometric overlay on Display 0 and bring up BouncerContent, then immediately wake + tap PIN
-    await adb_service.run_adb_shell(
-        "input keyevent 224 && sleep 0.3 && input keyevent 111 && sleep 0.3 && input swipe 540 1900 540 500 250",
-        serial,
-        timeout=5.0,
+    unlock_res = await adb_service.unlock_phone_screen_1213(
+        serial=ser,
+        phone_pin=phone_pin,
+        handle_teams_auth_after=False,
     )
-    await asyncio.sleep(0.8)
-
-    # Build a single uninterrupted shell command after `input keyevent 224` so all taps complete in < 2.0s
-    tap_parts = ["input keyevent 224", "sleep 0.35"]
-    for ch in str(pin).strip():
-        if ch in SYSTEMUI_PIN_PAD_COORDS:
-            x, y = SYSTEMUI_PIN_PAD_COORDS[ch]
-            tap_parts.append(f"input tap {x} {y}")
-            tap_parts.append("sleep 0.28")
-    ex, ey = SYSTEMUI_PIN_PAD_COORDS["enter"]
-    tap_parts.append(f"input tap {ex} {ey}")
-
-    await adb_service.run_adb_shell(" && ".join(tap_parts), serial, timeout=8.0)
-    actions.append(f"Tapped PIN ({len(pin)} digits) + Enter on verified SystemUI keyguard bouncer")
-    await asyncio.sleep(1.5)
-
-    pol_after = await adb_service.run_adb_shell("dumpsys window policy", serial, timeout=3.0)
-    after_out = pol_after.get("stdout", "") or ""
-    unlocked = "showing=false" in after_out or "inputRestricted=false" in after_out
     return {
-        "keyguard_was_showing": True,
-        "keyguard_unlocked": unlocked,
-        "actions": actions,
+        "status": "ok",
+        "serial": ser,
+        "phone_unlock": unlock_res,
     }
 
 
-async def run_unlock_and_auth(pin: str = "2992", serial: Optional[str] = None) -> Dict[str, Any]:
+async def run_auth_teams_pin(pin: str = "2992", serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Authenticates Microsoft Teams on the Desktop Display (`Display #<ext_id>`) using PIN 2992
+    ONLY when Teams displays the Blank White Fingerprint screen or the "Enter your PIN" screen.
+    Never sends PIN digits to the phone display (`Display #0`) or into the Markdown editor.
+    """
     from services import adb_service
 
     ser = await adb_service.get_active_adb_serial(serial)
@@ -104,18 +62,17 @@ async def run_unlock_and_auth(pin: str = "2992", serial: Optional[str] = None) -
         return {"status": "error", "message": "No active ADB device connected"}
     ext_id = await adb_service.detect_external_display_id(ser)
 
-    kg_res = await check_and_unlock_keyguard_if_showing(ser, pin=pin)
+    await adb_service.direct_hid_to_display(serial=ser, target_mode="desktop", ext_display_id=ext_id)
     teams_auth_res = await adb_service.auto_handle_pin_authentication(
         serial=ser,
         ext_display_id=ext_id,
         pin=pin,
-        force=False,
+        force=True,
     )
     return {
         "status": "ok",
         "serial": ser,
         "desktop_display_id": ext_id,
-        "keyguard": kg_res,
         "teams_pin_auth": teams_auth_res,
     }
 
@@ -129,6 +86,11 @@ async def run_navigate(
     pin: str = "2992",
     serial: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """
+    Opens Microsoft Teams on the Desktop Display, handles Teams PIN 2992 if prompted,
+    navigates OneDrive -> Markdowns -> ficus-platform -> <bundle_folder> -> <target_file>.md,
+    and prepares the Markdown editor in Fullscreen + Dark Mode + Edit Mode.
+    """
     from services import adb_service, ui_automator_service as uia
 
     ser = await adb_service.get_active_adb_serial(serial)
@@ -136,7 +98,7 @@ async def run_navigate(
         return {"status": "error", "message": "No active ADB device connected"}
     ext_id = await adb_service.detect_external_display_id(ser)
 
-    await check_and_unlock_keyguard_if_showing(ser, pin=pin)
+    await adb_service.direct_hid_to_display(serial=ser, target_mode="desktop", ext_display_id=ext_id)
     nav_res = await uia.navigate_teams_onedrive_path_to_markdown(
         serial=ser,
         display_id=ext_id,
@@ -150,6 +112,11 @@ async def run_navigate(
 
 
 async def run_prepare_editor(serial: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Assures the currently open Teams Markdown editor window on the Desktop Display
+    is maximized (Fullscreen), in Dark Mode, and in Single-Pane Edit Mode.
+    Also checks for the Undo (`↶`) button if accidental edits occurred.
+    """
     import cv2
     import numpy as np
     from alignment_engine import detect_teams_markdown_alignment
@@ -160,6 +127,7 @@ async def run_prepare_editor(serial: Optional[str] = None) -> Dict[str, Any]:
         return {"status": "error", "message": "No active ADB device connected"}
     ext_id = await adb_service.detect_external_display_id(ser)
 
+    await adb_service.direct_hid_to_display(serial=ser, target_mode="desktop", ext_display_id=ext_id)
     prep_res = await uia.prepare_markdown_editor_window(serial=ser, display_id=ext_id)
     snap = await adb_service.capture_display_screenshot("desktop", serial=ser, display_id=ext_id, max_cache_age_s=0.0)
     align_info: Dict[str, Any] = {}
@@ -196,43 +164,68 @@ def write_output(payload: Dict[str, Any], output_path: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Navigate Teams OneDrive folder path, handle PIN 2992, and prepare Fullscreen Dark Mode Edit Mode."
+        description="Navigate Teams OneDrive folder path, handle Teams PIN 2992 on Desktop Display, and prepare Fullscreen Dark Mode Edit Mode."
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # 1. unlock-and-auth
-    p_auth = subparsers.add_parser("unlock-and-auth", help="Unlock keyguard / authenticate Teams with PIN 2992")
-    p_auth.add_argument("--pin", default="2992", help="PIN code (default: 2992)")
+    # 0. unlock-phone
+    p_unlock = subparsers.add_parser(
+        "unlock-phone",
+        help="Wake Display #0 and unlock Android OS Phone Lockscreen with PIN 1213 (never 2992)",
+    )
+    p_unlock.add_argument("--phone-pin", default="1213", help="Phone OS unlock PIN (default: 1213)")
+    p_unlock.add_argument("--serial", default=None, help="Optional ADB serial")
+    p_unlock.add_argument("--output", required=True, help="Output JSON file path")
+
+    # 1. auth-teams-pin
+    p_auth = subparsers.add_parser(
+        "auth-teams-pin",
+        help="Authenticate Teams on the Desktop Display with PIN 2992 (handles Blank White Fingerprint -> Escape -> PIN 2992)",
+    )
+    p_auth.add_argument("--pin", default="2992", help="Teams PIN code (default: 2992)")
     p_auth.add_argument("--serial", default=None, help="Optional ADB serial")
     p_auth.add_argument("--output", required=True, help="Output JSON file path")
 
     # 2. navigate
-    p_nav = subparsers.add_parser("navigate", help="Navigate Teams -> OneDrive -> Markdowns -> ficus-platform -> bundle -> file")
+    p_nav = subparsers.add_parser(
+        "navigate",
+        help="Navigate Teams -> OneDrive -> Markdowns -> ficus-platform -> bundle -> file",
+    )
     p_nav.add_argument("--bundle", required=True, help="Bundle folder name (e.g. DIXUI_impact_26-11-05-9-43pm)")
     p_nav.add_argument("--file", required=True, help="Target markdown file name (e.g. DIXUI_impact_26-11-05-9-43pm_part5.md)")
     p_nav.add_argument("--part", type=int, default=5, help="Target part number (default: 5)")
-    p_nav.add_argument("--pin", default="2992", help="PIN code (default: 2992)")
+    p_nav.add_argument("--pin", default="2992", help="Teams PIN code (default: 2992)")
     p_nav.add_argument("--serial", default=None, help="Optional ADB serial")
     p_nav.add_argument("--output", required=True, help="Output JSON file path")
 
     # 3. prepare-editor
-    p_prep = subparsers.add_parser("prepare-editor", help="Assure Markdown editor is Fullscreen + Dark Mode + Edit Mode")
+    p_prep = subparsers.add_parser(
+        "prepare-editor",
+        help="Assure Markdown editor is Fullscreen + Dark Mode + Edit Mode",
+    )
     p_prep.add_argument("--serial", default=None, help="Optional ADB serial")
     p_prep.add_argument("--output", required=True, help="Output JSON file path")
 
     # 4. full-run
-    p_full = subparsers.add_parser("full-run", help="Run full PIN 2992 auth + OneDrive navigation + Fullscreen Dark Edit Mode")
+    p_full = subparsers.add_parser(
+        "full-run",
+        help="Run Phone Unlock (1213) + Teams PIN (2992) auth + OneDrive navigation + Fullscreen Dark Edit Mode",
+    )
     p_full.add_argument("--bundle", default="DIXUI_impact_26-11-05-9-43pm", help="Bundle folder name")
     p_full.add_argument("--file", default="DIXUI_impact_26-11-05-9-43pm_part5.md", help="Target markdown file name")
     p_full.add_argument("--part", type=int, default=5, help="Target part number")
-    p_full.add_argument("--pin", default="2992", help="PIN code (default: 2992)")
+    p_full.add_argument("--phone-pin", default="1213", help="Phone OS unlock PIN (default: 1213)")
+    p_full.add_argument("--pin", default="2992", help="Teams PIN code (default: 2992)")
     p_full.add_argument("--serial", default=None, help="Optional ADB serial")
     p_full.add_argument("--output", required=True, help="Output JSON file path")
 
     args = parser.parse_args()
 
-    if args.command == "unlock-and-auth":
-        res = asyncio.run(run_unlock_and_auth(pin=args.pin, serial=args.serial))
+    if args.command == "unlock-phone":
+        res = asyncio.run(run_unlock_phone(phone_pin=args.phone_pin, serial=args.serial))
+        write_output(res, args.output)
+    elif args.command in ("auth-teams-pin", "unlock-and-auth"):
+        res = asyncio.run(run_auth_teams_pin(pin=args.pin, serial=args.serial))
         write_output(res, args.output)
     elif args.command == "navigate":
         res = asyncio.run(
@@ -250,7 +243,8 @@ def main() -> None:
         write_output(res, args.output)
     elif args.command == "full-run":
         async def _full():
-            auth_r = await run_unlock_and_auth(pin=args.pin, serial=args.serial)
+            unlock_r = await run_unlock_phone(phone_pin=args.phone_pin, serial=args.serial)
+            auth_r = await run_auth_teams_pin(pin=args.pin, serial=args.serial)
             nav_r = await run_navigate(
                 bundle_folder=args.bundle,
                 target_file=args.file,
@@ -264,6 +258,7 @@ def main() -> None:
                 "bundle": args.bundle,
                 "file": args.file,
                 "part": args.part,
+                "phone_unlock": unlock_r,
                 "auth": auth_r,
                 "navigation": nav_r,
                 "editor": prep_r,

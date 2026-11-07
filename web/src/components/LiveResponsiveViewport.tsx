@@ -54,6 +54,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
   const [peekScreen, setPeekScreen] = useState(false);
+  const [tapRipple, setTapRipple] = useState<{ x: number; y: number } | null>(null);
 
   // Synchronize internal live mode with controlled prop or allow local toggle
   const [internalLiveMode, setInternalLiveMode] = useState<'desktop' | 'phone'>(liveMode);
@@ -63,6 +64,11 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   }, [liveMode]);
 
   const effectiveLiveMode = onSwitchLiveMode ? liveMode : internalLiveMode;
+
+  // Reset naturalSize when switching between desktop and phone so aspect ratio updates immediately
+  useEffect(() => {
+    setNaturalSize({ width: 0, height: 0 });
+  }, [effectiveLiveMode]);
 
   const handleSwitchMode = (targetMode: 'desktop' | 'phone') => {
     if (onSwitchLiveMode) {
@@ -151,12 +157,13 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   };
 
   // Determine effective resolution and orientation
+  const isPhoneMode = effectiveLiveMode === 'phone';
   const metaW = typeof metaResolution === 'object' ? metaResolution.width : (metaResolution ? parseInt(metaResolution.split('x')[0], 10) : 0);
   const metaH = typeof metaResolution === 'object' ? metaResolution.height : (metaResolution ? parseInt(metaResolution.split('x')[1], 10) : 0);
 
-  const baseW = naturalSize.width || alignmentData?.resolution?.width || metaW || (effectiveLiveMode === 'phone' ? 1080 : 1920);
-  const baseH = naturalSize.height || alignmentData?.resolution?.height || metaH || (effectiveLiveMode === 'phone' ? 2400 : 1080);
-  const aspectRatio = baseW > 0 && baseH > 0 ? baseW / baseH : (effectiveLiveMode === 'phone' ? 9 / 20 : 16 / 9);
+  const baseW = naturalSize.width || (!isPhoneMode ? (alignmentData?.resolution?.width || metaW) : 0) || (isPhoneMode ? 1080 : 1920);
+  const baseH = naturalSize.height || (!isPhoneMode ? (alignmentData?.resolution?.height || metaH) : 0) || (isPhoneMode ? 2404 : 1080);
+  const aspectRatio = baseW > 0 && baseH > 0 ? baseW / baseH : (isPhoneMode ? 1080 / 2404 : 16 / 9);
   const isPortrait = baseH > baseW;
   const orientationLabel = isPortrait ? 'PORTRAIT' : 'LANDSCAPE';
   const resolutionDisplay = `${baseW}×${baseH}`;
@@ -164,23 +171,48 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
   // Calculate pixel-perfect stage dimensions to eliminate letterbox disparity between image and SVG
   let stageW = '100%';
   let stageH = '100%';
-  let stagePixelWidth = containerSize.width;
-  let stagePixelHeight = containerSize.height;
+  const calloutOffsetH = (topCallout ? 28 : 0) + (bottomCallout ? 28 : 0);
+  const availW = containerSize.width;
+  const availH = Math.max(80, containerSize.height - calloutOffsetH);
+  let stagePixelWidth = availW;
+  let stagePixelHeight = availH;
 
-  if (viewMode === 'fit' && containerSize.width > 0 && containerSize.height > 0) {
-    const containerRatio = containerSize.width / containerSize.height;
+  if (viewMode === 'fit' && availW > 0 && availH > 0) {
+    const containerRatio = availW / availH;
     if (containerRatio > aspectRatio) {
       // Container is wider than aspect ratio: height-bound
-      stagePixelHeight = containerSize.height;
-      stagePixelWidth = Math.round(containerSize.height * aspectRatio);
+      stagePixelHeight = availH;
+      stagePixelWidth = Math.round(availH * aspectRatio);
     } else {
       // Container is taller than aspect ratio: width-bound
-      stagePixelWidth = containerSize.width;
-      stagePixelHeight = Math.round(containerSize.width / aspectRatio);
+      stagePixelWidth = availW;
+      stagePixelHeight = Math.round(availW / aspectRatio);
     }
     stageW = `${stagePixelWidth}px`;
     stageH = `${stagePixelHeight}px`;
   }
+
+  const handlePhoneStageClick = useCallback(async (e: React.MouseEvent<HTMLImageElement>) => {
+    if (effectiveLiveMode !== 'phone') return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const normX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const normY = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    setTapRipple({ x: normX * 100, y: normY * 100 });
+    setTimeout(() => setTapRipple(null), 550);
+    try {
+      await fetch(resolveDirectBackendUrl('/api/device/phone-tap'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ norm_x: normX, norm_y: normY, serial: deviceInfo?.active_serial }),
+      });
+      if (onRefreshStream) {
+        setTimeout(() => onRefreshStream(), 350);
+      }
+    } catch (err) {
+      console.warn('Phone tap dispatch failed:', err);
+    }
+  }, [effectiveLiveMode, deviceInfo?.active_serial, onRefreshStream]);
 
   const toggleFullscreen = useCallback(async () => {
     if (!containerRef.current) return;
@@ -415,6 +447,7 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
               src={activeStreamUrl || streamUrl}
               alt={`Live ${effectiveLiveMode} display`}
               onLoad={handleImageLoad}
+              onClick={handlePhoneStageClick}
               onError={(e) => {
                 if (activeFallbackUrl || fallbackUrl) {
                   (e.target as HTMLImageElement).src = (activeFallbackUrl || fallbackUrl)!;
@@ -425,9 +458,28 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
                 height: '100%',
                 objectFit: viewMode === 'fill' ? 'cover' : 'contain',
                 display: 'block',
-                pointerEvents: 'none',
+                pointerEvents: effectiveLiveMode === 'phone' ? 'auto' : 'none',
+                cursor: effectiveLiveMode === 'phone' ? 'pointer' : 'default',
               }}
             />
+            {tapRipple && effectiveLiveMode === 'phone' && (
+              <span
+                style={{
+                  position: 'absolute',
+                  left: `${tapRipple.x}%`,
+                  top: `${tapRipple.y}%`,
+                  width: '28px',
+                  height: '28px',
+                  marginLeft: '-14px',
+                  marginTop: '-14px',
+                  borderRadius: '50%',
+                  border: '2px solid #38bdf8',
+                  background: 'rgba(56, 189, 248, 0.35)',
+                  pointerEvents: 'none',
+                  zIndex: 26,
+                }}
+              />
+            )}
             {headlessMode && peekScreen && (
               <button
                 type="button"
@@ -462,88 +514,93 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
           />
         )}
 
-        {/* Live Mode & Connection Status Badge */}
+        {/* Custom Extra Overlay Slot */}
+        {extraOverlay}
+      </div>
+
+      {/* Live Mode & Connection Status Badge (anchored to outer container so portrait phone screen is never overlapped) */}
+      <div
+        className="live-screen-overlay-badge"
+        style={{
+          position: 'absolute',
+          top: topCallout ? '36px' : '10px',
+          left: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'rgba(9, 12, 18, 0.85)',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+          borderRadius: '20px',
+          padding: '3px 10px',
+          fontFamily: 'var(--font-mono, monospace)',
+          fontSize: '10px',
+          color: '#fff',
+          pointerEvents: 'none',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 15,
+        }}
+      >
+        <span
+          style={{
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            background: '#00ff9d',
+            boxShadow: '0 0 8px #00ff9d',
+            animation: 'pulse-dot 1.5s infinite',
+          }}
+        />
+        <span style={{ fontWeight: 800, letterSpacing: '0.4px' }}>
+          LIVE • {effectiveLiveMode.toUpperCase()}
+        </span>
+        <span style={{ color: '#8b949e', fontSize: '9px' }}>({orientationLabel})</span>
+      </div>
+
+      {/* Resolution & Device Hardware Info Badge */}
+      <div
+        className="live-screen-overlay-info"
+        style={{
+          position: 'absolute',
+          bottom: bottomCallout ? '36px' : '10px',
+          right: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          background: 'rgba(9, 12, 18, 0.85)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
+          borderRadius: '6px',
+          padding: '3px 8px',
+          fontFamily: 'var(--font-mono, monospace)',
+          fontSize: '10px',
+          color: '#c9d1d9',
+          pointerEvents: 'none',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 15,
+        }}
+      >
+        <span style={{ color: '#58a6ff', fontWeight: 700 }}>{resolutionDisplay}</span>
+        <span>•</span>
+        <span>{deviceInfo?.active_serial ? deviceInfo.active_serial.split(':')[0] : 'ADB'}</span>
+      </div>
+
+      {/* Viewport Micro-Controls (Floating Top Right of Outer Container) */}
+      {showControls && (
         <div
-          className="live-screen-overlay-badge"
+          className="live-viewport-floating-controls"
           style={{
             position: 'absolute',
-            top: '10px',
-            left: '10px',
+            top: topCallout ? '36px' : '10px',
+            right: '12px',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(9, 12, 18, 0.82)',
-            border: '1px solid rgba(255, 255, 255, 0.16)',
-            borderRadius: '20px',
-            padding: '3px 10px',
-            fontFamily: 'var(--font-mono, monospace)',
-            fontSize: '10px',
-            color: '#fff',
-            pointerEvents: 'none',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            zIndex: 15,
+            gap: '5px',
+            zIndex: 20,
           }}
         >
-          <span
-            style={{
-              width: '7px',
-              height: '7px',
-              borderRadius: '50%',
-              background: '#00ff9d',
-              boxShadow: '0 0 8px #00ff9d',
-              animation: 'pulse-dot 1.5s infinite',
-            }}
-          />
-          <span style={{ fontWeight: 800, letterSpacing: '0.4px' }}>
-            LIVE • {effectiveLiveMode.toUpperCase()}
-          </span>
-          <span style={{ color: '#8b949e', fontSize: '9px' }}>({orientationLabel})</span>
-        </div>
-
-        {/* Resolution & Device Hardware Info Badge */}
-        <div
-          className="live-screen-overlay-info"
-          style={{
-            position: 'absolute',
-            bottom: '10px',
-            right: '10px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(9, 12, 18, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.14)',
-            borderRadius: '6px',
-            padding: '3px 8px',
-            fontFamily: 'var(--font-mono, monospace)',
-            fontSize: '10px',
-            color: '#c9d1d9',
-            pointerEvents: 'none',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
-            zIndex: 15,
-          }}
-        >
-          <span style={{ color: '#58a6ff', fontWeight: 700 }}>{resolutionDisplay}</span>
-          <span>•</span>
-          <span>{deviceInfo?.active_serial ? deviceInfo.active_serial.split(':')[0] : 'ADB'}</span>
-        </div>
-
-        {/* Viewport Micro-Controls (Floating Top Right) */}
-        {showControls && (
-          <div
-            className="live-viewport-floating-controls"
-            style={{
-              position: 'absolute',
-              top: '10px',
-              right: '10px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              zIndex: 20,
-            }}
-          >
-            {/* Display Mode Toggle Pill: Desktop vs Phone */}
+          {/* Display Mode Toggle Pill: Desktop vs Phone (only shown when parent toolbar doesn't render it) */}
+          {!onSwitchLiveMode && (
             <div
               className="live-mode-toggle-group"
               style={{
@@ -605,58 +662,82 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
                 <span>PHONE</span>
               </button>
             </div>
+          )}
 
-            {/* View Mode Toggle: Fit to bounds vs Full Fill */}
+          {/* View Mode Toggle: Fit to bounds vs Full Fill */}
+          <button
+            type="button"
+            className="btn btn-xs btn-outline live-view-toggle-btn"
+            onClick={() => setViewMode(v => (v === 'fit' ? 'fill' : 'fit'))}
+            title={viewMode === 'fit' ? 'Switch to Full Fill View' : 'Switch to Aspect Fit View'}
+            style={{
+              height: '24px',
+              padding: '2px 8px',
+              fontSize: '10px',
+              background: 'rgba(15, 23, 42, 0.85)',
+              borderColor: 'rgba(255, 255, 255, 0.2)',
+              color: viewMode === 'fill' ? '#00ff9d' : '#e6edf3',
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            <ZoomIn size={11} />
+            <span>{viewMode.toUpperCase()}</span>
+          </button>
+
+          {/* Copy Live Screenshot to Clipboard */}
+          <button
+            type="button"
+            className="btn btn-xs btn-outline live-copy-btn"
+            onClick={handleCopyImage}
+            disabled={copying}
+            title={copied ? 'Copied to Clipboard!' : 'Copy Live Frame to Clipboard (PNG)'}
+            style={{
+              height: '24px',
+              padding: '2px 8px',
+              fontSize: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: copied ? 'rgba(35, 134, 54, 0.85)' : 'rgba(15, 23, 42, 0.85)',
+              borderColor: copied ? 'rgba(46, 160, 67, 0.6)' : 'rgba(255, 255, 255, 0.2)',
+              color: copied ? '#ffffff' : '#e6edf3',
+              backdropFilter: 'blur(6px)',
+              cursor: copying ? 'wait' : 'pointer',
+            }}
+          >
+            {copied ? <Check size={11} color="#3fb950" /> : <Copy size={11} />}
+            <span>{copied ? 'COPIED' : copying ? 'COPYING...' : 'COPY FRAME'}</span>
+          </button>
+
+          {/* Native Fullscreen Button */}
+          <button
+            type="button"
+            className="btn btn-xs btn-outline live-fullscreen-btn"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Exit Fullscreen' : 'Enter Native Fullscreen'}
+            style={{
+              height: '24px',
+              width: '24px',
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(15, 23, 42, 0.85)',
+              borderColor: 'rgba(255, 255, 255, 0.2)',
+              color: isFullscreen ? '#58a6ff' : '#e6edf3',
+              backdropFilter: 'blur(6px)',
+            }}
+          >
+            {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+          </button>
+
+          {/* Stream Refresh */}
+          {onRefreshStream && (
             <button
               type="button"
-              className="btn btn-xs btn-outline live-view-toggle-btn"
-              onClick={() => setViewMode(v => (v === 'fit' ? 'fill' : 'fit'))}
-              title={viewMode === 'fit' ? 'Switch to Full Fill View' : 'Switch to Aspect Fit View'}
-              style={{
-                height: '24px',
-                padding: '2px 8px',
-                fontSize: '10px',
-                background: 'rgba(15, 23, 42, 0.85)',
-                borderColor: 'rgba(255, 255, 255, 0.2)',
-                color: viewMode === 'fill' ? '#00ff9d' : '#e6edf3',
-                backdropFilter: 'blur(6px)',
-              }}
-            >
-              <ZoomIn size={11} />
-              <span>{viewMode.toUpperCase()}</span>
-            </button>
-
-            {/* Copy Live Screenshot to Clipboard */}
-            <button
-              type="button"
-              className="btn btn-xs btn-outline live-copy-btn"
-              onClick={handleCopyImage}
-              disabled={copying}
-              title={copied ? 'Copied to Clipboard!' : 'Copy Live Frame to Clipboard (PNG)'}
-              style={{
-                height: '24px',
-                padding: '2px 8px',
-                fontSize: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                background: copied ? 'rgba(35, 134, 54, 0.85)' : 'rgba(15, 23, 42, 0.85)',
-                borderColor: copied ? 'rgba(46, 160, 67, 0.6)' : 'rgba(255, 255, 255, 0.2)',
-                color: copied ? '#ffffff' : '#e6edf3',
-                backdropFilter: 'blur(6px)',
-                cursor: copying ? 'wait' : 'pointer',
-              }}
-            >
-              {copied ? <Check size={11} color="#3fb950" /> : <Copy size={11} />}
-              <span>{copied ? 'COPIED' : copying ? 'COPYING...' : 'COPY FRAME'}</span>
-            </button>
-
-            {/* Native Fullscreen Button */}
-            <button
-              type="button"
-              className="btn btn-xs btn-outline live-fullscreen-btn"
-              onClick={toggleFullscreen}
-              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Native Fullscreen'}
+              className="btn btn-xs btn-outline live-refresh-btn"
+              onClick={onRefreshStream}
+              title="Refresh Live Stream"
               style={{
                 height: '24px',
                 width: '24px',
@@ -666,42 +747,15 @@ export const LiveResponsiveViewport: React.FC<LiveResponsiveViewportProps> = ({
                 justifyContent: 'center',
                 background: 'rgba(15, 23, 42, 0.85)',
                 borderColor: 'rgba(255, 255, 255, 0.2)',
-                color: isFullscreen ? '#58a6ff' : '#e6edf3',
+                color: '#e6edf3',
                 backdropFilter: 'blur(6px)',
               }}
             >
-              {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              <RefreshCw size={11} />
             </button>
-
-            {/* Stream Refresh */}
-            {onRefreshStream && (
-              <button
-                type="button"
-                className="btn btn-xs btn-outline live-refresh-btn"
-                onClick={onRefreshStream}
-                title="Refresh Live Stream"
-                style={{
-                  height: '24px',
-                  width: '24px',
-                  padding: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'rgba(15, 23, 42, 0.85)',
-                  borderColor: 'rgba(255, 255, 255, 0.2)',
-                  color: '#e6edf3',
-                  backdropFilter: 'blur(6px)',
-                }}
-              >
-                <RefreshCw size={11} />
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Custom Extra Overlay Slot */}
-        {extraOverlay}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Bottom Gutter Callout slot */}
       {bottomCallout && (

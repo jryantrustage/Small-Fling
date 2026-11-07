@@ -47,9 +47,14 @@ CORS_ALLOWED_ORIGINS: List[str] = ["*"] if _cors == "*" else [o.strip() for o in
 
 TARGET_TOTAL_LINES: int = int(os.environ.get("TARGET_TOTAL_LINES", "9951"))
 ADB_PATH: str = os.environ.get("ADB_PATH", "adb").strip()
-# Automated PIN Entry: defaults to true when DEVICE_PIN is configured to handle sudden authentication
+# Automated PIN Entry:
+#   - PHONE_UNLOCK_PIN ("1213"): Strictly for unlocking the Android Phone OS Lockscreen (Display #0 Bouncer).
+#   - TEAMS_PIN / DEVICE_PIN ("2992"): Strictly for authenticating Microsoft Teams (MAM PIN prompt on Desktop Mode).
+#   NEVER mix these two PINs up!
 AUTO_ENTER_PIN: bool = bool(_persisted_auto_pin if "auto_enter_pin" in _persisted_cfg else os.environ.get("AUTO_ENTER_PIN", "true").lower() in ("true", "1", "yes"))
-DEVICE_PIN: str = _persisted_device_pin or os.environ.get("DEVICE_PIN", "").strip() or "2992"
+PHONE_UNLOCK_PIN: str = _persisted_cfg.get("phone_unlock_pin", "").strip() or os.environ.get("PHONE_UNLOCK_PIN", "").strip() or "1213"
+TEAMS_PIN: str = _persisted_device_pin or os.environ.get("TEAMS_PIN", "").strip() or os.environ.get("DEVICE_PIN", "").strip() or "2992"
+DEVICE_PIN: str = TEAMS_PIN
 PACER_LINE_PITCH_PX: float = float(os.environ.get("PACER_LINE_PITCH_PX", "32.0"))
 PACER_AUTO_TUNE_FACTOR: float = float(os.environ.get("PACER_AUTO_TUNE_FACTOR", "1.0"))
 OLLAMA_URL: str = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434").strip()

@@ -228,6 +228,11 @@ function AppContent() {
       localStorage.setItem('mc_live_mode', mode);
     } catch {}
     setStreamKey(Date.now());
+    fetch(`${API_BASE}/api/device/hid-target`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_mode: mode, serial: deviceInfo?.active_serial }),
+    }).catch(() => {});
   };
   const [inspectorMode, setInspectorMode] = useState<'live' | 'single' | 'ocr_inspect'>('live');
   const [ocrInspectImageId, setOcrInspectImageId] = useState<string>('dag_node3_capture_temp');
@@ -4708,6 +4713,72 @@ function AppContent() {
                             PHONE
                           </button>
                         </div>
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={async () => {
+                            try {
+                              await fetch(`${API_BASE}/api/device/unlock-phone`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  serial: deviceInfo?.active_serial,
+                                  phone_pin: '1213',
+                                  handle_teams_auth_after: false,
+                                }),
+                              });
+                              setStreamKey(Date.now());
+                            } catch {}
+                          }}
+                          title="Wake Phone Screen (Display #0) & Unlock Android OS Lockscreen using Phone PIN 1213 (Never 2992)"
+                          style={{
+                            padding: '2px 8px',
+                            height: '22px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            background: 'rgba(14, 165, 233, 0.16)',
+                            border: '1px solid rgba(56, 189, 248, 0.45)',
+                            color: '#38bdf8',
+                            borderRadius: '4px',
+                            marginLeft: '4px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🔓 Unlock Phone (1213)
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={async () => {
+                            try {
+                              await fetch(`${API_BASE}/api/device/auto-pin`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  serial: deviceInfo?.active_serial,
+                                  pin: '2992',
+                                  force: true,
+                                }),
+                              });
+                              setStreamKey(Date.now());
+                            } catch {}
+                          }}
+                          title="Authenticate Microsoft Teams Passcode using Teams PIN 2992 (Dismisses biometric prompt -> enters 2992 on Teams PIN screen)"
+                          style={{
+                            padding: '2px 8px',
+                            height: '22px',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            background: 'rgba(245, 158, 11, 0.16)',
+                            border: '1px solid rgba(251, 191, 36, 0.45)',
+                            color: '#fbbf24',
+                            borderRadius: '4px',
+                            marginLeft: '4px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🔑 Teams PIN (2992)
+                        </button>
                       </div>
 
                       {/* Yellow Arrow 1 Target: Actuator Progress */}
@@ -4741,16 +4812,16 @@ function AppContent() {
                         alignmentData={alignmentData}
                         showBoundingBoxes={showBoundingBoxes}
                         deviceInfo={deviceInfo}
-                        metaResolution={alignmentData?.resolution}
+                        metaResolution={liveMode === 'phone' ? undefined : alignmentData?.resolution}
                         headlessMode={headlessMode}
                         onToggleHeadlessMode={handleToggleHeadlessMode}
                         onRefreshStream={() => setStreamKey(Date.now())}
                         topCallout={
                           <div className="gutter-line-callout top">
                             <span className="gutter-callout-icon">▲</span>
-                            <span className="gutter-callout-label">TOP GUTTER:</span>
+                            <span className="gutter-callout-label">{liveMode === 'phone' ? 'PHONE DISPLAY:' : 'TOP GUTTER:'}</span>
                             <span className="gutter-callout-value">
-                              {(() => {
+                              {liveMode === 'phone' ? 'Display #0 (Built-in Screen • Click to Tap)' : (() => {
                                 const topLn = alignmentData.first_line_number || telemetry.current_top_line || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1]?.top_line : 0);
                                 return topLn ? `Line #${topLn}` : 'Detecting...';
                               })()}
@@ -4760,9 +4831,9 @@ function AppContent() {
                         bottomCallout={
                           <div className="gutter-line-callout bottom">
                             <span className="gutter-callout-icon">▼</span>
-                            <span className="gutter-callout-label">BOTTOM GUTTER:</span>
+                            <span className="gutter-callout-label">{liveMode === 'phone' ? 'HID ROUTING:' : 'BOTTOM GUTTER:'}</span>
                             <span className="gutter-callout-value">
-                              {(() => {
+                              {liveMode === 'phone' ? 'Active on Phone Display #0 (Portrait Mirror)' : (() => {
                                 const botLn = alignmentData.last_line_number || telemetry.current_bottom_line || (sortedFrames.length > 0 ? sortedFrames[sortedFrames.length - 1]?.bottom_line : 0);
                                 return botLn ? `Line #${botLn}` : 'Detecting...';
                               })()}
