@@ -1066,7 +1066,13 @@ class PinCodeRequestedClassifier(BaseClassifier):
         raw_disp = context.display_id if context.display_id is not None else await detect_external_display_id(serial)
         disp_id = raw_disp if (isinstance(raw_disp, int) and 0 < raw_disp <= 255) else 0
 
-        pin_res = await auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=force_entry)
+        pin_res = await auto_handle_pin_authentication(
+            serial=serial,
+            ext_display_id=disp_id,
+            pin=pin,
+            force=force_entry,
+            screen_img=_get_cv_img(context),
+        )
         actions = pin_res.get("actions", [])
 
         if pin_res.get("status") == "blocked_username_password":

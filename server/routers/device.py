@@ -169,11 +169,7 @@ async def device_screen_endpoint(
 ):
     ser = await adb.get_active_adb_serial(serial)
     if format.lower() == "png":
-        if mode == "desktop":
-            png_bytes = await adb.capture_external_screenshot(ser, bypass_lock=True)
-        else:
-            res = await asyncio.to_thread(adb._exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
-            png_bytes = adb._extract_png_bytes(res.stdout) if res.returncode == 0 else None
+        png_bytes = await adb.capture_display_screenshot(target_display=mode, serial=ser, bypass_lock=True)
         if not png_bytes:
             raise HTTPException(status_code=503, detail="Failed to capture screen PNG")
         return Response(content=png_bytes, media_type="image/png", headers={"Cache-Control": "no-store, must-revalidate"})
@@ -469,7 +465,7 @@ async def enforce_desktop_markdown_endpoint(req: Request):
 @router.post("/api/device/auto-pin")
 async def auto_pin_endpoint(req: Request):
     """
-    Automatically enters the device/Intune PIN whenever authentication is suddenly displayed.
+    Automatically enters the device/Intune PIN ONLY when a verified Teams PIN prompt is displayed on desktop.
     """
     data = {}
     try: data = await req.json()
@@ -480,5 +476,40 @@ async def auto_pin_endpoint(req: Request):
     force = bool(data.get("force", True))
     res = await adb.auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=force)
     return {"status": "ok", "details": res}
+
+@router.get("/api/device/hid-target")
+async def get_hid_target_endpoint():
+    """Returns the current Mouse & Keyboard HID target display ('desktop' vs 'phone') and active capture display."""
+    from services import kiosk_service, state as app_state
+    return {
+        "status": "ok",
+        "hid_target_display": app_state.latest_telemetry.get("hid_target_display") or {
+            "mode": "desktop" if kiosk_service.kiosk_state.get("mouse_display_id", 0) > 0 else "phone",
+            "display_id": kiosk_service.kiosk_state.get("mouse_display_id", 0),
+        },
+        "active_capture_display": app_state.latest_telemetry.get("active_capture_display") or {
+            "target": "desktop",
+            "display_id": app_state.latest_telemetry.get("capture_telemetry", {}).get("display_id"),
+        },
+    }
+
+@router.post("/api/device/hid-target")
+async def set_hid_target_endpoint(req: Request):
+    """Explicitly directs Mouse & Keyboard HID focus between 'phone' (Display #0) and 'desktop' (External Display)."""
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    target_mode = data.get("target_mode") or data.get("mode") or "desktop"
+    disp_id = data.get("display_id")
+    focus_coords = data.get("focus_coords")
+    res = await adb.direct_hid_to_display(
+        serial=serial,
+        target_mode=target_mode,
+        ext_display_id=disp_id,
+        focus_coords=focus_coords,
+    )
+    return {"status": "ok", "details": res}
+
 
 

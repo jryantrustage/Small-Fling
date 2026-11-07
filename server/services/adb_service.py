@@ -588,6 +588,153 @@ async def capture_external_screenshot(serial: Optional[str] = None, max_cache_ag
         if acquired_lock:
             _screencap_lock.release()
 
+
+async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s: float = 0.35, bypass_lock: bool = True) -> Optional[bytes]:
+    """
+    Explicitly captures a screenshot from the internal phone display (Display #0),
+    keeping it strictly isolated from the external desktop display frame cache.
+    """
+    ser = await get_active_adb_serial(serial)
+    if not ser:
+        return None
+    if ser and "mock" in str(ser).lower():
+        return _get_or_create_standby_frame("phone")
+
+    cache_key = (ser, "phone")
+    now = time.time()
+    cached = _frame_cache.get(cache_key)
+    if cached and cached.get("raw_png") and (now - cached.get("ts", 0.0) < max_cache_age_s):
+        return cached["raw_png"]
+
+    acquired_lock = False
+    if not bypass_lock:
+        try:
+            await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.08)
+            acquired_lock = True
+        except asyncio.TimeoutError:
+            if cached and cached.get("raw_png"):
+                return cached["raw_png"]
+
+    try:
+        disp_map = await detect_surfaceflinger_displays(ser)
+        phone_id = disp_map.get("phone", "0")
+        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if (phone_id and len(str(phone_id)) > 4) else ["-s", ser, "exec-out", "screencap", "-p"]
+        res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
+        if res.returncode != 0 or not res.stdout:
+            res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
+        if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
+            _update_frame_cache(ser, "phone", png_bytes)
+            return png_bytes
+        if cached and cached.get("raw_png") and (time.time() - cached.get("ts", 0.0) < 5.0):
+            return cached["raw_png"]
+        return None
+    finally:
+        if acquired_lock:
+            _screencap_lock.release()
+
+
+async def capture_display_screenshot(
+    target_display: str = "desktop",
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    max_cache_age_s: float = 0.35,
+    bypass_lock: bool = True,
+) -> Optional[bytes]:
+    """
+    Explicitly controls which display ('desktop' vs 'phone' or numeric display_id) screenshots
+    are obtained from, preventing cross-display capture ambiguity when controlling dual screens.
+    """
+    mode = str(target_display or "desktop").strip().lower()
+    if display_id is not None and int(display_id) == 0:
+        mode = "phone"
+    elif display_id is not None and int(display_id) > 0:
+        mode = "desktop"
+
+    try:
+        from services import state as app_state
+        app_state.latest_telemetry["active_capture_display"] = {
+            "target": mode,
+            "display_id": int(display_id) if display_id is not None else (0 if mode == "phone" else app_state.latest_telemetry.get("capture_telemetry", {}).get("display_id")),
+            "ts": time.time(),
+        }
+    except Exception:
+        pass
+
+    if mode == "phone":
+        return await capture_phone_screenshot(serial=serial, max_cache_age_s=max_cache_age_s, bypass_lock=bypass_lock)
+    return await capture_external_screenshot(serial=serial, max_cache_age_s=max_cache_age_s, bypass_lock=bypass_lock)
+
+
+async def direct_hid_to_display(
+    serial: Optional[str] = None,
+    target_mode: str = "desktop",
+    ext_display_id: Optional[int] = None,
+    focus_coords: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """
+    Explicitly directs Mouse and Keyboard HID routing between the Phone screen (Display #0)
+    and Desktop Mode screen (External Display #ext_id).
+      - When target_mode == 'desktop':
+          * Routes mouse pointer & hardware keyboard focus to ext_id
+          * Suppresses on-screen soft keyboard (show_ime_with_hard_keyboard=0)
+          * Updates kiosk_state['mouse_display_id'] = ext_id
+      - When target_mode == 'phone':
+          * Routes focus to Display #0 without tapping arbitrary phone app search bars
+          * Restores phone on-screen keyboard (show_ime_with_hard_keyboard=1)
+          * Updates kiosk_state['mouse_display_id'] = 0
+    """
+    ser = await get_active_adb_serial(serial)
+    mode = "phone" if str(target_mode or "").strip().lower() in ("phone", "0", "mobile") else "desktop"
+    actions: List[str] = []
+
+    if not ser or "mock" in str(ser).lower():
+        return {"status": "mock", "mode": mode, "display_id": 0 if mode == "phone" else (ext_display_id or 2), "actions": actions}
+
+    ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
+    target_disp_id = 0 if mode == "phone" else (ext_id or 0)
+
+    if mode == "desktop" and target_disp_id > 0:
+        fx, fy = (int(focus_coords[0]), int(focus_coords[1])) if (focus_coords and len(focus_coords) >= 2) else (240, 40)
+        await run_adb_shell(
+            f"settings put secure show_ime_with_hard_keyboard 0; "
+            f"input -d {target_disp_id} mouse tap {fx} {fy} >/dev/null 2>&1",
+            ser,
+            timeout=2.0,
+        )
+        actions.append(f"Directed mouse & keyboard HID to desktop display #{target_disp_id} at ({fx}, {fy})")
+    else:
+        target_disp_id = 0
+        if focus_coords and len(focus_coords) >= 2:
+            fx, fy = int(focus_coords[0]), int(focus_coords[1])
+            await run_adb_shell(
+                f"settings put secure show_ime_with_hard_keyboard 1; "
+                f"input -d 0 tap {fx} {fy} >/dev/null 2>&1",
+                ser,
+                timeout=2.0,
+            )
+            actions.append(f"Directed HID to phone display #0 at ({fx}, {fy})")
+        else:
+            await run_adb_shell("settings put secure show_ime_with_hard_keyboard 1", ser, timeout=1.5)
+            actions.append("Directed HID to phone display #0 (restored phone soft IME without tapping active phone app)")
+
+    try:
+        from services import kiosk_service, state as app_state
+        kiosk_service.kiosk_state["mouse_display_id"] = target_disp_id
+        app_state.latest_telemetry["hid_target_display"] = {
+            "mode": mode,
+            "display_id": target_disp_id,
+            "ts": time.time(),
+        }
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "mode": mode,
+        "display_id": target_disp_id,
+        "actions": actions,
+    }
+
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -809,17 +956,16 @@ async def detect_auth_screen_type(
 ) -> Dict[str, Any]:
     """
     Differentiates between:
-      1. 'pin': A numeric PIN entry screen (Keyguard, Device PIN, Intune MAM PIN pad, or
-         Blank White Teams screen where phone is waiting for fingerprint and Escape prompts for PIN).
-         Safe for automated numeric PIN entry.
+      1. 'pin': A visually verified Teams numeric PIN prompt on the Desktop Display ('Enter your PIN' /
+         'Managed by your organization') or a Blank White Teams screen on the Desktop Display where
+         the phone is displaying a fingerprint prompt for Teams and Escape prompts for the desktop PIN.
+         STRICTLY requires visual confirmation on the Desktop Display so that numeric fields or search
+         bars on the phone (e.g. Audible) NEVER trigger PIN entry!
       2. 'username_password': A Username, Email, Password, or OAuth sign-in screen
          (e.g., BrokerAuthorizationActivity, AccountChooserActivity, SignInActivity, Webview).
          STRICTLY PROHIBITS PIN ENTRY so PIN digits (e.g. 2992) are never typed into username fields!
       3. 'none': Normal application screen (clean, no auth prompt).
     """
-    # If an explicit screenshot is provided, inspect it immediately (handles Image 3 & Image 4 deterministically).
-    # CRITICAL: If the external display screenshot does NOT show a PIN/fingerprint screen, do NOT fall through
-    # to dumpsys input_method history, which can falsely trigger PIN entry inside an open Markdown editor!
     if screen_img is not None:
         cv_eval = detect_teams_auth_or_fingerprint_screen_cv(screen_img)
         if cv_eval.get("detected"):
@@ -854,23 +1000,7 @@ async def detect_auth_screen_type(
             "requires_escape_for_pin": False,
         }
 
-    # 1. Device Keyguard / Lockscreen check
-    try:
-        kg_chk = await run_adb_shell("dumpsys window | grep -iE 'isKeyguardShowing=true|mDreamingLockscreen=true'", ser, timeout=1.2)
-        kg_out = kg_chk.get("stdout", "")
-        if "isKeyguardShowing=true" in kg_out or "mDreamingLockscreen=true" in kg_out:
-            return {
-                "auth_type": "pin",
-                "details": "Device lockscreen / keyguard active",
-                "is_pin_safe": True,
-                "requires_keyguard_unlock": True,
-                "requires_mam_pin": False,
-                "requires_escape_for_pin": False,
-            }
-    except Exception:
-        pass
-
-    # 2. Window Manager and Activity Stack inspection
+    # 1. Check Window Manager & Activity Stack for Username / Password / OAuth Webview prompts
     combined_acts = ""
     try:
         win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", ser, timeout=1.2)
@@ -882,23 +1012,6 @@ async def detect_auth_screen_type(
 
     combined_acts_lower = combined_acts.lower()
 
-    # Check if phone is showing Biometric / Fingerprint dialog while Teams is on external display
-    biometric_indicators = [
-        "biometricprompt", "authcontroller", "fingerprint", "biometricactivity"
-    ]
-    detected_bio = [ind for ind in biometric_indicators if ind in combined_acts_lower]
-    if detected_bio:
-        return {
-            "auth_type": "pin",
-            "auth_subtype": "fingerprint_blank_teams",
-            "details": f"Phone fingerprint/biometric prompt active ({', '.join(detected_bio)}); Escape prompts for desktop PIN",
-            "is_pin_safe": True,
-            "requires_keyguard_unlock": False,
-            "requires_mam_pin": True,
-            "requires_escape_for_pin": True,
-        }
-
-    # Prioritize detecting Username / Password / OAuth Webview prompts
     username_pw_indicators = [
         "brokerauthorizationactivity", "accountchooseractivity", "signinactivity",
         "oauthactivity", "webauthactivity", "authorizeactivity", "browsersigninactivity",
@@ -915,98 +1028,48 @@ async def detect_auth_screen_type(
             "requires_escape_for_pin": False,
         }
 
-    # 3. Check Input Method / Focused Editor characteristics (inputType & hintText)
-    # Ignore historical StartInput lines and never treat an active FilePreviewActivity (Markdown editor) as a numeric PIN field!
-    is_markdown_editor_focused = ("filepreviewactivity" in combined_acts_lower)
-    try:
-        ime_chk = await run_adb_shell("dumpsys input_method", ser, timeout=1.2)
-        ime_out = ime_chk.get("stdout", "")
-        in_history_section = False
-        for line in ime_out.splitlines():
-            line_str = line.strip()
-            if "StartInputHistory" in line_str or "StartInput #" in line_str:
-                in_history_section = True
-                continue
-            if in_history_section:
-                continue
-            if "mEditorInfo" in line_str or "mCurAttribute" in line_str or "inputType=" in line_str:
-                m_type = re.search(r'inputType=0x([0-9a-fA-F]+)', line_str)
-                if m_type:
-                    val = int(m_type.group(1), 16)
-                    cls = val & 0x0F
-                    variation = val & 0x0FF0
-                    if cls == 1 and variation in (0x20, 0x80, 0x90, 0xd0, 0xe0):
-                        return {
-                            "auth_type": "username_password",
-                            "details": f"Focused input field is email/password (inputType=0x{val:x})",
-                            "is_pin_safe": False,
-                            "requires_keyguard_unlock": False,
-                            "requires_mam_pin": False,
-                            "requires_escape_for_pin": False,
-                        }
-                    if not is_markdown_editor_focused and cls == 2 and (val == 0x12 or (variation & 0x10) != 0):
-                        return {
-                            "auth_type": "pin",
-                            "details": f"Focused input field is numeric PIN (inputType=0x{val:x})",
-                            "is_pin_safe": True,
-                            "requires_keyguard_unlock": False,
-                            "requires_mam_pin": True,
-                            "requires_escape_for_pin": False,
-                        }
-            if any(hint in line_str.lower() for hint in ["hinttext=email", "hinttext=username", "hinttext=phone", "signinname"]):
-                return {
-                    "auth_type": "username_password",
-                    "details": f"Focused field hint indicates username/email ({line_str[:50]})",
-                    "is_pin_safe": False,
-                    "requires_keyguard_unlock": False,
-                    "requires_mam_pin": False,
-                    "requires_escape_for_pin": False,
-                }
-    except Exception:
-        pass
-
-    # 4. Dedicated PIN activity names
-    pin_indicators = [
-        "pinactivity", "mampinactivity", "confirmpinactivity", "confirmcredential",
-        "confirmdevicecredentialactivity", "keyguardbouncer"
-    ]
-    detected_pin = [ind for ind in pin_indicators if ind in combined_acts_lower]
-    if detected_pin:
+    # 2. Require Microsoft Teams to be present in the active window/activity state before considering any Teams PIN prompt
+    if combined_acts_lower and "com.microsoft.teams" not in combined_acts_lower:
         return {
-            "auth_type": "pin",
-            "details": f"Intune MAM PIN prompt active ({', '.join(detected_pin)})",
-            "is_pin_safe": True,
+            "auth_type": "none",
+            "details": "Microsoft Teams is not active in window focus; skipping PIN check",
+            "is_pin_safe": False,
             "requires_keyguard_unlock": False,
-            "requires_mam_pin": True,
+            "requires_mam_pin": False,
             "requires_escape_for_pin": False,
         }
 
-    # 5. Live screenshot visual check for Blank White Teams Fingerprint screen (Image 3) or Desktop PIN screen (Image 4)
-    if screen_img is None:
-        try:
-            snap_bytes = await capture_external_screenshot(ser, bypass_lock=True)
-            if snap_bytes:
-                img_live = cv2.imdecode(np.frombuffer(snap_bytes, np.uint8), cv2.IMREAD_COLOR)
-                if img_live is not None:
-                    cv_eval = detect_teams_auth_or_fingerprint_screen_cv(img_live)
-                    if cv_eval.get("detected"):
-                        return {
-                            "auth_type": cv_eval["auth_type"],
-                            "auth_subtype": cv_eval.get("auth_subtype", ""),
-                            "details": cv_eval.get("details", ""),
-                            "is_pin_safe": bool(cv_eval.get("is_pin_safe", False)),
-                            "requires_keyguard_unlock": False,
-                            "requires_mam_pin": bool(cv_eval.get("requires_mam_pin", False)),
-                            "requires_escape_for_pin": bool(cv_eval.get("requires_escape_for_pin", False)),
-                            "pin_field_coords": cv_eval.get("pin_field_coords"),
-                            "ok_btn_coords": cv_eval.get("ok_btn_coords"),
-                        }
-        except Exception:
-            pass
+    # 3. Live screenshot visual verification explicitly from the Desktop Display (NEVER Display #0)
+    try:
+        snap_bytes = await capture_display_screenshot(
+            target_display="desktop",
+            serial=ser,
+            display_id=ext_display_id,
+            max_cache_age_s=0.25,
+            bypass_lock=True,
+        )
+        if snap_bytes:
+            img_live = cv2.imdecode(np.frombuffer(snap_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if img_live is not None:
+                cv_eval = detect_teams_auth_or_fingerprint_screen_cv(img_live)
+                if cv_eval.get("detected"):
+                    return {
+                        "auth_type": cv_eval["auth_type"],
+                        "auth_subtype": cv_eval.get("auth_subtype", ""),
+                        "details": cv_eval.get("details", ""),
+                        "is_pin_safe": bool(cv_eval.get("is_pin_safe", False)),
+                        "requires_keyguard_unlock": False,
+                        "requires_mam_pin": bool(cv_eval.get("requires_mam_pin", False)),
+                        "requires_escape_for_pin": bool(cv_eval.get("requires_escape_for_pin", False)),
+                        "pin_field_coords": cv_eval.get("pin_field_coords"),
+                        "ok_btn_coords": cv_eval.get("ok_btn_coords"),
+                    }
+    except Exception:
+        pass
 
     return {
         "auth_type": "none",
-        "details": "No authentication prompt active",
+        "details": "No Teams authentication prompt active on desktop display",
         "is_pin_safe": False,
         "requires_keyguard_unlock": False,
         "requires_mam_pin": False,
@@ -1022,11 +1085,15 @@ async def auto_handle_pin_authentication(
     screen_img: Optional[np.ndarray] = None
 ) -> Dict[str, Any]:
     """
-    Assures PIN code authentication is automatically handled ONLY when a valid numeric PIN prompt
-    (e.g. Teams MAM PIN, Blank White Teams Fingerprint Screen -> Escape -> PIN 2992, Keyguard, Lockscreen)
-    is displayed and enabled in Settings (config.AUTO_ENTER_PIN).
-    STRICTLY differentiates between PIN prompts and Username/Password/OAuth prompts to ensure
-    the numeric PIN is NEVER typed into a username or email field!
+    Assures PIN code authentication is automatically handled ONLY when Microsoft Teams on the
+    external desktop display explicitly prompts for a PIN ('Enter your PIN' / 'mam_pin_prompt')
+    or displays the Blank White Teams Fingerprint Screen ('fingerprint_blank_teams' -> Escape -> 'Enter your PIN').
+
+    STRICT SAFETY INVARIANTS:
+      - NEVER types the PIN (2992) on the phone display (Display #0), preventing accidental entry into
+        phone apps (such as Audible, messages, or browser search bars).
+      - NEVER types the PIN unless 'Enter your PIN' is visually confirmed on the desktop display (#ext_id).
+      - Explicitly directs Mouse & Keyboard HID between phone and desktop mode as necessary.
     """
     import config
     active_pin = pin or getattr(config, "DEVICE_PIN", "2992") or "2992"
@@ -1054,9 +1121,19 @@ async def auto_handle_pin_authentication(
         }
 
     ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
-    actions = []
+    if not ext_id or ext_id <= 0:
+        return {
+            "status": "no_external_display",
+            "auth_detected": False,
+            "auth_type": "none",
+            "pin_submitted": False,
+            "keyguard_unlocked": False,
+            "actions": ["No external desktop display detected; refusing to type PIN on phone display #0"]
+        }
 
-    # 1. Differentiate Authentication Screen Type
+    actions: List[str] = []
+
+    # 1. Differentiate Authentication Screen Type using explicit Desktop Display capture
     auth_eval = await detect_auth_screen_type(ser, ext_id, screen_img=screen_img)
     auth_type = auth_eval.get("auth_type", "none")
 
@@ -1084,8 +1161,8 @@ async def auto_handle_pin_authentication(
             "actions": actions
         }
 
-    # 3. If no auth prompt is active and not forced, return clean
-    if auth_type == "none" and not force:
+    # 3. If no Teams auth prompt is active on the desktop display, return clean immediately
+    if auth_type != "pin":
         return {
             "status": "clean",
             "auth_detected": False,
@@ -1095,43 +1172,44 @@ async def auto_handle_pin_authentication(
             "actions": []
         }
 
-    # 4. Validated numeric PIN prompt (or Blank White Teams Fingerprint Screen) or force=True
-    keyguard_unlocked = False
+    # 4. Handle Visually Verified Teams Fingerprint / PIN Prompt on Desktop Display (#ext_id)
+    pin_submitted = False
     try:
-        # A. Keyguard / Lockscreen unlock
-        if auth_eval.get("requires_keyguard_unlock") or force:
-            await run_adb_shell(
-                f"input -d 0 keyevent 224; "
-                f"input -d 0 keyevent 82; "
-                f"input -d 0 swipe 540 1800 540 600 200; "
-                f"sleep 0.1; "
-                f"input -d 0 text {active_pin}; "
-                f"input -d 0 keyevent 66; "
-                f"wm dismiss-keyguard",
-                ser,
-                timeout=3.0
-            )
-            keyguard_unlocked = True
-            actions.append(f"Unlocked device keyguard on phone screen with PIN {active_pin}")
-
-        # B. Blank White Teams Screen (Phone Fingerprint Prompt -> Hit ESCAPE to prompt for PIN on desktop)
         pin_coords = auth_eval.get("pin_field_coords") or [960, 635]
         ok_coords = auth_eval.get("ok_btn_coords") or [935, 725]
-        confirmed_mam_pin_prompt = bool(
-            auth_eval.get("auth_subtype") == "mam_pin_prompt"
-            or (auth_eval.get("requires_mam_pin") and not auth_eval.get("requires_escape_for_pin"))
-            or (force and not auth_eval.get("requires_keyguard_unlock"))
-        )
+        confirmed_mam_pin_prompt = bool(auth_eval.get("auth_subtype") == "mam_pin_prompt")
+
+        # A. Blank White Teams Screen on Desktop -> Phone is displaying Teams Fingerprint Prompt
+        #    Direct HID to dismiss the fingerprint prompt with ESCAPE (keyevent 111), then return HID to Desktop
         if auth_eval.get("requires_escape_for_pin"):
-            disp_cmd = f"input -d {ext_id} keyevent 111; " if (ext_id and ext_id > 0) else ""
-            await run_adb_shell(f"{disp_cmd}input -d 0 keyevent 111", ser, timeout=2.5)
+            # Check if phone display #0 actually has BiometricPrompt / AuthController focused
+            win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", ser, timeout=1.2)
+            win_out_low = (win_chk.get("stdout", "") or "").lower()
+            has_phone_biometric_dialog = any(
+                k in win_out_low for k in ("biometric", "authcontroller", "fingerprint")
+            )
+            if has_phone_biometric_dialog:
+                await direct_hid_to_display(ser, target_mode="phone", ext_display_id=ext_id)
+                await run_adb_shell("input -d 0 keyevent 111", ser, timeout=1.5)
+                actions.append("Directed HID to phone display #0 and sent ESCAPE (keyevent 111) to dismiss biometric prompt")
+
+            await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[240, 40])
+            await run_adb_shell(f"input -d {ext_id} keyevent 111", ser, timeout=2.0)
             actions.append(
-                f"Sent ESCAPE (keyevent 111) on blank white Teams fingerprint screen to prompt for PIN on desktop display #{ext_id or 0}"
+                f"Directed HID to desktop display #{ext_id} and sent ESCAPE (keyevent 111) on blank white Teams screen to prompt for PIN"
             )
             await asyncio.sleep(0.9)
-            # Capture fresh screenshot after Escape to confirm PIN prompt ('Enter your PIN') before typing 2992
+
+            # Capture a fresh screenshot explicitly from the desktop display (#ext_id) to confirm 'Enter your PIN' appeared
+            confirmed_mam_pin_prompt = False
             try:
-                snap_after_esc = await capture_external_screenshot(ser, bypass_lock=True)
+                snap_after_esc = await capture_display_screenshot(
+                    target_display="desktop",
+                    serial=ser,
+                    display_id=ext_id,
+                    max_cache_age_s=0.0,
+                    bypass_lock=True,
+                )
                 if snap_after_esc:
                     img_after_esc = cv2.imdecode(np.frombuffer(snap_after_esc, np.uint8), cv2.IMREAD_COLOR)
                     if img_after_esc is not None:
@@ -1140,38 +1218,32 @@ async def auto_handle_pin_authentication(
                             pin_coords = esc_eval["pin_field_coords"]
                         if esc_eval.get("ok_btn_coords"):
                             ok_coords = esc_eval["ok_btn_coords"]
-                        if esc_eval.get("auth_subtype") == "mam_pin_prompt" or esc_eval.get("requires_mam_pin"):
+                        if esc_eval.get("detected") and esc_eval.get("auth_subtype") == "mam_pin_prompt":
                             confirmed_mam_pin_prompt = True
                         else:
-                            actions.append("Post-Escape screen did not show 'Enter your PIN' prompt; skipped desktop PIN typing to prevent accidental editor input")
-                    else:
-                        confirmed_mam_pin_prompt = True
-                else:
-                    # Fallback when capture_external_screenshot is mocked or unavailable
-                    confirmed_mam_pin_prompt = True
-            except Exception:
-                confirmed_mam_pin_prompt = True
+                            actions.append("Post-Escape desktop screenshot did not show 'Enter your PIN' prompt; skipped PIN typing")
+            except Exception as esc_err:
+                actions.append(f"Post-Escape desktop verification failed ({esc_err}); skipped PIN typing for safety")
 
-        # C. Intune MAM / Teams Desktop PIN Prompt Entry (e.g. PIN 2992)
-        if confirmed_mam_pin_prompt:
+        # B. Enter PIN 2992 ONLY when 'Enter your PIN' (mam_pin_prompt) is visually confirmed on Desktop Display (#ext_id)
+        #    NEVER send 'input -d 0 text 2992' to the phone screen!
+        if confirmed_mam_pin_prompt and ext_id and ext_id > 0:
             px, py = int(pin_coords[0]), int(pin_coords[1])
             ox, oy = int(ok_coords[0]), int(ok_coords[1])
-            if ext_id and ext_id > 0:
-                await run_adb_shell(
-                    f"input -d {ext_id} tap {px} {py}; "
-                    f"sleep 0.15; "
-                    f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
-                    f"input -d {ext_id} text {active_pin}; "
-                    f"sleep 0.2; "
-                    f"input -d {ext_id} keyevent 66; "
-                    f"input -d {ext_id} tap {ox} {oy}",
-                    ser,
-                    timeout=3.5
-                )
-                actions.append(f"Submitted PIN {active_pin} to Teams/Intune PIN prompt on desktop display #{ext_id}")
-
-            await run_adb_shell(f"input -d 0 text {active_pin}; input -d 0 keyevent 66", ser, timeout=1.5)
-            actions.append(f"Submitted PIN {active_pin} on phone display #0")
+            await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[px, py])
+            await run_adb_shell(
+                f"input -d {ext_id} tap {px} {py}; "
+                f"sleep 0.15; "
+                f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
+                f"input -d {ext_id} text {active_pin}; "
+                f"sleep 0.2; "
+                f"input -d {ext_id} keyevent 66; "
+                f"input -d {ext_id} tap {ox} {oy}",
+                ser,
+                timeout=3.5
+            )
+            pin_submitted = True
+            actions.append(f"Directed HID to desktop display #{ext_id} and submitted PIN {active_pin} to verified Teams PIN prompt")
 
         if actions:
             try:
@@ -1180,6 +1252,7 @@ async def auto_handle_pin_authentication(
                     "type": "pin_authentication_handled",
                     "pin_length": len(active_pin),
                     "auth_subtype": auth_eval.get("auth_subtype", "pin"),
+                    "pin_submitted": pin_submitted,
                     "actions": actions
                 })
             except Exception:
@@ -1191,8 +1264,8 @@ async def auto_handle_pin_authentication(
             "auth_type": "pin",
             "auth_subtype": auth_eval.get("auth_subtype", "pin"),
             "escape_sent": bool(auth_eval.get("requires_escape_for_pin", False)),
-            "pin_submitted": bool(actions),
-            "keyguard_unlocked": keyguard_unlocked,
+            "pin_submitted": pin_submitted,
+            "keyguard_unlocked": False,
             "actions": actions
         }
     except Exception as e:
@@ -1201,7 +1274,7 @@ async def auto_handle_pin_authentication(
             "auth_detected": True,
             "auth_type": "pin",
             "pin_submitted": False,
-            "keyguard_unlocked": keyguard_unlocked,
+            "keyguard_unlocked": False,
             "error": str(e),
             "actions": actions
         }
@@ -1211,28 +1284,19 @@ async def configure_display_awake_policies(serial: Optional[str] = None, pin: Op
     if not ser or "mock" in str(ser).lower():
         return {"status": "mock", "stay_on": True}
 
-    import config
-    active_pin = pin or getattr(config, "DEVICE_PIN", "1213") or "1213"
     result = {"status": "ok", "stay_on": True, "keyguard_unlocked": False, "auth_handled": False}
     try:
-        # 1. Enforce permanent stay-awake policy across all power connections (AC, USB, Wireless)
+        # Enforce permanent stay-awake policy across all power connections without typing PINs in background
         await run_adb_shell(
             "svc power stayon true; "
             "settings put global stay_on_while_plugged_in 7; "
             "settings put system screen_off_timeout 2147483647; "
             "settings put global sleep_timeout -1; "
             "settings put secure lock_screen_lock_after_timeout 2147483647; "
-            "settings put secure doze_enabled 0; "
-            "wm dismiss-keyguard",
+            "settings put secure doze_enabled 0",
             ser,
             timeout=2.0
         )
-
-        # 2. Check and handle keyguard / PIN prompts on all active displays
-        pin_res = await auto_handle_pin_authentication(ser, pin=active_pin)
-        result["keyguard_unlocked"] = pin_res.get("keyguard_unlocked", False)
-        result["auth_handled"] = pin_res.get("auth_detected", False) and pin_res.get("pin_submitted", False)
-        result["pin_actions"] = pin_res.get("actions", [])
     except Exception as e:
         print(f"[configure_display_awake_policies] Note: {e}")
         result["error"] = str(e)
@@ -1309,8 +1373,8 @@ async def enforce_markdown_only_on_desktop(
 ) -> Dict[str, Any]:
     """
     Assures that the Markdown editor (FilePreviewActivity) ONLY opens and runs on the desktop mode screen
-    (external display e.g. Display 11 / Display 8), closing or removing it from the phone screen (Display 0)
-    to prevent the blank/paused white screen conflict. Also auto-handles any PIN prompt.
+    (external display e.g. Display 11 / Display 8), without interfering with other apps on the phone screen
+    (Display 0). Also handles Teams PIN prompts when visually confirmed on the desktop display.
     """
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
@@ -1342,23 +1406,7 @@ async def enforce_markdown_only_on_desktop(
             "actions": ["Desktop mode disabled; phone screen is untouched for user interaction"]
         }
 
-    # GUARD 2: If an authentication / login screen is active (e.g. TruStage login, Azure AD BrokerAuthorizationActivity):
-    # Strictly do NOT send HOME key, do NOT dismiss keyboard, do NOT interfere with user typing!
-    auth_eval = await detect_auth_screen_type(ser, ext_id)
-    if auth_eval.get("auth_type") == "username_password":
-        return {
-            "status": "auth_in_progress",
-            "phone_cleared": False,
-            "desktop_markdown_active": False,
-            "actions": [f"Authentication in progress ({auth_eval.get('details')}); strictly preserving phone screen and keyboard for login"]
-        }
-
-    # 1. Auto-handle PIN code authentication if suddenly displayed (for numeric PIN only)
-    pin_res = await auto_handle_pin_authentication(ser, ext_id)
-    if pin_res.get("auth_detected"):
-        actions.extend(pin_res.get("actions", []))
-
-    # 2. Query activity stack across all displays
+    # GUARD 2: Query activity stack across all displays first
     act_res = await run_adb_shell("dumpsys activity activities", ser, timeout=3.5)
     out = act_res.get("stdout", "") if act_res.get("status") == "ok" else ""
     parsed = parse_activities_by_display(out)
@@ -1366,26 +1414,23 @@ async def enforce_markdown_only_on_desktop(
     disp0_info = parsed.get(0, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
     ext_info = parsed.get(ext_id, {"file_preview_tasks": [], "teams_tasks": [], "resumed_activities": []})
 
-    # 3. Check if FilePreviewActivity is resident specifically on Phone Display (Display 0)
-    # Only remove Markdown viewer (FilePreviewActivity), NEVER knock user out of Teams login or main app
+    # Check if FilePreviewActivity is the topResumedActivity on Phone Display (Display 0)
+    # Never send HOME to Display 0 if the user is using another app (e.g., Audible) on Display 0!
     ext_md_tasks_list = list(ext_info.get("file_preview_tasks", []))
-    ext_md_tasks = set(ext_md_tasks_list)
-    phone_md_tasks = [t for t in disp0_info.get("file_preview_tasks", []) if t not in ext_md_tasks]
+    is_disp0_top_md = any("FilePreviewActivity" in r for r in disp0_info.get("resumed_activities", []))
 
-    if phone_md_tasks and not ext_md_tasks_list:
-        # Send HOME keyevent to phone display (Display 0) only if Markdown preview is stuck on phone
+    if is_disp0_top_md and not ext_md_tasks_list:
         await run_adb_shell("input -d 0 keyevent 3", ser, timeout=1.5)
         actions.append("Dispatched HOME keyevent to phone display #0 to background FilePreviewActivity")
         phone_cleared = True
         await asyncio.sleep(0.1)
 
-    # 4. Check status on External Desktop Display
+    # Check status on External Desktop Display
     is_top_resumed_md = any("FilePreviewActivity" in r for r in ext_info.get("resumed_activities", []))
     is_ext_md_resumed = is_top_resumed_md or len(ext_md_tasks_list) > 0
     is_any_md_open = "FilePreviewActivity" in out
 
     if not is_ext_md_resumed and not is_any_md_open:
-        # Launch / Bring com.microsoft.teams to the foreground on the external desktop display
         await run_adb_shell(
             f"monkey -p com.microsoft.teams -c android.intent.category.LAUNCHER 1 --display {ext_id} >/dev/null 2>&1",
             ser,
@@ -1394,18 +1439,21 @@ async def enforce_markdown_only_on_desktop(
         actions.append(f"Launched / focused Teams on desktop display #{ext_id}")
         await asyncio.sleep(0.3)
     elif ext_md_tasks_list and not is_top_resumed_md:
-        # Only bring topmost FilePreviewActivity task to front if it is NOT already the topResumedActivity on ext_id
         top_tid = ext_md_tasks_list[0]
         await run_adb_shell(f"cmd activity task to-front {top_tid} >/dev/null 2>&1", ser, timeout=1.5)
         actions.append(f"Focused topmost FilePreviewActivity task #{top_tid} on display #{ext_id}")
 
-    # 5. Silently assure virtual keyboard is closed on desktop display without touching phone
+    # Direct HID to desktop display and silently assure virtual keyboard is closed on desktop display
+    await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id)
     await dismiss_keyboard(ser, ext_id)
 
-    # 6. Check once more for any lingering PIN authentication prompt after display switch
-    pin_res2 = await auto_handle_pin_authentication(ser, ext_id)
-    if pin_res2.get("auth_detected"):
-        actions.extend(pin_res2.get("actions", []))
+    return {
+        "status": "ok",
+        "display_id": ext_id,
+        "phone_cleared": phone_cleared,
+        "desktop_markdown_active": is_ext_md_resumed or is_any_md_open,
+        "actions": actions,
+    }
 
 async def reposition_keyboard_assistant_overlay(
     serial: Optional[str] = None,
@@ -1442,9 +1490,10 @@ async def ensure_editor_content_focused(
     """
     Guarantees active input focus and blinking cursor on the Teams editor content:
       1. Brings topmost Teams FilePreviewActivity task to the foreground ONLY if not already topResumedActivity
-      2. Suppresses soft IMEs before tapping so touch input never pops up handwriting/soft keyboard
-      3. Taps safe editor content coordinates on external display
-      4. Settle delay to let focus register
+      2. Directs Mouse & Keyboard HID to the external desktop display
+      3. Suppresses soft IMEs before tapping so touch input never pops up handwriting/soft keyboard
+      4. Taps safe editor content coordinates on external display
+      5. Settle delay to let focus register
     """
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -1479,12 +1528,13 @@ async def ensure_editor_content_focused(
     # 2. Suppress soft keyboard policy BEFORE tapping canvas so touch tap never opens Gboard/handwriting pad
     await dismiss_keyboard(ser, ext_id)
 
-    # 3. Tap safe editor content coordinates to guarantee input connection focus
+    # 3. Direct HID and tap safe editor content coordinates on external desktop display
     disp_w, disp_h = await get_display_dimensions(ser, ext_id)
     focus_x = int(disp_w * 0.25) if disp_w > 0 else 320
     focus_y = int(disp_h * 0.38) if disp_h > 0 else 380
+    await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[focus_x, focus_y])
     await run_adb_shell(f"input -d {ext_id} tap {focus_x} {focus_y} >/dev/null 2>&1", ser, timeout=1.0)
-    actions.append(f"Tapped editor content canvas at ({focus_x}, {focus_y}) on display {ext_id}")
+    actions.append(f"Directed HID and tapped editor content canvas at ({focus_x}, {focus_y}) on display {ext_id}")
 
     # 4. Suppress soft keyboard policy after tap
     await dismiss_keyboard(ser, ext_id)
@@ -1500,9 +1550,9 @@ async def ensure_editor_content_focused(
 
 async def pulse_display_awake_heartbeat(serial: Optional[str] = None):
     ser = await get_active_adb_serial(serial)
-    if not ser: return
+    if not ser:
+        return
     try:
-        await run_adb_shell("input keyevent 224", ser)
         ext_id = await detect_external_display_id(ser)
         if ext_id and ext_id > 0:
             await run_adb_shell(f"input -d {ext_id} keyevent 224", ser)
@@ -1518,7 +1568,6 @@ async def awake_keepalive_loop():
                 from services import state
                 # If desktop mode is disabled, user is working on the phone screen: DO NOT INTERFERE!
                 if not getattr(state, "desktop_mode_enabled", True):
-                    # Ensure on-screen keyboard is enabled and normal for user
                     await run_adb_shell(
                         "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
                         "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
@@ -1528,22 +1577,9 @@ async def awake_keepalive_loop():
                     )
                     continue
 
-                # If an authentication screen (TruStage login, Username/Password) is active: DO NOT INTERFERE!
-                auth_chk = await detect_auth_screen_type(ser)
-                if auth_chk.get("auth_type") == "username_password":
-                    # Ensure on-screen keyboard is enabled for login entry
-                    await run_adb_shell(
-                        "ime enable com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
-                        "ime set com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME; "
-                        "settings put secure show_ime_with_hard_keyboard 1",
-                        ser,
-                        timeout=1.5
-                    )
-                    continue
-
+                # Only maintain power stay-awake policy and external display heartbeat in background;
+                # NEVER auto-enter PINs or steal phone focus in the background keepalive loop!
                 await configure_display_awake_policies(ser)
-                await auto_handle_pin_authentication(ser)
-                await enforce_markdown_only_on_desktop(ser)
                 await pulse_display_awake_heartbeat(ser)
                 await dismiss_anr_dialogs(ser)
         except Exception:

@@ -279,3 +279,108 @@ async def test_auto_switch_queued_to_active_on_part2():
         db.delete_bundle_projects("bundle_dixui_test")
 
 
+@pytest.mark.asyncio
+async def test_pin_never_typed_on_phone_display_and_requires_teams_prompt(monkeypatch):
+    """
+    Verify:
+      1. Passcode 2992 is NEVER sent to Display #0 (phone screen) under any condition.
+      2. When Audible or a non-PIN screen is shown, auto_handle_pin_authentication does NOT type 2992 anywhere.
+      3. When Teams 'Enter your PIN' is visually confirmed on Desktop Display #2, HID is directed to Desktop #2
+         and 2992 is typed ONLY on '-d 2', never '-d 0'.
+    """
+    import numpy as np
+    from services import adb_service
+
+    executed_cmds = []
+
+    async def fake_get_serial(serial=None, force_refresh=False):
+        return "192.168.86.85:5555"
+
+    async def fake_run_adb_shell(cmd, serial=None, timeout=5.0):
+        executed_cmds.append(cmd)
+        return {"status": "ok", "stdout": "mCurrentFocus=Window{123 u0 com.microsoft.teams/com.microsoft.skype.teams.MainActivity}", "returncode": 0}
+
+    monkeypatch.setattr(adb_service, "get_active_adb_serial", fake_get_serial)
+    monkeypatch.setattr(adb_service, "run_adb_shell", fake_run_adb_shell)
+
+    # Case 1: Normal / Audible / Markdown screen (no Teams PIN prompt) -> Must NOT type 2992 even if force=True!
+    normal_img = np.full((1080, 1920, 3), 24, dtype=np.uint8)
+    res_clean = await adb_service.auto_handle_pin_authentication(
+        serial="192.168.86.85:5555",
+        ext_display_id=2,
+        pin="2992",
+        force=True,
+        screen_img=normal_img,
+    )
+    assert res_clean["status"] == "clean"
+    assert res_clean["pin_submitted"] is False
+    assert not any("2992" in c for c in executed_cmds)
+
+    # Case 2: Visually confirmed Teams 'Enter your PIN' prompt on Desktop Display #2
+    monkeypatch.setattr(
+        adb_service,
+        "detect_teams_auth_or_fingerprint_screen_cv",
+        lambda img: {
+            "detected": True,
+            "auth_type": "pin",
+            "auth_subtype": "mam_pin_prompt",
+            "requires_escape_for_pin": False,
+            "requires_mam_pin": True,
+            "is_pin_safe": True,
+            "pin_field_coords": [960, 635],
+            "ok_btn_coords": [935, 725],
+            "details": "Desktop mode Teams/Intune PIN prompt detected ('Enter your PIN')",
+        },
+    )
+    executed_cmds.clear()
+    res_pin = await adb_service.auto_handle_pin_authentication(
+        serial="192.168.86.85:5555",
+        ext_display_id=2,
+        pin="2992",
+        force=False,
+        screen_img=normal_img,
+    )
+    assert res_pin["status"] == "ok"
+    assert res_pin["pin_submitted"] is True
+    # Must NEVER type 2992 on Display #0 (phone screen)!
+    assert not any("-d 0 text" in c for c in executed_cmds)
+    # Must type 2992 ONLY on Desktop Display #2!
+    assert any("input -d 2 text 2992" in c for c in executed_cmds)
+    # Must direct HID to Desktop Display #2!
+    assert any("input -d 2 mouse tap" in c for c in executed_cmds)
+
+
+@pytest.mark.asyncio
+async def test_direct_hid_and_display_capture_routing(monkeypatch):
+    """Verify direct_hid_to_display and capture_display_screenshot explicitly switch between phone (#0) and desktop (#2)."""
+    from services import adb_service, kiosk_service, state
+
+    executed_cmds = []
+
+    async def fake_get_serial(serial=None, force_refresh=False):
+        return "192.168.86.85:5555"
+
+    async def fake_run_adb_shell(cmd, serial=None, timeout=5.0):
+        executed_cmds.append(cmd)
+        return {"status": "ok", "stdout": "", "returncode": 0}
+
+    monkeypatch.setattr(adb_service, "get_active_adb_serial", fake_get_serial)
+    monkeypatch.setattr(adb_service, "run_adb_shell", fake_run_adb_shell)
+
+    # 1. Switch HID to phone mode
+    hid_phone = await adb_service.direct_hid_to_display("192.168.86.85:5555", target_mode="phone", ext_display_id=2)
+    assert hid_phone["mode"] == "phone"
+    assert hid_phone["display_id"] == 0
+    assert kiosk_service.kiosk_state["mouse_display_id"] == 0
+    assert state.latest_telemetry["hid_target_display"]["mode"] == "phone"
+
+    # 2. Switch HID to desktop mode
+    hid_desk = await adb_service.direct_hid_to_display("192.168.86.85:5555", target_mode="desktop", ext_display_id=2, focus_coords=[320, 380])
+    assert hid_desk["mode"] == "desktop"
+    assert hid_desk["display_id"] == 2
+    assert kiosk_service.kiosk_state["mouse_display_id"] == 2
+    assert state.latest_telemetry["hid_target_display"]["mode"] == "desktop"
+    assert any("input -d 2 mouse tap 320 380" in c for c in executed_cmds)
+
+
+
