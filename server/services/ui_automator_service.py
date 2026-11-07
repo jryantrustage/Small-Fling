@@ -1035,6 +1035,26 @@ async def predetermine_bundle_from_folder_screenshot(
             exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
             actions.extend(exit_res.get("actions", []))
             folder_scan = exit_res.get("folder_scan", {})
+            if not folder_scan.get("is_folder_view") and not folder_scan.get("files"):
+                active_proj_nav = db.get_active_project() or {}
+                nav_bundle = (
+                    state.multipart_bundle_state.get("base_prefix")
+                    or active_proj_nav.get("bundle_name")
+                    or mp_open.get("base_prefix")
+                    or ""
+                )
+                if nav_bundle:
+                    nav_res = await navigate_teams_onedrive_path_to_markdown(
+                        serial=ser,
+                        display_id=disp_id,
+                        bundle_folder_name=nav_bundle,
+                        target_file_name=detected_open_file or active_proj_nav.get("part_file_name"),
+                        target_part_number=detected_open_part or active_proj_nav.get("part_number"),
+                        open_editor=False,
+                    )
+                    actions.extend(nav_res.get("actions", []))
+                    if nav_res.get("folder_scan", {}).get("files"):
+                        folder_scan = nav_res["folder_scan"]
     else:
         try:
             manifest_path = state.FRAMES_DIR / "bundle_folder_manifest.png"
@@ -1245,6 +1265,26 @@ async def select_and_open_next_markdown_part(
                     available_parts = sorted(set(available_parts) | set(scroll_scan.get("available_parts", [])))
                     total_parts = max(total_parts, scroll_scan.get("total_parts", 0))
                     candidates = [f for f in scroll_scan["files"] if f.get("part_number") == next_part]
+
+    if not files and not candidates:
+        # Fallback: If Teams reset to root or exited OneDrive, navigate Teams -> OneDrive -> Markdowns -> ficus-platform -> <bundle_folder>
+        nav_bundle = base_prefix or mp_info.get("base_prefix") or state.multipart_bundle_state.get("base_prefix") or ""
+        if nav_bundle:
+            nav_res = await navigate_teams_onedrive_path_to_markdown(
+                serial=ser,
+                display_id=disp_id,
+                bundle_folder_name=nav_bundle,
+                target_part_number=next_part,
+                open_editor=False,
+            )
+            actions.extend(nav_res.get("actions", []))
+            nav_scan = nav_res.get("folder_scan", {})
+            if nav_scan.get("files"):
+                folder_scan = nav_scan
+                files = list(nav_scan["files"])
+                available_parts = sorted(set(available_parts) | set(nav_scan.get("available_parts", [])))
+                total_parts = max(total_parts, nav_scan.get("total_parts", 0))
+                candidates = [f for f in files if f.get("part_number") == next_part]
 
     if not files and not candidates:
         return {
@@ -1477,6 +1517,490 @@ async def undo_markdown_edits(
         "undo_enabled_remaining": bool(last_eval.get("undo_enabled", False)),
         "actions": actions,
     }
+
+
+DEFAULT_TEAMS_ONEDRIVE_PATH: List[str] = ["OneDrive", "Markdowns", "ficus-platform"]
+
+
+def _ocr_desktop_rows(img: Optional[np.ndarray]) -> List[Dict[str, Any]]:
+    """
+    Runs RapidOCR on a desktop display screenshot and returns both individual token rows
+    and horizontally merged rows so multi-token names (like 'DIXUI_impact_26-11-05-9-43pm'
+    or 'DIXUI_impact_26-11-05-9-43pm_part5.md') can be matched reliably.
+    """
+    if img is None or getattr(img, "size", 0) == 0:
+        return []
+    import re
+    from ocr_engine import get_rapid_ocr
+    from alignment_engine import normalize_bundle_identifier_ocr, parse_multipart_markdown_filename
+
+    h, w = img.shape[:2]
+    scale_y = h / 1080.0
+    try:
+        ocr = get_rapid_ocr()
+        ocr_res, _ = ocr(img)
+    except Exception:
+        ocr_res = None
+
+    if not ocr_res:
+        return []
+
+    tokens: List[Dict[str, Any]] = []
+    for item in ocr_res:
+        box, text, score = item[0], str(item[1]).strip(), float(item[2])
+        if not text:
+            continue
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        x1, y1, x2, y2 = int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
+        cy = (y1 + y2) // 2
+        cx = (x1 + x2) // 2
+        norm = normalize_bundle_identifier_ocr(text)
+        mp = parse_multipart_markdown_filename(norm)
+        tokens.append({
+            "text": text,
+            "norm_text": norm,
+            "part_number": mp.get("part_number"),
+            "base_prefix": mp.get("base_prefix") or "",
+            "x1": x1,
+            "y1": y1,
+            "x2": x2,
+            "y2": y2,
+            "cx": cx,
+            "cy": cy,
+            "tap_coords": [cx, cy],
+            "bbox": [x1, y1, x2 - x1, y2 - y1],
+            "score": score,
+        })
+
+    # Also build horizontally merged rows for multi-token filenames/folder names
+    raw_rows: List[List[Dict[str, Any]]] = []
+    for tok in sorted(tokens, key=lambda t: (t["cy"], t["x1"])):
+        placed = False
+        for r_group in raw_rows:
+            avg_cy = sum(it["cy"] for it in r_group) / len(r_group)
+            if abs(tok["cy"] - avg_cy) <= max(14.0, 18.0 * scale_y):
+                r_group.append(tok)
+                placed = True
+                break
+        if not placed:
+            raw_rows.append([tok])
+
+    merged_rows: List[Dict[str, Any]] = []
+    for r_group in raw_rows:
+        if len(r_group) <= 1:
+            continue
+        r_group.sort(key=lambda t: t["x1"])
+        merged_txt = "".join(
+            (t["text"] if idx == 0 or t["text"].startswith("_") or r_group[idx - 1]["text"].endswith("_") else f"_{t['text']}")
+            for idx, t in enumerate(r_group)
+        )
+        norm_merged = normalize_bundle_identifier_ocr(merged_txt)
+        mp = parse_multipart_markdown_filename(norm_merged)
+        bx1 = min(t["x1"] for t in r_group)
+        by1 = min(t["y1"] for t in r_group)
+        bx2 = max(t["x2"] for t in r_group)
+        by2 = max(t["y2"] for t in r_group)
+        cx, cy = (bx1 + bx2) // 2, (by1 + by2) // 2
+        merged_rows.append({
+            "text": merged_txt,
+            "norm_text": norm_merged,
+            "part_number": mp.get("part_number"),
+            "base_prefix": mp.get("base_prefix") or "",
+            "x1": bx1,
+            "y1": by1,
+            "x2": bx2,
+            "y2": by2,
+            "cx": cx,
+            "cy": cy,
+            "tap_coords": [cx, cy],
+            "bbox": [bx1, by1, bx2 - bx1, by2 - by1],
+            "score": sum(t["score"] for t in r_group) / len(r_group),
+        })
+
+    return tokens + merged_rows
+
+
+def _match_row_for_target(
+    rows: List[Dict[str, Any]],
+    target_label: str,
+    exclude_header_band: bool = False,
+    img_h: int = 1080,
+) -> Optional[Dict[str, Any]]:
+    """
+    Finds the best matching OCR token/row on the desktop display for target_label
+    (e.g., 'OneDrive', 'Markdowns', 'ficus-platform', 'DIXUI_impact_26-11-05-9-43pm',
+    or 'DIXUI_impact_26-11-05-9-43pm_part5.md').
+    """
+    from alignment_engine import normalize_bundle_identifier_ocr, parse_multipart_markdown_filename
+
+    target_norm = normalize_bundle_identifier_ocr(target_label).strip()
+    if not target_norm:
+        return None
+    target_low = target_norm.lower()
+    target_mp = parse_multipart_markdown_filename(target_norm)
+    target_part_num = target_mp.get("part_number") if target_mp.get("is_multipart") else None
+
+    min_y = int(0.16 * img_h) if exclude_header_band else 0
+    max_y = int(0.93 * img_h)
+
+    candidates = [r for r in rows if min_y <= int(r.get("cy", 0)) <= max_y]
+
+    # 1. If matching a specific multipart markdown file (e.g. ..._part5.md), match exact part_number first
+    if target_part_num is not None:
+        part_matches = [
+            r for r in candidates
+            if r.get("part_number") == target_part_num
+            and (
+                not target_mp.get("base_prefix")
+                or target_mp["base_prefix"][:8].lower() in (r.get("norm_text") or "").lower()
+            )
+        ]
+        if part_matches:
+            return sorted(part_matches, key=lambda r: len(r.get("norm_text", "")), reverse=True)[0]
+
+    # 2. Exact case-insensitive match on normalized text
+    for r in candidates:
+        rn = (r.get("norm_text") or "").strip().lower()
+        if rn == target_low or rn.rstrip(".md") == target_low.rstrip(".md"):
+            return r
+
+    # 3. Substring match (when target_label is a folder/bundle name like 'ficus-platform' or 'DIXUI_impact_26-11-05-9-43pm')
+    if target_part_num is None:
+        sub_matches = [
+            r for r in candidates
+            if target_low in (r.get("norm_text") or "").lower()
+            and r.get("part_number") is None
+        ]
+        if sub_matches:
+            return sorted(sub_matches, key=lambda r: abs(len(r.get("norm_text", "")) - len(target_norm)))[0]
+
+    return None
+
+
+async def _find_and_tap_text_on_desktop(
+    serial: str,
+    disp_id: int,
+    target_label: str,
+    actions: List[str],
+    exclude_header_band: bool = False,
+    max_scrolls: int = 3,
+) -> Dict[str, Any]:
+    """
+    Locates `target_label` on the desktop display via RapidOCR (scrolling down the folder list
+    up to `max_scrolls` times if necessary) and taps its coordinates on `disp_id`.
+    """
+    from services.adb_service import capture_display_screenshot, direct_hid_to_display
+
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    disp_w, disp_h = await get_display_dimensions(serial, disp_id)
+
+    for attempt in range(max_scrolls + 1):
+        snap = await capture_display_screenshot("desktop", serial=serial, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+        snap = await _ensure_teams_authenticated_if_needed(serial, disp_id, snap, actions)
+        if not snap:
+            break
+        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            break
+        hi, wi = img.shape[:2]
+        rows = _ocr_desktop_rows(img)
+        match = _match_row_for_target(rows, target_label, exclude_header_band=exclude_header_band, img_h=hi)
+        if match:
+            tx, ty = match["tap_coords"]
+            await direct_hid_to_display(serial, target_mode="desktop", ext_display_id=disp_id, focus_coords=[tx, ty])
+            await run_adb_shell(f"input {disp_pfx}tap {tx} {ty}", serial, timeout=2.5)
+            actions.append(f"Selected '{target_label}' ('{match.get('norm_text')}') at ({tx}, {ty}) on desktop display #{disp_id}")
+            await asyncio.sleep(1.4)
+            return {"found": True, "tapped": [tx, ty], "matched_text": match.get("norm_text")}
+
+        if attempt < max_scrolls:
+            sx = wi // 2
+            sy1, sy2 = int(hi * 0.72), int(hi * 0.30)
+            await run_adb_shell(f"input {disp_pfx}swipe {sx} {sy1} {sx} {sy2} 260 >/dev/null 2>&1", serial, timeout=2.5)
+            actions.append(f"Scrolled desktop display #{disp_id} searching for '{target_label}' (scroll #{attempt + 1})")
+            await asyncio.sleep(0.9)
+
+    return {"found": False, "tapped": None, "matched_text": None}
+
+
+async def navigate_teams_onedrive_path_to_markdown(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    bundle_folder_name: Optional[str] = None,
+    target_file_name: Optional[str] = None,
+    target_part_number: Optional[int] = None,
+    folder_path: Optional[List[str]] = None,
+    open_editor: bool = True,
+) -> Dict[str, Any]:
+    """
+    Navigates the Microsoft Teams app on the external desktop display through the OneDrive folder hierarchy:
+      1. Opens / focuses the Teams app on the desktop display (#ext_id) and handles any Teams PIN prompt.
+      2. Selects 'OneDrive' in Teams.
+      3. Selects the folder 'Markdowns'.
+      4. Selects the folder 'ficus-platform'.
+      5. Selects the bundle folder (e.g. 'DIXUI_impact_26-11-05-9-43pm').
+      6. Scans the bundle folder manifest (MD 1 / N .. MD N / N) and selects the target markdown file
+         (e.g. 'DIXUI_impact_26-11-05-9-43pm_part5.md'), maximizing Fullscreen + Dark Mode + Edit Mode.
+    """
+    import db
+    from alignment_engine import (
+        detect_teams_markdown_alignment,
+        normalize_bundle_identifier_ocr,
+        parse_multipart_markdown_filename,
+    )
+    from services import state
+    from services.adb_service import (
+        capture_display_screenshot,
+        direct_hid_to_display,
+        maximize_floating_markdown_window,
+    )
+
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {"status": "mock", "success": False, "actions": []}
+
+    disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    actions: List[str] = []
+
+    active_proj = db.get_active_project() or {}
+    eff_part = int(
+        target_part_number
+        or active_proj.get("part_number")
+        or state.multipart_bundle_state.get("current_part")
+        or 5
+    )
+    eff_bundle = normalize_bundle_identifier_ocr(
+        bundle_folder_name
+        or state.multipart_bundle_state.get("base_prefix")
+        or active_proj.get("bundle_name")
+        or "DIXUI_impact_26-11-05-9-43pm"
+    )
+    eff_bundle = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle, flags=re.IGNORECASE).strip("_- ") or "DIXUI_impact_26-11-05-9-43pm"
+    eff_file = normalize_bundle_identifier_ocr(
+        target_file_name
+        or active_proj.get("part_file_name")
+        or f"{eff_bundle}_part{eff_part}.md"
+    )
+    if not eff_file.lower().endswith(".md"):
+        eff_file = f"{eff_file}.md"
+
+    base_folders = list(folder_path or DEFAULT_TEAMS_ONEDRIVE_PATH)
+    nav_sequence = base_folders + [eff_bundle]
+
+    # Step 1: Direct HID to desktop display and ensure Teams app is open/focused on desktop display
+    await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=disp_id)
+    await run_adb_shell(
+        f"monkey -p com.microsoft.teams -c android.intent.category.LAUNCHER 1 --display {disp_id} >/dev/null 2>&1",
+        ser,
+        timeout=3.0,
+    )
+    actions.append(f"Opened / focused Microsoft Teams on desktop display #{disp_id}")
+    await asyncio.sleep(1.0)
+
+    snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+    snap = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap, actions)
+    await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
+
+    snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+    if not snap:
+        return {"status": "error", "success": False, "message": "Could not capture desktop display", "actions": actions}
+    img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return {"status": "error", "success": False, "message": "Could not decode desktop display screenshot", "actions": actions}
+
+    # Step 2: Check if already inside Markdown Editor
+    align = detect_teams_markdown_alignment(img)
+    open_fn = normalize_bundle_identifier_ocr(align.get("file_name") or "")
+    open_mp = parse_multipart_markdown_filename(open_fn)
+    if open_fn and (open_fn.lower() == eff_file.lower() or (open_mp.get("is_multipart") and open_mp.get("part_number") == eff_part)):
+        if open_editor:
+            prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+            actions.extend(prep_res.get("actions", []))
+            return {
+                "status": "success",
+                "success": True,
+                "bundle_folder": eff_bundle,
+                "opened_file_name": eff_file,
+                "part_number": eff_part,
+                "navigation_path": nav_sequence + [eff_file],
+                "actions": actions,
+            }
+        else:
+            exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
+            actions.extend(exit_res.get("actions", []))
+            snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+            img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR) if snap else img
+    elif open_fn and align.get("back_button_coords"):
+        exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
+        actions.extend(exit_res.get("actions", []))
+        snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR) if snap else img
+
+    # Step 3: Check if already inside the target bundle folder ('DIXUI_impact_26-11-05-9-43pm')
+    folder_scan = scan_folder_markdown_files_cv(img)
+    already_in_bundle_folder = bool(
+        folder_scan.get("is_folder_view")
+        and (
+            eff_bundle[:8].lower() in (folder_scan.get("folder_name") or "").lower()
+            or eff_bundle[:8].lower() in (folder_scan.get("base_prefix") or "").lower()
+        )
+    )
+
+    if not already_in_bundle_folder:
+        # Determine which step in ['OneDrive', 'Markdowns', 'ficus-platform', eff_bundle] is currently visible
+        rows = _ocr_desktop_rows(img)
+        hi = img.shape[0]
+        start_idx = 0
+        for idx in range(len(nav_sequence) - 1, -1, -1):
+            step_label = nav_sequence[idx]
+            excl_hdr = idx > 0
+            if _match_row_for_target(rows, step_label, exclude_header_band=excl_hdr, img_h=hi) is not None:
+                start_idx = idx
+                break
+
+        for step_idx in range(start_idx, len(nav_sequence)):
+            step_label = nav_sequence[step_idx]
+            excl_hdr = step_idx > 0
+            tap_res = await _find_and_tap_text_on_desktop(
+                serial=ser,
+                disp_id=disp_id,
+                target_label=step_label,
+                actions=actions,
+                exclude_header_band=excl_hdr,
+                max_scrolls=1 if step_idx == 0 else 3,
+            )
+            if not tap_res.get("found") and step_label.lower() == "onedrive":
+                # In Teams, OneDrive may be under 'More' (...) or 'Files' in the navigation bar
+                more_res = await _find_and_tap_text_on_desktop(
+                    serial=ser,
+                    disp_id=disp_id,
+                    target_label="More",
+                    actions=actions,
+                    exclude_header_band=False,
+                    max_scrolls=0,
+                )
+                if more_res.get("found"):
+                    tap_res = await _find_and_tap_text_on_desktop(
+                        serial=ser,
+                        disp_id=disp_id,
+                        target_label="OneDrive",
+                        actions=actions,
+                        exclude_header_band=False,
+                        max_scrolls=1,
+                    )
+                if not tap_res.get("found"):
+                    await _find_and_tap_text_on_desktop(
+                        serial=ser,
+                        disp_id=disp_id,
+                        target_label="Files",
+                        actions=actions,
+                        exclude_header_band=False,
+                        max_scrolls=0,
+                    )
+
+            snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+            snap = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap, actions)
+            if snap:
+                img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+
+        if img is not None:
+            folder_scan = scan_folder_markdown_files_cv(img)
+
+    # Update predetermined_parts in state if bundle folder was scanned
+    if folder_scan.get("predetermined_parts"):
+        pred_parts = folder_scan["predetermined_parts"]
+        for pt in pred_parts:
+            pno = int(pt.get("part_number") or 0)
+            if pno < eff_part:
+                pt["status"] = "completed"
+            elif pno == eff_part:
+                pt["status"] = "scanning"
+            else:
+                pt["status"] = "pending"
+        state.multipart_bundle_state.update({
+            "is_multipart": True,
+            "base_prefix": eff_bundle,
+            "folder_name": eff_bundle,
+            "onedrive_folder_path": base_folders + [eff_bundle],
+            "current_part": eff_part,
+            "total_parts": folder_scan.get("total_parts") or len(pred_parts) or 9,
+            "available_parts": folder_scan.get("available_parts", []),
+            "predetermined_parts": pred_parts,
+            "active_file_name": eff_file,
+        })
+
+    if not open_editor:
+        return {
+            "status": "success" if folder_scan.get("files") else "partial",
+            "success": bool(folder_scan.get("files")),
+            "bundle_folder": eff_bundle,
+            "target_file_name": eff_file,
+            "part_number": eff_part,
+            "navigation_path": nav_sequence,
+            "folder_scan": folder_scan,
+            "actions": actions,
+        }
+
+    # Step 4: Select and open the target markdown file (e.g. 'DIXUI_impact_26-11-05-9-43pm_part5.md')
+    file_tap_coords = None
+    for pf in folder_scan.get("part_files", []):
+        if pf.get("part_number") == eff_part:
+            file_tap_coords = pf.get("tap_coords")
+            break
+
+    if file_tap_coords:
+        fx, fy = int(file_tap_coords[0]), int(file_tap_coords[1])
+        await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=disp_id, focus_coords=[fx, fy])
+        await run_adb_shell(f"input {disp_pfx}tap {fx} {fy}", ser, timeout=2.5)
+        actions.append(f"Selected '{eff_file}' at ({fx}, {fy}) in folder '{eff_bundle}'")
+        await asyncio.sleep(1.8)
+    else:
+        file_tap = await _find_and_tap_text_on_desktop(
+            serial=ser,
+            disp_id=disp_id,
+            target_label=eff_file,
+            actions=actions,
+            exclude_header_band=True,
+            max_scrolls=3,
+        )
+        if not file_tap.get("found"):
+            return {
+                "status": "file_not_found",
+                "success": False,
+                "bundle_folder": eff_bundle,
+                "target_file_name": eff_file,
+                "part_number": eff_part,
+                "navigation_path": nav_sequence + [eff_file],
+                "folder_scan": folder_scan,
+                "actions": actions,
+                "message": f"Navigated path {' -> '.join(nav_sequence)}, but could not locate '{eff_file}' on screen",
+            }
+
+    # Step 5: Handle any post-tap Teams PIN prompt, then maximize Fullscreen + Dark Mode + Edit Mode
+    snap_post = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0, bypass_lock=True)
+    await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_post, actions)
+    prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+    actions.extend(prep_res.get("actions", []))
+
+    state.multipart_bundle_state["last_opened_file"] = eff_file
+    state.multipart_bundle_state["active_file_name"] = eff_file
+    state.multipart_bundle_state["current_part"] = eff_part
+    state.sync_multipart_state_from_alignment()
+
+    return {
+        "status": "success",
+        "success": True,
+        "bundle_folder": eff_bundle,
+        "opened_file_name": eff_file,
+        "part_number": eff_part,
+        "navigation_path": nav_sequence + [eff_file],
+        "folder_scan": folder_scan,
+        "prepare_result": prep_res,
+        "actions": actions,
+    }
+
 
 
 

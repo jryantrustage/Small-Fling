@@ -3140,6 +3140,27 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
         if proj_total_parts and not multipart_bundle_state.get("total_parts"):
             multipart_bundle_state["total_parts"] = int(proj_total_parts)
 
+    eff_base_prefix = str(multipart_bundle_state.get("base_prefix") or proj_bundle_name or "").strip()
+    eff_tot_parts = int(multipart_bundle_state.get("total_parts") or proj_total_parts or 0)
+    if eff_base_prefix:
+        multipart_bundle_state["folder_name"] = eff_base_prefix
+        multipart_bundle_state["onedrive_folder_path"] = ["OneDrive", "Markdowns", "ficus-platform", eff_base_prefix]
+
+    if not predetermined and eff_base_prefix and eff_tot_parts >= 2:
+        predetermined = [
+            {
+                "part_number": i,
+                "total_parts": eff_tot_parts,
+                "scope_label": f"MD {i} / {eff_tot_parts}",
+                "file_name": f"{eff_base_prefix}_part{i}.md",
+                "base_prefix": eff_base_prefix,
+                "tap_coords": [400, 180 + i * 70],
+                "status": "pending",
+            }
+            for i in range(1, eff_tot_parts + 1)
+        ]
+        multipart_bundle_state["predetermined_parts"] = predetermined
+
     if predetermined:
         avail = sorted({int(p["part_number"]) for p in predetermined if p.get("part_number") is not None})
         if avail:
@@ -3240,13 +3261,23 @@ async def activate_or_create_bundle_part_project(
     eff_bundle_name = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle_name, flags=re.IGNORECASE).strip("_- ") or "Bundle"
     slug = re.sub(r"[^a-z0-9]+", "_", eff_bundle_name.lower()).strip("_") or "bundle"
     eff_bundle_id = bundle_id or active_proj.get("bundle_id") or f"bundle_{slug}"
-    eff_total_parts = int(
-        total_parts
-        or mp_parsed.get("total_parts")
-        or multipart_bundle_state.get("total_parts")
-        or active_proj.get("total_parts")
-        or len(predetermined)
-        or target_part
+    sibling_max_total = max(
+        [
+            int(p.get("total_parts") or p.get("part_number") or 0)
+            for p in all_projs
+            if str(p.get("bundle_id") or "") == eff_bundle_id
+            or (p.get("bundle_name") and eff_bundle_name[:8].lower() in str(p.get("bundle_name")).lower())
+        ]
+        or [0]
+    )
+    eff_total_parts = max(
+        int(total_parts or 0),
+        int(mp_parsed.get("total_parts") or 0),
+        int(multipart_bundle_state.get("total_parts") or 0),
+        int(active_proj.get("total_parts") or 0),
+        len(predetermined),
+        sibling_max_total,
+        target_part,
     )
     pred_match = next((p for p in predetermined if int(p.get("part_number") or 0) == target_part), None)
     eff_file_name = normalize_bundle_identifier_ocr(

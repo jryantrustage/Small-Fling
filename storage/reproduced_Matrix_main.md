@@ -1,15474 +1,10384 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-                                         "coverage": 260000,
-                                         "premium": 405.6
+# DIXUI_impact_26-11-05-9-43pm (Part 5 of 9)
+
+> **Generated by Analyser** / 2026-11-06T05:44:50.890Z
+> Part: **5 of 9** / Files in this part: **4g** (Total project files: **407**)
+> Part Size: **984.1 KB** / Lines: **21,169** / Characters: **1,007,472**
+
+## Directory Structure (Part 5 of 9)
+
+```
+.
+    DevCode/DIxUI/src/components/
+        README.md
+    DevCode/DIxUI/src/components/pages/
+        index.ts
+    DevCode/DIxUI/src/components/pages/__mock__/
+         mockCreditCardPaymentAppResponse.json
+    DevCode/DIXUI/src/components/Router/
+        ListedRoutes.ts
+         router.tsx
+         styles.ts
+    DevCode/DIXUI/src/constants/
+        notifications.tsx
+    DevCode/DIxUI/src/contexts/
+        AppBrandingContext.tsx
+         appResetContext.tsx
+         DynamicFormContext.tsx
+         errorContext.tsx
+         FinalRateContext.tsx
+         HistoryContext.tsx
+         InsuranceAppContext.tsx
+         PaymentFlowContext.tsx
+         SegmentFlowContext.tsx
+         TenantContext.tsx
+    DevCode/DIxuI/src/contexts/ErrorBoundary/
+        errorBoundary.css
+    DevCode/DIXUI/src/i18n/
+         en.ts
+         index.ts
+    DevCode/DIxUI/src/mocks/mock-api/
+        mock-get-cobanding-partner.json
+        mock-get-insurance-app-additional-info-florida.json
+        mock-get-insurance-app-additional-info-nevada.json
+        mock-get-insurance-app-additional-info.json
+        mock-get-insurance-app-beneficiaries-tawl.json
+        mock-get-insurance-app-coverage-adjuster.json
+        mock-get-insurance-app-gawl-t&c-econsent.json
+        mock-get-insurance-app-gawl-t&c.json
+        mock-get-insurance-app-health-questions-florida.json
+         mock-get-insurance-app-health-questions.json
+        mock-get-insurance-app-payment-details-AppReview.json
+        mock-get-insurance-app-payment-details.json
+        mock-get-insurance-app-payment_method.json
+         mock-get-insurance-app-replacement-naic.json
+        mock-get-insurance-app-replacement-non-naic.json
+        mock-get-insurance-app-siterm-beneficiaries.json
+        mock-get-insurance-app-siterm-final-rate.json
+        mock-get-insurance-app-siterm-review.json
+         mock-get-insurance-app-siterm-t&c.json
+        mock-get-insurance-app-state-specific-disclosure-for-GA-IL-WA-wI.json
+        mock-get-insurance-app-state-specific-disclosures-Maine.json
+        mock-get-insurance-app-state-specific-disclosures-stoli.json
+         mock-get-insurance-app-state-specific-disclosures.json
+        mock-get-insurance-app-summary.json
+        mock-get-insurance-app-tawl-additional-health-information.json
+        mock-get-insurance-app-tawl-final-rate-approved.json
+        mock-get-insurance-app-tawl-final-rate-with-rider.json
+        mock-get-insurance-app-tawl-final-rate-without-rider.json
+        mock-get-insurance-app-tawl-final-rate.json
+```
+
+## File Contents
+
+### 193.‘C:\DevCode\DIxUI\srcIcomponents\pages\_mock__\mockCreditCardPaymentAppResponse.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIxUI\src\components\pages\__mock__\mockCreditCardPaymentAppResponse.json" type=".json" size="33328" lines="768" chars="33324" -->
+   json
+{
+    "consumerId": null,
+    "memberNumber": null,
+    "insuranceAppVersion": 1,
+    "complete": false,
+    "submittedDate": null,
+    "insuranceAppId":"B2468B16-4AF3-411D-A8CF-50D2DD527C5C",
+    "coreProduct": {
+        "name": "Trustage Term Life Insurance",
+        "version": 5,
+        "category": "Trustage",
+        "type": "Life",
+        "subtype": "Term",
+        "productTemplateId":"8C70A455-BFC0-489D-9F64-0B33EE1F748D",
+        "pr0ductId": "773294EC-3C41-439C-A026-37575C7DEE4D",
+        "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+    },
+    "insuranceForm": {
+        "formId":"BD500321-5A8B-401C-96A4-34059FC8A791",
+        "formName": "24-10-07:1327 TruStage SITerm Life Insurance Form Template",
+        "formVersion": 4
+    },
+    "recordstate": "In Progress",
+    "createdDate": "2024-10-21T16:41:45.496Z",
+    "lastUpdated": "2024-10-21T17:06:22.349+00:00",
+    "forwardEnabled": false,
+    "backEnabled": true,
+    "segment": {
+        "segmentCode": "SEGMENT-PAYMENT-DETAILS-CC",
+        "segmentTitle": "Payment Details",
+        "navigationTitle": "Payment Details",
+        "segmentSubTitle": "",
+        "arialabel": "",
+        "helpText": "",
+        "progressItemCode": "PROGRESS-PAYMENT-INFO",
+        "parentSegmentCode": "SEGMENT-PAYMENT-METHOD",
+        "isComplete": false,
+        "presentationorder": 3,
+        "hidden": false,
+        "required": false,
+        "prefilled": false,
+        "prefillsource": "",
+        "exposition": [
+            {
+                "order": 1,
+"content": "**3o Day Guarantee**nIf you're not completely satisfied, simply cancel within the first 3o days and get a full refund-no questions asked."
+            }
+        ],
+        "fieldGroups":[
+            {
+                "grOupCode": "GROUP-PAYMENT-DETAILS-CC",
+                "groupTitle": "Payment Details",
+                "groupType": "basic",
+                "presentationorder": 1,
+                "hidden": false,
+                "required": false,
+                "exposition":[],.
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-PAYMENT-CC-FIRST-NAME",
+                        "fieldLabel": "First Name On Card",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "Enter card holder first name",
+                        "presentationorder": 1,
+                        "dataFieldSize": 3,
+                        "usage":"input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "text",
+                        "maxLength": 50,
+                        "default": "",
+                        "value": "",
+                         "presentationRules":[].
+                        "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-PAYMENT-CC-LAST-NAME",
+                        "fieldLabel": "Last Name On Card",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "Enter card holder last name",
+                        "presentationorder": 1,
+                        "dataFieldSize": 3,
+                        "usage":"input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "text",
+                        "maxLength": 50,
+                        "default": "",
+                        "value": "",
+                         "presentationRules":[].
+                         "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-PAYMENT-CC-MASKED-NUMBER",
+                        "fieldLabel": "Masket Card Number",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "Enter masked card number",
+                        "presentationorder": 2,
+                        "dataFieldSize": 2,
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "text",
+                        "maxLength": 50,
+                        "default": "",
+                        "value": "",
+                         "presentationRules": [],
+                        "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-PAYMENT-CC-CARD-TYPE",
+                        "fieldLabel": "Card Type",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "Enter card type",
+                        "presentationorder": 1,
+                        "dataFieldSize": 3,
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "text",
+                        "maxLength": 50,
+                        "default": "",
+                        "value": "",
+                        "presentationRules": [].
+                         "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-PAYMENT-CC-EXPIRATION-DATE",
+                        "fieldLabel": "Expiration Date",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "MM/YY",
+                         "presentationorder": 2,
+                        "dataFieldsize": 1,
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "text",
+                        "maxLength": 5,
+                        "default":"",
+                        "value": "",
+                        "presentationRules": [].
+                         "options":[]
+                    }
+                ]
+            },
+            {
+                "grOupCode" : "GROUP-PAYMENT-SCHEDULE-CC",
+                "groupTitle": "Payment Schedule",
+                "groupType": "basic",
+                "presentationorder": 2,
+                "hidden": false,
+                "required": false,
+                "exposition": [],
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                        "fieldLabel": "Payment Amount and Frequency",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "presentationorder": 1,
+                        "placeholder": "Select frequency",
+                        "hidden": false,
+                        "usage":"input",
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "single-select-dropdown",
+                        "default": "$49.54 Monthly",
+                        "value": "",
+                        "valueRules":[
+                            {
+                                 "uSe": "MODIFY_VALUE",
+                                 "useValuesList":[
+                                     {
+                                         "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                                         "valueTransformer": "frequencyFromPayment",
+                                         "joinFieldCode": ""
                                      },
                                      {
-                                         "coverage": 261000,
-                                         "premium": 407.16
+                                         "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                         "valueTransformer": "nextDateFromFrequencyCc",
+                                         "joinFieldCode": "FIELD-PAYMENT-DATE"
+                                     }
+                                 ]
+                            }
+                        ],
+                        "maxLength": 30,
+                        "dataFieldsize": 2,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "$49.54 per Month",
+                                 "value": "$49.54 Monthly",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "$148.62 per Quarter",
+                                 "value": "$148.62 Quarterly",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 3,
+                                 "label": "$297.24 Semi-Annually",
+                                 "value": "$297.24 Semiannual",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 4,
+                                 "label": "$594.48 Annually",
+                                 "value": "$594.48 Annual",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                         "presentationRules":[]
+                    },
+                    {
+                         "fieldCode": "FIELD-PAYMENT-DATE",
+                        "fieldLabel": "Payment Date",
+                        "ariaLabel": "",
+                        "helpText": "",
+                         "presentationorder": 1,
+                        "placeholder": "Select payment date",
+                        "hidden": false,
+                        "usage": "input",
+                        "disabled": false,
+                        "required": true,
+                        "dataFieldSize": 1,
+                        "fieldType": "single-select-dropdown",
+                        "exposition": [
+                            {
+                                 "order": 1,
+"content": "It may take up to 3 business days for the first payment to show up on your account statement."
+                            }
+                        ],
+                        "default": "",
+                        "value": "",
+                        "valueRules":[
+                            {
+                                 "uSe": "MODIFY_VALUE",
+                                 "useValuesList": [
+                                     {
+                                         "fieldCode":"FIELD-DISPLAY-COVERAGE-START-DATE",
+                                         "valueTransformer": "startDateFromCurrentDate",
+                                         "joinFieldCode": ""
                                      },
                                      {
-                                         "coverage": 262000,
-                                         "premium": 408.72
+                                         "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                                         "valueTransformer": "frequencyFromDate",
+                                         "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
                                      },
                                      {
-                                         "coverage": 263000,
-                                         "premium": 410.28
-                                     },
-                                     {
-                                         "coverage": 264000,
-                                         "premium": 411.84
-                                     },
-                                     {
-"coverage": 265000,
-"premium": 413.4
-},
-{
-"coverage": 266000,
-"premium": 414.96
-},
-{
-"coverage": 267000,
-"premium": 416.52
-},
-{
-"coverage": 268000,
-"premium": 418.08
-},
-{
-"coverage": 269000,
-"premium": 419.64
-},
-{
-"coverage": 270000,
-"premium": 421.2
-},
-{
-"coverage": 271000,
-"premium": 422.76
-},
-{
-"coverage": 272000,
-"premium": 424.32
-},
-{
-"coverage": 273000,
-"premium": 425.88
-},
-{
-"coverage": 274000,
-"premium": 427.44
-},
-{
-"coverage": 275000,
-"premium": 429
-},
-{
-"coverage": 276000,
-"premium": 430.56
-},
-{
-"coverage": 277000,
-"premium": 432.12
-},
-{
-"coverage": 278000,
-"premium": 433.68
-},
-{
-"coverage": 279000,
-"premium": 435.24
-},
-{
-"coverage": 280000,
-"premium": 436.8
-},
-{
-"coverage": 281000,
-"premium": 438.36
-},
-{
-"coverage": 282000,
-"premium": 439.92
-},
-{
-"coverage": 283000,
-"premium": 441.48
-},
-{
-"coverage": 284000,
-"premium": 443.04
-},
-{
-"coverage": 285000,
-"premium": 444.6
-},
-{
-"coverage": 286000,
-"premium": 446.16
-},
-{
-"coverage": 287000,
-"premium": 447.72
-},
-{
-"coverage": 288000,
-"premium": 449.28
-},
-{
-"coverage": 289000,
-"premium": 450.84
-},
-{
-"coverage": 290000,
-"premium": 452.4
-},
-{
-"coverage": 291000,
-"premium": 453.96
-},
-{
-"coverage": 292000,
-"premium": 455.52
-},
-{
-"coverage": 293000,
-"premium": 457.08
-},
-{
-"coverage": 294000,
-"premium": 458.64
-},
-{
-"coverage": 295000,
-"premium": 460.2
-},
-{
-"coverage": 296000,
-"premium": 461.76
-},
-{
-"coverage": 297000,
-"premium": 463.32
-},
-{
-"coverage": 298000,
-"premium": 464.88
-},
-{
-"coverage": 299000,
-"premium": 466.44
-},
-{
-"coverage": 300000,
-"premium": 468
-},
-{
-"coverage": 301000,
-"premium": 469.56
-},
-{
-"coverage": 302000,
-"premium": 471.12
-},
-{
-"coverage": 303000,
-"premium": 472.68
-},
-{
-"coverage": 304000,
-"premium": 474.24
-},
-{
-"coverage": 305000,
-"premium": 475.8
-},
-{
-"coverage": 306000,
-"premium": 477.36
-},
-{
-"coverage": 307000,
-"premium": 478.92
-},
-{
-"coverage": 308000,
-"premium": 480.48
-},
-{
-"coverage": 309000,
-"premium": 482.04
-},
-{
-"coverage": 310000,
-"premium": 483.6
-},
-{
-"coverage": 311000,
-"premium": 485.16
-},
-{
-"coverage": 312000,
-"premium": 486.72
-},
-{
-"coverage": 313000,
-"premium": 488.28
-},
-{
-"coverage": 314000,
-"premium": 489.84
-},
-{
-"coverage": 315000,
-"premium": 491.4
-},
-{
-"coverage": 316000,
-"premium": 492.96
-},
-{
-"coverage": 317000,
-"premium": 494.52
-},
-{
-"coverage": 318000,
-"premium": 496.08
-},
-{
-"coverage": 319000,
-"premium": 497.64
-},
-{
-"coverage": 320000,
-"premium": 499.2
-},
-{
-"coverage": 321000,
-"premium": 500.76
-},
-{
-"coverage": 322000,
-"premium": 502.32
-},
-{
-"coverage": 323000,
-"premium": 503.88
-},
-{
-"coverage": 324000,
-"premium": 505.44
-},
-{
-"coverage": 325000,
-"premium": 507
-},
-{
-"coverage": 326000,
-"premium": 508.56
-},
-{
-"coverage": 327000,
-"premium": 510.12
-},
-{
-"coverage": 328000,
-"premium": 511.68
-},
-{
-"coverage": 329000,
-"premium": 513.24
-},
-{
-"coverage": 330000,
-"premium": 514.8
-},
-{
-"coverage": 331000,
-"premium": 516.36
-},
-{
-"coverage": 332000,
-"premium": 517.92
-},
-{
-"coverage": 333000,
-"premium": 519.48
-},
-{
-"coverage": 334000,
-"premium": 521.04
-},
-{
-"coverage": 335000,
-"premium": 522.6
-},
-{
-"coverage": 336000,
-"premium": 524.16
-},
-{
-"coverage": 337000,
-"premium": 525.72
-},
-{
-"coverage": 338000,
-"premium": 527.28
-},
-{
-"coverage": 339000,
-"premium": 528.84
-},
-{
-"coverage": 340000,
-"premium": 530.4
-},
-{
-"coverage": 341000,
-"premium": 531.96
-},
-{
-"coverage": 342000,
-"premium": 533.52
-},
-{
-"coverage": 343000,
-"premium": 535.08
-},
-{
-"coverage": 344000,
-"premium": 536.64
-},
-{
-"coverage": 345000,
-"premium": 538.2
-},
-{
-"coverage": 346000,
-"premium": 539.76
-},
-{
-"coverage": 347000,
-"premium": 541.32
-},
-{
-"coverage": 348000,
-"premium": 542.88
-},
-{
-"coverage": 349000,
-"premium": 544.44
-},
-{
-"coverage": 350000,
-"premium": 546
-},
-{
-"coverage": 351000,
-"premium": 547.56
-},
-{
-"coverage": 352000,
-"premium": 549.12
-},
-{
-"coverage": 353000,
-"premium": 550.68
-},
-{
-"coverage": 354000,
-"premium": 552.24
-},
-{
-"coverage": 355000,
-"premium": 553.8
-},
-{
-"coverage": 356000,
-"premium": 555.36
-},
-{
-"coverage": 357000,
-"premium": 556.92
-},
-{
-"coverage": 358000,
-"premium": 558.48
-},
-{
-"coverage": 359000,
-"premium": 560.04
-},
-{
-"coverage": 360000,
-"premium": 561.6
-},
-{
-"coverage": 361000,
-"premium": 563.16
-},
-{
-"coverage": 362000,
-"premium": 564.72
-},
-{
-"coverage": 363000,
-"premium": 566.28
-},
-{
-"coverage": 364000,
-"premium": 567.84
-},
-{
-"coverage": 365000,
-"premium": 569.4
-},
-{
-"coverage": 366000,
-"premium": 570.96
-},
-{
-"coverage": 367000,
-"premium": 572.52
-},
-{
-"coverage": 368000,
-"premium": 574.08
-},
-{
-"coverage": 369000,
-"premium": 575.64
-},
-{
-"coverage": 370000,
-"premium": 577.2
-},
-{
-"coverage": 371000,
-"premium": 578.76
-},
-{
-"coverage": 372000,
-"premium": 580.32
-},
-{
-"coverage": 373000,
-"premium": 581.88
-},
-{
-"coverage": 374000,
-"premium": 583.44
-},
-{
-"coverage": 375000,
-"premium": 585
-},
-{
-"coverage": 376000,
-"premium": 586.56
-},
-{
-"coverage": 377000,
-"premium": 588.12
-},
-{
-"coverage": 378000,
-"premium": 589.68
-},
-{
-"coverage": 379000,
-"premium": 591.24
-},
-{
-"coverage": 380000,
-"premium": 592.8
-},
-{
-"coverage": 381000,
-"premium": 594.36
-},
-{
-"coverage": 382000,
-"premium": 595.92
-},
-{
-"coverage": 383000,
-"premium": 597.48
-},
-{
-"coverage": 384000,
-"premium": 599.04
-},
-{
-"coverage": 385000,
-"premium": 600.6
-},
-{
-"coverage": 386000,
-"premium": 602.16
-},
-{
-"coverage": 387000,
-"premium": 603.72
-},
-{
-"coverage": 388000,
-"premium": 605.28
-},
-{
-"coverage": 389000,
-"premium": 606.84
-},
-{
-"coverage": 390000,
-"premium": 608.4
-},
-{
-"coverage": 391000,
-"premium": 609.96
-},
-{
-"coverage": 392000,
-"premium": 611.52
-},
-{
-"coverage": 393000,
-"premium": 613.08
-},
-{
-"coverage": 394000,
-"premium": 614.64
-},
-{
-"coverage": 395000,
-"premium": 616.2
-},
-{
-"coverage": 396000,
-"premium": 617.76
-},
-{
-"coverage": 397000,
-"premium": 619.32
-},
-{
-"coverage": 398000,
-"premium": 620.88
-},
-{
-"coverage": 399000,
-"premium": 622.44
-},
-{
-"coverage": 400000,
-"premium": 624
-},
-{
-"coverage": 401000,
-"premium": 625.56
-},
-{
-"coverage": 402000,
-"premium": 627.12
-},
-{
-"coverage": 403000,
-"premium": 628.68
-},
-{
-"coverage": 404000,
-"premium": 630.24
-},
-{
-"coverage": 405000,
-"premium": 631.8
-},
-{
-"coverage": 406000,
-"premium": 633.36
-},
-{
-"coverage": 407000,
-"premium": 634.92
-},
-{
-"coverage": 408000,
-"premium": 636.48
-},
-{
-"coverage": 409000,
-"premium": 638.04
-},
-{
-"coverage": 410000,
-"premium": 639.6
-},
-{
-"coverage": 411000,
-"premium": 641.16
-},
-{
-"coverage": 412000,
-"premium": 642.72
-},
-{
-"coverage": 413000,
-"premium": 644.28
-},
-{
-"coverage": 414000,
-"premium": 645.84
-},
-{
-"coverage": 415000,
-"premium": 647.4
-},
-{
-"coverage": 416000,
-"premium": 648.96
-},
-{
-"coverage": 417000,
-"premium": 650.52
-},
-{
-"coverage": 418000,
-"premium": 652.08
-},
-{
-"coverage": 419000,
-"premium": 653.64
-},
-{
-"coverage": 420000,
-"premium": 655.2
-},
-{
-"coverage": 421000,
-"premium": 656.76
-},
-{
-"coverage": 422000,
-"premium": 658.32
-},
-{
-"coverage": 423000,
-"premium": 659.88
-},
-{
-"coverage": 424000,
-"premium": 661.44
-},
-{
-"coverage": 425000,
-"premium": 663
-},
-{
-"coverage": 426000,
-"premium": 664.56
-},
-{
-"coverage": 427000,
-"premium": 666.12
-},
-{
-"coverage": 428000,
-"premium": 667.68
-},
-{
-"coverage": 429000,
-"premium": 669.24
-},
-{
-"coverage": 430000,
-"premium": 670.8
-},
-{
-"coverage": 431000,
-"premium": 672.36
-},
-{
-"coverage": 432000,
-"premium": 673.92
-},
-{
-"coverage": 433000,
-"premium": 675.48
-},
-{
-"coverage": 434000,
-"premium": 677.04
-},
-{
-"coverage": 435000,
-"premium": 678.6
-},
-{
-"coverage": 436000,
-"premium": 680.16
-},
-{
-"coverage": 437000,
-"premium": 681.72
-},
-{
-"coverage": 438000,
-"premium": 683.28
-},
-{
-"coverage": 439000,
-"premium": 684.84
-},
-{
-"coverage": 440000,
-"premium": 686.4
-},
-{
-"coverage": 441000,
-"premium": 687.96
-},
-{
-"coverage": 442000,
-"premium": 689.52
-},
-{
-"coverage": 443000,
-"premium": 691.08
-},
-{
-"coverage": 444000,
-"premium": 692.64
-},
-{
-"coverage": 445000,
-"premium": 694.2
-},
-{
-"coverage": 446000,
-"premium": 695.76
-},
-{
-"coverage": 447000,
-"premium": 697.32
-},
-{
-"coverage": 448000,
-"premium": 698.88
-},
-{
-"coverage": 449000,
-"premium": 700.44
-},
-{
-"coverage": 450000,
-"premium": 702
-},
-{
-"coverage": 451000,
-"premium": 703.56
-},
-{
-"coverage": 452000,
-"premium": 705.12
-},
-{
-"coverage": 453000,
-"premium": 706.68
-},
-{
-"coverage": 454000,
-"premium": 708.24
-},
-{
-"coverage": 455000,
-"premium": 709.8
-},
-{
-"coverage": 456000,
-"premium": 711.36
-},
-{
-"coverage": 457000,
-"premium": 712.92
-},
-{
-"coverage": 458000,
-"premium": 714.48
-},
-{
-"coverage": 459000,
-"premium": 716.04
-},
-{
-"coverage": 460000,
-"premium": 717.6
-},
-{
-"coverage": 461000,
-"premium": 719.16
-},
-{
-"coverage": 462000,
-"premium": 720.72
-},
-{
-"coverage": 463000,
-"premium": 722.28
-},
-{
-"coverage": 464000,
-"premium": 723.84
-},
-{
-"coverage": 465000,
-"premium": 725.4
-},
-{
-"coverage": 466000,
-"premium": 726.96
-},
-{
-"coverage": 467000,
-"premium": 728.52
-},
-{
-"coverage": 468000,
-"premium": 730.08
-},
-{
-"coverage": 469000,
-"premium": 731.64
-},
-{
-"coverage": 470000,
-"premium": 733.2
-},
-{
-"coverage": 471000,
-"premium": 734.76
-},
-{
-"coverage": 472000,
-"premium": 736.32
-},
-{
-"coverage": 473000,
-"premium": 737.88
-},
-{
-"coverage": 474000,
-"premium": 739.44
-},
-{
-"coverage": 475000,
-"premium": 741
-},
-{
-"coverage": 476000,
-"premium": 742.56
-},
-{
-"coverage": 477000,
-"premium": 744.12
-},
-{
-"coverage": 478000,
-"premium": 745.68
-},
-{
-"coverage": 479000,
-"premium": 747.24
-},
-{
-"coverage": 480000,
-"premium": 748.8
-},
-{
-"coverage": 481000,
-"premium": 750.36
-},
-{
-"coverage": 482000,
-"premium": 751.92
-},
-{
-"coverage": 483000,
-"premium": 753.48
-},
-{
-"coverage": 484000,
-"premium": 755.04
-},
-{
-"coverage": 485000,
-"premium": 756.6
-},
-{
-"coverage": 486000,
-"premium": 758.16
-},
-{
-"coverage": 487000,
-"premium": 759.72
-},
-{
-"coverage": 488000,
-"premium": 761.28
-},
-{
-"coverage": 489000,
-"premium": 762.84
-},
-{
-"coverage": 490000,
-"premium": 764.4
-},
-{
-"coverage": 491000,
-"premium": 765.96
-},
-{
-"coverage": 492000,
-"premium": 767.52
-},
-{
-"coverage": 493000,
-"premium": 769.08
-},
-{
-"coverage": 494000,
-"premium": 770.64
-},
-{
-"coverage": 495000,
-"premium": 772.2
-},
-{
-"coverage": 496000,
-"premium": 773.76
-},
-{
-"coverage": 497000,
-"premium": 775.32
-},
-{
-"coverage": 498000,
-"premium": 776.88
-},
-{
-"coverage": 499000,
-"premium": 778.44
-},
-{
-"coverage": 500000,
-"premium": 780
+                                         "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                         "valueTransformer": "nextDateFromCurrentDatecc",
+                                         "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
+                                     }
+                                 ]
+                            }
+                        ],
+                        "maxLength": 30,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "Today",
+                                 "value":"2024-10-30",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "November 01",
+                                 "value":"2024-11-01",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 3,
+                                 "label": "November 02",
+                                 "value":"2024-11-02",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 4,
+                                 "label": "November 03",
+                                 "value":"2024-11-03",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 5,
+                                 "label": "November 04",
+                                 "value": "2024-11-04",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 6,
+                                 "label": "November 05",
+                                 "value":"2024-11-05",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 7,
+                                 "label": "November 06",
+                                 "value":"2024-11-06",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 8,
+                                 "label": "November 07",
+                                 "value":"2024-11-07",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 9,
+                                 "label": "November 08",
+                                 "value": "2024-11-08",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 10,
+                                 "label": "November 09",
+                                 "value":"2024-11-09",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 11,
+                                 "label": "November 10",
+                                 "value": "2024-11-10",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 12,
+                                 "label": "November 11",
+                                 "value":"2024-11-11",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 13,
+                                 "label": "November 12",
+                                 "value":"2024-11-12",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 14,
+                                 "label": "November 13",
+                                 "value":"2024-11-13",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 15,
+                                 "label": "November 14",
+                                 "value":"2024-11-14",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 16,
+                                 "label": "November 15",
+                                 "value": "2024-11-15",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 17.
+                                 "label": "November 16",
+                                 "value": "2024-11-16",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 18,
+                                 "label": "November 17",
+                                 "value":"2024-11-17",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 19,
+                                 "label": "November 18",
+                                 "value":"2024-11-18",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 20,
+                                 "label": "November 19",
+                                 "value":"2024-11-19",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 21.
+                                 "label": "November 20",
+                                 "value":"2024-11-20",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 22,
+                                 "label": "November 21",
+                                 "value": "2024-11-21",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 23,
+                                 "label": "November 22",
+                                 "value": "2024-11-22",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 24,
+                                 "label": "November 23",
+                                 "value":"2024-11-23",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 25,
+                                 "label": "November 24",
+                                 "value": "2024-11-24",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 26,
+                                 "label": "November 25",
+                                 "value": "2024-11-25",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 27.
+                                 "label": "November 26",
+                                 "value": "2024-11-26",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 28,
+                                 "label": "December 01",
+                                 "value":"2024-12-01",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 29,
+                                 "label": "December 02",
+                                 "value":"2024-12-02",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 30,
+                                 "label": "December 03",
+                                 "value":"2024-12-03",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 31,.
+                                 "label": "December 04",
+                                 "value": "2024-12-04",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                         "presentationRules": []
+                    },
+                    {
+                        "fieldCode": "FIELD-DISPLAY-COVERAGE-START-DATE",
+                        "fieldLabel": "Coverage Start Date",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder":"",
+                        "presentationorder": 2,
+                        "dataFieldSize": 1,
+                        "usage": "hero-display",
+                        "usagesubtype": "small",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "text",
+                        "maxLength": 30,
+                        "default": "",
+                        "value": "",
+                        "presentationRules": [
+                            {
+                                 "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                 "value": "",
+                                 "hidden": true
+                            },
+                            {
+                                 "field": "FIELD-PAYMENT-DATE",
+                                 "value": "",
+                                 "hidden": true
+                            }
+                        ],
+                        "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                        "fieldLabel": "Your Billing Cycle",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 2,
+                        "dataFieldSize": 1,
+                        "usage": "hero-display",
+                        "usagesubtype": "small",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "text",
+                        "maxLength": 30,
+                        "default": "",
+                        "value": "",
+                        "presentationRules":[
+                            {
+                                 "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                 "value": "",
+                                 "hidden": true
+                            },
+                            {
+                                 "field": "FIELD-PAYMENT-DATE",
+                                 "value": "",
+                                 "hidden": true
+                            }
+                        ],
+                         "options":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                        "fieldLabel": "Next Bill Date",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder":"",
+                        "presentationorder": 2,
+                        "dataFieldSize": 1,
+                        "usage": "hero-display",
+                        "usagesubtype": "small",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "text",
+                        "maxLength": 30,
+                        "default": "",
+                        "value": "",
+                        "presentationRules": [
+                            {
+                                 "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                 "value": "",
+                                 "hidden": true
+                            },
+                            {
+                                 "field": "FIELD-PAYMENT-DATE",
+                                 "value": "",
+                                 "hidden": true
+                            }
+                        ],
+                         'options": []
+                    }
+                ]
+            },
+            {
+                "grOupCode": "GROUP-SUBMIT-PAYMENT-DETAILS-CC",
+                "groupTitle": "",
+                "groupSubTitle": "",
+                "groupType": "progress",
+                "arialabel": "",
+                "helpText": "",
+                "isComplete": false,
+                "presentationorder": 3,
+                "hidden": false,
+                "disabled": false,
+                "required": false,
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-SUBMIT-PAYMENT-DETAILS-CC",
+                        "fieldLabel": "",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 1,
+                        "hidden": false,
+                        "usage": "progress",
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "single-select",
+                        "maxLength": 30,
+                        "default":"save",
+                        "value": "save",
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "BACK",
+                                 "value": "back",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "CONTINUE",
+                                 "value": "save",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "exposition":[]
+                    }
+                ]
+            }
+        ],
+        "fieldGroupCount": 3,
+        "sectionNumber": 2,
+        "segmentNumber": 3,
+        "visited": true
+    },
+    "progress": {
+        "sectionsCount": 3,
+        "sectionsComplete": 1,
+        "sectionsRequired": 3,
+        "segmentsCount": 10,
+        "segmentsComplete": 4,
+        "segmentsRequired": 2,
+        "currentSection": 2,
+        "currentSegment": 3,
+        "currentSegmentCode": "SEGMENT-PAYMENT-DETAILS-CC",
+        "currentProgItemCode": "PROGRESS-PAYMENT-INFO",
+        "progressItemList":[
+            {
+                "progressItemTitle": "Personal Information",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                "isComplete": true,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 3,
+                "sectionNumber": 1,
+                "startTimestamp": "2024-10-21T16:41:45.492+00:00",
+                "segmentNumber": 1,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Name Beneficiaries",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Health Questions",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Personal Information",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                 "completeTimestamp": "2024-10-21T17:06:17.013+00:00"
+            },
+            {
+                "progressItemTitle": "Payment",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                "isComplete": false,
+                "active": true,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 1,
+                "sectionNumber": 2,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Payment Method",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Payment Details",
+                        "isComplete": false,
+                        "active": true
+                    }
+                ],
+                "segmentNumber": 1,
+                "startTimestamp": "2024-10-21T17:06:17.013+00:00"
+            },
+            {
+                "progressItemTitle": "Review & Submit",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                "isComplete": false,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 0,
+                "sectionNumber": 3,
+                 'segments":[]
+            }
+        ]
+    },
+    "externalApp": {
+        "appId":"aec14ab5-e224-4035-ab28-97d60601af13",
+        "appstatus":"Pending",
+        "appSubstatus":"Pending",
+        "underwritingstatus": "Pending",
+        "billingstatus": "Incomplete",
+        "insuredstatus": "Approved",
+        "coverageAmount": 42000,
+        "insuredFirstName": "dfadf",
+        "insuredLastName": "dafdsf",
+        "insuredFullName": "dfadf dafdsf",
+        "billingAmount":"??.??",
+        "billingFreq":"Monthly",
+        "urlsuccessRedirect": "https://trustage.com",
+        "urlDeclineRedirect":"https://trustage.com/cancel-application",
+        "urlstartover": "https://trustage.com",
+        "urlsource": "https://trustage.com",
+        "urlPrescriptionDecline": "https://trustage.com/cancel-application"
+    },
+    "googleAnalyticsData": {
+        "id": "7861d3d7-e97b-4da3-81d2-74e80b7b243a",
+        "eAppId":"42EA0928-13B2-440D-8D44-0E6320138599",
+        "appSubstatus": "Approved",
+        "correlationId":"ee538d2a-f013-48b3-9ec9-5870034da7c1",
+        "insuredstatus":"SuspectedFraudBadActor",
+        "productCode": "2016 SITERM80",
+        "coverageAmount":"4000o",
+        "policystatus": "Approved",
+        "premiumAmount": "107.70",
+        "premiumFrequency": "Monthly",
+        "channel": "Web",
+        "gender":"Male",
+        "state": "WI",
+        "issueAge": "64"
+    },
+    "lastFourSSN": "1111"
 }
-]
-},
-{
-"billingMethod": "ACH",
-"billingFrequency": "Monthly",
-"underwritingClassCode": "P",
-"underwritingDescription": "Preferred Non-Tobacco",
-"coveragePremiums": [
-{
-"coverage": 15000,
-"premium": 1.95
-},
-{
-"coverage": 16000,
-"premium": 2.08
-},
-{
-"coverage": 17000,
-"premium": 2.21
-},
-{
-"coverage": 18000,
-"premium": 2.34
-},
-{
-"coverage": 19000,
-"premium": 2.47
-},
-{
-"coverage": 20000,
-"premium": 2.6
-},
-{
-"coverage": 21000,
-"premium": 2.73
-},
-{
-"coverage": 22000,
-"premium": 2.86
-},
-{
-"coverage": 23000,
-"premium": 2.99
-},
-{
-"coverage": 24000,
-"premium": 3.12
-},
-{
-"coverage": 25000,
-"premium": 3.25
-},
-{
-"coverage": 26000,
-"premium": 3.38
-},
-{
-"coverage": 27000,
-"premium": 3.51
-},
-{
-"coverage": 28000,
-"premium": 3.64
-},
-{
-"coverage": 29000,
-"premium": 3.77
-},
-{
-"coverage": 30000,
-"premium": 3.9
-},
-{
-"coverage": 31000,
-"premium": 4.03
-},
-{
-"coverage": 32000,
-"premium": 4.16
-},
-{
-"coverage": 33000,
-"premium": 4.29
-},
-{
-"coverage": 34000,
-"premium": 4.42
-},
-{
-"coverage": 35000,
-"premium": 4.55
-},
-{
-"coverage": 36000,
-"premium": 4.68
-},
-{
-"coverage": 37000,
-"premium": 4.81
-},
-{
-"coverage": 38000,
-"premium": 4.94
-},
-{
-"coverage": 39000,
-"premium": 5.07
-},
-{
-"coverage": 40000,
-"premium": 5.2
-},
-{
-"coverage": 41000,
-"premium": 5.33
-},
-{
-"coverage": 42000,
-"premium": 5.46
-},
-{
-"coverage": 43000,
-"premium": 5.59
-},
-{
-"coverage": 44000,
-"premium": 5.72
-},
-{
-"coverage": 45000,
-"premium": 5.85
-},
-{
-"coverage": 46000,
-"premium": 5.98
-},
-{
-"coverage": 47000,
-"premium": 6.11
-},
-{
-"coverage": 48000,
-"premium": 6.24
-},
-{
-"coverage": 49000,
-"premium": 6.37
-},
-{
-"coverage": 50000,
-"premium": 6.5
-},
-{
-"coverage": 51000,
-"premium": 6.63
-},
-{
-"coverage": 52000,
-"premium": 6.76
-},
-{
-"coverage": 53000,
-"premium": 6.89
-},
-{
-"coverage": 54000,
-"premium": 7.02
-},
-{
-"coverage": 55000,
-"premium": 7.15
-},
-{
-"coverage": 56000,
-"premium": 7.28
-},
-{
-"coverage": 57000,
-"premium": 7.41
-},
-{
-"coverage": 58000,
-"premium": 7.54
-},
-{
-"coverage": 59000,
-"premium": 7.67
-},
-{
-"coverage": 60000,
-"premium": 7.8
-},
-{
-"coverage": 61000,
-"premium": 7.93
-},
-{
-"coverage": 62000,
-"premium": 8.06
-},
-{
-"coverage": 63000,
-"premium": 8.19
-},
-{
-"coverage": 64000,
-"premium": 8.32
-},
-{
-"coverage": 65000,
-"premium": 8.45
-},
-{
-"coverage": 66000,
-"premium": 8.58
-},
-{
-"coverage": 67000,
-"premium": 8.71
-},
-{
-"coverage": 68000,
-"premium": 8.84
-},
-{
-"coverage": 69000,
-"premium": 8.97
-},
-{
-"coverage": 70000,
-"premium": 9.1
-},
-{
-"coverage": 71000,
-"premium": 9.23
-},
-{
-"coverage": 72000,
-"premium": 9.36
-},
-{
-"coverage": 73000,
-"premium": 9.49
-},
-{
-"coverage": 74000,
-"premium": 9.62
-},
-{
-"coverage": 75000,
-"premium": 9.75
-},
-{
-"coverage": 76000,
-"premium": 9.88
-},
-{
-"coverage": 77000,
-"premium": 10.01
-},
-{
-"coverage": 78000,
-"premium": 10.14
-},
-{
-"coverage": 79000,
-"premium": 10.27
-},
-{
-"coverage": 80000,
-"premium": 10.4
-},
-{
-"coverage": 81000,
-"premium": 10.53
-},
-{
-"coverage": 82000,
-"premium": 10.66
-},
-{
-"coverage": 83000,
-"premium": 10.79
-},
-{
-"coverage": 84000,
-"premium": 10.92
-},
-{
-"coverage": 85000,
-"premium": 11.05
-},
-{
-"coverage": 86000,
-"premium": 11.18
-},
-{
-"coverage": 87000,
-"premium": 11.31
-},
-{
-"coverage": 88000,
-"premium": 11.44
-},
-{
-"coverage": 89000,
-"premium": 11.57
-},
-{
-"coverage": 90000,
-"premium": 11.7
-},
-{
-"coverage": 91000,
-"premium": 11.83
-},
-{
-"coverage": 92000,
-"premium": 11.96
-},
-{
-"coverage": 93000,
-"premium": 12.09
-},
-{
-"coverage": 94000,
-"premium": 12.22
-},
-{
-"coverage": 95000,
-"premium": 12.35
-},
-{
-"coverage": 96000,
-"premium": 12.48
-},
-{
-"coverage": 97000,
-"premium": 12.61
-},
-{
-"coverage": 98000,
-"premium": 12.74
-},
-{
-"coverage": 99000,
-"premium": 12.87
-},
-{
-"coverage": 100000,
-"premium": 13
-},
-{
-"coverage": 101000,
-"premium": 13.13
-},
-{
-"coverage": 102000,
-"premium": 13.26
-},
-{
-"coverage": 103000,
-"premium": 13.39
-},
-{
-"coverage": 104000,
-"premium": 13.52
-},
-{
-"coverage": 105000,
-"premium": 13.65
-},
-{
-"coverage": 106000,
-"premium": 13.78
-},
-{
-"coverage": 107000,
-"premium": 13.91
-},
-{
-"coverage": 108000,
-"premium": 14.04
-},
-{
-"coverage": 109000,
-"premium": 14.17
-},
-{
-"coverage": 110000,
-"premium": 14.3
-},
-{
-"coverage": 111000,
-"premium": 14.43
-},
-{
-"coverage": 112000,
-"premium": 14.56
-},
-{
-"coverage": 113000,
-"premium": 14.69
-},
-{
-"coverage": 114000,
-"premium": 14.82
-},
-{
-"coverage": 115000,
-"premium": 14.95
-},
-{
-"coverage": 116000,
-"premium": 15.08
-},
-{
-"coverage": 117000,
-"premium": 15.21
-},
-{
-"coverage": 118000,
-"premium": 15.34
-},
-{
-"coverage": 119000,
-"premium": 15.47
-},
-{
-"coverage": 120000,
-"premium": 15.6
-},
-{
-"coverage": 121000,
-"premium": 15.73
-},
-{
-"coverage": 122000,
-"premium": 15.86
-},
-{
-"coverage": 123000,
-"premium": 15.99
-},
-{
-"coverage": 124000,
-"premium": 16.12
-},
-{
-"coverage": 125000,
-"premium": 16.25
-},
-{
-"coverage": 126000,
-"premium": 16.38
-},
-{
-"coverage": 127000,
-"premium": 16.51
-},
-{
-"coverage": 128000,
-"premium": 16.64
-},
-{
-"coverage": 129000,
-"premium": 16.77
-},
-{
-"coverage": 130000,
-"premium": 16.9
-},
-{
-"coverage": 131000,
-"premium": 17.03
-},
-{
-"coverage": 132000,
-"premium": 17.16
-},
-{
-"coverage": 133000,
-"premium": 17.29
-},
-{
-"coverage": 134000,
-"premium": 17.42
-},
-{
-"coverage": 135000,
-"premium": 17.55
-},
-{
-"coverage": 136000,
-"premium": 17.68
-},
-{
-"coverage": 137000,
-"premium": 17.81
-},
-{
-"coverage": 138000,
-"premium": 17.94
-},
-{
-"coverage": 139000,
-"premium": 18.07
-},
-{
-"coverage": 140000,
-"premium": 18.2
-},
-{
-"coverage": 141000,
-"premium": 18.33
-},
-{
-"coverage": 142000,
-"premium": 18.46
-},
-{
-"coverage": 143000,
-"premium": 18.59
-},
-{
-"coverage": 144000,
-"premium": 18.72
-},
-{
-"coverage": 145000,
-"premium": 18.85
-},
-{
-"coverage": 146000,
-"premium": 18.98
-},
-{
-"coverage": 147000,
-"premium": 19.11
-},
-{
-"coverage": 148000,
-"premium": 19.24
-},
-{
-"coverage": 149000,
-"premium": 19.37
-},
-{
-"coverage": 150000,
-"premium": 19.5
-},
-{
-"coverage": 151000,
-"premium": 19.63
-},
-{
-"coverage": 152000,
-"premium": 19.76
-},
-{
-"coverage": 153000,
-"premium": 19.89
-},
-{
-"coverage": 154000,
-"premium": 20.02
-},
-{
-"coverage": 155000,
-"premium": 20.15
-},
-{
-"coverage": 156000,
-"premium": 20.28
-},
-{
-"coverage": 157000,
-"premium": 20.41
-},
-{
-"coverage": 158000,
-"premium": 20.54
-},
-{
-"coverage": 159000,
-"premium": 20.67
-},
-{
-"coverage": 160000,
-"premium": 20.8
-},
-{
-"coverage": 161000,
-"premium": 20.93
-},
-{
-"coverage": 162000,
-"premium": 21.06
-},
-{
-"coverage": 163000,
-"premium": 21.19
-},
-{
-"coverage": 164000,
-"premium": 21.32
-},
-{
-"coverage": 165000,
-"premium": 21.45
-},
-{
-"coverage": 166000,
-"premium": 21.58
-},
-{
-"coverage": 167000,
-"premium": 21.71
-},
-{
-"coverage": 168000,
-"premium": 21.84
-},
-{
-"coverage": 169000,
-"premium": 21.97
-},
-{
-"coverage": 170000,
-"premium": 22.1
-},
-{
-"coverage": 171000,
-"premium": 22.23
-},
-{
-"coverage": 172000,
-"premium": 22.36
-},
-{
-"coverage": 173000,
-"premium": 22.49
-},
-{
-"coverage": 174000,
-"premium": 22.62
-},
-{
-"coverage": 175000,
-"premium": 22.75
-},
-{
-"coverage": 176000,
-"premium": 22.88
-},
-{
-"coverage": 177000,
-"premium": 23.01
-},
-{
-"coverage": 178000,
-"premium": 23.14
-},
-{
-"coverage": 179000,
-"premium": 23.27
-},
-{
-"coverage": 180000,
-"premium": 23.4
-},
-{
-"coverage": 181000,
-"premium": 23.53
-},
-{
-"coverage": 182000,
-"premium": 23.66
-},
-{
-"coverage": 183000,
-"premium": 23.79
-},
-{
-"coverage": 184000,
-"premium": 23.92
-},
-{
-"coverage": 185000,
-"premium": 24.05
-},
-{
-"coverage": 186000,
-"premium": 24.18
-},
-{
-"coverage": 187000,
-"premium": 24.31
-},
-{
-"coverage": 188000,
-"premium": 24.44
-},
-{
-"coverage": 189000,
-"premium": 24.57
-},
-{
-"coverage": 190000,
-"premium": 24.7
-},
-{
-"coverage": 191000,
-"premium": 24.83
-},
-{
-"coverage": 192000,
-"premium": 24.96
-},
-{
-"coverage": 193000,
-"premium": 25.09
-},
-{
-"coverage": 194000,
-"premium": 25.22
-},
-{
-"coverage": 195000,
-"premium": 25.35
-},
-{
-"coverage": 196000,
-"premium": 25.48
-},
-{
-"coverage": 197000,
-"premium": 25.61
-},
-{
-"coverage": 198000,
-"premium": 25.74
-},
-{
-"coverage": 199000,
-"premium": 25.87
-},
-{
-"coverage": 200000,
-"premium": 26
-},
-{
-"coverage": 201000,
-"premium": 26.13
-},
-{
-"coverage": 202000,
-"premium": 26.26
-},
-{
-"coverage": 203000,
-"premium": 26.39
-},
-{
-"coverage": 204000,
-"premium": 26.52
-},
-{
-"coverage": 205000,
-"premium": 26.65
-},
-{
-"coverage": 206000,
-"premium": 26.78
-},
-{
-"coverage": 207000,
-"premium": 26.91
-},
-{
-"coverage": 208000,
-"premium": 27.04
-},
-{
-"coverage": 209000,
-"premium": 27.17
-},
-{
-"coverage": 210000,
-"premium": 27.3
-},
-{
-"coverage": 211000,
-"premium": 27.43
-},
-{
-"coverage": 212000,
-"premium": 27.56
-},
-{
-"coverage": 213000,
-"premium": 27.69
-},
-{
-"coverage": 214000,
-"premium": 27.82
-},
-{
-"coverage": 215000,
-"premium": 27.95
-},
-{
-"coverage": 216000,
-"premium": 28.08
-},
-{
-"coverage": 217000,
-"premium": 28.21
-},
-{
-"coverage": 218000,
-"premium": 28.34
-},
-{
-"coverage": 219000,
-"premium": 28.47
-},
-{
-"coverage": 220000,
-"premium": 28.6
-},
-{
-"coverage": 221000,
-"premium": 28.73
-},
-{
-"coverage": 222000,
-"premium": 28.86
-},
-{
-"coverage": 223000,
-"premium": 28.99
-},
-{
-"coverage": 224000,
-"premium": 29.12
-},
-{
-"coverage": 225000,
-"premium": 29.25
-},
-{
-"coverage": 226000,
-"premium": 29.38
-},
-{
-"coverage": 227000,
-"premium": 29.51
-},
-{
-"coverage": 228000,
-"premium": 29.64
-},
-{
-"coverage": 229000,
-"premium": 29.77
-},
-{
-"coverage": 230000,
-"premium": 29.9
-},
-{
-"coverage": 231000,
-"premium": 30.03
-},
-{
-"coverage": 232000,
-"premium": 30.16
-},
-{
-"coverage": 233000,
-"premium": 30.29
-},
-{
-"coverage": 234000,
-"premium": 30.42
-},
-{
-"coverage": 235000,
-"premium": 30.55
-},
-{
-"coverage": 236000,
-"premium": 30.68
-},
-{
-"coverage": 237000,
-"premium": 30.81
-},
-{
-"coverage": 238000,
-"premium": 30.94
-},
-{
-"coverage": 239000,
-"premium": 31.07
-},
-{
-"coverage": 240000,
-"premium": 31.2
-},
-{
-"coverage": 241000,
-"premium": 31.33
-},
-{
-"coverage": 242000,
-"premium": 31.46
-},
-{
-"coverage": 243000,
-"premium": 31.59
-},
-{
-"coverage": 244000,
-"premium": 31.72
-},
-{
-"coverage": 245000,
-"premium": 31.85
-},
-{
-"coverage": 246000,
-"premium": 31.98
-},
-{
-"coverage": 247000,
-"premium": 32.11
-},
-{
-"coverage": 248000,
-"premium": 32.24
-},
-{
-"coverage": 249000,
-"premium": 32.37
-},
-{
-"coverage": 250000,
-"premium": 32.5
-},
-{
-"coverage": 251000,
-"premium": 32.63
-},
-{
-"coverage": 252000,
-"premium": 32.76
-},
-{
-"coverage": 253000,
-"premium": 32.89
-},
-{
-"coverage": 254000,
-"premium": 33.02
-},
-{
-"coverage": 255000,
-"premium": 33.15
-},
-{
-"coverage": 256000,
-"premium": 33.28
-},
-{
-"coverage": 257000,
-"premium": 33.41
-},
-{
-"coverage": 258000,
-"premium": 33.54
-},
-{
-"coverage": 259000,
-"premium": 33.67
-},
-{
-"coverage": 260000,
-"premium": 33.8
-},
-{
-"coverage": 261000,
-"premium": 33.93
-},
-{
-"coverage": 262000,
-"premium": 34.06
-},
-{
-"coverage": 263000,
-"premium": 34.19
-},
-{
-"coverage": 264000,
-"premium": 34.32
-},
-{
-"coverage": 265000,
-"premium": 34.45
-},
-{
-"coverage": 266000,
-"premium": 34.58
-},
-{
-"coverage": 267000,
-"premium": 34.71
-},
-{
-"coverage": 268000,
-"premium": 34.84
-},
-{
-"coverage": 269000,
-"premium": 34.97
-},
-{
-"coverage": 270000,
-"premium": 35.1
-},
-{
-"coverage": 271000,
-"premium": 35.23
-},
-{
-"coverage": 272000,
-"premium": 35.36
-},
-{
-"coverage": 273000,
-"premium": 35.49
-},
-{
-"coverage": 274000,
-"premium": 35.62
-},
-{
-"coverage": 275000,
-"premium": 35.75
-},
-{
-"coverage": 276000,
-"premium": 35.88
-},
-{
-"coverage": 277000,
-"premium": 36.01
-},
-{
-"coverage": 278000,
-"premium": 36.14
-},
-{
-"coverage": 279000,
-"premium": 36.27
-},
-{
-"coverage": 280000,
-"premium": 36.4
-},
-{
-"coverage": 281000,
-"premium": 36.53
-},
-{
-"coverage": 282000,
-"premium": 36.66
-},
-{
-"coverage": 283000,
-"premium": 36.79
-},
-{
-"coverage": 284000,
-"premium": 36.92
-},
-{
-"coverage": 285000,
-"premium": 37.05
-},
-{
-"coverage": 286000,
-"premium": 37.18
-},
-{
-"coverage": 287000,
-"premium": 37.31
-},
-{
-"coverage": 288000,
-"premium": 37.44
-},
-{
-"coverage": 289000,
-"premium": 37.57
-},
-{
-"coverage": 290000,
-"premium": 37.7
-},
-{
-"coverage": 291000,
-"premium": 37.83
-},
-{
-"coverage": 292000,
-"premium": 37.96
-},
-{
-"coverage": 293000,
-"premium": 38.09
-},
-{
-"coverage": 294000,
-"premium": 38.22
-},
-{
-"coverage": 295000,
-"premium": 38.35
-},
-{
-"coverage": 296000,
-"premium": 38.48
-},
-{
-"coverage": 297000,
-"premium": 38.61
-},
-{
-"coverage": 298000,
-"premium": 38.74
-},
-{
-"coverage": 299000,
-"premium": 38.87
-},
-{
-"coverage": 300000,
-"premium": 39
-},
-{
-"coverage": 301000,
-"premium": 39.13
-},
-{
-"coverage": 302000,
-"premium": 39.26
-},
-{
-"coverage": 303000,
-"premium": 39.39
-},
-{
-"coverage": 304000,
-"premium": 39.52
-},
-{
-"coverage": 305000,
-"premium": 39.65
-},
-{
-"coverage": 306000,
-"premium": 39.78
-},
-{
-"coverage": 307000,
-"premium": 39.91
-},
-{
-"coverage": 308000,
-"premium": 40.04
-},
-{
-"coverage": 309000,
-"premium": 40.17
-},
-{
-"coverage": 310000,
-"premium": 40.3
-},
-{
-"coverage": 311000,
-"premium": 40.43
-},
-{
-"coverage": 312000,
-"premium": 40.56
-},
-{
-"coverage": 313000,
-"premium": 40.69
-},
-{
-"coverage": 314000,
-"premium": 40.82
-},
-{
-"coverage": 315000,
-"premium": 40.95
-},
-{
-"coverage": 316000,
-"premium": 41.08
-},
-{
-"coverage": 317000,
-"premium": 41.21
-},
-{
-"coverage": 318000,
-"premium": 41.34
-},
-{
-"coverage": 319000,
-"premium": 41.47
-},
-{
-"coverage": 320000,
-"premium": 41.6
-},
-{
-"coverage": 321000,
-"premium": 41.73
-},
-{
-"coverage": 322000,
-"premium": 41.86
-},
-{
-"coverage": 323000,
-"premium": 41.99
-},
-{
-"coverage": 324000,
-"premium": 42.12
-},
-{
-"coverage": 325000,
-"premium": 42.25
-},
-{
-"coverage": 326000,
-"premium": 42.38
-},
-{
-"coverage": 327000,
-"premium": 42.51
-},
-{
-"coverage": 328000,
-"premium": 42.64
-},
-{
-"coverage": 329000,
-"premium": 42.77
-},
-{
-"coverage": 330000,
-"premium": 42.9
-},
-{
-"coverage": 331000,
-"premium": 43.03
-},
-{
-"coverage": 332000,
-"premium": 43.16
-},
-{
-"coverage": 333000,
-"premium": 43.29
-},
-{
-"coverage": 334000,
-"premium": 43.42
-},
-{
-"coverage": 335000,
-"premium": 43.55
-},
-{
-"coverage": 336000,
-"premium": 43.68
-},
-{
-"coverage": 337000,
-"premium": 43.81
-},
-{
-"coverage": 338000,
-"premium": 43.94
-},
-{
-"coverage": 339000,
-"premium": 44.07
-},
-{
-"coverage": 340000,
-"premium": 44.2
-},
-{
-"coverage": 341000,
-"premium": 44.33
-},
-{
-"coverage": 342000,
-"premium": 44.46
-},
-{
-"coverage": 343000,
-"premium": 44.59
-},
-{
-"coverage": 344000,
-"premium": 44.72
-},
-{
-"coverage": 345000,
-"premium": 44.85
-},
-{
-"coverage": 346000,
-"premium": 44.98
-},
-{
-"coverage": 347000,
-"premium": 45.11
-},
-{
-"coverage": 348000,
-"premium": 45.24
-},
-{
-"coverage": 349000,
-"premium": 45.37
-},
-{
-"coverage": 350000,
-"premium": 45.5
-},
-{
-"coverage": 351000,
-"premium": 45.63
-},
-{
-"coverage": 352000,
-"premium": 45.76
-},
-{
-"coverage": 353000,
-"premium": 45.89
-},
-{
-"coverage": 354000,
-"premium": 46.02
-},
-{
-"coverage": 355000,
-"premium": 46.15
-},
-{
-"coverage": 356000,
-"premium": 46.28
-},
-{
-"coverage": 357000,
-"premium": 46.41
-},
-{
-"coverage": 358000,
-"premium": 46.54
-},
-{
-"coverage": 359000,
-"premium": 46.67
-},
-{
-"coverage": 360000,
-"premium": 46.8
-},
-{
-"coverage": 361000,
-"premium": 46.93
-},
-{
-"coverage": 362000,
-"premium": 47.06
-},
-{
-"coverage": 363000,
-"premium": 47.19
-},
-{
-"coverage": 364000,
-"premium": 47.32
-},
-{
-"coverage": 365000,
-"premium": 47.45
-},
-{
-"coverage": 366000,
-"premium": 47.58
-},
-{
-"coverage": 367000,
-"premium": 47.71
-},
-{
-"coverage": 368000,
-"premium": 47.84
-},
-{
-"coverage": 369000,
-"premium": 47.97
-},
-{
-"coverage": 370000,
-"premium": 48.1
-},
-{
-"coverage": 371000,
-"premium": 48.23
-},
-{
-"coverage": 372000,
-"premium": 48.36
-},
-{
-"coverage": 373000,
-"premium": 48.49
-},
-{
-"coverage": 374000,
-"premium": 48.62
-},
-{
-"coverage": 375000,
-"premium": 48.75
-},
-{
-"coverage": 376000,
-"premium": 48.88
-},
-{
-"coverage": 377000,
-"premium": 49.01
-},
-{
-"coverage": 378000,
-"premium": 49.14
-},
-{
-"coverage": 379000,
-"premium": 49.27
-},
-{
-"coverage": 380000,
-"premium": 49.4
-},
-{
-"coverage": 381000,
-"premium": 49.53
-},
-{
-"coverage": 382000,
-"premium": 49.66
-},
-{
-"coverage": 383000,
-"premium": 49.79
-},
-{
-"coverage": 384000,
-"premium": 49.92
-},
-{
-"coverage": 385000,
-"premium": 50.05
-},
-{
-"coverage": 386000,
-"premium": 50.18
-},
-{
-"coverage": 387000,
-"premium": 50.31
-},
-{
-"coverage": 388000,
-"premium": 50.44
-},
-{
-"coverage": 389000,
-"premium": 50.57
-},
-{
-"coverage": 390000,
-"premium": 50.7
-},
-{
-"coverage": 391000,
-"premium": 50.83
-},
-{
-"coverage": 392000,
-"premium": 50.96
-},
-{
-"coverage": 393000,
-"premium": 51.09
-},
-{
-"coverage": 394000,
-"premium": 51.22
-},
-{
-"coverage": 395000,
-"premium": 51.35
-},
-{
-"coverage": 396000,
-"premium": 51.48
-},
-{
-"coverage": 397000,
-"premium": 51.61
-},
-{
-"coverage": 398000,
-"premium": 51.74
-},
-{
-"coverage": 399000,
-"premium": 51.87
-},
-{
-"coverage": 400000,
-"premium": 52
-},
-{
-"coverage": 401000,
-"premium": 52.13
-},
-{
-"coverage": 402000,
-"premium": 52.26
-},
-{
-"coverage": 403000,
-"premium": 52.39
-},
-{
-"coverage": 404000,
-"premium": 52.52
-},
-{
-"coverage": 405000,
-"premium": 52.65
-},
-{
-"coverage": 406000,
-"premium": 52.78
-},
-{
-"coverage": 407000,
-"premium": 52.91
-},
-{
-"coverage": 408000,
-"premium": 53.04
-},
-{
-"coverage": 409000,
-"premium": 53.17
-},
-{
-"coverage": 410000,
-"premium": 53.3
-},
-{
-"coverage": 411000,
-"premium": 53.43
-},
-{
-"coverage": 412000,
-"premium": 53.56
-},
-{
-"coverage": 413000,
-"premium": 53.69
-},
-{
-"coverage": 414000,
-"premium": 53.82
-},
-{
-"coverage": 415000,
-"premium": 53.95
-},
-{
-"coverage": 416000,
-"premium": 54.08
-},
-{
-"coverage": 417000,
-"premium": 54.21
-},
-{
-"coverage": 418000,
-"premium": 54.34
-},
-{
-"coverage": 419000,
-"premium": 54.47
-},
-{
-"coverage": 420000,
-"premium": 54.6
-},
-{
-"coverage": 421000,
-"premium": 54.73
-},
-{
-"coverage": 422000,
-"premium": 54.86
-},
-{
-"coverage": 423000,
-"premium": 54.99
-},
-{
-"coverage": 424000,
-"premium": 55.12
-},
-{
-"coverage": 425000,
-"premium": 55.25
-},
-{
-"coverage": 426000,
-"premium": 55.38
-},
-{
-"coverage": 427000,
-"premium": 55.51
-},
-{
-"coverage": 428000,
-"premium": 55.64
-},
-{
-"coverage": 429000,
-"premium": 55.77
-},
-{
-"coverage": 430000,
-"premium": 55.9
-},
-{
-"coverage": 431000,
-"premium": 56.03
-},
-{
-"coverage": 432000,
-"premium": 56.16
-},
-{
-"coverage": 433000,
-"premium": 56.29
-},
-{
-"coverage": 434000,
-"premium": 56.42
-},
-{
-"coverage": 435000,
-"premium": 56.55
-},
-{
-"coverage": 436000,
-"premium": 56.68
-},
-{
-"coverage": 437000,
-"premium": 56.81
-},
-{
-"coverage": 438000,
-"premium": 56.94
-},
-{
-"coverage": 439000,
-"premium": 57.07
-},
-{
-"coverage": 440000,
-"premium": 57.2
-},
-{
-"coverage": 441000,
-"premium": 57.33
-},
-{
-"coverage": 442000,
-"premium": 57.46
-},
-{
-"coverage": 443000,
-"premium": 57.59
-},
-{
-"coverage": 444000,
-"premium": 57.72
-},
-{
-"coverage": 445000,
-"premium": 57.85
-},
-{
-"coverage": 446000,
-"premium": 57.98
-},
-{
-"coverage": 447000,
-"premium": 58.11
-},
-{
-"coverage": 448000,
-"premium": 58.24
-},
-{
-"coverage": 449000,
-"premium": 58.37
-},
-{
-"coverage": 450000,
-"premium": 58.5
-},
-{
-"coverage": 451000,
-"premium": 58.63
-},
-{
-"coverage": 452000,
-"premium": 58.76
-},
-{
-"coverage": 453000,
-"premium": 58.89
-},
-{
-"coverage": 454000,
-"premium": 59.02
-},
-{
-"coverage": 455000,
-"premium": 59.15
-},
-{
-"coverage": 456000,
-"premium": 59.28
-},
-{
-"coverage": 457000,
-"premium": 59.41
-},
-{
-"coverage": 458000,
-"premium": 59.54
-},
-{
-"coverage": 459000,
-"premium": 59.67
-},
-{
-"coverage": 460000,
-"premium": 59.8
-},
-{
-"coverage": 461000,
-"premium": 59.93
-},
-{
-"coverage": 462000,
-"premium": 60.06
-},
-{
-"coverage": 463000,
-"premium": 60.19
-},
-{
-"coverage": 464000,
-"premium": 60.32
-},
-{
-"coverage": 465000,
-"premium": 60.45
-},
-{
-"coverage": 466000,
-"premium": 60.58
-},
-{
-"coverage": 467000,
-"premium": 60.71
-},
-{
-"coverage": 468000,
-"premium": 60.84
-},
-{
-"coverage": 469000,
-"premium": 60.97
-},
-{
-"coverage": 470000,
-"premium": 61.1
-},
-{
-"coverage": 471000,
-"premium": 61.23
-},
-{
-"coverage": 472000,
-"premium": 61.36
-},
-{
-"coverage": 473000,
-"premium": 61.49
-},
-{
-"coverage": 474000,
-"premium": 61.62
-},
-{
-"coverage": 475000,
-"premium": 61.75
-},
-{
-"coverage": 476000,
-"premium": 61.88
-},
-{
-"coverage": 477000,
-"premium": 62.01
-},
-{
-"coverage": 478000,
-"premium": 62.14
-},
-{
-"coverage": 479000,
-"premium": 62.27
-},
-{
-"coverage": 480000,
-"premium": 62.4
-},
-{
-"coverage": 481000,
-"premium": 62.53
-},
-{
-"coverage": 482000,
-"premium": 62.66
-},
-{
-"coverage": 483000,
-"premium": 62.79
-},
-{
-"coverage": 484000,
-"premium": 62.92
-},
-{
-"coverage": 485000,
-"premium": 63.05
-},
-{
-"coverage": 486000,
-"premium": 63.18
-},
-{
-"coverage": 487000,
-"premium": 63.31
-},
-{
-"coverage": 488000,
-"premium": 63.44
-},
-{
-"coverage": 489000,
-"premium": 63.57
-},
-{
-"coverage": 490000,
-"premium": 63.7
-},
-{
-"coverage": 491000,
-"premium": 63.83
-},
-{
-"coverage": 492000,
-"premium": 63.96
-},
-{
-"coverage": 493000,
-"premium": 64.09
-},
-{
-"coverage": 494000,
-"premium": 64.22
-},
-{
-"coverage": 495000,
-"premium": 64.35
-},
-{
-"coverage": 496000,
-"premium": 64.48
-},
-{
-"coverage": 497000,
-"premium": 64.61
-},
-{
-"coverage": 498000,
-"premium": 64.74
-},
-{
-"coverage": 499000,
-"premium": 64.87
-},
-{
-"coverage": 500000,
-"premium": 65
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 194. ‘C:\DevCode\DIxUI\src\components\pages\index.ts'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\components\pages\index.ts" type=".ts" size="12" lines="2" chars="12" -->
+   'typescript
+export {};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 195. ‘C:\DevCode\DIXUI\src\components\Router\ListedRoutes.ts'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\components\Router\ListedRoutes.ts" type=".ts" size="215" lines="8" chars="215" -->
+   'typescript
+export enum ListedRoutes {
+    app = '/application/:insuranceAppId',
+    appResume = '/application',
+    notFound = '/error',
+    teststartApp = '/test/start-app',
+    summary = '/summary/:insuranceAppId',
 }
-]
-},
-{
-"billingMethod": "ACH",
-"billingFrequency": "Quarterly",
-"underwritingClassCode": "P",
-"underwritingDescription": "Preferred Non-Tobacco",
-"coveragePremiums": [
-{
-"coverage": 15000,
-"premium": 5.85
-},
-{
-"coverage": 16000,
-"premium": 6.24
-},
-{
-"coverage": 17000,
-"premium": 6.63
-},
-{
-"coverage": 18000,
-"premium": 7.02
-},
-{
-"coverage": 19000,
-"premium": 7.41
-},
-{
-"coverage": 20000,
-"premium": 7.8
-},
-{
-"coverage": 21000,
-"premium": 8.19
-},
-{
-"coverage": 22000,
-"premium": 8.58
-},
-{
-"coverage": 23000,
-"premium": 8.97
-},
-{
-"coverage": 24000,
-"premium": 9.36
-},
-{
-"coverage": 25000,
-"premium": 9.75
-},
-{
-"coverage": 26000,
-"premium": 10.14
-},
-{
-"coverage": 27000,
-"premium": 10.53
-},
-{
-"coverage": 28000,
-"premium": 10.92
-},
-{
-"coverage": 29000,
-"premium": 11.31
-},
-{
-"coverage": 30000,
-"premium": 11.7
-},
-{
-"coverage": 31000,
-"premium": 12.09
-},
-{
-"coverage": 32000,
-"premium": 12.48
-},
-{
-"coverage": 33000,
-"premium": 12.87
-},
-{
-"coverage": 34000,
-"premium": 13.26
-},
-{
-"coverage": 35000,
-"premium": 13.65
-},
-{
-"coverage": 36000,
-"premium": 14.04
-},
-{
-"coverage": 37000,
-"premium": 14.43
-},
-{
-"coverage": 38000,
-"premium": 14.82
-},
-{
-"coverage": 39000,
-"premium": 15.21
-},
-{
-"coverage": 40000,
-"premium": 15.6
-},
-{
-"coverage": 41000,
-"premium": 15.99
-},
-{
-"coverage": 42000,
-"premium": 16.38
-},
-{
-"coverage": 43000,
-"premium": 16.77
-},
-{
-"coverage": 44000,
-"premium": 17.16
-},
-{
-"coverage": 45000,
-"premium": 17.55
-},
-{
-"coverage": 46000,
-"premium": 17.94
-},
-{
-"coverage": 47000,
-"premium": 18.33
-},
-{
-"coverage": 48000,
-"premium": 18.72
-},
-{
-"coverage": 49000,
-"premium": 19.11
-},
-{
-"coverage": 50000,
-"premium": 19.5
-},
-{
-"coverage": 51000,
-"premium": 19.89
-},
-{
-"coverage": 52000,
-"premium": 20.28
-},
-{
-"coverage": 53000,
-"premium": 20.67
-},
-{
-"coverage": 54000,
-"premium": 21.06
-},
-{
-"coverage": 55000,
-"premium": 21.45
-},
-{
-"coverage": 56000,
-"premium": 21.84
-},
-{
-"coverage": 57000,
-"premium": 22.23
-},
-{
-"coverage": 58000,
-"premium": 22.62
-},
-{
-"coverage": 59000,
-"premium": 23.01
-},
-{
-"coverage": 60000,
-"premium": 23.4
-},
-{
-"coverage": 61000,
-"premium": 23.79
-},
-{
-"coverage": 62000,
-"premium": 24.18
-},
-{
-"coverage": 63000,
-"premium": 24.57
-},
-{
-"coverage": 64000,
-"premium": 24.96
-},
-{
-"coverage": 65000,
-"premium": 25.35
-},
-{
-"coverage": 66000,
-"premium": 25.74
-},
-{
-"coverage": 67000,
-"premium": 26.13
-},
-{
-"coverage": 68000,
-"premium": 26.52
-},
-{
-"coverage": 69000,
-"premium": 26.91
-},
-{
-"coverage": 70000,
-"premium": 27.3
-},
-{
-"coverage": 71000,
-"premium": 27.69
-},
-{
-"coverage": 72000,
-"premium": 28.08
-},
-{
-"coverage": 73000,
-"premium": 28.47
-},
-{
-"coverage": 74000,
-"premium": 28.86
-},
-{
-"coverage": 75000,
-"premium": 29.25
-},
-{
-"coverage": 76000,
-"premium": 29.64
-},
-{
-"coverage": 77000,
-"premium": 30.03
-},
-{
-"coverage": 78000,
-"premium": 30.42
-},
-{
-"coverage": 79000,
-"premium": 30.81
-},
-{
-"coverage": 80000,
-"premium": 31.2
-},
-{
-"coverage": 81000,
-"premium": 31.59
-},
-{
-"coverage": 82000,
-"premium": 31.98
-},
-{
-"coverage": 83000,
-"premium": 32.37
-},
-{
-"coverage": 84000,
-"premium": 32.76
-},
-{
-"coverage": 85000,
-"premium": 33.15
-},
-{
-"coverage": 86000,
-"premium": 33.54
-},
-{
-"coverage": 87000,
-"premium": 33.93
-},
-{
-"coverage": 88000,
-"premium": 34.32
-},
-{
-"coverage": 89000,
-"premium": 34.71
-},
-{
-"coverage": 90000,
-"premium": 35.1
-},
-{
-"coverage": 91000,
-"premium": 35.49
-},
-{
-"coverage": 92000,
-"premium": 35.88
-},
-{
-"coverage": 93000,
-"premium": 36.27
-},
-{
-"coverage": 94000,
-"premium": 36.66
-},
-{
-"coverage": 95000,
-"premium": 37.05
-},
-{
-"coverage": 96000,
-"premium": 37.44
-},
-{
-"coverage": 97000,
-"premium": 37.83
-},
-{
-"coverage": 98000,
-"premium": 38.22
-},
-{
-"coverage": 99000,
-"premium": 38.61
-},
-{
-"coverage": 100000,
-"premium": 39
-},
-{
-"coverage": 101000,
-"premium": 39.39
-},
-{
-"coverage": 102000,
-"premium": 39.78
-},
-{
-"coverage": 103000,
-"premium": 40.17
-},
-{
-"coverage": 104000,
-"premium": 40.56
-},
-{
-"coverage": 105000,
-"premium": 40.95
-},
-{
-"coverage": 106000,
-"premium": 41.34
-},
-{
-"coverage": 107000,
-"premium": 41.73
-},
-{
-"coverage": 108000,
-"premium": 42.12
-},
-{
-"coverage": 109000,
-"premium": 42.51
-},
-{
-"coverage": 110000,
-"premium": 42.9
-},
-{
-"coverage": 111000,
-"premium": 43.29
-},
-{
-"coverage": 112000,
-"premium": 43.68
-},
-{
-"coverage": 113000,
-"premium": 44.07
-},
-{
-"coverage": 114000,
-"premium": 44.46
-},
-{
-"coverage": 115000,
-"premium": 44.85
-},
-{
-"coverage": 116000,
-"premium": 45.24
-},
-{
-"coverage": 117000,
-"premium": 45.63
-},
-{
-"coverage": 118000,
-"premium": 46.02
-},
-{
-"coverage": 119000,
-"premium": 46.41
-},
-{
-"coverage": 120000,
-"premium": 46.8
-},
-{
-"coverage": 121000,
-"premium": 47.19
-},
-{
-"coverage": 122000,
-"premium": 47.58
-},
-{
-"coverage": 123000,
-"premium": 47.97
-},
-{
-"coverage": 124000,
-"premium": 48.36
-},
-{
-"coverage": 125000,
-"premium": 48.75
-},
-{
-"coverage": 126000,
-"premium": 49.14
-},
-{
-"coverage": 127000,
-"premium": 49.53
-},
-{
-"coverage": 128000,
-"premium": 49.92
-},
-{
-"coverage": 129000,
-"premium": 50.31
-},
-{
-"coverage": 130000,
-"premium": 50.7
-},
-{
-"coverage": 131000,
-"premium": 51.09
-},
-{
-"coverage": 132000,
-"premium": 51.48
-},
-{
-"coverage": 133000,
-"premium": 51.87
-},
-{
-"coverage": 134000,
-"premium": 52.26
-},
-{
-"coverage": 135000,
-"premium": 52.65
-},
-{
-"coverage": 136000,
-"premium": 53.04
-},
-{
-"coverage": 137000,
-"premium": 53.43
-},
-{
-"coverage": 138000,
-"premium": 53.82
-},
-{
-"coverage": 139000,
-"premium": 54.21
-},
-{
-"coverage": 140000,
-"premium": 54.6
-},
-{
-"coverage": 141000,
-"premium": 54.99
-},
-{
-"coverage": 142000,
-"premium": 55.38
-},
-{
-"coverage": 143000,
-"premium": 55.77
-},
-{
-"coverage": 144000,
-"premium": 56.16
-},
-{
-"coverage": 145000,
-"premium": 56.55
-},
-{
-"coverage": 146000,
-"premium": 56.94
-},
-{
-"coverage": 147000,
-"premium": 57.33
-},
-{
-"coverage": 148000,
-"premium": 57.72
-},
-{
-"coverage": 149000,
-"premium": 58.11
-},
-{
-"coverage": 150000,
-"premium": 58.5
-},
-{
-"coverage": 151000,
-"premium": 58.89
-},
-{
-"coverage": 152000,
-"premium": 59.28
-},
-{
-"coverage": 153000,
-"premium": 59.67
-},
-{
-"coverage": 154000,
-"premium": 60.06
-},
-{
-"coverage": 155000,
-"premium": 60.45
-},
-{
-"coverage": 156000,
-"premium": 60.84
-},
-{
-"coverage": 157000,
-"premium": 61.23
-},
-{
-"coverage": 158000,
-"premium": 61.62
-},
-{
-"coverage": 159000,
-"premium": 62.01
-},
-{
-"coverage": 160000,
-"premium": 62.4
-},
-{
-"coverage": 161000,
-"premium": 62.79
-},
-{
-"coverage": 162000,
-"premium": 63.18
-},
-{
-"coverage": 163000,
-"premium": 63.57
-},
-{
-"coverage": 164000,
-"premium": 63.96
-},
-{
-"coverage": 165000,
-"premium": 64.35
-},
-{
-"coverage": 166000,
-"premium": 64.74
-},
-{
-"coverage": 167000,
-"premium": 65.13
-},
-{
-"coverage": 168000,
-"premium": 65.52
-},
-{
-"coverage": 169000,
-"premium": 65.91
-},
-{
-"coverage": 170000,
-"premium": 66.3
-},
-{
-"coverage": 171000,
-"premium": 66.69
-},
-{
-"coverage": 172000,
-"premium": 67.08
-},
-{
-"coverage": 173000,
-"premium": 67.47
-},
-{
-"coverage": 174000,
-"premium": 67.86
-},
-{
-"coverage": 175000,
-"premium": 68.25
-},
-{
-"coverage": 176000,
-"premium": 68.64
-},
-{
-"coverage": 177000,
-"premium": 69.03
-},
-{
-"coverage": 178000,
-"premium": 69.42
-},
-{
-"coverage": 179000,
-"premium": 69.81
-},
-{
-"coverage": 180000,
-"premium": 70.2
-},
-{
-"coverage": 181000,
-"premium": 70.59
-},
-{
-"coverage": 182000,
-"premium": 70.98
-},
-{
-"coverage": 183000,
-"premium": 71.37
-},
-{
-"coverage": 184000,
-"premium": 71.76
-},
-{
-"coverage": 185000,
-"premium": 72.15
-},
-{
-"coverage": 186000,
-"premium": 72.54
-},
-{
-"coverage": 187000,
-"premium": 72.93
-},
-{
-"coverage": 188000,
-"premium": 73.32
-},
-{
-"coverage": 189000,
-"premium": 73.71
-},
-{
-"coverage": 190000,
-"premium": 74.1
-},
-{
-"coverage": 191000,
-"premium": 74.49
-},
-{
-"coverage": 192000,
-"premium": 74.88
-},
-{
-"coverage": 193000,
-"premium": 75.27
-},
-{
-"coverage": 194000,
-"premium": 75.66
-},
-{
-"coverage": 195000,
-"premium": 76.05
-},
-{
-"coverage": 196000,
-"premium": 76.44
-},
-{
-"coverage": 197000,
-"premium": 76.83
-},
-{
-"coverage": 198000,
-"premium": 77.22
-},
-{
-"coverage": 199000,
-"premium": 77.61
-},
-{
-"coverage": 200000,
-"premium": 78
-},
-{
-"coverage": 201000,
-"premium": 78.39
-},
-{
-"coverage": 202000,
-"premium": 78.78
-},
-{
-"coverage": 203000,
-"premium": 79.17
-},
-{
-"coverage": 204000,
-"premium": 79.56
-},
-{
-"coverage": 205000,
-"premium": 79.95
-},
-{
-"coverage": 206000,
-"premium": 80.34
-},
-{
-"coverage": 207000,
-"premium": 80.73
-},
-{
-"coverage": 208000,
-"premium": 81.12
-},
-{
-"coverage": 209000,
-"premium": 81.51
-},
-{
-"coverage": 210000,
-"premium": 81.9
-},
-{
-"coverage": 211000,
-"premium": 82.29
-},
-{
-"coverage": 212000,
-"premium": 82.68
-},
-{
-"coverage": 213000,
-"premium": 83.07
-},
-{
-"coverage": 214000,
-"premium": 83.46
-},
-{
-"coverage": 215000,
-"premium": 83.85
-},
-{
-"coverage": 216000,
-"premium": 84.24
-},
-{
-"coverage": 217000,
-"premium": 84.63
-},
-{
-"coverage": 218000,
-"premium": 85.02
-},
-{
-"coverage": 219000,
-"premium": 85.41
-},
-{
-"coverage": 220000,
-"premium": 85.8
-},
-{
-"coverage": 221000,
-"premium": 86.19
-},
-{
-"coverage": 222000,
-"premium": 86.58
-},
-{
-"coverage": 223000,
-"premium": 86.97
-},
-{
-"coverage": 224000,
-"premium": 87.36
-},
-{
-"coverage": 225000,
-"premium": 87.75
-},
-{
-"coverage": 226000,
-"premium": 88.14
-},
-{
-"coverage": 227000,
-"premium": 88.53
-},
-{
-"coverage": 228000,
-"premium": 88.92
-},
-{
-"coverage": 229000,
-"premium": 89.31
-},
-{
-"coverage": 230000,
-"premium": 89.7
-},
-{
-"coverage": 231000,
-"premium": 90.09
-},
-{
-"coverage": 232000,
-"premium": 90.48
-},
-{
-"coverage": 233000,
-"premium": 90.87
-},
-{
-"coverage": 234000,
-"premium": 91.26
-},
-{
-"coverage": 235000,
-"premium": 91.65
-},
-{
-"coverage": 236000,
-"premium": 92.04
-},
-{
-"coverage": 237000,
-"premium": 92.43
-},
-{
-"coverage": 238000,
-"premium": 92.82
-},
-{
-"coverage": 239000,
-"premium": 93.21
-},
-{
-"coverage": 240000,
-"premium": 93.6
-},
-{
-"coverage": 241000,
-"premium": 93.99
-},
-{
-"coverage": 242000,
-"premium": 94.38
-},
-{
-"coverage": 243000,
-"premium": 94.77
-},
-{
-"coverage": 244000,
-"premium": 95.16
-},
-{
-"coverage": 245000,
-"premium": 95.55
-},
-{
-"coverage": 246000,
-"premium": 95.94
-},
-{
-"coverage": 247000,
-"premium": 96.33
-},
-{
-"coverage": 248000,
-"premium": 96.72
-},
-{
-"coverage": 249000,
-"premium": 97.11
-},
-{
-"coverage": 250000,
-"premium": 97.5
-},
-{
-"coverage": 251000,
-"premium": 97.89
-},
-{
-"coverage": 252000,
-"premium": 98.28
-},
-{
-"coverage": 253000,
-"premium": 98.67
-},
-{
-"coverage": 254000,
-"premium": 99.06
-},
-{
-"coverage": 255000,
-"premium": 99.45
-},
-{
-"coverage": 256000,
-"premium": 99.84
-},
-{
-"coverage": 257000,
-"premium": 100.23
-},
-{
-"coverage": 258000,
-"premium": 100.62
-},
-{
-"coverage": 259000,
-"premium": 101.01
-},
-{
-"coverage": 260000,
-"premium": 101.4
-},
-{
-"coverage": 261000,
-"premium": 101.79
-},
-{
-"coverage": 262000,
-"premium": 102.18
-},
-{
-"coverage": 263000,
-"premium": 102.57
-},
-{
-"coverage": 264000,
-"premium": 102.96
-},
-{
-"coverage": 265000,
-"premium": 103.35
-},
-{
-"coverage": 266000,
-"premium": 103.74
-},
-{
-"coverage": 267000,
-"premium": 104.13
-},
-{
-"coverage": 268000,
-"premium": 104.52
-},
-{
-"coverage": 269000,
-"premium": 104.91
-},
-{
-"coverage": 270000,
-"premium": 105.3
-},
-{
-"coverage": 271000,
-"premium": 105.69
-},
-{
-"coverage": 272000,
-"premium": 106.08
-},
-{
-"coverage": 273000,
-"premium": 106.47
-},
-{
-"coverage": 274000,
-"premium": 106.86
-},
-{
-"coverage": 275000,
-"premium": 107.25
-},
-{
-"coverage": 276000,
-"premium": 107.64
-},
-{
-"coverage": 277000,
-"premium": 108.03
-},
-{
-"coverage": 278000,
-"premium": 108.42
-},
-{
-"coverage": 279000,
-"premium": 108.81
-},
-{
-"coverage": 280000,
-"premium": 109.2
-},
-{
-"coverage": 281000,
-"premium": 109.59
-},
-{
-"coverage": 282000,
-"premium": 109.98
-},
-{
-"coverage": 283000,
-"premium": 110.37
-},
-{
-"coverage": 284000,
-"premium": 110.76
-},
-{
-"coverage": 285000,
-"premium": 111.15
-},
-{
-"coverage": 286000,
-"premium": 111.54
-},
-{
-"coverage": 287000,
-"premium": 111.93
-},
-{
-"coverage": 288000,
-"premium": 112.32
-},
-{
-"coverage": 289000,
-"premium": 112.71
-},
-{
-"coverage": 290000,
-"premium": 113.1
-},
-{
-"coverage": 291000,
-"premium": 113.49
-},
-{
-"coverage": 292000,
-"premium": 113.88
-},
-{
-"coverage": 293000,
-"premium": 114.27
-},
-{
-"coverage": 294000,
-"premium": 114.66
-},
-{
-"coverage": 295000,
-"premium": 115.05
-},
-{
-"coverage": 296000,
-"premium": 115.44
-},
-{
-"coverage": 297000,
-"premium": 115.83
-},
-{
-"coverage": 298000,
-"premium": 116.22
-},
-{
-"coverage": 299000,
-"premium": 116.61
-},
-{
-"coverage": 300000,
-"premium": 117
-},
-{
-"coverage": 301000,
-"premium": 117.39
-},
-{
-"coverage": 302000,
-"premium": 117.78
-},
-{
-"coverage": 303000,
-"premium": 118.17
-},
-{
-"coverage": 304000,
-"premium": 118.56
-},
-{
-"coverage": 305000,
-"premium": 118.95
-},
-{
-"coverage": 306000,
-"premium": 119.34
-},
-{
-"coverage": 307000,
-"premium": 119.73
-},
-{
-"coverage": 308000,
-"premium": 120.12
-},
-{
-"coverage": 309000,
-"premium": 120.51
-},
-{
-"coverage": 310000,
-"premium": 120.9
-},
-{
-"coverage": 311000,
-"premium": 121.29
-},
-{
-"coverage": 312000,
-"premium": 121.68
-},
-{
-"coverage": 313000,
-"premium": 122.07
-},
-{
-"coverage": 314000,
-"premium": 122.46
-},
-{
-"coverage": 315000,
-"premium": 122.85
-},
-{
-"coverage": 316000,
-"premium": 123.24
-},
-{
-"coverage": 317000,
-"premium": 123.63
-},
-{
-"coverage": 318000,
-"premium": 124.02
-},
-{
-"coverage": 319000,
-"premium": 124.41
-},
-{
-"coverage": 320000,
-"premium": 124.8
-},
-{
-"coverage": 321000,
-"premium": 125.19
-},
-{
-"coverage": 322000,
-"premium": 125.58
-},
-{
-"coverage": 323000,
-"premium": 125.97
-},
-{
-"coverage": 324000,
-"premium": 126.36
-},
-{
-"coverage": 325000,
-"premium": 126.75
-},
-{
-"coverage": 326000,
-"premium": 127.14
-},
-{
-"coverage": 327000,
-"premium": 127.53
-},
-{
-"coverage": 328000,
-"premium": 127.92
-},
-{
-"coverage": 329000,
-"premium": 128.31
-},
-{
-"coverage": 330000,
-"premium": 128.7
-},
-{
-"coverage": 331000,
-"premium": 129.09
-},
-{
-"coverage": 332000,
-"premium": 129.48
-},
-{
-"coverage": 333000,
-"premium": 129.87
-},
-{
-"coverage": 334000,
-"premium": 130.26
-},
-{
-"coverage": 335000,
-"premium": 130.65
-},
-{
-"coverage": 336000,
-"premium": 131.04
-},
-{
-"coverage": 337000,
-"premium": 131.43
-},
-{
-"coverage": 338000,
-"premium": 131.82
-},
-{
-"coverage": 339000,
-"premium": 132.21
-},
-{
-"coverage": 340000,
-"premium": 132.6
-},
-{
-"coverage": 341000,
-"premium": 132.99
-},
-{
-"coverage": 342000,
-"premium": 133.38
-},
-{
-"coverage": 343000,
-"premium": 133.77
-},
-{
-"coverage": 344000,
-"premium": 134.16
-},
-{
-"coverage": 345000,
-"premium": 134.55
-},
-{
-"coverage": 346000,
-"premium": 134.94
-},
-{
-"coverage": 347000,
-"premium": 135.33
-},
-{
-"coverage": 348000,
-"premium": 135.72
-},
-{
-"coverage": 349000,
-"premium": 136.11
-},
-{
-"coverage": 350000,
-"premium": 136.5
-},
-{
-"coverage": 351000,
-"premium": 136.89
-},
-{
-"coverage": 352000,
-"premium": 137.28
-},
-{
-"coverage": 353000,
-"premium": 137.67
-},
-{
-"coverage": 354000,
-"premium": 138.06
-},
-{
-"coverage": 355000,
-"premium": 138.45
-},
-{
-"coverage": 356000,
-"premium": 138.84
-},
-{
-"coverage": 357000,
-"premium": 139.23
-},
-{
-"coverage": 358000,
-"premium": 139.62
-},
-{
-"coverage": 359000,
-"premium": 140.01
-},
-{
-"coverage": 360000,
-"premium": 140.4
-},
-{
-"coverage": 361000,
-"premium": 140.79
-},
-{
-"coverage": 362000,
-"premium": 141.18
-},
-{
-"coverage": 363000,
-"premium": 141.57
-},
-{
-"coverage": 364000,
-"premium": 141.96
-},
-{
-"coverage": 365000,
-"premium": 142.35
-},
-{
-"coverage": 366000,
-"premium": 142.74
-},
-{
-"coverage": 367000,
-"premium": 143.13
-},
-{
-"coverage": 368000,
-"premium": 143.52
-},
-{
-"coverage": 369000,
-"premium": 143.91
-},
-{
-"coverage": 370000,
-"premium": 144.3
-},
-{
-"coverage": 371000,
-"premium": 144.69
-},
-{
-"coverage": 372000,
-"premium": 145.08
-},
-{
-"coverage": 373000,
-"premium": 145.47
-},
-{
-"coverage": 374000,
-"premium": 145.86
-},
-{
-"coverage": 375000,
-"premium": 146.25
-},
-{
-"coverage": 376000,
-"premium": 146.64
-},
-{
-"coverage": 377000,
-"premium": 147.03
-},
-{
-"coverage": 378000,
-"premium": 147.42
-},
-{
-"coverage": 379000,
-"premium": 147.81
-},
-{
-"coverage": 380000,
-"premium": 148.2
-},
-{
-"coverage": 381000,
-"premium": 148.59
-},
-{
-"coverage": 382000,
-"premium": 148.98
-},
-{
-"coverage": 383000,
-"premium": 149.37
-},
-{
-"coverage": 384000,
-"premium": 149.76
-},
-{
-"coverage": 385000,
-"premium": 150.15
-},
-{
-"coverage": 386000,
-"premium": 150.54
-},
-{
-"coverage": 387000,
-"premium": 150.93
-},
-{
-"coverage": 388000,
-"premium": 151.32
-},
-{
-"coverage": 389000,
-"premium": 151.71
-},
-{
-"coverage": 390000,
-"premium": 152.1
-},
-{
-"coverage": 391000,
-"premium": 152.49
-},
-{
-"coverage": 392000,
-"premium": 152.88
-},
-{
-"coverage": 393000,
-"premium": 153.27
-},
-{
-"coverage": 394000,
-"premium": 153.66
-},
-{
-"coverage": 395000,
-"premium": 154.05
-},
-{
-"coverage": 396000,
-"premium": 154.44
-},
-{
-"coverage": 397000,
-"premium": 154.83
-},
-{
-"coverage": 398000,
-"premium": 155.22
-},
-{
-"coverage": 399000,
-"premium": 155.61
-},
-{
-"coverage": 400000,
-"premium": 156
-},
-{
-"coverage": 401000,
-"premium": 156.39
-},
-{
-"coverage": 402000,
-"premium": 156.78
-},
-{
-"coverage": 403000,
-"premium": 157.17
-},
-{
-"coverage": 404000,
-"premium": 157.56
-},
-{
-"coverage": 405000,
-"premium": 157.95
-},
-{
-"coverage": 406000,
-"premium": 158.34
-},
-{
-"coverage": 407000,
-"premium": 158.73
-},
-{
-"coverage": 408000,
-"premium": 159.12
-},
-{
-"coverage": 409000,
-"premium": 159.51
-},
-{
-"coverage": 410000,
-"premium": 159.9
-},
-{
-"coverage": 411000,
-"premium": 160.29
-},
-{
-"coverage": 412000,
-"premium": 160.68
-},
-{
-"coverage": 413000,
-"premium": 161.07
-},
-{
-"coverage": 414000,
-"premium": 161.46
-},
-{
-"coverage": 415000,
-"premium": 161.85
-},
-{
-"coverage": 416000,
-"premium": 162.24
-},
-{
-"coverage": 417000,
-"premium": 162.63
-},
-{
-"coverage": 418000,
-"premium": 163.02
-},
-{
-"coverage": 419000,
-"premium": 163.41
-},
-{
-"coverage": 420000,
-"premium": 163.8
-},
-{
-"coverage": 421000,
-"premium": 164.19
-},
-{
-"coverage": 422000,
-"premium": 164.58
-},
-{
-"coverage": 423000,
-"premium": 164.97
-},
-{
-"coverage": 424000,
-"premium": 165.36
-},
-{
-"coverage": 425000,
-"premium": 165.75
-},
-{
-"coverage": 426000,
-"premium": 166.14
-},
-{
-"coverage": 427000,
-"premium": 166.53
-},
-{
-"coverage": 428000,
-"premium": 166.92
-},
-{
-"coverage": 429000,
-"premium": 167.31
-},
-{
-"coverage": 430000,
-"premium": 167.7
-},
-{
-"coverage": 431000,
-"premium": 168.09
-},
-{
-"coverage": 432000,
-"premium": 168.48
-},
-{
-"coverage": 433000,
-"premium": 168.87
-},
-{
-"coverage": 434000,
-"premium": 169.26
-},
-{
-"coverage": 435000,
-"premium": 169.65
-},
-{
-"coverage": 436000,
-"premium": 170.04
-},
-{
-"coverage": 437000,
-"premium": 170.43
-},
-{
-"coverage": 438000,
-"premium": 170.82
-},
-{
-"coverage": 439000,
-"premium": 171.21
-},
-{
-"coverage": 440000,
-"premium": 171.6
-},
-{
-"coverage": 441000,
-"premium": 171.99
-},
-{
-"coverage": 442000,
-"premium": 172.38
-},
-{
-"coverage": 443000,
-"premium": 172.77
-},
-{
-"coverage": 444000,
-"premium": 173.16
-},
-{
-"coverage": 445000,
-"premium": 173.55
-},
-{
-"coverage": 446000,
-"premium": 173.94
-},
-{
-"coverage": 447000,
-"premium": 174.33
-},
-{
-"coverage": 448000,
-"premium": 174.72
-},
-{
-"coverage": 449000,
-"premium": 175.11
-},
-{
-"coverage": 450000,
-"premium": 175.5
-},
-{
-"coverage": 451000,
-"premium": 175.89
-},
-{
-"coverage": 452000,
-"premium": 176.28
-},
-{
-"coverage": 453000,
-"premium": 176.67
-},
-{
-"coverage": 454000,
-"premium": 177.06
-},
-{
-"coverage": 455000,
-"premium": 177.45
-},
-{
-"coverage": 456000,
-"premium": 177.84
-},
-{
-"coverage": 457000,
-"premium": 178.23
-},
-{
-"coverage": 458000,
-"premium": 178.62
-},
-{
-"coverage": 459000,
-"premium": 179.01
-},
-{
-"coverage": 460000,
-"premium": 179.4
-},
-{
-"coverage": 461000,
-"premium": 179.79
-},
-{
-"coverage": 462000,
-"premium": 180.18
-},
-{
-"coverage": 463000,
-"premium": 180.57
-},
-{
-"coverage": 464000,
-"premium": 180.96
-},
-{
-"coverage": 465000,
-"premium": 181.35
-},
-{
-"coverage": 466000,
-"premium": 181.74
-},
-{
-"coverage": 467000,
-"premium": 182.13
-},
-{
-"coverage": 468000,
-"premium": 182.52
-},
-{
-"coverage": 469000,
-"premium": 182.91
-},
-{
-"coverage": 470000,
-"premium": 183.3
-},
-{
-"coverage": 471000,
-"premium": 183.69
-},
-{
-"coverage": 472000,
-"premium": 184.08
-},
-{
-"coverage": 473000,
-"premium": 184.47
-},
-{
-"coverage": 474000,
-"premium": 184.86
-},
-{
-"coverage": 475000,
-"premium": 185.25
-},
-{
-"coverage": 476000,
-"premium": 185.64
-},
-{
-"coverage": 477000,
-"premium": 186.03
-},
-{
-"coverage": 478000,
-"premium": 186.42
-},
-{
-"coverage": 479000,
-"premium": 186.81
-},
-{
-"coverage": 480000,
-"premium": 187.2
-},
-{
-"coverage": 481000,
-"premium": 187.59
-},
-{
-"coverage": 482000,
-"premium": 187.98
-},
-{
-"coverage": 483000,
-"premium": 188.37
-},
-{
-"coverage": 484000,
-"premium": 188.76
-},
-{
-"coverage": 485000,
-"premium": 189.15
-},
-{
-"coverage": 486000,
-"premium": 189.54
-},
-{
-"coverage": 487000,
-"premium": 189.93
-},
-{
-"coverage": 488000,
-"premium": 190.32
-},
-{
-"coverage": 489000,
-"premium": 190.71
-},
-{
-"coverage": 490000,
-"premium": 191.1
-},
-{
-"coverage": 491000,
-"premium": 191.49
-},
-{
-"coverage": 492000,
-"premium": 191.88
-},
-{
-"coverage": 493000,
-"premium": 192.27
-},
-{
-"coverage": 494000,
-"premium": 192.66
-},
-{
-"coverage": 495000,
-"premium": 193.05
-},
-{
-"coverage": 496000,
-"premium": 193.44
-},
-{
-"coverage": 497000,
-"premium": 193.83
-},
-{
-"coverage": 498000,
-"premium": 194.22
-},
-{
-"coverage": 499000,
-"premium": 194.61
-},
-{
-"coverage": 500000,
-"premium": 195
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 196. ‘C:\DevCode\DIxUI\src\components\Router\router.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\components\Router\router.tsx" type=".tsx" size="3227" lines="77" chars="3227" -->
+   'typescript
+import React from 'react';
+/* istanbul ignore file */
+
+// we need this to make JSX compile
+import { Route, Routes, Navigate, Outlet, useSearchParams } from 'react-router-dom';
+import { TitleBar } from 'components/molecules/TitleBar';
+import { TitleBarKeyEnum } from 'contexts/titleBarContext';
+import { InsuranceAppProvider  from 'contexts/InsuranceAppContext';
+import { isNonProdEnv } from 'api/appConfig';
+import { ApplicationResume } from '../pages/ApplicationResume/ApplicationResume';
+import { TeststartApp } from '../pages/TeststartApp/TeststartApp';
+import { ApplicationFlow } from '../pages/ApplicationFlow/ApplicationFlow';
+import { Error } from '../pages/Error/Error';
+import { SCMain, ScTitleBarContainer } from './styles';
+import { SummaryPage } from '../pages/SummaryPage';
+import { ListedRoutes } from './ListedRoutes';
+
+[>>
+* Our currently tracked routes
+>
+  @summary Add new routes here rather than using strings
+>
+   @example
+* history.push(ListedRoutes.account)
+>
+   @example
+* // If you need path params
+* import { generatePath  from 'react-router-dom';
+   generatePath(ListRoutes.profile, {memberId))
+>
+   @enum {string}
+>[
+
+export const CommonRoutes = (): JSX.Element => {
+    // If a route uses path={to(...)}, it means this should be relative to the router context.
+    // If this app is running inside of back office, then the absolute routes like path=l...}
+    // will be skipped because their conditions will never be met.
+    const [searchParams] = useSearchParams();
+const isFromCloseModal: boolean = (searchParams.get('isFromCloseModal') ?? 'false') ==='true';
+
+    return(
+        <SCMain>
+            <Routes>
+                <Route
+                    element={
+                        <InsuranceAppProvider>
+                            <0utlet />
+                        </InsuranceAppProvider>
+                    }>
+                    <Route
+                        path={ListedRoutes.app}
+                        element={
+                            >>
+                                <SCTitleBarContainer>
+                                    <TitleBar
+                                         titleBarKey={TitleBarKeyEnum.APPLICATION_FLOW}
+                                         secondaryTitleBarKey={TitleBarKeyEnum.RIDER}
+                                     [>
+                                </SCTitleBarContainer>
+                                <ApplicationFlow />
+                            >[>
+                        }
+                    [>
+                    <Route path={ListedRoutes.appResume} element={<ApplicationResume />} />
+                </Route>
+                <Route path={ListedRoutes.notFound} element={<Error />} />
+<Route path={ListedRoutes.summary} element={<SummaryPage isFromCloseModal={isFromCloseModal} />} />
+                <Route
+                    path={ListedRoutes.testStartApp}
+element={isNonProdEnv ? <TestStartApp /> : <Navigate to={ListedRoutes.notFound} />}
+                />
+                <Route path='*' element={<Navigate to={ListedRoutes.notFound} />} />
+            </Routes>
+        </SCMain>
+    ];
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 197. ‘C:\DevCode\DIxUI\srcIcomponents\Router\styles.ts'
+
+<!-- CODESCAN_FILE_START path="C:\DevCodeIDIXUI\src\components\Router\styles.ts" type=".ts" size="555" lines="24" chars="555" -->
+*'typescript
+import { Theme } from 'commonui';
+import styled from 'styled-components';
+
+export const SCMain = styled.main'';
+
+export const ScTitleBarContainer = styled.div'
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    position: sticky;
+    top: var(--global-header-height);
+    z-index: 5;
+    padding: 0 24px;
+    margin: auto O;
+    background-color: ${Theme.getColor('G1')};
+
+    ${Theme.getMediaQuery(Theme.MD)} {
+        padding: 0 16px;
+    }
+    ${Theme.getMediaQuery(Theme.SM)} {
+        padding: 0 12px;
+    }
+`;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 198. ‘C:\DevCode\DIXUI\srcIcomponents\README.md'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\components\README.md" type=".md" size="142" lines="4" chars="142" -->
+   'markdown
+Components folder contains all components used on each page in the Lox app.
+
+We keep these components generic and reusable where possible.
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 199. ‘C:\DevCode\DIxUI\srclconstants\notifications.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\constants\notifications.tsx" type=".tsx" size="9250" lines="257" chars="9250" -->
+   typescript
+o14 import { IcoN_TYPES, NotificationEntities, helpers } from 'commonui';
+import { nonHookTypedTranslation } from 'i18n';
+o16 import { replacePhoneNumberInText, formatPhoneNumber } from 'utils/formatters';
+import { ApiAppError, ApiErrorBannerType, IExternalAppBanner, IInsuranceApp } from'types/customTypes';
+o18 import { ListedRoutes } from 'components/Router/ListedRoutes';
+import { AnalyticsEvent, analyticsutils } from 'services/Analytics';
+
+[>>
+＊HELPER FUNCTIONS ##################################################
+>[
+
+function fireBannerEventonDismiss(
+    bannerType: NotificationEntities.NotificationType,
+    message: string,
+    insuranceApp: IInsuranceApp
+): void {
+    let eventType: AnalyticsEvent  undefined;
+    switch (bannerType){
+        case NotificationEntities.NotificationType.ALERT:
+            eventType = AnalyticsEvent.ALERT_BANNER;
+            break;
+        case NotificationEntities.NotificationType.ERRoR:
+            eventType = AnalyticsEvent.ERROR_BANNER;
+            break;
+        default:
+            eventType = undefined;
+            break;
+    }
+    if (eventType){
+        analyticsutils.fireBannerEvent(eventType, message, insuranceApp, 'closed');
+    }
 }
-]
-},
-{
-"billingMethod": "ACH",
-"billingFrequency": "SemiAnnually",
-"underwritingClassCode": "P",
-"underwritingDescription": "Preferred Non-Tobacco",
-"coveragePremiums": [
-{
-"coverage": 15000,
-"premium": 11.7
-},
-{
-"coverage": 16000,
-"premium": 12.48
-},
-{
-"coverage": 17000,
-"premium": 13.26
-},
-{
-"coverage": 18000,
-"premium": 14.04
-},
-{
-"coverage": 19000,
-"premium": 14.82
-},
-{
-"coverage": 20000,
-"premium": 15.6
-},
-{
-"coverage": 21000,
-"premium": 16.38
-},
-{
-"coverage": 22000,
-"premium": 17.16
-},
-{
-"coverage": 23000,
-"premium": 17.94
-},
-{
-"coverage": 24000,
-"premium": 18.72
-},
-{
-"coverage": 25000,
-"premium": 19.5
-},
-{
-"coverage": 26000,
-"premium": 20.28
-},
-{
-"coverage": 27000,
-"premium": 21.06
-},
-{
-"coverage": 28000,
-"premium": 21.84
-},
-{
-"coverage": 29000,
-"premium": 22.62
-},
-{
-"coverage": 30000,
-"premium": 23.4
-},
-{
-"coverage": 31000,
-"premium": 24.18
-},
-{
-"coverage": 32000,
-"premium": 24.96
-},
-{
-"coverage": 33000,
-"premium": 25.74
-},
-{
-"coverage": 34000,
-"premium": 26.52
-},
-{
-"coverage": 35000,
-"premium": 27.3
-},
-{
-"coverage": 36000,
-"premium": 28.08
-},
-{
-"coverage": 37000,
-"premium": 28.86
-},
-{
-"coverage": 38000,
-"premium": 29.64
-},
-{
-"coverage": 39000,
-"premium": 30.42
-},
-{
-"coverage": 40000,
-"premium": 31.2
-},
-{
-"coverage": 41000,
-"premium": 31.98
-},
-{
-"coverage": 42000,
-"premium": 32.76
-},
-{
-"coverage": 43000,
-"premium": 33.54
-},
-{
-"coverage": 44000,
-"premium": 34.32
-},
-{
-"coverage": 45000,
-"premium": 35.1
-},
-{
-"coverage": 46000,
-"premium": 35.88
-},
-{
-"coverage": 47000,
-"premium": 36.66
-},
-{
-"coverage": 48000,
-"premium": 37.44
-},
-{
-"coverage": 49000,
-"premium": 38.22
-},
-{
-"coverage": 50000,
-"premium": 39
-},
-{
-"coverage": 51000,
-"premium": 39.78
-},
-{
-"coverage": 52000,
-"premium": 40.56
-},
-{
-"coverage": 53000,
-"premium": 41.34
-},
-{
-"coverage": 54000,
-"premium": 42.12
-},
-{
-"coverage": 55000,
-"premium": 42.9
-},
-{
-"coverage": 56000,
-"premium": 43.68
-},
-{
-"coverage": 57000,
-"premium": 44.46
-},
-{
-"coverage": 58000,
-"premium": 45.24
-},
-{
-"coverage": 59000,
-"premium": 46.02
-},
-{
-"coverage": 60000,
-"premium": 46.8
-},
-{
-"coverage": 61000,
-"premium": 47.58
-},
-{
-"coverage": 62000,
-"premium": 48.36
-},
-{
-"coverage": 63000,
-"premium": 49.14
-},
-{
-"coverage": 64000,
-"premium": 49.92
-},
-{
-"coverage": 65000,
-"premium": 50.7
-},
-{
-"coverage": 66000,
-"premium": 51.48
-},
-{
-"coverage": 67000,
-"premium": 52.26
-},
-{
-"coverage": 68000,
-"premium": 53.04
-},
-{
-"coverage": 69000,
-"premium": 53.82
-},
-{
-"coverage": 70000,
-"premium": 54.6
-},
-{
-"coverage": 71000,
-"premium": 55.38
-},
-{
-"coverage": 72000,
-"premium": 56.16
-},
-{
-"coverage": 73000,
-"premium": 56.94
-},
-{
-"coverage": 74000,
-"premium": 57.72
-},
-{
-"coverage": 75000,
-"premium": 58.5
-},
-{
-"coverage": 76000,
-"premium": 59.28
-},
-{
-"coverage": 77000,
-"premium": 60.06
-},
-{
-"coverage": 78000,
-"premium": 60.84
-},
-{
-"coverage": 79000,
-"premium": 61.62
-},
-{
-"coverage": 80000,
-"premium": 62.4
-},
-{
-"coverage": 81000,
-"premium": 63.18
-},
-{
-"coverage": 82000,
-"premium": 63.96
-},
-{
-"coverage": 83000,
-"premium": 64.74
-},
-{
-"coverage": 84000,
-"premium": 65.52
-},
-{
-"coverage": 85000,
-"premium": 66.3
-},
-{
-"coverage": 86000,
-"premium": 67.08
-},
-{
-"coverage": 87000,
-"premium": 67.86
-},
-{
-"coverage": 88000,
-"premium": 68.64
-},
-{
-"coverage": 89000,
-"premium": 69.42
-},
-{
-"coverage": 90000,
-"premium": 70.2
-},
-{
-"coverage": 91000,
-"premium": 70.98
-},
-{
-"coverage": 92000,
-"premium": 71.76
-},
-{
-"coverage": 93000,
-"premium": 72.54
-},
-{
-"coverage": 94000,
-"premium": 73.32
-},
-{
-"coverage": 95000,
-"premium": 74.1
-},
-{
-"coverage": 96000,
-"premium": 74.88
-},
-{
-"coverage": 97000,
-"premium": 75.66
-},
-{
-"coverage": 98000,
-"premium": 76.44
-},
-{
-"coverage": 99000,
-"premium": 77.22
-},
-{
-"coverage": 100000,
-"premium": 78
-},
-{
-"coverage": 101000,
-"premium": 78.78
-},
-{
-"coverage": 102000,
-"premium": 79.56
-},
-{
-"coverage": 103000,
-"premium": 80.34
-},
-{
-"coverage": 104000,
-"premium": 81.12
-},
-{
-"coverage": 105000,
-"premium": 81.9
-},
-{
-"coverage": 106000,
-"premium": 82.68
-},
-{
-"coverage": 107000,
-"premium": 83.46
-},
-{
-"coverage": 108000,
-"premium": 84.24
-},
-{
-"coverage": 109000,
-"premium": 85.02
-},
-{
-"coverage": 110000,
-"premium": 85.8
-},
-{
-"coverage": 111000,
-"premium": 86.58
-},
-{
-"coverage": 112000,
-"premium": 87.36
-},
-{
-"coverage": 113000,
-"premium": 88.14
-},
-{
-"coverage": 114000,
-"premium": 88.92
-},
-{
-"coverage": 115000,
-"premium": 89.7
-},
-{
-"coverage": 116000,
-"premium": 90.48
-},
-{
-"coverage": 117000,
-"premium": 91.26
-},
-{
-"coverage": 118000,
-"premium": 92.04
-},
-{
-"coverage": 119000,
-"premium": 92.82
-},
-{
-"coverage": 120000,
-"premium": 93.6
-},
-{
-"coverage": 121000,
-"premium": 94.38
-},
-{
-"coverage": 122000,
-"premium": 95.16
-},
-{
-"coverage": 123000,
-"premium": 95.94
-},
-{
-"coverage": 124000,
-"premium": 96.72
-},
-{
-"coverage": 125000,
-"premium": 97.5
-},
-{
-"coverage": 126000,
-"premium": 98.28
-},
-{
-"coverage": 127000,
-"premium": 99.06
-},
-{
-"coverage": 128000,
-"premium": 99.84
-},
-{
-"coverage": 129000,
-"premium": 100.62
-},
-{
-"coverage": 130000,
-"premium": 101.4
-},
-{
-"coverage": 131000,
-"premium": 102.18
-},
-{
-"coverage": 132000,
-"premium": 102.96
-},
-{
-"coverage": 133000,
-"premium": 103.74
-},
-{
-"coverage": 134000,
-"premium": 104.52
-},
-{
-"coverage": 135000,
-"premium": 105.3
-},
-{
-"coverage": 136000,
-"premium": 106.08
-},
-{
-"coverage": 137000,
-"premium": 106.86
-},
-{
-"coverage": 138000,
-"premium": 107.64
-},
-{
-"coverage": 139000,
-"premium": 108.42
-},
-{
-"coverage": 140000,
-"premium": 109.2
-},
-{
-"coverage": 141000,
-"premium": 109.98
-},
-{
-"coverage": 142000,
-"premium": 110.76
-},
-{
-"coverage": 143000,
-"premium": 111.54
-},
-{
-"coverage": 144000,
-"premium": 112.32
-},
-{
-"coverage": 145000,
-"premium": 113.1
-},
-{
-"coverage": 146000,
-"premium": 113.88
-},
-{
-"coverage": 147000,
-"premium": 114.66
-},
-{
-"coverage": 148000,
-"premium": 115.44
-},
-{
-"coverage": 149000,
-"premium": 116.22
-},
-{
-"coverage": 150000,
-"premium": 117
-},
-{
-"coverage": 151000,
-"premium": 117.78
-},
-{
-"coverage": 152000,
-"premium": 118.56
-},
-{
-"coverage": 153000,
-"premium": 119.34
-},
-{
+
+[>>
+   ERRORNOTIFICATIONS############################### ####################
+>[
+
+  / Generic
+export const errorGlobalsystemFailure = (
+    displayRoute: ListedRoutes = ListedRoutes.app
+   NotificationEntities.INotification => ({
+    display: displayRoute,
+    type: NotificationEntities.NotificationType.ERROR,
+    icOn: ICON_TYPES.ERROR,
+    dismissable: false,
+    title: nonHookTypedTranslation('ERROR__GLOBAL_SYSTEM_FAILURE_TITLE'),
+    message: nonHookTypedTranslation('ERROR_GLOBAL_SYSTEM_FAILURE_MESSAGE'),
+}};
+
+export const errorGeneric = (displayRoute: ListedRoutes, phone: string): NotificationEntities.INotification => {
+    return {
+        display: displayRoute,
+        type: NotificationEntities.NotificationType.ERRoR,
+        icOn: ICON_TYPES.ERROR,
+        dismissable: false,
+        title: nonHookTypedTranslation('ERROR__GENERIC_TITLE'),
+message: nonHookTypedTranslation(phone ? 'ERROR_CONTACT_US' : 'ERROR__CONTACT_US_NO_PHONE',{
+tenantPhoneNumber: helpers.applyInputMask(phone, helpers.MASK_FoRMAT['phone-number'),
+        }],
+    };
+};
+
+   Generic title with specific message
+export const errorMessage = (
+    displayRoute: ListedRoutes,
+    message: string,
+    insuranceApp?: IInsuranceApp,
+    dismissable: boolean = false
+): NotificationEntities.INotification => {
+    return {
+        display: displayRoute,
+        type: NotificationEntities.NotificationType.ERROR,
+        icOn: ICON_TYPES.ERROR,
+        dismissable,
+        title: nonHookTypedTranslation('ERROR__GENERIC_TITLE'),
+        message,
+          ..(dismissable && insuranceApp
+            ] {
+                  onDismissAction:()=>
+fireBannerEventOnDismiss(NotificationEntities.NotificationType.ERROR,message, insuranceApp),
+              }
+            ; {}},
+    };
+};
+
+// Form fields invalid
+export const errorFormInvalid = (displayRoute: ListedRoutes = ListedRoutes.app): NotificationEntities.INotification => {
+    return {
+        display: displayRoute,
+        type: NotificationEntities.NotificationType.ERROR,
+        icOn: ICON_TYPES.ERROR,
+        dismissable: false,
+        title: nonHookTypedTranslation('ERROR__FORM_INVALID_TITLE'),
+        message: nonHookTypedTranslation('ERROR__FORM_INVALID_MESSAGE'),
+    };
+};
+
+// Application flow
+export const errorApplication = (
+    error: ApiAppError,
+    phone: string,
+    insuranceApp: IInsuranceApp
+): NotificationEntities.INotification => {
+    let bannerType = NotificationEntities.NotificationType.ERRoR;
+    let bannerIcon = ICON_TYPES.ERROR;
+    const bannerTitle = error.bannerTitle ?? -';
+    const bannerMessage = replacePhoneNumberInText(error.bannerMessage ?? -', phone);
+    const bannerDismissble = error.bannerDismissible ?? false;
+
+    switch (error.bannerType) {
+        case ApiErrorBannerType.INFO:
+            bannerType = NotificationEntities.NotificationType.INFo;
+            bannerIcon = ICON_TYPES.INFO_BLUE;
+            break;
+        case ApiErrorBannerType.WARN:
+            bannerType = NotificationEntities.NotificationType.ALERT;
+            bannerIcon = ICON_TYPES.EXCLAMATION;
+            break;
+        default:
+    }
+
+    return
+        display: ListedRoutes.app,
+        type: bannerType,
+        icon: bannerIcon,
+        dismissable: bannerDismissble,
+        title: bannerTitle,
+        message: bannerMessage,
+          ..(bannerDismissble && insuranceApp
+?  onDismissAction: () => fireBannerEventOnDismiss(bannerType, bannerMessage, insuranceApp)
+            ; {}},
+    };
+};
+
+export const errorApplicationGeneric = (phone: string): NotificationEntities.INotification => {
+    const formattedPhoneNumber = formatPhoneNumber(phone, true, true);
+    return {
+        display: ListedRoutes.app,
+        type: NotificationEntities.NotificationType.ERROR,
+        icOn: ICON_TYPES.ERROR,
+        dismissable: false,
+        title: nonHookTypedTranslation('ERROR__APP_GENERIC_TITLE'),
+        message: nonHookTypedTranslation('ERROR__APP_GENERIC_MESSAGE', {
+            phoneNumber: formattedPhoneNumber,
+        }],
+    };
+};
+
+// Summary page
+export const errorSummary = (
+    error: ApiAppError,
+    phone: string,
+    insuranceApp?: IInsuranceApp
+): NotificationEntities.INotification => {
+    const bannerTitle = error.bannerTitle ?? nonHookTypedTranslation('ERROR_SOMETHINGS_WRONG');
+    const bannerMessage = replacePhoneNumberInText(error.bannerMessage ?? -', phone);
+    const bannerDismissble = error.bannerDismissible ?? false;
+
+    return {
+        display: ListedRoutes.summary,
+        type: NotificationEntities.NotificationType.ERROR,
+        icon: ICON_TYPES.ERROR,
+        dismissable: bannerDismissble,
+        title: bannerTitle,
+        message: bannerMessage,
+          .(bannerDismissble && insuranceApp
+            ] {
+                  onDismissAction:() =>
+                      fireBannerEventOnDismiss(
+                          NotificationEntities.NotificationType.ERROR,
+                          bannerMessage,
+                          insuranceApp
+                      ],
+              }
+            ; {}},
+    };
+};
+[>>
+＊ NON-ERROR NOTIFICATIONS ##################################################
+>[
+
+export const beneficiariesMessage = (
+    displayRoute: ListedRoutes,
+    beneficiaries: string
+): NotificationEntities.INotification => {
+    return {
+        display: displayRoute,
+        type: NotificationEntities.NotificationType.INFO,
+        icOn: ICON_TYPES.INFO_BLUE,
+        dismissable: false,
+title: nonHookTypedTranslation('APP_FLOW_NOTIFICATION_BENEFICIARIES_INFO', { beneficiaries ),
+    };
+};
+
+export const coverageConfirmationMessage = (
+    displayRoute: ListedRoutes,
+    productName: string.
+    userCurrentCoverage: string,
+    maximumCoverage: string.
+    userAvailableCoverage: string
+): NotificationEntities.INotification => {
+    return {
+        display: displayRoute,
+        type: NotificationEntities.NotificationType.ALERT,
+        icon: ICON_TYPES.WARNING,
+        dismissable: false,
+        title: nonHookTypedTranslation('APP_FLOW_NOTIFICATION_COVERAGE_MAXIMUM_HEADER', {
+            productName,
+            userCurrentCoverage,
+        }],
+        message: nonHookTypedTranslation('APP_FLOW__NOTIFICATION_COVERAGE_MAXIMUM_BODY', {
+            productName,
+            maximumCoverage,
+            userAvailableCoverage,
+        }],
+    };
+};
+
+export const segmentSpecificNotification = (
+    displayRoute: ListedRoutes,
+    bannerContent: IExternalAppBanner,
+    phone: string,
+    insuranceApp: IInsuranceApp
+): NotificationEntities.INotification => {
+    const bannerMessage = replacePhoneNumberInText(bannerContent.message ?? ', phone);
+    const bannerDismissble = bannerContent.dismissable ?? false;
+const bannerType = bannerContent.type.toUpperCase() as NotificationEntities.NotificationType;
+    let bannerIcon;
+    switch (bannerType){
+        case NotificationEntities.NotificationType.ALERT:
+            bannerIcon = ICON_TYPES.WARNING;
+            break;
+        case NotificationEntities.NotificationType.ERROR:
+            bannerIcon = ICON_TYPES.ERROR;
+            break;
+        case NotificationEntities.NotificationType.INFo:
+            bannerIcon = ICON_TYPES.INFO_BLUE;
+            break;
+        case NotificationEntities.NotificationType.SUCCEsS:
+            bannerIcon = ICON_TYPES.CHECKMARK_GREEN_CIRCLE;
+            break;
+        default:
+    }
+
+    return {
+        display: displayRoute,
+        type: bannerType,
+        icon: bannerIcon,
+        dismissable: bannerDismissble,
+        title: bannerContent.title,
+        message: bannerMessage,
+          ..(bannerDismissble && insuranceApp
+?  onDismissAction: () => fireBannerEventOnDismiss(bannerType, bannerMessage, insuranceApp)
+            ; {}},
+    };
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 2oo. ‘C:\DevCode\DIxuI\src\contexts\ErrorBoundary\errorBoundary.css'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\ErrorBoundary\errorBoundary.css" type=".css" size="749" lines="34" chars="749" -->
+   'css
+.errorBoundaryMsg {
+    margin-top: 192px;
+    text-align: center;
+}
+.errorBoundaryMsg h1 {
+    font-style: normal:
+    font-weight: normal;
+    font-stretch: expanded;
+    font-size: 4opx;
+    line-height: 44px;
+    letter-spacing: -2px;
+    color: #262c30;
+}
+.errorBoundaryMsgLinkBox {
+    width: 208px;
+    height: 40px;
+    border: 1px solid rgba(38, 44, 48, 0.5);
+    border-radius: 43px;
+    box-sizing: border-box;
+    margin: auto;
+    margin-top: 40px;
+    padding-top: 8px;
+}
+.errorBoundaryMsgLink {
+    font-style: normal:
+    font-weight: normal;
+    text-transform: uppercase;
+    font-size: 14px;
+    line-height: 20px;
+    text-decoration-line: none;
+    letter-spacing: 0.25px;
+    color: #262c30;
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 2o1. ‘C:\DevCode\DIxUI\srcIcontexts\AppBrandingContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\AppBrandingContext.tsx" type=".tsx" size="2849" lines="82" chars="2849" -->
+   'typescript
+import React, { useMemo, usestate, useEffect } from 'react';
+i import { CobrandingPartner } from 'types/customTypes';
+import { InsuranceAppService } from 'api/InsuranceAppService';
+
+export interface IAppBrandingContext {
+    cobrandingPartner: IAppCobrandingPartner;
+    phoneNumber: string;
+    setPhoneNumber: (phoneNumber: string) => void;
+    setLoading: (loading: boolean) => void;
+    setBrandingContractNumber: (contractNumber: string) => void;
+}
+
+export interface IAppCobrandingPartner extends CobrandingPartner {
+    contractNumber: string;
+}
+
+export const defaultAppBranding: IAppBrandingContext = {
+    cobrandingPartner: {
+        contractNumber: *',
+        name: -',
+        displayName: -',
+        logourl: -',
+        websiteurl: -',
+        phoneNumbers: {
+            header: -',
+            contact: -',
+            confirmation: -',
+            decline: -',
+        },
+    },
+    phoneNumber: -',
+    setPhoneNumber: (): void => {},
+    setLoading: (): void => {},
+    setBrandingContractNumber: (): void => {},
+};
+
+export const AppBrandingContext = React.createContext(defaultAppBranding);
+
+export const AppBrandingProvider = ({ children }: { children: JSX.Element[] | JSX.Element ) =>
+    const [cobrandingPartner, setCobrandingPartner] = useState<IAppCobrandingPartner>(
+        defaultAppBranding.cobrandingPartner
+    ];
+    const [phoneNumber, setPhoneNumber] = useState<string>(defaultAppBranding.phoneNumber);
+    const [loading, setLoading] = usestate<boolean>(true);
+    const [brandingContractNumber, setBrandingContractNumber] = usestate<string>('');
+
+    const getCobrandingData = async (partnerId: string): Promise<void> => {
+        try {
+            // only fetch if partnerId is different from the current partnerId
+            if ((partnerId && cobrandingPartner.contractNumber !== partnerId)
+                const resp = await InsuranceAppService.getCobrandingPartner(partnerId);
+                setCobrandingPartner({ ...resp, contractNumber: partnerId });
+            }
+         catch(e){
+            // eslint-disable-next-line no-console
+            console.error(e);
+        finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (brandingContractNumber && loading) {
+            getCobrandingData(brandingContractNumber);
+        }
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+    },[brandingContractNumber]);
+
+    const ctx = useMemo(
+         (=>(
+            cobrandingPartner,
+            phoneNumber,
+            setPhoneNumber,
+            setLoading,
+            setBrandingContractNumber,
+        }],
+        [cobrandingPartner, phoneNumber]
+    ];
+
+    return <AppBrandingContext.Provider value={ctx}>{children}</AppBrandingContext.Provider>;
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 202. ‘C:\DevCode\DIxUI\src\contexts\appResetContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\appResetContext.tsx" type=".tsx" size="789" lines="26" chars="789" -->
+   'typescript
+import React, { createContext, usestate } from 'react';
+
+export interface IAppResetContext {
+    reset: () => void;
+}
+
+export const AppResetContext = createContext<IAppResetContext>({} as IAppResetContext);
+
+[>>
+* Hack to reset the user provider after user logs in
+>[
+export const AppResetProvider = ({ children : { children: any ): JsX.Element => {
+    const [resetKey, setResetKey] = usestate(() => Date.now()):
+    // eslint-disable-next-line react/jsx-no-constructed-context-values
+    const context: IAppResetContext = {
+        reset:() => {
+            setResetKey(Date.now());
+        },
+    };
+    return(
+        <AppResetContext.Provider value={context}>
+            <React.Fragment key={resetKey}>{children}</React.Fragment>
+        </AppResetContext.Provider>
+    ];
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 2o3. ‘C:\DevCode\DIxUI\srcIcontexts\DynamicFormContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\DynamicFormContext.tsx" type=".tsx" size="3634" lines="101" chars="3634" -->
+-**typescript
+import React from 'react';
+o import { LoanApplicationEntities, NotificationEntities } from 'commonui'
+
+export interface IDynamicFormstateValue {
+    onSubmit?: (formData?: Record<string, string>, recordstate?: string) => void;
+    loading?: boolean;
+    setLoading?: (loading: boolean) => void;
+    progressItemList?: LoanApplicationEntities.IProgressItem[l;
+    readonly?: boolean;
+    segment?: LoanApplicationEntities.ISectionSegment;
+    contextData?: unknown;
+    editMode?: boolean;
+    disableBeforeUnload?: boolean;
+    segmentsCount?: number;
+    segmentsComplete?: number;
+    apiFieldErrors?: Record<string, string>;
+    customValidationBanner?: NotificationEntities.INotification;
+}
+
+export interface IDynamicFormNavigationValue
+    handleNavigation?: (params: LoanApplicationEntities.IHandleNavigationPayload) => void;
+    navigation?: LoanApplicationEntities.INewLoanNavigation;
+}
+
+export interface IDynamicFormContextValue extends IDynamicFormStateValue, IDynamicFormNavigationValue {}
+
+export const DynamicFormStateContext = React.createContext<IDynamicFormStateValue>({
+    progressItemList: [],
+    readonly: false,
+}};
+
+export const DynamicFormNavigationContext = React.createContext<IDynamicFormNavigationValue>():
+
+export const DynamicFormContext = React.createContext<IDynamicFormContextValue>({
+    progressItemList: [],
+    readonly: false,
+}};
+
+export const useDynamicFormStateContext = (): IDynamicFormStateValue => {
+    const ctx = React.useContext(DynamicFormStateContext);
+
+    return {
+           ctx,
+        onSubmit: ctx.onSubmit ?? (() => {}),
+        progressItemlist: ctx.progressItemList ?? [],
+        readonly: ctx.readonly ?? false,
+        segment: ctx.segment ?? ({} as LoanApplicationEntities.ISectionSegment),
+        disableBeforeUnload: ctx.disableBeforeUnload ?? false,
+    };
+};
+
+export const useDynamicFormNavigationContext = (): IDynamicFormNavigationValue => {
+    const ctx = React.useContext(DynamicFormNavigationContext);
+
+    return {
+           .ctx,
+        handleNavigation: ctx.handleNavigation ?? (() => {}),
+        navigation: ctx.navigation ?? ({} as LoanApplicationEntities.INewLoanNavigation),
+    };
+};
+
+export const useDynamicFormContext = (): IDynamicFormContextValue => {
+    const contextValue = React.useContext(DynamicFormContext);
+
+    return {
+         ..contextValue,
+        onSubmit: contextValue.onSubmit ?? (() => {}),
+        handleNavigation: contextValue.handleNavigation ?? (() => {}),
+        progressItemList: contextValue.progressItemList ?? [],
+        readonly: contextValue.readonly ?? false,
+        segment: contextValue.segment ?? ({ as LoanApplicationEntities.ISectionSegment),
+        disableBeforeUnload: contextValue.disableBeforeUnload ?? false,
+    };
+};
+
+export const DynamicFormProvider = ({
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: IDynamicFormContextValue;
+}): JSX.Element => <DynamicFormContext.Provider value={value}>{children}</DynamicFormContext.Provider>;
+
+export const DynamicFormStateProvider = ({
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: IDynamicFormStateValue;
+}): JSX.Element => <DynamicFormStateContext.Provider value={value}>{children}</DynamicFormStateContext.Provider>;
+
+export const DynamicFormNavigationProvider = (
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: IDynamicFormNavigationValue;
+}): JSX.Element => (
+<DynamicFormNavigationContext.Provider value={value}>{children}</DynamicFormNavigationContext.Provider>
+];
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 204. ‘C:\DevCode\DIxUI\src\contexts\errorContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\errorContext.tsx" type=".tsx" size="1713" lines="49" chars="1713" -->
+   'typescript
+import React, { createContext, useContext, usestate, useMemo } from 'react';
+
+export interface IErrorContext {
+    handleSetErrors: (key: string, error: Record<string, string>) => void;
+    handleGetErrors: (formKey?: string) => Record<string, string>;
+    validateAllFields: boolean;
+    setValidateAllFields: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export const ErrorContext = createContext<IErrorContext>({} as IErrorContext);
+export const useErrorContext = () => useContext(ErrorContext);
+
+export const ErrorProvider = (props: { children: React.ReactNode }) => {
+    const [errors, setErrors] = usestate<Record<string, Record<string, string>>>({});
+    const [validateAllFields, setValidateAllFields] = usestate(false);
+    const handleSetErrors = (key: string, error: Record<string, string>) => {
+        setErrors({
+              ..errors,
+            [key]: error,
+        }];
+    };
+
+    const handleGetErrors = (formKey?: string) => {
+        if (!formKey){
+            const errorobjects = Object.values(errors);
+            const allErrors = errorobjects.reduce((acc, curr) => {
+                return { ...acc, ...curr };
+             },{;
+
+            return allErrors ?? {};
+        }
+        const formSpecificErrors = errors[formKey];
+        return formSpecificErrors ?? {};
+    };
+
+    const value = useMemo(
+        () =>({
+            handleGetErrors,
+            handleSetErrors,
+            validateAllFields,
+            setValidateAllFields,
+        }],
+         // eslint-disable-next-line react-hooks/exhaustive-deps
+        [errors,validateAllFields]
+    ];
+
+    return <ErrorContext.Provider value={value} {...props} />;
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 205. ‘C:\DevCode\DIxUI\src\contexts\FinalRateContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\FinalRateContext.tsx" type=".tsx" size="1064" lines="34" chars="1064" -->
+   'typescript
+import React from 'react';
+import { IRider } from 'types/customTypes';
+
+export interface IFinalRateCardModel {
+    primary: {
+        currentIndex: number;
+        valuesList: number[];
+        handleInputChange: (index: number) => void;
+        coverageAmount: number;
+    };
+    showApproved: boolean;
+    billingFreq: string;
+    riders: {
+        list: IRider[]:
+        handleInputChange: (order: number, index: number) => void;
+        handleAddRemove: (order: number, isAdd?: boolean) => void;
+    };
+    totalPayment?: number;
+    crossSellModuleTitle?: string:
+    finalRateLearnMoreModalTitle?: string;
+    finalRateLearnMoreModalSubTitle?: string:
+    finalRateLearnMoreModalBody?: string;
+}
+
+export const FinalRateContext = React.createContext<IFinalRateCardModel I undefined>(undefined);
+
+export const FinalRateProvider = ({
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: IFinalRateCardModel;
+}): JSX.Element => <FinalRateContext.Provider value={value}>{children}</FinalRateContext.Provider>;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 206. 'C:\DevCode\DIxUI\src\contexts\HistoryContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\HistoryContext.tsx" type=".tsx" size="812" lines="27" chars="812" -->
+   'typescript
+import React, { useMemo  from 'react';
+import { HistoryContext } from 'commonui';
+
+[>>
+Currently used to control the ID's of info modals in the redemption application(DynamicSegment) as
+the usePageName hook used in InfoModalTrigger (commonui) defaults the ID to'modal__mockPageName_FIELD_CODE'
+* By setting the pathname to ', the ID changes to 'modal_FIELD_CODE'
+>[
+export const HistoryProvider = ({
+    pathname = ',
+    children,
+}; {
+    pathname?: string;
+    children: JSX.Element[] | JSX.Element;
+) => (
+    const ctx = useMemo(
+        () =>({
+            location: {
+                pathname,
+            },
+            history: {},
+        }],
+        [pathname]
+    ];
+    return <HistoryContext.Provider value={ctx}>{children}</HistoryContext.Provider>;
+};
+
+```
+     CODESCAN_FILE_END -->
+
+---
+
+### 2o7. ‘C:\DevCode\DIxUI\src\contexts\InsuranceAppContext.tsx
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\InsuranceAppContext.tsx" type=".tsx" size="4618" lines="119" chars="4618" -->
+   'typescript
+import React, { useContext, useMemo, usestate } from 'react';
+import { NotificationContext, NotificationEntities, NotificationType, LoanApplicationEntities }from 'commonui';
+import { AnalyticsEvent, analyticsutils } from 'services/Analytics';
+import { IInsuranceApp } from 'types/customTypes';
+
+export type UpdateInsuranceAppSegment = (
+    insuranceAppId: string,
+    navRequest: LoanApplicationEntities.IApplicationCallPayload,
+    mode: 'none' | 'save',
+    captchaRequired: boolean
+) => Promise<IInsuranceApp>;
+
+export interface IInsuranceAppContext +
+    insuranceAppResponse?: IInsuranceApp;
+    setInsuranceAppResponse: React.Dispatch<React.SetStateAction<IInsuranceApp I undefined>>;
+    updateInsuranceAppSegment?: UpdateInsuranceAppSegment;
+    setUpdateInsuranceAppSegment?: (fn: UpdateInsuranceAppSegment) => void;
+    refreshCounter: number;
+    incrementRefreshCounter: () => void;
+}
+
+export const InsuranceAppContext = React.createContext<IInsuranceAppContext>(
+    setInsuranceAppResponse: () => {},
+    refreshCounter: 0,
+    incrementRefreshCounter: () => {},
+}};
+
+const handleNotification = (notification: NotificationEntities.INotification, insuranceAppResponse?: IInsuranceApp) => {
+    // handle different notification types
+    let alertType: AnalyticsEvent I undefined;
+    switch (notification.type) {
+        case NotificationType.ALERT:
+            alertType = AnalyticsEvent.ALERT_BANNER;
+            break;
+        case NotificationType.ERROR:
+            alertType = AnalyticsEvent.ERROR_BANNER;
+            break;
+        default:
+            alertType = undefined;
+            break;
+    }
+    if (alertType !== undefined) {
+        analyticsUtils.fireBannerEvent(
+            alertType,
+'$(notification.title}${notification.title?.endswith('.') ? -- : '.'}$(notification.message}',
+            insuranceAppResponse,
+            'Displayed'
+        };
+    }
+};
+
+[>>
+Provides insurance app state, as well as an override of 'NotificationContext' that fires GAevents.
+>[
+export const InsuranceAppProvider = ({
+    children,
+    initialInsuranceApp,
+}; {
+    children: JSX.Element[] I JSX.Element;
+    initialInsuranceApp?: IInsuranceApp;
+) = (
+    const notificationCtxBase = useContext(NotificationContext);
+const [insuranceAppResponse, setInsuranceAppResponse] = usestate<IInsuranceApp I undefined>(initialInsuranceApp);
+const [updateInsuranceAppSegment, setUpdateInsuranceAppSegment] = useState<UpdateInsuranceAppSegment I undefined>();
+    const [refreshCounter, setRefreshCounter] = useState(o);
+
+    [>>
+     * Override to fire GA events.
+     * Note that this doesn't take into account the 'display' property of notifications,
+     * because it's assumed that when a notification is created, it will also be displayed.
+     >[
+    const notificationCtx = useMemo(() => {
+const  addNotification: addNotificationBase, clearAndSetNotifications: clearAndSetNotificationsBase } =
+            notificationCtxBase;
+        const addNotification = (notification: NotificationEntities.INotification) => {
+            addNotificationBase(notification);
+            handleNotification(notification, insuranceAppResponse);
+        };
+const clearAndSetNotifications = (notifications: NotificationEntities.INotification[l)
+            clearAndSetNotificationsBase(notifications);
+            notifications.forEach((notification) => {
+                handleNotification(notification, insuranceAppResponse);
+            }];
+        };
+        return {
+              ..notificationCtxBase,
+            addNotification,
+            clearAndSetNotifications,
+        };
+      [notificationCtxBase, insuranceAppResponse])
+
+const incrementRefreshCounter = React.useCallback(() => setRefreshCounter((c) => c + 1),[;
+
+    const insuranceAppCtx = useMemo(
+        ()=>(
+            insuranceAppResponse,
+            setInsuranceAppResponse,
+            updateInsuranceAppSegment,
+            setUpdateInsuranceAppSegment: (fn: UpdateInsuranceAppSegment) => {
+                setUpdateInsuranceAppSegment(() => fn);
+            },
+            refreshCounter,
+            incrementRefreshCounter,
+        }],
+        [
+            insuranceAppResponse,
+            setInsuranceAppResponse,
+            updateInsuranceAppSegment,
+            refreshCounter,
+            incrementRefreshCounter,
+        ]
+    ];
+    return(
+        <InsuranceAppContext.Provider value={insuranceAppCtx}>
+<NotificationContext.Provider value={notificationCtx}>{children}</NotificationContext.Provider>
+        </InsuranceAppContext.Provider>
+    ];
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 208. ‘C:\DevCode\DIxUI\src\contexts\PaymentFlowContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\PaymentFlowContext.tsx" -->
+-**typescript
+import React from 'react';
+import { LoanApplicationEntities } from 'commonui';
+
+export interface IPaymentFlowContextValue +
+    hasPmtDetails: boolean;
+    pmtDetailsFormData?: Record<string, string>;
+    pmtScheduleFormData?: Record<string, string>;
+    setFormData: React.Dispatch<React.SetstateAction<Record<string, string> I I undefined>>;
+    showPaymentModal: () => Promise<any>;
+    setSubmitSegment: (value: boolean) => void;
+    onGoBack: () => Promise<void> | void;
+    segment?: LoanApplicationEntities.ISectionSegment:
+}
+
+export const PaymentFlowContext = React.createContext<IPaymentFlowContextValue  undefined>(undefined);
+
+export const PaymentFlowProvider = ({
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: IPaymentFlowContextValue;
+}): JSX.Element => <PaymentFlowContext.Provider value={value}>{children}</PaymentFlowContext.Provider>;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 2o9. ‘C:\DevCode\DIxUI\srcIcontexts\SegmentFlowContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\SegmentFlowContext.tsx" type=".tsx" size="569" lines="20" chars="569" -->
+   'typescript
+import React from 'react';
+import { CoreProduct } from 'types/customTypes';
+
+export interface ISegmentFlowContextValue {
+    coreProduct?: CoreProduct;
+    showSafetyNetLoading: boolean;
+}
+
+export const SegmentFlowContext = React.createContext<ISegmentFlowContextValue>({
+    showSafetyNetLoading: false,
+}};
+
+export const SegmentFlowProvider = (
+    children,
+    value,
+}; {
+    children: React.ReactNode;
+    value: ISegmentFlowContextValue;
+}): JSX.Element => <SegmentFlowContext.Provider value={value}>{children}</SegmentFlowContext.Provider>;
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 210. 'C:\DevCode\DIxUI\srcIcontextsITenantContext.tsx'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\contexts\TenantContext.tsx" type=".tsx" -->
+***typescript
+import React, { useMemo, usestate, useEffect } from 'react';
+import { TenantService } from 'api/TenantService';
+import { ITenantDetails, ITenantBranding  from 'types/customTypes';
+
+export interface ITenantContext {
+    tenantId: string;
+    loading: boolean;
+    details: ITenantDetails;
+    branding: ITenantBranding;
+}
+
+export const TenantContext = React.createContext<ITenantContext>({
+    tenantId: ',
+    loading: true,
+    details: {} as ITenantDetails,
+    branding: {} as ITenantBranding,
+}};
+
+export const TenantProvider = ({ children : { children: JSX.Element[] | JSX.Element }) => {
+    const [details, setDetails] = useState<ITenantDetails>({} as ITenantDetails);
+    const [branding, setBranding] = useState<ITenantBranding>( primaryColorHex: '193062'  as
+    const [loading, setLoading] = usestate<boolean>(true);
+
+    const getTenantData = async (): Promise<void> => {
+        try {
+            const tenantDetails = await TenantService.getTenantDetails('TRUSTAGE'):
+            setDetails(tenantDetails);
+            const tenantBranding = await TenantService.getTenantBrandings(tenantDetails.id);
+            setBranding(tenantBranding as ITenantBranding);
+         } catch(e){
+            // eslint-disable-next-line no-console
+            console.error(e);
+         finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if(loading){
+            getTenantData();
+        }
+    },[loading]);
+
+const ctx = useMemo(() => ({ loading, tenantId: details?.id, details, branding }), [loading, details, branding]);
+
+    return <TenantContext.Provider value={ctx}>{children}</TenantContext.Provider>;
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 211. ‘C:\DevCode\DIXUI\src\i18n\en.ts'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\i18n\en.ts" type=".ts" size="20759" lines="295" chars="20705" -->
+***typescript
+/* eslint-disable no-template-curly-in-string */
+export const translation = {
+    GLOBAL_CALL_US: 'Call us at {{phoneNumber}}',
+    GLOBAL_FINISH: 'Finish',
+    GLOBAL_LOADING_VERIFY_INFO: 'Verifying Information...',
+    GLOBAL__SAVE_AND_CONTINUE: 'Save ＆ Continue',
+    GLOBAL_CANCEL: 'CANCEL',
+    GLOBAL_TRUSTAGE: 'TruStage',
+
+    APP_FLOW_CANCEL_APP_MODAL_CANCEL_BTN_CTN: 'Yes, cancel application',
+    APP_FLOW_CANCEL_APP_MODAL_CANCEL_BTN_CANCEL: 'No, return to application',
+    APP_FLOW__VOID_APP_MODAL_VOID_BTN_CTN: 'Yes, cancel application',
+    APP_FLOW__VOID_APP_MODAL_VOID_BTN_CANCEL: 'No, return to application',
+    APP_FLOW__VOID_APP_MODAL_BODY_TEXT:
+'If you cancel the application you will discard all your current work. This action cannot be undone.',
+    APP_FLOw_VOID_APP_MODAL_TITLE: 'Do you want to cancel this application?'
+    APP_FLOW_EXTERNAL_FOOTER_BUILD_NUMBER: 'Build Number'
+    APP_FLOW_EXTERNAL_FOOTER_APP_ID: 'External App ID',
+    APP_FLOW_EXTERNAL_FOOTER_CORRELATION_ID: 'Correlation ID',
+    APP_FLOW_EXTERNAL_FOOTER_APP_STATUS: 'App Status/Sub-Status',
+    APP_FLOW_EXTERNAL_FOOTER_BILLING_STATUS: 'Billing Status',
+    APP_FLOW_EXTERNAL_FOOTER_INSURED_STATUS: 'Insured Status',
+    APP_FLOW_EXTERNAL_FOOTER_UNDERWRITING_STATUS: 'Underwriting Status',
+    APP_FLOW_LEAVING_APP_FORM_MODAL__EXIT_TEXT: 'EXIT ANYWAY',
+    APP_FLOW_LEAVING_APP_FORM_MODAL__STAY: 'STAY IN APPLICATION',
+    APP_FLOW_LEAVING_APP_FORM_MODAL__ARIA_TITLE: 'LeaVing so soon?',
+    APP_FLOW_LEAVING_APP_FORM_MODAL__BODY_TEXT:[
+        '# Leaving so soon?',
+'If you leave now, your progress will be lost. If you're just trying to go back to a previous page, click the back button on the application or use the menu to move to the correctpage.',
+    ],
+APP_FLOW_NOTIFICATION_BENEFICIARIES_INFO: 'This coverage will help protect{{beneficiaries}}.',
+    APP_FLOW_NOTIFICATION_BENEFICIARIES_ESTATE: 'the estate of {{estateFulIName}}',
+    APP_FLOW_NOTIFICATION_COVERAGE_MAXIMUM_HEADER:
+        'It looks like you already have {{userCurrentCoverage}} of {{productName}} with us.',
+    APP_FLOW_NOTIFICATION_COVERAGE_MAXIMUM_BODY:
+'You can purchase up to {{userAvailableCoverage}} of additional {{productName}}. (The coverage limit for the product is {(maximumCoverage}})',
+    APP_FLOW_NOTIFICATION_FIRST_MONTH_ONE_DOLLAR_MESSAGE:
+        'Your coverage is in place as soon as we receive your first payment.',
+    APP_FLOW_NOTIFICATION_FIRST_MONTH_ONE_DOLLAR_TITLE: 'Pay only $1 for the first month.',
+    APP_FLOW_PREMIUM_INCREASE_BIRTHDAY_MODAL_CTN: 'Continue With Higher Premium',
+    APP_FLOW__PREMIUM_INCREASE_BIRTHDAY_MODAL_CANCEL: 'Change Payment Date',
+    APP_FLOW_SECURITY_LOGO_ALT: 'Secured by digicert SSL - Verified Security Badge',
+    APP_FLOW__TERMS_CONDITIONS_AUTHORIZATION_ERROR: 'You must authorize to continue.',
+    APP_FLOW_TERMS_CONDITIONS_CONSENT: 'I consent to the terms in the',
+    APP_FLOW_TERMS_CONDITIONS_DOCUMENTS_ERROR:
+        'You must consent to the Electronic Documents and Signatures terms to continue.',
+APP_FLOW_TERMS_CONDITIONS_MODAL_CANCEL_LINK: 'I do not give permission, cancel the application',
+APP_FLOW_TERMS_CONDITIONS_MODAL_DOCUMENTS_HEADER: 'Electronic documents and signaturesPDF'
+    APP_FLOW_TERMS_CONDITIONS_MODAL_PRIVACY_POLICY_HEADER: 'Privacy policy',
+APP_FLOW_TERMS_CONDITIONS_PRIVACY_ERROR: 'You must consent to the Privacy Notice terms tocontinue.',
+APP_FLOW_TITLE_BAR_DESCRIPTION_COPY: '{{coverage}} for {{payment}}{{separator}}{{frequency}}',
+APP_FLOW_TITLE_BAR_HEADER_AGENT_COPY: '{{applicantName}} has selected {{productName}} coverage',
+    APP_FLOW_TITLE_BAR_HEADER_AGENT_TAWL_COPY: 'Whole Life Insurance',
+    APP_FLOW_TITLE_BAR_HEADER_GAWL_COPY: 'Guaranteed Acceptance Whole Life Insurance',
+    APP_FLOW_TITLE_BAR_HEADER_SITERM_COPY:'{{productName}}',
+    APP_FLOW_TITLE_BAR_HEADER_SIWL_COPY:'{{productName}}',
+    APP_FLOW_TITLE_BAR_HEADER_TAWL_COPY: 'Whole Life Insurance',
+    APP_FLOW_TITLE_BAR_HEADER_COPY: '{{productName}} Coverage',
+    APP_FLOW_RIDER_TITLE_BAR_HEADER_COPY:'and {{productName}} rider',
+APP_FLOW_RIDER_TITLE_BAR_HEADER_DESCRIPTION_COPY:'{{coverage}} for {{payment}}{{separator}}{{frequency+}',
+    APP_FLOW_TITLE_BAR_CART_HEADER_TITLE: 'View coverage details',
+    APP_FLOW_TITLE_BAR_CART_COVERAGE_LABEL: 'CoVerage',
+    APP_FLOW_TITLE_BAR_CART_PAYMENT_LABEL: 'Payment',
+    APP_FLOW_TITLE_BAR_CART_EDIT_COVERAGE_BUTTON: 'Edit Coverage',
+
+    AGENT_APPROVAL__APPROVED_HEADER: 'ApprOVed',
+    AGENT_APPROVAL__DECLINED_HEADER: 'Declined',
+    AGENT_APPROVAL__APPROVED_MESSAGE: 'Congratulations your policy has been approved.',
+AGENT_APPROVAL__DECLINED_MESSAGE: 'The product is not available to the customer based ontheir health.
+        In**Press 9 to save the recording for this application.**
+        Inonly read if caller prompts you for an explanation
+Inour decision was based in whole or part on information obtained by ScriptCheck Compliance, a consumer reporting agency. They did not make this decision nor can they explainwhy the decision was made. However, you may work directly with them regarding the accuracy orcompleteness of any information they provided.
+InYou may obtain a free disclosure of your file from ScriptCheck Compliance if you makethe request within 6o days by contacting them at:
+        InScriptCheck Compliance ExamOne
+0101 Renner Boulevard
+Lenexa, KS 66219
+        InE-mail: ScriptCheckCompliance@ExamOne.com
+        InVoice Mail: (844) 225-8047.',
+
+    CARD_TAG_APPROVED: 'Your Rate',
+
+    CHASE_PAYMENT_MODAL_HEADER: 'Add credit card',
+
+    ERROR__APP_GENERIC_TITLE: 'Uh oh. Looks like something isn't working right.',
+    ERROR_APP_GENERIC_MESSAGE:
+'This might be due to errant or missing fields on this page, or a system failure. Please check your entries and try again. If you continue to encounter this error, you maycontact us at {{phoneNumber}}.',
+    ERROR_APP_NOT_AVAIL:
+'The application requested is not available. Please call {{contactName}} at{{phoneNumber}} to complete your application',
+    ERROR_APP_ZIP_CODE_INVALID:
+"The application's state does not match the zip code provided. Please check your entry.or contact us at {{phoneNumber}}.",
+    ERROR_CONTACT_US: 'Please contact us at {{tenantPhoneNumber}} for assistance.',
+    ERROR_CONTACT_US_NO_PHONE: 'Please contact us for assistance.',
+    ERROR_GENERIC_TITLE: 'Uh oh, something went wrong.',
+    ERROR_GLOBAL_SYSTEM_FAILURE_TITLE: 'Welu2O19re unable to process requests right noW.',
+    ERROR_GLOBAL_SYSTEM_FAILURE_MESSAGE:
+        'Please save your work and close the application, then try again in a few minutes.',
+    ERROR_HEALTH_PARENT_MISMATCH: 'Please verify if any conditions apply',
+    ERROR_HEALTH_OPTIONS_MISMATCH:
+'You selected one or more conditions. Please select "Yes" to continue, or remove your selections',
+    ERROR_HEALTH_NOTIFICATION_TITLE: 'Please verify your health information',
+    ERROR__HEALTH_NOTIFICATION_MESSAGE:
+'please confirm your information. If you have no medical conditions, remove the medicalcondition answers. otherwise, update your medical conditions selection.',
+    ERROR_HEIGHT_REQUIRED: 'Enter feet and inches (use O if none).',
+    ERROR__HEIGHT_INVALID_FORMAT: 'InValid height format.',
+    ERROR_FORM_INVALID_MESSAGE: 'Please correct the highlighted fields. ',
+    ERROR__FORM_INVALID_TITLE: 'Uh oh. Looks like there's an error, or missing inputs.',
+    ERROR_INACTIVITY: 'Your application expired due to inactivity.',
+    ERROR_INVALID_DATA: 'Uh oh, there is invalid data.',
+    ERROR_NO_PRODUCT: 'Could not find product, "{{targetProductName}}".',
+    ERROR_PAGE_GENERIC: 'There has been an error processing your request.',
+    ERROR__SOMETHINGS_WRONG: "Something's wrong...",
+
+    FINAL_RATE_ADD_COVERAGE_BTN: '+ Add to Coverage',
+    FINAL_RATE_COVERAGE_HEADER: 'Coverage',
+    FINAL_RATE_DECREASE_BTN_ARIA_LABEL: 'decrease'
+    FINAL_RATE_INCREASE_BTN_ARIA_LABEL: 'increase',
+    FINAL_RATE_LEARN_MORE_BTN: 'Learn more',
+    FINAL_RATE__MAX_COVERAGE: 'Maximum coverage reached.',
+    FINAL_RATE__MIN_COVERAGE: 'Minimum coverage reached.',
+    FINAL_RATE__PAYMENT_HEADER: '{{frequency}} payment',
+    FINAL_RATE__TOTAL_LABEL: '{{frequency}} total',
+    FINAL_RATE_PRODUCT_HEADER: 'Whole Life Insurance',
+
+    FINAL_RATE_MODAL__HEADER: 'Great news! Your coverage has been approved.',
+    FINAL_RATE_MODAL__EDIT_COVERAGE: 'Edit CoVerage',
+    FINAL_RATE_MODAL__CONTINUE: 'Continue',
+
+    FINISH_LIFE_TITLE_TEXT: 'Congratulations {{applicantName}}!',
+    FINISH_LIFE_BODY_HEADER_TEXT: "What's Next?",
+    FINISH__LIFE_HEADER_TEXT :
+'Your {{coverageAmount}} {{productName}} policy to help protect {{beneficiaryName}} isapproved.',
+    FINISH_LIFE_BODY_TEXT:
+'Watch your mail box for your policy documents. You can expect them in 5-1o days. We'reso honored to provide you this support.',
+
+    INACTIVITY_TIMEOUT_MODAL_BUTTON_CONT: 'Continue',
+    INACTIVITY_TIMEOUT_MODAL_TITLE: 'Inactivity Timeout',
+    INACTIVITY_TIMEOUT_MODAL_BODY:[
+        '# Still There?',
+"Looks like you've stepped away. The application will expire after {(minutes}} minutesof inactivity. Would you like to continue?",
+    ],
+
+    LANDING__ANNUAL_PAYMENT: 'Annual Payment',
+    LANDING_CONTINUE_TO_APPLY:'Apply',
+    LANDING_COVERAGE_AMOUNT: 'Coverage Amount',
+    LANDING_FIELD_D0B_1900_ERR: 'Sorry, you must enter a Date of Birth after 01/01/1900.',
+    LANDING_FIELD_DOB_LABEL: 'Date of Birth',
+    LANDING_FIELD_SEX_LABEL: 'Sex Assigned at Birth',
+    LANDING_FIELD_SEX_MALE: 'Male',
+    LANDING__FIELD_SEX_FEMALE: 'Female',
+    LANDING__FIELD_STATE_LABEL: 'State',
+    LANDING__FIELD_TOBACCO_LABEL: 'Tobacco Use',
+    LANDING__FIELD_ZIP_LABEL: 'ZIP Code',
+LANDING__LIFE_TERM_DISCLAIMER: '<p>InQuotes and details about coverage benefits, limitations and costs are provided by TrustageTM and its affiliate insurers. {legalName}}provides this experience as a convenience.
+InTrustage is underwritten by CMFG Life Insurance Company, which is rated "A" (Excellent)as of December 2o23 by A.M. Best, an independent rating service which evaluates financialstability and operating performance, year after year. An "A" rating is the third highest of 16ratings.
+InlniAM Best ratings were affirmed in December 2023. S&P ratings were affirmed in February2024. Moody's ratings were affirmed in May 2024. All ratings carry a stable outlook.
+InlnTrustage Simplified Issue Term Life Insurance is issued by CMFG Life Insurance Company.The insurance offered is not a deposit, and is not federally insured, sold guaranteed by anyfinancial institution. This is a term policy to age 8o that has premiums that increased whenentering each five-year band: 25, 30, 35, 40, 45, 50, 55, 60, 65, 70 and 75. Approval is basedon your answers to the questions on the application and additional information we obtain fromother sources. Rates may be higher due to tobacco use. Product and features may vary and not beavailable in all states. Corporate Headquarters 5910 Mineral Point Road, Madison, wI 537o5 BaseForm Numbers for coverage under 100k. IcC16-A10a-039, A10a-039-2016 & over 100k IcC 17-Sit-2,2017-SIT-2
+    IninTrustage
+    InSIT1, SIT2-6641153.1-0524-0626</p>',
+LANDING__LIFE_HEADER_DESC: "Get an instant decision and if you're approved, buy completelyonline with TruStagem",
+    LANDING_LIFE_TERM_HEADER_EST: 'Your term life insurance quote:',
+LANDING__LIFE_TERM_HEADER_EST_PARTNER: 'Thanks for trusting {{partnerName}} for your termlife insurance quote:',
+    LANDING_LIFE_WHOLE_HEADER_EST: 'Your whole life insurance quote:',
+    LANDING_LIFE_WHOLE_HEADER_EST_PARTNER: 'Thanks for trusting {(partnerName}} for your whole
+    LANDING__LIFE_TERM_HEADER_EST_DESC:
+'Term life can help guard your family against major costs with coverage that never decreases.',
+    LANDING__LIFE_WHOLE_HEADER_EST_DESC:
+"Get a lifetime of coverage at a rate that's locked-in upfront. No physical exams required.",
+    LANDING_LIFE_HEADER: 'Life insurance designed to fit your budget',
+LANDING__LIFE_HEADER_PARTNER: "Welcome from {{partnerName}}. Let's find life insurancethat's right for you.",
+    LANDING__MONTHLY_PAYMENT: 'Monthly Payment',
+    LANDING_QUARTERLY_PAYMENT: 'Quarterly Payment',
+    LANDING_SEMIANNUAL_PAYMENT: 'Semi-Annual Payment',
+    LANDING_SEE_ESTIMATE: 'Get free quote',
+    LANDING__TOBACCO_USE_LABEL:
+'Have you used any forms of tobacco, including nicotine substitutes, in the last 12 months?',
+    TEST_START_APP_ORG_DROPDOWN_LABEL: 'Organization Select',
+    TEST_START_APP__API_LABEL: 'API Key',
+    TEST_START_APP__APP_EXPERIENCE_LABEL: 'Application Experience',
+    TEST_START_APP_AGENT_ID_LABEL: 'Agent ID',
+    TEST_START_APP_ENV_LABEL: 'Environment',
+    TEST_START_APP_GLOBAL_HEADER_NAME: 'Life Distribution Partner',
+    TEST_START_APP_PRODUCT_LABEL: 'Product',
+    TEST_START_APP_REDIRECT_BTN: 'Redirect',
+    TEST_START_APP_REQUEST_LABEL: 'Start App Request Body',
+    TEST_START_APP_RESET_PAYLOAD_BTN: 'Reset Payload',
+    TEST_START_APP_RESPONSE_LABEL: 'Response',
+    TEST_START_APP_START_BTN: 'Start',
+
+    PAGE_TITLE_LANDING_DETAILS: 'Life Insurance Details',
+    PAGE_TITLE_LIFE_APPLICATION: 'Life Insurance Application',
+    PAGE_TITLE_LIFE_FINISH: 'Life Insurance Summary',
+    PAGE_TITLE_TEST_START_APP: 'Test Start App',
+
+PAYMENT__ASSOCIATED_ROUTING_NUMBER: '{{fiName}} is associated with the entered routingnumber.',
+    PAYMENT__ROUTING_NUM_INVALID: 'Please enter a Valid 9 digit routing number.',
+    PAYMENT__ROUTING_NUM_DISALLOWED:
+"Sorry, we can't process payments from this financial institution. Please choose a different financial institution or change your payment method.",
+
+COVERAGE_ADJUSTER_HEADER: 'You are applying for {{initialCoverageAmount}} of{{productName}}',
+    COVERAGE_ADJUSTER_DESCRIPTION: 'You can adjust your monthly payment and coverage below.',
+COVERAGE_ADJUSTER_DESCRIPTION_MAX_AMOUNT: 'You can adjust your monthly payment and coveragebelow.',
+    COVERAGE_ADJUSTER_PRODUCT_INPUT_LABEL: '{{productName}} coverage',
+    COVERAGE_ADJUSTER_MODAL_ARIA_TITLE: 'Choose your rate',
+    COVERAGE_ADJUSTER_MODAL_TITLE: 'Choose your rate',
+
+    EDIT_COVERAGE_MODAL_ARIA_TITLE: 'Edit coverage',
+    EDIT_COVERAGE_MODAL_TITLE: 'Edit coVerage',
+    EDIT_COVERAGE_MODAL_DISCLAIMER: 'Adjust the coverage amount to see updated pricing.',
+    EDIT_COVERAGE_MODAL_COVERAGE_EXCEEDED_HEADING: 'Update coVerage selections'
+    EDIT_COVERAGE_MODAL_COVERAGE_EXCEEDED_ERROR:
+'Accidental Death coverage cannot be greater than 3 times the whole Life coverage, adjust at least one of the coverages to continue.',
+
+    COVERAGE_MAXIMUM_LIMIT_REACHED: 'Maximum coverage reached.',
+    COVERAGE_MINIMUM_LIMIT_REACHED: 'Minimum coverage reached.',
+
+    MONEY_INCREMENT_INCREMENT: 'Increment {{label}}'
+    MONEY_INCREMENT_DECREMENT: 'Decrement {{label}}',
+
+    SUMMARY_SUB_HEADER: "What's Next?",
+    SUMMARY_DECLINED_SUB_BODY:
+'You can still apply for life insurance over the phone. A licensed agent would be happyto give you a free quote and help you explore your options. You will receive more detailsregarding our decision by U.S. mail in approximately three to five business days.',
+
+    SUMMARY_DEFAULT_DECLINED_SUB_BODY:
+'If you feel a mistake has been made please call us at {(phoneNumber}} to discuss withone of our licensed representatives. Any person who knowingly presents a false statement in anapplication for insurance may be guilty of a criminal offense and subject to penalties understate law.',
+
+    SUMMARY_STOLI_KNOCKOUT_SUB_BODY:
+'For the insured's protection, insurance regulations restrict who can own life insurance on another person's life. The details you provided point to an arrangement whereothers may profit from your death. Insureds are best protected when others participatingdirectly or indirectly in the transaction are better off with the insured alive.',
+
+    SUMMARY_APPROVED_HEADER: 'Congratulations {{insuredFirstName}}',
+    SUMMARY_APPROVED_BODY:
+'Your {{coverageAmount}} {{coreProductName}} application to help protect{{beneficiaryNames}} is approved.',
+
+    SUMMARY_APPROVED_SUB_BODY:
+'You'll get emails confirming your approval and letting you know when your welcome kitis on the way. The kit includes all the important details, including your policy documents.we'll process your first payment {{coveragestartDate}}* and your coverage will start once thepayment is received.',
+    SUMMARY_PENDING_HEADER: 'Decision is pending.',
+    SUMMARY_PENDING_BODY:
+'You just applied for {{coverageAmount}} in {{coreProductName}} to help protect{{beneficiaryNames}}.',
+    SUMMARY_PENDING_SUB_BODY:
+'we're experiencing a delay in accessing your prescription information. An email will be sent to you with your decision shortly. If you're approved, we'll initiate your firstpayment {{coveragestartDate}}* and your coverage will start once payment is received. If youdon't receive our email within 24 hours, please call {(phoneNumber} with your confirmationnumber, and one of our licensed agents will help you.',
+    SUMMARY_PENDING_CONFIRMATION: 'Your confirmation number is ',
+
+    SUMMARY_DECLINED_HEADER:
+'Due to information gathered for your application (answers to health questions or prescription records), we're not able to offer you this insurance.',
+
+    SUMMARY_PRIOR_DECLINED_HEADER:
+         'Based on information obtained from a previous attempt to apply, we are unable to
+
+    SUMMARY_BAD_ACTOR_HEADER: 'Our ability to help customers requires a high degree of trust.',
+    SUMMARY_BAD_ACTOR_BODY:
+'Prior interactions have created doubt and concerns about the integrity of the information provided which we are unable to overcome.',
+SUMMARY_BAD_ACTOR_BODY_SECONDARY: 'Due to those concerns, we are unable to accept yourapplication.',
+
+    SUMMARY_NOT_THE_INSURED_HEADER:
+'Due to information gathered for your application we're not able to offer you this insurance.',
+
+    SUMMARY_NO_REPLACEMENTS_HEADER:
+'Due to information gathered for your application we're not able to offer you this insurance.',
+
+    SUMMARY_STOLI_KNOCKOUT_HEADER:
+         'Based on your answers on the questionnaire, we are unable to complete this request.',
+
+SUMMARY_ADBO_KNOCKOUT_HEADER: 'This application can not be completed. You may now close theeApp.',.
+
+    SUMMARY_COVERAGE_MAXIMUM_HEADER:
+'It looks like you already have the maximum amount of Trustage {{coreProductName}} withus.',
+    SUMMARY_COVERAGE_MAXIMUM_HEADER_AGENT :
+'It looks like you already have the maximum amount of {{coreProductName} with us, thisapplication can not be completed.',
+
+    SUMMARY_SYSTEM_UNAVAILABLE_HEADER:
+'Unfortunately, at this time, we are experiencing technical difficulties and are unableto process your current request online.',
+SUMMARY_SYSTEM_UNAVAILABLE_SUB_BODY: 'You can still apply for life insurance over the phone.',
+
+SUMMARY_GENERIC_HEADER: 'Unfortunately, we cannot process this request online at this time.
+SUMMARY_AGENT_GENERIC_HEADER: 'This application can not be completed. You may now close theeApp.',
+SUMMARY_AGENT_VOLUNTARY_CLOSE_HEADER: 'This application has now been saved! You may nowclose the browser tab.',
+    CHASE_PAYMENT_MODAL_SUBHEADER:
+'please enter your credit card details for payment. You'll be able to review the full application after you hit submit.',
+    APP_FLOW_TERMS_CONDITIONS_PRIVACY_NOTICE: 'Privacy Notice',
+
+    SAVE_AND_CLOSE_MODAL_TITLE: 'Save & close the application',
+    SAVE_AND_CLOSE_MODAL_TITLE_WHILE_RECORDING: 'Recording still in progress',
+SAVE_AND_CLoSE_MODAL_BODY: 'Are you sure you want to save your changes and close the application?',
+    SAVE_AND_CLOSE_MODAL_BODY_WHILE_RECORDING: 'To save your recording\n
+
+    1. Press 9 on your phone
+    2. Confirm you want to close the application
+    3. Save your changes',
+
+    EMAIL_CONSENT_MODAL_TITLE: 'Are you sure?',
+    EMAIL_CONSENT_MODAL_ARIA_TITLE: 'Are you sure?'
+    EMAIL_CONSENT_MODAL_BODY: 'Are you sure you want to cancel and discard this application?',
+    EMAIL_CONSENT_MODAL_DESCRIPTION:
+'If the applicant does not agree to email delivery, this application will be cancelledand any work done here will be discarded',
+};
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 212. ‘C:\DevCode\DIXUI\src\i18n\index.ts
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\i18n\index.ts" type=".ts" size="1195" lines="37" chars="1195" -->
+   'typescript
+import { useCallback } from 'react';
+import i18n from 'i18next';
+import { initReactI18next, useTranslation  from 'react-i18next';
+import { i18n as commonuIi18n } from 'commonui';
+import { translation } from './en';
+
+const translations = { ...commonuIi18n.translation, ...translation };
+export type TranslationType = keyof typeof translations;
+
+i18n.use(initReactI18next).init({
+    resources: {
+        en: {
+            translation: translations,
+        },
+    },
+    Ing: 'en',
+    keySeparator: false,
+    interpolation: { escapeValue: false ,
+}};
+
+export interface IUseTypedTranslation
+    t: (ns: TranslationType, options?: object) => string;
+}
+
+const useTypedTranslation = (): IUseTypedTranslation => {
+    const { t  = useTranslation();
+// react-i18next's bundled types predate the installed i18next version's stricter t() overloads
+const newT = useCallback((ns: TranslationType, options?: object): string => t(ns, optionsas any) as string, [tj);
+    return
+        t: newT,
+    };
+};
+
+const nonHookTypedTranslation = (ns: TranslationType, options?: object): string => i18n.t(ns,
+
+export { i18n, useTypedTranslation, nonHookTypedTranslation };
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 213. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-cobanding-partner.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-cobanding-partner.json" type=".json" size="638" lines="21" chars="638" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId":"58f1df3e-197a-4877-81fc-dd347b4aac55",
+        "errors":[]
+    },
+    "payload": {
+        "name": "Ethos Technologies Inc.",
+        "displayName": "Ethos",
+        "websiteurl": "https://www.ethoslife.com/",
+        "logoUrl": "https://trustageimages.azureedge.net/logo/10447336.png",
+        "phoneNumbers": {
+            "header": "1-415-322-1828",
+            "contact":"1-415-322-1828",
+            "confirmation": "1-415-322-1828",
+            "decline": "1-415-322-1828"
+        }
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 214. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-additional-info-florida.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-additional-info-florida.json" type=".json" size="42289" lines="849" chars="42285" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId": "1e565f29-6ab1-4f71-a3c4-56e80f446956",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+        "coreProduct": {
+            "name": "Trustage Term Life Insurance",
+            "version": 17.
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Term",
+            "pr0ductTemplateId": "5D00D1F3-6A4E-4BC2-A543-FFEADE290727",
+            "pr0ductId": "773294EC-3C41-439C-A026-37575C7DEE4D",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+        "insuranceForm": {
+            "formId":"20CE04DC-4F35-4833-A980-27E05F8CF1F4",
+            "formName": "25-09-11:1347 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 5,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate":"2025-09-24T16:39:55.069Z",
+        "lastUpdated": "2025-09-24T16:40:43.692Z",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "segmentTitle": "Additional Information",
+            "navigationTitle": "Additional Information",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 4,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [],
+            "fieldGroups":[
+                {
+                    "groupCode": "GROUP-ADDITIONAL-INFO",
+                    "groupTitle": "Additional Information",
+                     "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition": [].
+                    "dataFields":[
+                        {
+                             "fieldCode":"FIELD-CITIZENSHIP",
+                             "fieldLabel": "Are you a citizen or permanent resident of the usA?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-COLLECT-CITIZENSHIP",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "required": true
+                                 },
+                                {
+                                     "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "googleAnalytics":
+                                 "fieldName":"Status",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-CHECK",
+"fieldLabel": "Will the coverage applied for replace, discontinue, or change any existing life coverage or annuities in this or any other company?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label":"Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Replace",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-GEORGIA",
+"fieldLabel": "As a Georgia resident, we are required to provide you the following information:\nlnPlease review the [Replacement Noticej",
+                             "arialabel": "",
+"helpText": "## Replacing Your Life Insurance Policy?InlnAre you thinking about buying a new policy and discontinuing or changing an existing policy? If youare, your decision could be a good one - or a mistake. You will not know for sure unless youmake a careful comparison of your existing policy and the proposed policy.InlnMake sure youunderstand the facts. Below you will find a check list of some of the items you should considerin making your decision. TAKE TIME To READ IT.InlnDo not let one agent or insurer prevent youfrom obtaining information from another agent or insurer which may be to your advantage.InHearboth sides before you decide. This way you can be sure you are making a decision that is inyour best interest.Inwe are required to notify your existing company that you may be replacingtheir policy.InlnITEMs To coNSIDERlnIf the policy coverages are basically similar, premiums fora new policy may be higher because rates increase as your age increases.InCash values anddividends, if any, may grow slower under a new policy initially because of the initial costs ofissuing a policy.InYour present insurance company may be able to make a change on terms whichmay be more favorable than if you replace existing insurance with new insurance.InIf you borrowagainst an existing policy to pay premiums on a new policy, death benefits payable under yourexisting policy will be reduced by the amount of any unpaid loan, including unpaid interest.InCurrent interest rates are not guaranteed. Guaranteed interest rates are usuallyconsiderably lower than current rates. what rates are guaranteed?lnAre premiums guaranteed orsubject to change - up or down?lnParticipating policies pay dividends that may materiallyreduce the cost of insurance over the life of the contract. Dividends, however, are notguaranteed.InlnCAuTIoN, you are urged not to take action to terminate, assign, or alter yourexisting life insurance coverage until after you have been issued the new policy, examined itand have found it to be acceptable to you.InlnAnd, REMEMBER, you have thirty (3o) daysfollowing receipt of any life insurance policy to examine its contents. If you are notsatisfied with it for any reason, you have the right to return it to the insurer at its home orbranch office or to the agent through whom it was purchased, for a full refund of premium.",
+                             "helpTextTitle": "Replacement Notice",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage": "display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "info-partial",
+                             "blockField": true,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "GA",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Georgia Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                "optionsType":"click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-FLORIDA",
+"fieldLabel": "Florida regulations give you the right to receive a written Comparative Information Form which summarizes your policy values. Indicate whether ornot you wish to receive a Comparative Information Form from the proposed company and yourexisting insurer or insurers by checking the appropriate box below.",
+                             "arialabel": "",
+                             "helpText": "",
+                             "helpTextTitle": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "operator": "EQUAL"
+                                 },
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "FL",
+                                     "hidden": false,
+                                     "operator": "EQUAL"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Florida Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "fieldType": "boolean",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        },
+                        {
+                             "fieldCode": "FIELD-MAIL-ADDR-STATE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "value": "FL"
+                        },
+                        {
+                             "fieldCode": "FIELD-COLLECT-CITIZENSHIP",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage": "display",
+                             "fieldType": "text",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-ADD-EXISTING-COVERAGE",
+                    "groupTitle": "Existing Coverage",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content":"Coverage [key]"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                    "groupType": "repeatable",
+                    "jsonValueField": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "disabled": false,
+                    "hidden": true,
+                    "required": false,
+                    "presentationRules":[
+                        {
+                             "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                             "value": "true",
+                             "required": true,
+                             "hidden": false
+                        }
+                    ],
+                    "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+                             "value": "",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-NAME",
+                             "fieldLabel": "Name of current insurance company",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter name of current insurance company",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 55,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "companyName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Name of Current Insurance Company [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-HOME-OFFICE-WYOMING",
+                             "fieldLabel": "Insurer Home Office Location",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter home office location",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options": [],.
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             'googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-POLICY-NUMBER",
+                             "fieldLabel": "Policy number (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter policy number",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldtype": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 12,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "maxLength": 200
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "policyNumber"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Policy Number [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-INSURED-WYOMING",
+                             "fieldLabel": "Insured",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter Insured",
+                             "presentationorder": 4,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingExistingCoverage"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-INFO-WYOMING",
+"fieldLabel": "If a number has not been assigned by the existing insurer, indicate alternative identification, such as an application or receipt number.",
+                             "ariaLabel": "",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "dataFieldSize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype":"small",
+                             "maxLength": 137,
+                             "default": "",
+                             "helpText": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                             "fieldLabel": "Do you know your surrender charge?",
+                             "ariaLabel": "",
+"helpText": "## Surrender ChargelnlnLook to your existing policy's data page to determine the surrender charge percentage and dollar amount.",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "radio-vertical",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "I know my surrender charge",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "I don't know my surrender charge",
+                                     "value": "false",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "Not applicable",
+                                     "value": "unknown",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderCharge"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-AMOUNT-WYOMING",
+                             "fieldLabel": "How would you like to enter your surrender charge?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "nested-multi-select",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "label":"Percentage",
+                                     "placeholder": "Enter percentage",
+                                     "optionType":"percentage",
+                                     "order": 1
+                                 },
+                                {
+                                     "label": "Dollar Amount",
+                                     "placeholder": "Enter dollar amount",
+                                     "optionType":"dollar-amount",
+                                     "order": 2
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderChargeAmount"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge Amount [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                             "fieldLabel": "+ Add Another Policy",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 22,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                     "maxEntries": 2
+                },
+                {
+                    "groupCode" : "GROUP-SUBMIT-ADDITIONAL-INFO",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 4,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADDITIONAL-INFO",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 4,
+            "sectionNumber": 1,
+            "segmentNumber": 4,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 3,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 4,
+            "currentSegmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 3,
+                    "sectionNumber": 1,
+                    "startTimestamp":"2025-09-24T12:39:53.770-04:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                     "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "policyNumber": "LC5982111",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingStatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 90000,
+            "billingAmount":"$42.70",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals": [],
+            "insuredFirstName":"John",
+            "insuredLastName": "Sanford",
+            "insuredFullName": "John Sanford",
+            "productCode": "2016 SITERM80",
+            "productName": "TruStage Term Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Test - Term Life Insurance - Hello Sprint Review",
+                "productType": "Term Life 2: Battle",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader":"833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "beneficiaries":[
+                {
+                     "name":{
+                        "firstName":"Peter",
+                        "lastName": "whisperwind"
+                    },
+                     "relationship":"CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "eAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+            "correlationId":"1e565f29-6ab1-4f71-a3c4-56e80f446956",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "42.70",
+            "paymentFreq":"Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "gender": "Male",
+            "state": "FL",
+            "issueAge":"65",
+            "policyNumber":"Lc5982111",
+            "policystatus": "InProgress",
+            "addressLine1": "3838 SE Jefferson St",
+            "city": "Stuart",
+            "zip":"34997",
+            "email":"hayne_Wehner95@gmail.com",
+            "firstName": "John",
+            "lastName": "Sanford",
+            "phone": "(610) 872-1486",
+            "date0fBirth": "1960-01-15"
+        },
+        "sessionId": "c988d38f-4701-47bc-9350-bce2f9e84401",
+        "lastFoursSN": "8010"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 215. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-additional-info-nevada.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-additional-info-nevada.json" type=".json" size="45689" lines="887" chars="45685" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId": "1e565f29-6ab1-4f71-a3c4-56e80f446956",
+        "errors": []
+    },
+    "payload":{
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+        "coreProduct": {
+            "name": "Trustage Term Life Insurance",
+            "version": 17.
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "pr0ductTemplateId": "5D00D1F3-6A4E-4BC2-A543-FFEADE290727",
+            "pr0ductId": "773294EC-3C41-439C-A026-37575C7DEE4D",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+        "insuranceForm": {
+            "formId":"20CE04DC-4F35-4833-A980-27E05F8CF1F4",
+            "formName": "25-09-11:1347 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 5,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2025-09-24T16:39:55.069Z",
+        "lastUpdated": "2025-09-24T16:40:43.692Z",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "segmentTitle": "Additional Information",
+            "navigationTitle": "Additional Information",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 4,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[],
+            "fieldGroups":[
+                {
+                    "groupCode": "GROUP-ADDITIONAL-INFO",
+                    "groupTitle": "Additional Information",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition": [].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-CITIZENSHIP",
+                             "fieldLabel": "Are you a citizen or permanent resident of the usA?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "dataFieldSize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label":"Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-COLLECT-CITIZENSHIP",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "required": true
+                                 },
+                                {
+                                     "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Status",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-CHECK",
+"fieldLabel": "Will the coverage applied for replace, discontinue, or change any existing life coverage or annuities in this or any other company?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Replace",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-GEORGIA",
+"fieldLabel": "As a Georgia resident, we are required to provide you the following information:InlnPlease review the [Replacement Noticej]",
+                             "ariaLabel": "",
+"helpText": "## Replacing Your Life Insurance Policy?\nlnAre you thinking about buying a new policy and discontinuing or changing an existing policy? If youare, your decision could be a good one - or a mistake. You will not know for sure unless youmake a careful comparison of your existing policy and the proposed policy.InlnMake sure youunderstand the facts. Below you will find a check list of some of the items you should considerin making your decision. TAKE TIME To READ IT.InlnDo not let one agent or insurer prevent youfrom obtaining information from another agent or insurer which may be to your advantage.InHearboth sides before you decide. This way you can be sure you are making a decision that is inyour best interest.Inwe are required to notify your existing company that you may be replacingtheir policy.InlnITEMs To CONSIDERInIf the policy coverages are basically similar, premiums fora new policy may be higher because rates increase as your age increases.InCash values anddividends, if any, may grow slower under a new policy initially because of the initial costs ofissuing a policy.InYour present insurance company may be able to make a change on terms whichmay be more favorable than if you replace existing insurance with new insurance.InIf you borrowagainst an existing policy to pay premiums on a new policy, death benefits payable under yourexisting policy will be reduced by the amount of any unpaid loan, including unpaid interest.Incurrent interest rates are not guaranteed. Guaranteed interest rates are usuallyconsiderably lower than current rates. what rates are guaranteed?\nAre premiums guaranteed orsubject to change - up or down?\nParticipating policies pay dividends that may materiallyreduce the cost of insurance over the life of the contract. Dividends, however, are notguaranteed.InlnCAuTIoN, you are urged not to take action to terminate, assign, or alter yourexisting life insurance coverage until after you have been issued the new policy, examined itand have found it to be acceptable to you.In\nAnd, REMEMBER, you have thirty (3o) daysfollowing receipt of any life insurance policy to examine its contents. If you are notsatisfied with it for any reason, you have the right to return it to the insurer at its home orbranch office or to the agent through whom it was purchased, for a full refund of premium.",
+                             "helpTextTitle": "Replacement Notice",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "info-partial",
+                             "blockField": true,
+                             "options": [],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "GA",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Georgia Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType":"click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-NEVADA",
+"fieldLabel": "As a Nevada resident who is considering replacing your existing policy, please review the [Replacement Notice]. In\nlnlnBy clicking "Continuel",your signature will be applied to the Replacement Notice.",
+                             "arialabel": "",
+"helpText": "## Replacing Your Life Insurance Policy?InIn IMPORTANT NOTICE REGARDING THE REPLACEMENT OF YOUR POLICY OF LIFE INSURANCE\n\nYou have been offered apolicy to replace all or part of your existing policy of life insurance.InlnBefore you replaceyour existing policy, you should consider whether you could suffer a FINANCIAL Loss under thenew policy because of your AGE or the condition of your HEALTH. You should also considerwhether you will pay more for premiums because of your age or health.InlnYou wILL incuradditional costs to acquire the new policy, including the payment of commissions to the agentadvocating the replacement of your existing policy.InlnTo make an informed decision about thereplacement of your policy, you should discuss the provisions of your existing policy with youragent or the company which issued it to determine whether your policy can be changed to meetyour present needs.InlnYour new policy provides 3o days for you to decide whether you wish tokeep it.nlnThe agent who is offering to replace your existing policy is required to obtainyour signature on this notice. Also, the agent will be notifying your existing insurancecompany that you are considering the replacement of your policy.InlnI have read this notice andreceived a copy of it for my records.",
+                             "helpTextTitle": "Replacement Notice",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "info-partial",
+                             "blockField": true,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "operator": "EQUAL"
+                                 },
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "Nv",
+                                     "hidden": false,
+                                     "operator": "EQUAL"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Nevada Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType":"click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-FLORIDA",
+"fieldLabel": "Florida regulations give you the right to receive a written Comparative Information Form which summarizes your policy values. Indicate whether ornot you wish to receive a Comparative Information Form from the proposed company and yourexisting insurer or insurers by checking the appropriate box below.",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "helpTextTitle": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "operator": "EQUALS"
+                                 },
+                                {
+                                     "field":"FIELD-MAIL-ADDR-STATE",
+                                     "value": "FL",
+                                     "hidden": false,
+                                     "operator": "EQUALS"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Florida Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage": "display",
+                             "fieldType": "boolean",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        },
+                        {
+                             "fieldCode": "FIELD-MAIL-ADDR-STATE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "value": "Nv"
+                        },
+                        {
+                             "fieldCode": "FIELD-COLLECT-CITIZENSHIP",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"display",
+                             "fieldType": "text",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-ADD-EXISTING-COVERAGE",
+                    "groupTitle": "Existing Coverage",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content":"Coverage [key]"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                     "groupType":"repeatable",
+                    "jsonValueField": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                    "arialabel":"",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "disabled": false,
+                    "hidden": true,
+                    "required": false,
+                    "presentationRules": [
+                        {
+                             "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                             "value": "true",
+                             "required": true,
+                             "hidden": false
+                        }
+                    ],
+                    "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default":"",
+                             "value": "",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-NAME",
+                             "fieldLabel": "Name of current insurance company",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter name of current insurance company",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 55,
+                             "options": [],.
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "companyName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Name of Current Insurance Company [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-HOME-OFFICE-WYOMING",
+                             "fieldLabel": "Insurer Home Office Location",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter home office location",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options": [],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-POLICY-NUMBER",
+                             "fieldLabel": "Policy number (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter policy number",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "maxLength": 200
+                                 }
+                             ],
+                             "valueRules": [
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "policyNumber"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Policy Number [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-INSURED-WYOMING",
+                             "fieldLabel": "Insured",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter Insured",
+                             "presentationorder": 4,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingExistingCoverage"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-INFO-WYOMING",
+"fieldLabel": "If a number has not been assigned by the existing insurer, indicate alternative identification, such as an application or receipt number.",
+                             "ariaLabel": "",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "dataFieldsize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype": "small",
+                             "maxLength": 137,
+                             "default":"",
+                             "helpText": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                             "fieldLabel": "Do you know your surrender charge?",
+                             "ariaLabel": "",
+"helpText": "## Surrender ChargelnnLook to your existing policy's data page to determine the surrender charge percentage and dollar amount.",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "radio-vertical",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "I know my surrender charge",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "I don't know my surrender charge",
+                                     "value": "false",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "Not applicable",
+                                     "value": "unknown",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute":"wyomingSurrenderCharge"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-AMOUNT-WYOMING",
+                             "fieldLabel": "How would you like to enter your surrender charge?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "nested-multi-select",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "label":"Percentage",
+                                     "placeholder": "Enter percentage",
+                                     "optionType": "percentage",
+                                     "order": 1
+                                 },
+                                {
+                                     "label": "Dollar Amount",
+                                     "placeholder": "Enter dollar amount",
+                                     "optionType":"dollar-amount",
+                                     "order": 2
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules": [
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderChargeAmount"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge Amount [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                             "fieldLabel": "+ Add Another Policy",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 22,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                    "maxEntries": 2
+                },
+                {
+                    "groupCode" : "GROUP-SUBMIT-ADDITIONAL-INFO",
+                    "groupTitle": "",
+                     "groupSubTitle": "",
+                     "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 4,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADDITIONAL-INFO",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 4,
+            "sectionNumber": 1,
+            "segmentNumber": 4,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 3,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 4,
+            "currentSegmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 3,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2025-09-24T12:39:53.770-04:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                     "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "policyNumber": "LC5982111",
+            "appstatus": "InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingStatus": "Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 90000,
+            "billingAmount":"$42.70",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoverageStartDate": null,
+            "riders":[],
+            "modals":[],
+            "insuredFirstName": "John",
+            "insuredLastName": "Sanford",
+            "insuredFullName": "John Sanford",
+            "productCode": "2016 SITERM80",
+            "productName": "Trustage Term Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Test - Term Life Insurance - Hello Sprint Review",
+                "productType": "Term Life 2: Battle",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlSource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Peter",
+                        "lastName": "whisperwind"
+                    },
+                     'relationship":"CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "eAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+            "correlationId":"1e565f29-6ab1-4f71-a3c4-56e80f446956",
+            "appSubstatus": "InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "42.70",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "gender":"Male",
+            "state": "FL",
+            "issueAge":"65",
+            "policyNumber":"LC5982111",
+            "policystatus":"InProgress",
+            "addressLine1": "3838 SE Jefferson St",
+            "city": "stuart",
+            "zip":"34997",
+            "email": "hayne_Wehner95@gmail.com",
+            "firstName": "John",
+            "lastName": "Sanford",
+            "phone": "(610) 872-1486",
+            "date0fBirth": "1960-01-15"
+        },
+        "sessionId": "c988d38f-4701-47bc-9350-bce2f9e84401",
+        "lastFourSSN": "8010"
+    }
+}
+```
+     CODESCAN_FILE_END -->
+
+---
+
+### 216. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-additional-info.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-additional-info.json" type=".json" size="41835" lines="849" chars="41831" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId": "1e565f29-6ab1-4f71-a3c4-56e80f446956",
+        "errors":[]
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+        "coreProduct": {
+            "name": "Trustage Term Life Insurance",
+            "version": 17.
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Term",
+            "productTemplateId": "5D00D1F3-6A4E-4BC2-A543-FFEADE290727",
+            "pr0ductId": "773294EC-3C41-439C-A026-37575C7DEE4D",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+        "insuranceForm": {
+            "formId":"20CE04DC-4F35-4833-A980-27E05F8CF1F4",
+            "formName": "25-09-11:1347 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 5,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate":"2025-09-24T16:39:55.069Z",
+        "lastUpdated": "2025-09-24T16:40:43.692Z",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "segmentTitle": "Additional Information",
+            "navigationTitle": "Additional Information",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 4,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [],
+            "fieldGroups": [
+                {
+                    "groupCode":"GROUP-ADDITIONAL-INFO",
+                    "groupTitle": "Additional Information",
+                    "groupType":"basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition": [].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-CITIZENSHIP",
+                             "fieldLabel": "Are you a citizen or permanent resident of the usA?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-COLLECT-CITIZENSHIP",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "required": true
+                                 },
+                                {
+                                     "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName":"Status",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-CHECK",
+"fieldLabel": "Will the coverage applied for replace, discontinue, or change any existing life coverage or annuities in this or any other company?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label":"Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Replace",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-GEORGIA",
+"fieldLabel": "As a Georgia resident, we are required to provide you the following information:InlnPlease review the [Replacement Noticej]",
+                             "arialabel": "",
+"helpText": "## Replacing Your Life Insurance Policy?InlnAre you thinking about buying a new policy and discontinuing or changing an existing policy? If youare, your decision could be a good one - or a mistake. You will not know for sure unless youmake a careful comparison of your existing policy and the proposed policy.InlnMake sure youunderstand the facts. Below you will find a check list of some of the items you should considerin making your decision. TAKE TIME To READ IT.InlnDo not let one agent or insurer prevent youfrom obtaining information from another agent or insurer which may be to your advantage.InHearboth sides before you decide. This way you can be sure you are making a decision that is inyour best interest.Inwe are required to notity your existing company that you may be replacingtheir policy.InlnITEMs To CoNsIDERInIf the policy coverages are basically similar, premiums fora new policy may be higher because rates increase as your age increases.InCash values anddividends, if any, may grow slower under a new policy initially because of the initial costs ofissuing a policy.InYour present insurance company may be able to make a change on terms whichmay be more favorable than if you replace existing insurance with new insurance.InIf you borrowagainst an existing policy to pay premiums on a new policy, death benefits payable under yourexisting policy will be reduced by the amount of any unpaid loan, including unpaid interest.InCurrent interest rates are not guaranteed. Guaranteed interest rates are usuallyconsiderably lower than current rates. what rates are guaranteed?\nAre premiums guaranteed orsubject to change - up or down?\nParticipating policies pay dividends that may materiallyreduce the cost of insurance over the life of the contract. Dividends, however, are notguaranteed.InlnCAuTIoN, you are urged not to take action to terminate, assign, or alter yourexisting life insurance coverage until after you have been issued the new policy, examined itand have found it to be acceptable to you.In\nAnd, REMEMBER, you have thirty (3o) daysfollowing receipt of any life insurance policy to examine its contents. If you are notsatisfied with it for any reason, you have the right to return it to the insurer at its home orbranch office or to the agent through whom it was purchased, for a full refund of premium.",
+                             "helpTextTitle": "Replacement Notice",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "info-partial",
+                             "blockField": true,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "GA",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Georgia Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                                     "fieldCode": "FIELD-REPLACEMENT-NOTICE-FLORIDA",
+"fieldLabel": "Florida regulations give you the right to receive a written Comparative Information Form which summarizes your policy values. Indicatewhether or not you wish to receive a Comparative Information Form from the proposed company andyour existing insurer or insurers by checking the appropriate box below.",
+                                     "ariaLabel":"",
+                                     "helpText": "",
+                                     "helpTextTitle": "",
+                                     "placeholder": "",
+                                     "presentationorder": 1,
+                                     "usage":"input",
+                                     "hidden": true,
+                                     "disabled": false,
+                                     "required": false,
+                                     "fieldType": "single-select",
+                                     "options":[
+                                         {
+                                             "hidden": false,
+                                             "label": "Yes",
+                                             "order": 1.
+                                             "value": "true"
+                                         },
+                                         {
+                                             "hidden": false,
+                                             "label": "No",
+                                             "order": 2,
+                                             "value": "false"
+                                         }
+                                     ],
+                                     "default": "",
+                                     "value": "",
+                                     "presentationRules": [
+                                         {
+                                             "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                             "value": "true",
+                                             "hidden": false,
+                                             "operator": "EQUALS"
+                                         },
+                                         {
+                                             "field": "FIELD-MAIL-ADDR-STATE",
+                                             "value": "Fl",
+                                             "hidden": false,
+                                             "operator": "EQUALs"
+                                         }
+                                     ],
+                                     "googleAnalytics": {
+                                         "fieldName": "Florida Replacement Notice",
+                                         "eventName": "trackotherButtons",
+                                         "optionsType":"click",
+                                         "options": []
+                                     }
+                                 },
+                        {
+                             "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "fieldType": "boolean",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        },
+                        {
+                             "fieldCode": "FIELD-MAIL-ADDR-STATE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "value": "WI"
+                        },
+                        {
+                             "fieldCode": "FIELD-COLLECT-CITIZENSHIP",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"display",
+                             "fieldType": "text",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-ADD-EXISTING-COVERAGE",
+                    "groupTitle": "Existing Coverage",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content":"Coverage [key]"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                    "groupType":"repeatable",
+                    "jsonValueField": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "disabled": false,
+                    "hidden": true,
+                    "required": false,
+                    "presentationRules":[
+                        {
+                             "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                             "value": "true",
+                             "required": true,
+                             "hidden": false
+                        }
+                    ],
+                     "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+                             "value": "",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-NAME",
+                             "fieldLabel": "Name of current insurance company",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter name of current insurance company",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 55,
+                             "options": [],.
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules": [
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "companyName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Name of Current Insurance Company [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-HOME-OFFICE-WYOMING",
+                             "fieldLabel": "Insurer Home Office Location",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter home office location",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-POLICY-NUMBER",
+                             "fieldLabel": "Policy number (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter policy number",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "maxLength": 200
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "policyNumber"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Policy Number [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-INSURED-WYOMING",
+                             "fieldLabel": "Insured",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter Insured",
+                             "presentationorder": 4,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingExistingCoverage"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home ffice Location [keyj",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-INFO-WYOMING",
+"fieldLabel": "If a number has not been assigned by the existing insurer, indicate alternative identification, such as an application or receipt number.",
+                             "arialabel": "",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "dataFieldSize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype": "small",
+                             "maxLength": 137,
+                             "default": "",
+                             "helpText": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                             "fieldLabel": "Do you know your surrender charge?",
+                             "ariaLabel": "",
+"helpText": "## Surrender ChargelnlnLook to your existing policy's data page to determine the surrender charge percentage and dollar amount.",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "radio-vertical",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "I know my surrender charge",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "I don't know my surrender charge",
+                                     "value": "false",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "Not applicable",
+                                     "value": "unknown",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderCharge"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-AMOUNT-WYOMING",
+                             "fieldLabel": "How would you like to enter your surrender charge?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "nested-multi-select",
+                             "maxLength": 200,
+                             "options":[
+                                {
+                                     "label":"Percentage",
+                                     "placeholder": "Enter percentage",
+                                     "optionType": "percentage",
+                                     "order": 1
+                                 },
+                                {
+                                     "label": "Dollar Amount",
+                                     "placeholder": "Enter dollar amount",
+                                     "optionType": "dollar-amount",
+                                     "order": 2
+                                 }
+                             ],
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderChargeAmount"
+                                 }
+                             ],
+                             "googleAnalytics":
+                                 "fieldName": "Surrender Charge Amount [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                             "fieldLabel": "+ Add Another Policy",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 22,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                     "maxEntries": 2
+                },
+                {
+                    "groupCode" : "GROUP-SUBMIT-ADDITIONAL-INFO",
+                    "groupTitle": "",
+                    "groupSubTitle": "",
+                    "grouptype": "progress",
+                    "arialabel":"",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 4,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADDITIONAL-INFO",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 4,
+            "sectionNumber": 1,
+            "segmentNumber": 4,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 3,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 4,
+            "currentSegmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList": [
+                {
+                    "progressItemTitle": "Application",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 3,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2025-09-24T12:39:53.770-04:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                     "progressItemTitle": "Payment",
+                    "arialabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "policyNumber": "LC5982111",
+            "appstatus": "InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingstatus":"Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 90000,
+            "billingAmount": "$42.70",
+            "billingFreq":"Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals": [],
+            "insuredFirstName":"John",
+            "insuredLastName": "Sanford",
+            "insuredFullName": "John Sanford",
+            "productCode": "2016 SITERM80",
+            "productName": "TruStage Term Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Test - Term Life Insurance - Hello Sprint Review",
+                "productType": "Term Life 2: Battle",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel":"https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader":"833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName":"Peter",
+                        "lastName": "whisperwind"
+                    },
+                     'relationship":"CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id": "8b842bd5-b070-486a-bf9a-e71d53dbf5d2",
+            "eAppId":"B221D5FB-D06F-4274-9834-56DA5912B3D8",
+            "correlationId":"1e565f29-6ab1-4f71-a3c4-56e80f446956",
+            "appSubstatus": "InProgress",
+            "insuredstatus":"Approved",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "42.70",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "gender":"Male",
+            "state": "FL",
+            "issueAge": "65",
+            "policyNumber":"Lc5982111",
+            "policystatus": "InProgress",
+            "addressLine1": "3838 SE Jefferson St",
+            "city": "Stuart",
+            "zip":"34997",
+            "email": "hayne_Wehner95@gmail.com",
+            "firstName": "John",
+            "lastName": "Sanford",
+            "phone": "(610) 872-1486",
+            "date0fBirth": "1960-01-15"
+        },
+        "sessionId": "c988d38f-4701-47bc-9350-bce2f9e84401",
+        "lastFourSSN": "8010"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 217. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-beneficiaries-tawl.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-beneficiaries-tawl.json" type=".json" size="78737" lines="1671" chars="78735" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId": "01f09be8-28cb-4067-883f-d64fee996d15",
+        "errors":[]
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"412D3210-E484-4730-A006-4D9D57960D1C",
+        "coreProduct": {
+            "name": "TruStage Advantage Whole Life",
+            "version": 1,
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Wwhole",
+            "pr0ductTemplateId":"ED6A8625-B675-4A94-A800-2822C84827D7",
+            "pr0ductId": "44B30520-5726-448E-8B72-A03A3FAAF782",
+            "tenantId": "475B8867-FE2A-4627-AA0F-948076F401DB"
+        },
+        "insuranceForm": {
+            "formId":"3DAE3973-6D9F-46B0-96DC-AF430E9912AE",
+            "formName": "26-04-03:0914 TruStage TAwL 2.0 Insurance, Agent Form Template",
+            "formVersion": 35,
+            "formTemplateType": "DIX-AA"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-07-06T20:26:12.374Z",
+        "lastUpdated": "2026-07-06T20:27:29.275+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "segmentTitle": "Enter Beneficiaries",
+            "navigationTitle": "Enter Beneficiaries",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-BENEFICIARIES-AND-PAYMENT",
+            "isComplete": false,
+            "presentationorder": 1,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [],
+            "fieldGroups":[
+                {
+                    "grOupCode": "GROUP-BENEFICIARY-ALLOCATION",
+                    "groupTitle": "Enter beneficiaries",
+                    "groupSubTitle": "",
+                    "groupType":"default",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode":"FIELD-ADD-OTHER-BENEFICIARY-O",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+                             "presentationRules": [],
+                             "value": ""
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ALLOCATION-METHOD",
+                             "fieldLabel": "How would you like to allocate benefit percentages?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "default": "SPLIT_EVENLY",
+                             "value": "SPLIT_EVENLY",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Split evenly",
+                                     "Value": "SPLIT_EVENLY",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "Enter manually",
+                                     "value": "MANUAL",
+                                     "hidden": false
+                                 }
+                             ],
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-BENEFICIARY-O",
+                                     "value": "true",
+                                     "disabled": false
+                                 }
+                             ],
+                             "valueRules":[]
+                        }
+                    ]
+                },
+                {
+                    "groupCode": "GROUP-ADD-BENEFICIARIES",
+                    "groupTitle": "",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content": "Beneficiary [key]"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                    "groupType": "repeatable",
+                    "jsonValueField": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "helpTextTitle": "Additional Information",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "disabled": false,
+                    "hidden": false,
+                    "required": true,
+                    "maxEntries": 4,
+                    "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+                             "value": "[{\"beneficiaryDesignation\":\"PRIMARY\"}]",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-KEY",
+                             "hidden": true,
+                             "value":"[key]"
+                        },
+                        {
+                             "fieldCode":"FIELD-BENEFICIARY-DESIGNATION",
+                             "fieldLabel": "Benefit Designation",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label":"Primary",
+                                     "order": 1,
+                                     "value": "PRIMARY"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "Contingent",
+                                     "order": 2,
+                                     "Value": "CONTINGENT"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value": "[key]",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value": "}",
+                                     "disabled": true,
+                                     "default": "PRIMARY"
+                                 },
+                                {
+                                     "field": "FIELD-ADD-OTHER-BENEFICIARY",
+                                     "value": "true",
+                                     "disabled": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "beneficiaryDesignation"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Benefit Designation [key]",
+                                 "eventName": "trackSelection",
+                                 "options":[
+                                     {
+                                         "value": "Primary",
+                                         "action": "Primary"
+                                     },
+                                     {
+                                         "value": "Contingent",
+                                         "action": "Contingent"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-TYPE",
+                             "fieldLabel": "Beneficiary Type",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Select",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "dataFieldSize": 1,
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Person",
+                                     "value": "PERSON"
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "Organization",
+                                     "value": "ORGANIZATION"
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"Estate",
+                                     "value": "ESTATE"
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "Trust",
+                                     "value": "TRUST"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "beneficiaryType"
+                                 },
+                                {
+                                     "uSe": "MODIFY_VALUE_CONDITIONAL",
+                                     "fieldCodes":[
+                                         "FIELD-BENEFICIARY-RELATIONSHIP-TRUST"
+                                     ],
+                                     "values":[
+                                         "TrUST",
+                                         "TRUST"
+                                     ]
+                                 },
+                                {
+                                     "uSe": "MODIFY_VALUE_CONDITIONAL",
+                                     "fieldCodes":[
+                                         "FIELD-BENEFICIARY-RELATIONSHIP-ESTATE"
+                                     ],
+                                     "values":[
+                                         "ESTATE",
+                                         "ESTATE"
+                                     ]
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Beneficiary Type [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode":"FIELD-BENEFICIARY-RELATIONSHIP-PERSON",
+                             "fieldLabel": "Relationship to You",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Select",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"Child",
+                                     "value": "CHILD",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "Friend",
+                                     "value": "FRIEND",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"Grandchild",
+                                     "value": "GRANDCHILD",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Grandparent",
+                                     "value": "GRANDPARENT",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "Parent",
+                                     "Value": "PARENT",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label":"Partner",
+                                     "value": "PARTNER",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label":"Sibling",
+                                     "value": "SIBLING",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 8,
+                                     "label": "Spouse",
+                                     "value": "SPOUSE",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 9,
+                                     "label":"Stepchild",
+                                     "value": "STEPCHILD",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 10,
+                                     "label": "stepparent",
+                                     "Value": "STEPPARENT",
+                                     "hidden": false
+                                 }
+                             ],
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "PERSON",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "relationship"
+                                 }
+                             ],
+                             "googleAnalytics":
+                                 "fieldName": "Relationship [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-RELATIONSHIP-ORGANIZATION",
+                             "fieldLabel": "Relationship to You",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder":"Select",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Charity",
+                                     "value": "CHARITY",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "Church",
+                                     "value": "CHURCH",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"College",
+                                     "Value": "COLLEGE",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "organization",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "School",
+                                     "value": "SCHOOL",
+                                     "hidden": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "Value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "relationship"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Relationship [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-RELATIONSHIP-ESTATE",
+                             "fieldLabel": "Relationship to You",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder":"Select",
+                             "presentationorder": 2,
+                             "dataFieldsize": 1,
+                             "hidden": true,
+                             "disabled": true,
+                             "required": true,
+                             "fieldType": "single-select-dropdown",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Estate",
+                                     "value": "ESTATE",
+                                     "hidden": false
+                                 }
+                             ],
+                             "default": "ESTATE",
+                             "value": "ESTATE",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ESTATE",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "relationship"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Relationship [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-RELATIONSHIP-TRUST",
+                             "fieldLabel": "Relationship to You",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder":"Select",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "dataFieldsize": 1,
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Trust",
+                                     "value": "TRUST",
+                                     "hidden": false
+                                 }
+                             ],
+                             "default": "TRUST",
+                             "value": "TRUST",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "TRUST",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "relationship"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Relationship [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-FIRST-NAME",
+                             "fieldLabel": "First Name",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter first name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "text",
+                             "maxLength": 20,
+                             "default": "",
+                             "value": "",
+                             "dataFieldsize":"s",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-BENEFICIARY-TYPE",
+                                     "value": "PERSON",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "firstName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "First Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-MIDDLE-NAME",
+                             "fieldLabel":"Middle Name (optional)",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter middle name",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldtype": "text",
+                             "maxLength": 10,
+                             "default": "",
+                             "value": "",
+                             "dataFieldSize": "s",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "PERSON",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "middleName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Middle Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-LAST-NAME",
+                             "fieldLabel": "Last Name",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter last name",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "last-name",
+                             "maxLength": 20,
+                             "minLength": 2,
+                             "default": "",
+                             "value": "",
+                             "dataFieldsize":"s",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "PERSON",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "lastName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Last Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-SUFFIX",
+                             "fieldLabel":"Suffix (optional)",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Select suffix",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-BENEFICIARY-TYPE",
+                                     "value": "PERSON",
+                                     "hidden": false
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"I",
+                                     "value":"I",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"II",
+                                     "value": "II",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"III",
+                                     "value": "III",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Iv",
+                                     "value": "Iv",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "y",
+                                     "value": "y",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label":"Jr",
+                                     "value": "JR",
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label":"Sr",
+                                     "value": "SR",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules": [
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "suffix"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Suffix [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-NAME",
+                             "fieldLabel": "organization name",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter organization name",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "text",
+                             "maxLength": 20,
+                             "dataFieldsize": 2,
+                             "default": "",
+                             "value": "",
+                             "exposition":[
+                                {
+                                     "order": 1,
+"content": "Financial institutions and funeral homes cannot be used as beneficiaries."
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "organizationName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Organization Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-MAIL-ADDR-LINE1",
+                             "fieldLabel":"Address",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter address",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "text",
+                             "maxLength": 35,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "dataFieldSize": 1,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "organizationMailAddrLine1"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Beneficiary Organization Address Line 1 [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-MAIL-ADDR-LINE2",
+                             "fieldLabel": "Address 2 (optional)",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter address line 2",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 35,
+                             "default": "",
+                             "value": "",
+                             "exposition": [].
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "organizationMailAddrLine2"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Beneficiary Organization Address Line 2 [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-MAIL-ADDR-CITY",
+                             "fieldLabel":"City",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter city",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "text",
+                             "maxLength": 24,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute":"organizationMailAddrCity"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Beneficiary Organization City [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-MAIL-ADDR-STATE",
+                             "fieldLabel": "State",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Select state",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Alabama",
+                                     "value": "Al"
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"Alaska",
+                                     "value": "Ak"
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"Arizona",
+                                     "value": "Az"
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "Arkansas",
+                                     "value": "AR"
+                                 },
+                                {
+                                     "order": 5,
+                                     "label":"California",
+                                     "value": "CA"
+                                 },
+                                {
+                                     "order": 6,
+                                     "label": "Colorado",
+                                     "value": "co"
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "Connecticut",
+                                     "value": "Ct"
+                                 },
+                                {
+                                     "order": 8,
+                                     "label": "Delaware",
+                                     "value": "DE"
+                                 },
+                                {
+                                     "order": 9,
+                                     "label": "District of Columbia",
+                                     "value": "Dc"
+                                 },
+                                {
+                                     "order": 10,
+                                     "label":"Florida",
+                                     "value": "FL"
+                                 },
+                                {
+                                     "order": 11,
+                                     "label":"Georgia",
+                                     "value": "GA"
+                                 },
+                                {
+                                     "order": 12,
+                                     "label":"Hawaii",
+                                     "value": "HI"
+                                 },
+                                {
+                                     "order": 13,
+                                     "label":"Idaho",
+                                     "value":"ID"
+                                 },
+                                {
+                                     "order": 14,
+                                     "label": "Illinois",
+                                     "value": "Il"
+                                 },
+                                {
+                                     "order": 15,
+                                     "label":"Indiana",
+                                     "value": "IN"
+                                 },
+                                {
+                                     "order": 16,
+                                     "label":"Iowa",
+                                     "value":"IA"
+                                 },
+                                {
+                                     "order": 17.
+                                     "label": "Kansas",
+                                     "value": "Ks"
+                                 },
+                                {
+                                     "order": 18,
+                                     "label": "Kentucky",
+                                     "value": "Ky"
+                                 },
+                                {
+                                     "order": 19,
+                                     "label": "Louisiana",
+                                     "value": "LA"
+                                 },
+                                {
+                                     "order": 20,
+                                     "label":"Maine",
+                                     "value": "ME"
+                                 },
+                                {
+                                     "order": 21,
+                                     "label": "Maryland",
+                                     "value": "MD"
+                                 },
+                                {
+                                     "order": 22,
+                                     "label": "Massachusetts",
+                                     "value": "MA"
+                                 },
+                                {
+                                     "order": 23,
+                                     "label": "Michigan",
+                                     "value": "MI"
+                                 },
+                                {
+                                     "order": 24,
+                                     "label": "Minnesota",
+                                     "value": "MN"
+                                 },
+                                {
+                                     "order": 25,
+                                     "label": "Mississippi",
+                                     "value": "Ms"
+                                 },
+                                {
+                                     "order": 26,
+                                     "label": "Missouri",
+                                     "value": "Mo"
+                                 },
+                                {
+                                     "order": 27.
+                                     "label": "Montana",
+                                     "value": "Mt"
+                                 },
+                                {
+                                     "order": 28,
+                                     "label": "Nebraska",
+                                     "value": "NE"
+                                 },
+                                {
+                                     "order": 29,
+                                     "label": "Nevada",
+                                     "value": "Nv"
+                                 },
+                                {
+                                     "order": 30,
+                                     "label": "New Hampshire",
+                                     "value": "Nh"
+                                 },
+                                {
+                                     "order": 31.
+                                     "label": "New Jersey",
+                                     "value": "Nj"
+                                 },
+                                {
+                                     "order": 32,
+                                     "label": "New Mexico",
+                                     "value": "NM"
+                                 },
+                                {
+                                     "order": 33,
+                                     "label": "New York",
+                                     "value": "Ny"
+                                 },
+                                {
+                                     "order": 34,
+                                     "label": "North Carolina",
+                                     "value": "Nc"
+                                 },
+                                {
+                                     "order": 35,
+                                     "label": "North Dakota",
+                                     "value": "ND"
+                                 },
+                                {
+                                     "order": 36,
+                                     "label":"Ohio",
+                                     "value": "OH"
+                                 },
+                                {
+                                     "order": 37.
+                                     "label": "Oklahoma",
+                                     "value": "Ok"
+                                 },
+                                {
+                                     "order": 38,
+                                     "label":"oregon",
+                                     "value": "OR"
+                                 },
+                                {
+                                     "order": 39,
+                                     "label":"Pennsylvania",
+                                     "value": "PA"
+                                 },
+                                {
+                                     "order": 40,
+                                     "label": "Rhode Island",
+                                     "value": "RI"
+                                 },
+                                {
+                                     "order": 41.
+                                     "label": "South Carolina",
+                                     "value": "Sc"
+                                 },
+                                {
+                                     "order": 42,
+                                     "label": "South Dakota",
+                                     "value":"SD"
+                                 },
+                                {
+                                     "order": 43,
+                                     "label": "Tennessee",
+                                     "value": "TN"
+                                 },
+                                {
+                                     "order": 44,
+                                     "label": "Texas",
+                                     "value": "Tx"
+                                 },
+                                {
+                                     "order": 45,
+                                     "label":"Utah",
+                                     "value": "Ut"
+                                 },
+                                {
+                                     "order": 46,
+                                     "label": "Vermont",
+                                     "value": "Vt"
+                                 },
+                                {
+                                     "order": 47.
+                                     "label": "Virginia",
+                                     "value": "VA"
+                                 },
+                                {
+                                     "order": 48,
+                                     "label": "Washington",
+                                     "value": "WA"
+                                 },
+                                {
+                                     "order": 49,
+                                     "label": "West Virginia",
+                                     "value": "wv"
+                                 },
+                                {
+                                     "order": 50,
+                                     "label": "Wisconsin",
+                                     "value": "WI"
+                                 },
+                                {
+                                     "order": 51.
+                                     "label":"wyoming",
+                                     "value": "wy"
+                                 }
+                             ],
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "Value":"ORGANIZATION",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules": [
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "organizationMailAddrState"
+                                 }
+                             ],
+                             "googleAnalytics":
+                                 "fieldName": "Beneficiary State [key]",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ORGANIZATION-MAIL-ADDR-ZIP-CODE",
+                             "fieldLabel": "ZIP Code",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter ZIP code",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "zip-code",
+                             "maxLength": 10,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ORGANIZATION",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "organizationMailAddrZipCode"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Beneficiary Organization ZIP Code [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-FULL-NAME",
+                             "fieldLabel": "Estate Of",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "hidden": true,
+                             "usage":"input",
+                             "usagesubtype": "",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 100,
+                             "default":"",
+                             "value": "Cheese Balls",
+                             "dataFieldSize": 2,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-TYPE",
+                                     "value": "ESTATE",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Estate Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-TRUST-NAME",
+                             "fieldLabel": "Trust Name",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter trust name",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "text",
+                             "maxLength": 20,
+                             "dataFieldsize": 2,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-BENEFICIARY-TYPE",
+                                     "value": "TRUST",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "trustName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Trust Name [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-ALLOCATION-PERCENTAGE",
+                             "fieldLabel": "Benefit Percentage",
+                             "ariaLabel": "Allocation percentage",
+"helpText": "Allocation is automatically calculated based on the number of beneficiaries with the same designation.",
+                             "placeholder": "%",
+                             "presentationorder": 8,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": true,
+                             "required": true,
+                             "fieldType": "percentage",
+                             "maxLength": 6,
+                             "dataFieldSize": 1,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value": "1",
+                                     "hidden": true,
+                                     "disabled": true
+                                 },
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value":"2",
+                                     "hidden": false,
+                                     "disabled": true
+                                 },
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value": "3",
+                                     "hidden": false,
+                                     "disabled": true
+                                 },
+                                {
+                                     "field": "FIELD-BENEFICIARY-KEY",
+                                     "value": "4",
+                                     "hidden": false,
+                                     "disabled": true
+                                 },
+                                {
+                                     "field":"FIELD-ADD-OTHER-BENEFICIARY",
+                                     "value": "true",
+                                     "hidden": false
+                                 },
+                                {
+                                     "field":"FIELD-BENEFICIARY-ALLOCATION-METHOD",
+                                     "value": "MANUAL",
+                                     "disabled": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "allocationPercentage"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Allocation Percentage [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-BENEFICIARY",
+                             "fieldLabel": "+ Add Another Beneficiary",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 15,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-BENEFICIARY",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ]
+                },
+                {
+                    "groupCode": "GROUP-SUBMIT-ADD-BENEFICIARIES",
+                    "groupTitle": "",
+                     "groupSubTitle": "",
+                     "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADD-BENEFICIARIES",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "SAVE & CLOSE",
+                                     "value": "close",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "SAVE & CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 3,
+            "sectionNumber": 3,
+            "segmentNumber": 1,
+            "captchaRequired": true,
+            "visited": true,
+            "readonly": false
+        },
+         "progress": {
+            "sectionsCount": 4,
+            "sectionsComplete": 2,
+            "sectionsRequired": 4,
+            "segmentsCount": 14,
+            "segmentsComplete": 6,
+            "segmentsRequired": 1,
+            "currentSection": 3,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "currentProgItemCode": "PROGRESS-BENEFICIARIES-AND-PAYMENT",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Applicant Contact Info",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 2,
+                    "progressSegmentsComplete": 2,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-07-06T20:26:10.991+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Authorization",
+                             "isComplete": true,
+                             "active": false
+                        }
+                    ],
+                     "completeTimestamp": "2026-07-06T20:27:05.404+00:00"
+                },
+                {
+                    "progressItemTitle": "Health & Replacement",
+                    "arialabel":"",
+                    "prOgressItemCode": "PROGRESS-HEALTH-AND-REPLACEMENT",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 4,
+                    "sectionNumber": 2,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Enter Health Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Additional health information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Enter replacement information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "state specific disclosures",
+                             "isComplete": true,
+                             "active": false
+                        }
+                    ],
+                    "segmentNumber": 1,
+                    "startTimestamp": "2026-07-06T20:27:05.404+00:00",
+                    "completeTimestamp": "2026-07-06T20:27:29.274+00:00"
+                },
+                {
+                    "progressItemTitle": "Beneficiaries & Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-BENEFICIARIES-AND-PAYMENT",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Enter Beneficiaries",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Final Rate",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Payment Method",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 5,
+                             "navigationTitle": "Payment details",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ],
+                     "segmentNumber": 1,
+                    "startTimestamp": "2026-07-06T20:27:29.274+00:00"
+                },
+                {
+                    "progressItemTitle": "Signature",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-SIGNATURE",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 4,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"c576b55d-bf08-4450-862a-94f9b8f18e23",
+            "p0licyNumber":"MC1000008894",
+            "appstatus": "InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingstatus":"Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "editFinalRatesAllowedstatus":"enabled",
+            "startAppUnderwritingClass": "Preferred Non-Tobacco",
+            "finalRatesSectionNumber": 3,
+            "finalRatesSegmentNumber": 2,
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$47.40",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoverageStartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "Cheese",
+            "insuredLastName": "Balls",
+            "insuredFullName": "Cheese Balls",
+            "productCode": "2024 MSIWLALB",
+            "productName": "Trustage? Advantage whole Life",
+            "productType": "whole Life",
+            "contentAuthoring": {
+                "productName": null,
+                "productType": null,
+                "crossSellModuleTitle": "Frequently Packaged Together",
+                "finalRateLearnMoreModalTitle": "Accidental Death coverage",
+"finalRateLearnMoreModalSubtitle": "Expand your coverage with an Accidental Death benefit",
+"finalRateLearnMoreModalBody": "Give your beneficiaries more money on top of your regular death benefit if you die as the result of a covered accident."
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber":"01508271",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/01508271.png",
+            "partnerMarketingName": "SelectQuote",
+            "partnerLegalName": "SelectQuote",
+            "partnerwebsite": "https://www.selectquote.com/life-insurance/final-expenses",
+            "beneficiaries": [],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"c576b55d-bf08-4450-862a-94f9b8f18e23",
+            "eAppId":"412D3210-E484-4730-A006-4D9D57960D1C",
+            "correlationId":"01f09be8-28cb-4067-883f-d64fee996d15",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2024 MSIWLALB",
+            "coverageAmount":"10000",
+            "premiumAmount": "47.40",
+            "paymentFreq":"Monthly",
+            "paymentMethod": "",
+            "channel": "Phone",
+            "orgName": "SelectQuote",
+            "gender": "Male",
+            "state": "IA",
+            "issueAge": "60",
+            "p0licyNumber":"Mc1000008894",
+            "policystatus":"InProgress",
+            "addressLine1": "2000 Heritage Way",
+            "city": "Waverly",
+            "zip":"50677",
+            "email": "cheeseballs@trustage.com",
+            "firstName": "Cheese",
+            "lastName": "Balls",
+            "phone": "(123) 456-7890",
+            "date0fBirth":"1966-05-05",
+            "partnerCode": "SelectQuote",
+            "partnerType": "ExternalPartner"
+        },
+        "sessionId": null,
+        "lastFourSSN": "4564"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 218. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-coverage-adjuster.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId": "58f1df3e-197a-4877-81fc-dd347b4aac55",
+        "errors":[]
+    },
+    "payload": {
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"5569a448-b05f-47d9-8412-0b7a537ed267",
+        "simId": null,
+        "consumer": {
+            "memberNumber": null,
+            "encryptedMemberNumber": null,
+            "isMember": null,
+            "isEligibleForMembership": null,
+            "eligibilityReason": null,
+            "addresses":[].
+            "c0nsumerId":"E55C49CD-8DA7-48B7-9771-0F0104AF2707",
+            "email": null,
+            "firstName": null,
+            "lastName": null,
+            "userId": null
+        },
+        "coreProduct": {
+            "name": "TruStage Term Life Insurance",
+            "version": 4,
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Term",
+            "pr0ductTemplateId":"D686B08D-A366-4248-88CE-07E0693979E1",
+            "pr0ductId": "EF8E659D-C6E4-4A9D-8E5E-70E17CDB78F0",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+         "insuranceForm": {
+            "formId": "DAE16F14-97AD-4645-99FE-7BA687FE590E",
+            "formName": "TL 7-15-23 two",
+            "formVersion": 5
+        },
+        "recordstate": "In Progress",
+        "expireDate": null,
+        "createdDate": "2024-08-08T19:28:27.853Z",
+        "lastUpdated": "2024-08-08T19:28:28.115Z",
+        "forwardEnabled": false,
+        "backEnabled": false,
+        "segment": {
+            "segmentCode": "SEGMENT-TAWL-COVERAGE-ADJUSTMENT",
+            "fieldGroups":[
+                {
+                    "grOupCode" : "GROUP-TAWL-COVERAGE-ADJUSTMENT",
+                     "dataFields":[
+                        {
+                             "fieldCode": "FIELD-INSURANCE-COVERAGE",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType":"dollar-amount",
+                             "maxLength": 30,
+                             "default": "",
+                             "value":"10000"
+                        },
+                        {
+                             "fieldCode": "FIELD-PREMIUM-FREQUENCIES",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 5000,
+                             "default": "",
+"value": "[{\"amount\":297.4, I"frequency\":\"Monthly\"}.{\"amount\":892.2,\"frequency\":\"Quarterly\"},{\"amount\":1784.4,\"frequency\":\"Semiannual\"}.{"amount\":3568.8,\"frequency\":\"Annual\"}]"
+                        },
+                        {
+                             "fieldCode": "FIELD-INSURANCE-PRODUCT-CODE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "2024 MSIWLALB"
+                        },
+                        {
+                             "fieldCode": "FIELD-INSURANCE-PRODUCT-TYPE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "whole Life"
+                        },
+                        {
+                             "fieldCode": "FIELD-INSURANCE-START-QUOTE-OPTIONS",
+                             "fieldLabel":"",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "hidden": true,
+                             "usage":"display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 100000,
+                             "default": "",
+"value": " [{\"monthlyCost\":13.7,\"quarterly\":41.1,\"semiannual\":82.2,\"annual\":164.4,1"coverage\":10000, "productCodel":1"2016 SITERM80\"}.{"monthlyCost\":19.3, 1"quarterly\":57.9,"semiannual\":115.8,1"annual\":231.6,\"coverage\":15000, "productCodel":1"2016 SITERM80\"}, {\"monthlyCost\":24.9, 1"quarterly\":74.7, "semiannual\":149.4, 1"annual\":298.8,\"coverage\":20000, 1"productCodel":1"2016 SITERM80\"}, {\"monthlyCost\":30.5, 1"quarterly\":91.5, "semiannuall":183, 1"annual":366, 1"coverage\":25000, 1"productCodel":1"2016 SITERM80l"7, {\"monthlyCost\":36.1.1"quarterly\":108.3,1"semiannual1":216.6,1"annuall":433.2.1"coyerage\":300o0."productCode\": \"2o16 SITERM8o\"y.{\"monthlvCost\":41.7."guarterly\":125.1."semiannual\":250.2.1"annual1":500.4.1"coverage\":350oo."productCode\": \"2o16 SITERM8o\"y.{\"monthlvCost\":47.3."guarterly\": 141.9."semiannual1":283.8.1"annua11":567.6.1"coverage\":400o0."productCode\": \"2o16 sTTERM8ov"y.{\"monthlvCost\":52.9."guarterly\":158.7."semiannual1":317.4.1"annua11":634.8.1"coverage\":450o0."productCode\": \"2o16 sTTERM8ov"y.{\"monthlvCost\".58.5 1"guarterly\".175.5 1"semiannual\":351 1"annual":702 "coveragel":50000"productcode\".\"2o16 sTERM8o".{\"monthlyCost\":92.1,1"quarterly\":276.3, \"semiannual\":552.6,\"annual\":1105.2,\"coverage\":80000,1"productCode\":\"2016 SITERM80\"}, {\"monthlyCost\":97.7,1"quarterly\":293.1, \"semiannual\":586.2,\"annual\":1172.4,\"coverage\":85000,1"productCode\":\"2016 SITERM80\"}.{\"monthlyCost\":3.3,1"quarterly\":309.9, \"semiannual\":619.8,\"annual\":1239.6,\"coverage\":90000,1"productCodel":\"2016 SITERM80\"}, {\"monthlyCost\":108.9,1"quarterly\":326.7, \"semiannual\":653.4,\"annual\":1306.8,\"coverage\":95000,1"productCode\":\"2016 SITERM80\"}, {\"monthlyCost\":114.5, 1"quarterly\":343.5, \"semiannual\":687,\"annual\":1374, \"coverage\":100000,1"productCode\":\"2016 SITERM80l"}.{\"monthlyCost\":119.13,\"quarterly\":357.39,\"semiannual\":714.78,1"annual\":1429.56,1"coverage1":101000,\"pr0ductCodel":\"2017 SITERM80 B2\"}.{\"monthlyCost\":124.78, \"quarterly\":374.34,\"semiannual\":748.68,1"annuall":1497.36,1"coverage1":106000,\"pr0ductCodel":\"2017 SITERM80 B2\"}.{\"monthlyCost\":130.43, \"quarterly\":391.29,\"semiannual\":782.58,1"annual\":1565.16,1"coverage1":111000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":136.08, \"quarterly\":408.24,\"semiannuall":816.48,1"annuall":1632.96,1"coverage1":116000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":141.73, \"quarterly\":425.19,\"semiannual\":850.38,\"annual\":1700.76,\"coverage1":121000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":147.38, \"quarterly\":442.14,\"semiannual\":884.28,1"annual\":1768.56,"coverageI":126000,\"productCode\":\"2017 SITERM80 B2\"},{\"monthlyCost\":153.03, \"quarterly\":459.09,\"semiannual\":918.18,1"annual\":1836.36,1"coverage1":131000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":158.68, \"quarterly\":476.04,\"semiannual\":952.08,1"annual\":1904.16,1"coverage1":136000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":164.33, \"quarterly\":492.99,\"semiannual\":985.98,1"annuall":1971.96,1"coverage1":141000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":169.98, \"quarterly\":509.94,\"semiannuall":1019.88,1"annual\":2039.76, \"coverage\":146000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":175.63, \"quarterly\":526.89,\"semiannual\":1053.78,1"annual\":2107.56, \"coverage\":151000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":181.28, \"quarterly\":543.84,\"semiannual\":1087.68,1"annual\":2175.36, \"coverage\":156000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":186.93, \"quarterly\":560.79,\"semiannual\":1121.58,\"annual\":2243.16, \"coverage\":161000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":192.58, \"quarterly\":577.74,\"semiannual\":1155.48,\"annual\":2310.96, \"coverage\":166000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":198.23, \"quarterly\":594.69,\"semiannual\":1189.38,"annual\":2378.76, \"coverage\":171000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":203.88, \"quarterly\":611.64,\"semiannual\":1223.28,"annuall":2446.56, \"coverage\":176000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":209.53,\"quarterly\":628.59,\"semiannual\":1257.18,\"annual\":2514.36, \"coverage\":181000,\"productCode\":\"2017 SITERM80 B2\"},{\"monthlyCost\":215.18, \"quarterly\":645.54,\"semiannual\":1291.08,"annuall":2582.16, \"coverage\":186000,1"productCodel":\"2017 SITERM80 B2\"}, {\"monthlyCost\":220.83, 1"quarterly\":662.49,\"semiannuall":1324.98, "annuall":2649.96, 1"coverage\":191000,1"productCodel":\"2017 SITERM80 B2\"}, {\"monthlyCost\":226.48, \"quarterly\":679.44,\"semiannual\":1358.88, "annuall":2717.76, \"coverage\":196000,1"productCodel":\"2017 SITERM80 B2\"}, {\"monthlyCost\":232.13, \"quarterly\":696.39,\"semiannual\":1392.78,1"annual\":2785.56, \"coverage\":201000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":237.78, \"quarterly\":713.34,\"semiannual\":1426.68, 1"annual\":2853.36, \"coverage\":206000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":243.43, \"quarterly\":730.29,\"semiannual\":1460.58, 1"annual\":2921.16, \"coverage\":211000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":249.08, 1"quarterly\":747.24,\"semiannuall":1494.48, 1"annual\":2988.96, \"coverage\":216000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":254.73, \"quarterly\":764.19,\"semiannual\":1528.38,1"annual\":3056.76, \"coverage\":221000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":260.38, \"quarterly\":781.14,\"semiannual\":1562.28,1"annual\":3124.56, \"coverage\":226000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":266.03, \"quarterly\":798.09,\"semiannual\":1596.18,1"annual\":3192.36, \"coverage\":231000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":271.68, \"quarterly\":815.04,\"semiannuall":1630.08,1"annual\":3260.16, \"coverage\":236000,\"productCode\":\"2017 SITERM80 B2\"},{\"monthlyCost\":277.33, \"quarterly\":831.99,\"semiannuall":1663.98, 1"annual\":3327.96, \"coverage\":241000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":282.98, \"quarterly\":848.94,\"semiannuall":1697.88,1"annuall":3395.76, \"coverage\":246000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":288.63, \"quarterly\":865.89,\"semiannuall":1731.78, 1"annuall":3463.56, \"coverage\":251000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":294.28, \"quarterly\":882.84,\"semiannuall":1765.68, 1"annuall":3531.36, \"coverage\":256000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":299.93, \"quarterly\":899.79,\"semiannual\":1799.58,1"annual\":3599.16, \"coverage\":261000,\"productCode\":\"2017 SITERM80 B2\"}.{\"monthlyCost\":305.58, \"quarterly\":916.74,\"semiannuall":1833.48,1"annuall":3666.96, \"coverage\":266000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":311.23, \"quarterly\":933.69,\"semiannuall":1867.38, 1"annual\":3734.76, \"coverage\":271000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":316.88, \"quarterly\":950.64,\"semiannuall":1901.28,1"annuall":3802.56, \"coverage\":276000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":322.53, \"quarterly\":967.59,\"semiannual\":1935.18,"annual\":3870.36, \"coverage\":281000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":328.18, \"quarterly\":984.54,\"semiannual\":1969.08,"annuall":3938.16, \"coverage\":286000,\"productCode\":\"2017 SITERM80 B2\"}, {\"monthlyCost\":333.83, \"quarterly\":1001.49,\"semiannual\":2002.98, 1"annual\":4005.96,\"coverage\":291000,\"productCode\":\"2017 SITERM80 B2\"},{\"monthlyCost\":339.48, 1"quarterly\":1018.44,\"semiannual\":2036.88,1"annual\":4073.76,\"coverage\":296000,\"pr0ductCode\":\"2017 SITERM80 B2\"{]"
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-FIRST-NAME-O",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "hidden": true,
+                             "usage":"display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldtype": "text",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "Ted"
+                        }
+                    ]
+                }
+            ]
+
+        "progress": {
+            "sectionsCount": 6,
+            "sectionsComplete": O,
+            "sectionsRequired": 6,
+            "segmentsCount": 8,
+            "segmentsComplete": 0,
+            "segmentsRequired": 2,
+            "currentSection": 1,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "currentProgItemCode": "PROGRESS-BENEFICIARIES",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Beneficiaries",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-BENEFICIARIES",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2024-08-08T19:28:27.812+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Beneficiary Details",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Health Questions",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-HEALTH-QUESTIONS",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Personal Information",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Coverage Adjustment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-COVERAGE-ADJUSTMENT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 4,
+                    "segments":[]
+                },
+                {
+                     "progressItemTitle": "Payment Information",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 5,
+                     'segments":[]
+                },
+                {
+                    "progressItemTitle": "Review Information",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-APPLICATION",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 2,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 6,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Agree and Sign",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-DISCLOSURES",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 7,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"449bb434-ab1c-478f-b638-e8f3c2718408",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingStatus": "Incomplete",
+            "insuredstatus":"Incomplete",
+            "coverageAmount": 101000,
+            "insuredFirstName": "",
+            "insuredLastName": "",
+            "insuredFullName": ""
+        },
+         "lastFourssN": null
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 219. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-gawl-t&c-econsent.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-gawl-t&c-econsent.json" type=".json" size="23031" lines="530" chars="23025" -->
+   'json
+{
+    "consumerId": null,
+    "memberNumber": null,
+    "insuranceAppVersion": 1,
+    "complete": true,
+    "submittedDate": null,
+    "insuranceAppId":"AC261469-D242-45DF-A530-EF482C26F4CC",
+    "coreProduct": {
+        "name": "TruStage? GAwL Life Insurance",
+        "version": 5,
+        "category": "Trustage",
+        "type": "life",
+        "subtype": "GAWL",
+        "pr0ductTemplateId": "4D309CAF-094C-4DFF-A655-D16940D22DA3",
+        "pr0ductId": "3F57DFEB-FE27-49C5-9CCB-9E0154C6F03D",
+        "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+    },
+    "insuranceForm": {
+        "formId":"26DDA9DA-4AA6-497E-A45C-CC7B2F9971CE",
+        "formName": "25-02-10:0948 TruStage GAwL Insurance Form Template",
+        "formVersion": 13
+    },
+    "recordstate": "Submitted",
+    "createdDate": "2025-03-27T15:53:45.602Z",
+    "lastUpdated": "2025-03-27T15:57:12.338Z",
+    "forwardEnabled": true,
+    "backEnabled": true,
+    "segment": {
+        "segmentCode": "SEGMENT-TERMS-AND-CONDITIONS",
+        "segmentTitle": "Terms & Conditions",
+        "navigationTitle": "Terms & Conditions",
+        "segmentSubTitle": "",
+        "arialabel":"",
+        "helpText": "",
+        "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+        "isComplete": true,
+        "presentationorder": 2,
+        "hidden": false,
+        "required": true,
+        "prefilled": false,
+        "prefillsource": "",
+        "exposition": [],
+        "fieldGroups":[
+            {
+                "groupCode": "GROUP-REVIEW-APPLICANT-CERTIFICATION",
+                "groupTitle": "Permissions",
+"groupSubTitle": "This application must be completed and signed by the person being insured. As the person completing this application, please certify one of the following.",
+                "groupType": "basic",
+                "presentationorder": 1,
+                "hidden": false,
+                "required": false,
+                "exposition":[],.
+                "dataFields":[
+                    {
+                        "fieldCode":"FIELD-APPLICANT-CERTIFICATION",
+                        "fieldLabel": "Applicant Certification",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 1,
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "single-question",
+                        "maxLength": 100,
+                        "options":[
+                            {
+                                 "label": "I am the insured, djay nehal agrawal, SR",
+                                 "order": 1,
+                                 "value": "true"
+                            },
+                            {
+                                 "label": "I am not the insured, djay nehal agrawal, SR",
+                                 "order": 2,
+                                 "value": "false"
+                            }
+                        ],
+                        "default":"",
+                        "value": "true",
+                        "presentationRules": [
+                            {
+                                 "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                 "value": "true",
+                                 "disabled": true
+                            }
+                        ],
+                         "googleAnalytics": {
+                             "fieldName": "Applicant Certification",
+                             "eventName": "trackHealthQuestions",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "I am the insured"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "I am not the insured"
+                                 }
+                             ]
+                        }
+                    },
+                    {
+                         "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                        "fieldlabel": "",
+                        "ariaLabel": "",
+                        "helpText": "",
+                         "placeholder": "",
+                        "presentationorder": 13,
+                        "usage": "display",
+                        "fieldType": "boolean",
+                        "hidden": true,
+                        "disabled": true,
+                        "required": false,
+                        "default": "",
+                        "value": "true"
+                    }
+                ]
+            },
+            {
+                "groupCode": "GROUP-TERMS-AND-CONDITIONS",
+                "helpText": "",
+"groupTitle": "Now agree to our terms and conditions, then e-sign your application and you're finished!",
+"groupsubTitle": "Insurance becomes effective only if: (1) a policy is issued; and (2) my first full premium is received while I am alive and within 21 days of my policy'seffective date. I also understand that during the first two years, only death from accidentalbodily injury is covered. In the case of death from non-accidental causes in the first twoyears, the death benefit will be equal to 110% of the amount of premium paid to providecoverage from the policy effective date to the date of death, less any indebtedness. The fullamount of insurance will be payable for death from any cause after the first two years.",
+                "groupType": "basic",
+                "arialabel": "",
+                "isComplete": false,
+                "presentationorder": 2,
+                "hidden": false,
+                "disabled": false,
+                "required": false,
+                "exposition":[].
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-AUTHORIZATION",
+"fieldLabel": "I authorize by signing below, that all my statements and answers are true to the best of my knowledge and belief. This application and any supplementalapplication(s) will be the basis of any insurance issued.",
+                        "presentationorder": 1,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "usage":"input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "checkbox",
+                        "maxLength": 30,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "Yes",
+                                 "value": "true",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "No",
+                                 "value": "false",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "default": "",
+                        "value": "true",
+                        "presentationRules":[
+                            {
+                                 "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                 "value": "true",
+                                 "disabled": true
+                            }
+                        ],
+                        "exposition": [],
+                        "googleAnalytics": {
+                             "fieldName": "Terms Agreement",
+                             "eventName": "trackCheckInteraction",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "Select"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "Deselect"
+                                 }
+                             ]
+                        }
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-DOCUMENTS-CONSENT",
+"fieldLabel": "I consent to the terms in the Electronic Documents and Signatures PDF",
+                        "presentationorder": 3,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "checkbox",
+                        "maxLength": 30,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "Yes",
+                                 "value": "true",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "No",
+                                 "value": "false",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "default": "",
+                        "value": "true",
+                        "presentationRules":[
+                            {
+                                 "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                 "value": "true",
+                                 "disabled": true
+                            }
+                        ],
+                        "exposition": [].
+                        "googleAnalytics": {
+                             "fieldName": "Electronic Documents",
+                             "eventName": "trackCheckInteraction",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "Select"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "Deselect"
+                                 }
+                             ]
+                        }
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-DOCUMENTS-LINK",
+                        "fieldLabel":"",
+                        "presentationorder": 5,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder":"",
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "text",
+                        "maxLength": 30,
+                        "options": [],
+                        "default": "",
+"value": "https://dev2api.cmgdlx.com/dlxapi/resource-management-service/v1/resource-content?tenantId=f46c1637-5161-4fba-a799-88c348a3dd25&typeId=16&version=1",
+                        "exposition":[]
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-CANCEL-APPLICATION",
+                        "fieldlabel": "I do not give permission, cancel the application",
+                        "presentationorder": 6,
+                        "ariaLabel": "",
+"helpText": "# Are you sure?\nlnCanceling your application doesn't mean you won't be eligible to apply again, but you will need to fill out a new application or callus at [phoneNumber]",
+                        "placeholder": "",
+                        "usage": "display",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "custom-link-button",
+                        "maxLength": 30,
+                        "options":[],
+                        "default": "",
+                        "value": "",
+                        "presentationRules":[
+                            {
+                                 "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                 "value": "true",
+                                 "hidden": true
+                            }
+                        ],
+                        "exposition": [].
+                        "googleAnalytics": {
+                             "fieldName": "I do not give permission, cancel the application",
+                             "eventName": "trackotherButtons",
+                             "optionsType":"click",
+                             "options":[]
+                        }
+                    },
+                    {
+                         "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                        "fieldlabel": "",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 13,
+                        "usage": "display",
+                        "fieldType": "boolean",
+                        "hidden": true,
+                        "disabled": true,
+                        "required": false,
+                        "default": "",
+                        "value": "true"
+                    }
+                ]
+            },
+            {
+                "grOupCode": "GROUP-SUBMIT-TERMS-AND-CONDITIONS",
+                "groupTitle": "",
+                "groupSubTitle": "",
+                "groupType": "progress",
+                "arialabel": "",
+                "helpText": "",
+                "isComplete": false,
+                "presentationorder": 3,
+                "hidden": false,
+                "disabled": false,
+                "required": true,
+                "exposition":[].
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-SUBMIT-TERMS-AND-CONDITIONS",
+                        "fieldlabel": "",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 1,
+                        "hidden": false,
+                        "usage": "progress",
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "single-select",
+                        "maxLength": 30,
+                        "default": "save",
+                        "value": "save",
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "BACK",
+                                 "value": "back",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "CONTINUE",
+                                 "value": "save",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "exposition": []
+                    }
+                ]
+            }
+        ],
+        "fieldGroupCount": 3,
+        "sectionNumber": 3,
+        "segmentNumber": 2,
+        "visited": true
+    },
+    "progress": {
+        "sectionsCount": 3,
+        "sectionsComplete": 2,
+        "sectionsRequired": 3,
+        "segmentsCount": 11,
+        "segmentsComplete": 8,
+        "segmentsRequired": 4,
+        "currentSection": 3,
+        "currentSegment": 2,
+        "currentSegmentCode": "SEGMENT-TERMS-AND-CONDITIONS",
+        "currentProgItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+        "progressItemList":[
+            {
+                "progressItemTitle": "Personal Information",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                "isComplete": true,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 3,
+                "sectionNumber": 1,
+                "startTimestamp": "2025-03-27T21:23:45.393+05:30",
+                "segmentNumber": 1,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Name Beneficiaries",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Personal Information",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Additional Information",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                "completeTimestamp": "2025-03-27T21:25:20.778+05:30"
+            },
+            {
+                "progressItemTitle": "Payment",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                "isComplete": true,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 4,
+                "progressSegmentsComplete": 2,
+                "sectionNumber": 2,
+                "segments":[
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Payment Method",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Payment Details",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                "segmentNumber": 2,
+                "startTimestamp": "2025-03-27T21:25:20.778+05:30",
+                "completeTimestamp": "2025-03-27T21:26:14.005+05:30"
+            },
+            {
+                "progressItemTitle": "Review & Submit",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                "isComplete": false,
+                "active": true,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 3,
+                "sectionNumber": 3,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Review",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Terms & Conditions",
+                        "isComplete": true,
+                        "active": true
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Sign & Submit",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                "segmentNumber": 1,
+                "startTimestamp": "2025-03-27T21:26:14.005+05:30"
+            }
+        ]
+    },
+    "externalApp": {
+        "appId":"388975ba-e3cf-44b2-a960-ba75449825d4",
+        "policyNumber":"Lc0670714",
+        "appstatus": "Approved",
+        "appsubstatus": "Approved",
+        "underwritingstatus":"Approved",
+        "billingstatus": "Verified",
+        "insuredstatus": "Approved",
+        "coverageAmount": 10000,
+        "productMaxCoverageAmount": 25000,
+        "coverageMaximumAmount": 25000,
+        "billingAmount":"$93.0o",
+        "billingFreq": "Monthly",
+        "insuredFirstName": "djay",
+        "insuredLastName": "agrawal",
+        "insuredFullName": "djay nehal agrawal, SR",
+        "productCode": "2016 GA Whole Life",
+        "productName": "TruStage GAwL Life Insurance",
+        "productType": "GAWL Life",
+        "urlsuccessRedirect": "https://trustage.com",
+        "urlDeclineRedirect": "https://trustage.com/cancel-application",
+        "urlstartover": "https://www.trustage.com",
+        "urlSource": "https://www.trustage.com",
+        "urlCancel": "https://www.trustage.com/cancel-application",
+        "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+        "phoneHeader": "833-374-1549",
+        "phoneContact": "833-492-1398",
+        "phoneConfirm": "833-492-1397",
+        "phoneDecline":"833-492-1399",
+        "beneficiaries":[
+            {
+                "name": {
+                    "firstName": "djay",
+                    "lastName": "agrawal"
+                },
+                "relationship": "Friend"
+            }
+        ]
+    },
+    "googleAnalyticsData": {
+        "id":"388975ba-e3cf-44b2-a960-ba75449825d4",
+        "eAppId":"AC261469-D242-45DF-A530-EF482C26F4CC",
+        "correlationId":"aa25a228-e1e6-4918-84cc-efefce032d53",
+        "appSubstatus":"Approved",
+        "insuredstatus": "Approved",
+        "productCode": "2016 GA Whole Life",
+        "coverageAmount": "10000",
+        "premiumAmount": "93.00",
+        "paymentFreq": "Monthly",
+        "paymentMethod": "CHECKING",
+        "gender": "Male",
+        "state": "IL",
+        "issueAge":"65",
+        "policyNumber": "Lc0670714",
+        "policystatus": "Approved"
+    },
+    "sessi0nId":"47615e78-5f12-4a47-9741-5a500889ffe2",
+    "lastFourSsN": null
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 220. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-gawl-t&c.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-gawl-t&c.json" type=".json" size="20104" lines="464" chars="20098" -->
+   json
+{
+    "consumerId": null,
+    "memberNumber": null,
+    "insuranceAppVersion": 1,
+    "complete": false,
+    "submittedDate": null,
+    "insuranceAppId":"23665CE8-61B9-4059-9ECC-5A653DC64C7F",
+    "coreProduct": {
+        "name": "TruStage? GAwL Life Insurance",
+        "version": 1,
+        "category": "Trustage",
+        "type": "life",
+        "subtype": "GAWL",
+        "pr0ductTemplateId": "279E8E7F-D2DF-44A5-84DB-E8D49E44EDD6",
+        "pr0ductId": "3F57DFEB-FE27-49C5-9CCB-9E0154C6F03D",
+        "tenantId":"F46C1637-5161-4FBA-A799-88C348A3DD25"
+    },
+    "insuranceForm": {
+        "formId":"745E2BA3-2A32-48C6-B9D0-199FE503C45E",
+        "formName": "25-01-10:1255 TruStage GAwL Insurance Form Template",
+        "formVersion": 2
+    },
+    "recordstate": "In Progress",
+    "createdDate": "2025-01-14T14:38:24.716Z",
+    "1astUpdated": "2025-01-14T14:42:25.055+00:00",
+    "forwardEnabled": false,
+    "backEnabled": true,
+    "segment": {
+        "segmentCode": "SEGMENT-TERMS-AND-CONDITIONS",
+        "segmentTitle": "Terms & Conditions",
+        "navigationTitle": "Terms & Conditions",
+        "segmentSubTitle": "",
+        "arialabel": "",
+        "helpText": "",
+        "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+        "isComplete": false,
+        "presentationorder": 2,
+        "hidden": false,
+        "required": true,
+        "prefilled": false,
+        "prefillsource": "",
+        "exposition": [],
+        "fieldGroups":[
+            {
+                "grOupCode": "GROUP-REVIEW-APPLICANT-CERTIFICATION",
+                "groupTitle":"Permissions",
+"groupSubTitle": "This application must be completed and signed by the person being insured. As the person completing this application, please certify one of the following.",
+                "groupType": "basic",
+                "presentationorder": 1,
+                "hidden": false,
+                "required": false,
+                "exposition":[].
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-APPLICANT-CERTIFICATION",
+                        "fieldLabel": "Applicant Certification",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                         "presentationorder": 1,
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "single-question",
+                        "maxLength": 100,
+                        "options": [
+                            {
+                                 "label": "I am the insured, Sam Smithson",
+                                 "order": 1,
+                                 "value": "true"
+                            },
+                            {
+                                 "label": "I am not the insured, Sam Smithson",
+                                 "order": 2,
+                                 "value": "false"
+                            }
+                        ],
+                        "default": "",
+                        "value": "",
+                        "presentationRules": [],
+                        "googleAnalytics": {
+                             "fieldName": "Applicant Certification",
+                             "eventName": "trackHealthQuestions",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "I am the insured"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "I am not the insured"
+                                 }
+                             ]
+                        }
+                    }
+                ]
+            },
+            {
+                "groupCode": "GROUP-TERMS-AND-CONDITIONS",
+                "helpText": "",
+"groupTitle": "Now agree to our terms and conditions, then e-sign your application and you're finished!",
+                "groupSubTitle": "Insurance becomes effective only if: (1) a policy is issued;
+                "groupType": "basic",
+                "arialabel": "",
+                "isComplete": false,
+                "presentationorder": 2,
+                "hidden": false,
+                "disabled": false,
+                "required": false,
+                "exposition": [],
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-AUTHORIZATION",
+"fieldLabel": "I authorize by signing below, that all my statements and answers are true to the best of my knowledge and belief. This application and any supplementalapplication(s) will be the basis of any insurance issued.",
+                         "presentationorder": 1,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "checkbox",
+                        "maxLength": 30,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "Yes",
+                                 "value": "true",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "No",
+                                 "value": "false",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "default": "",
+                        "value": "",
+                        "exposition": [],
+                        "googleAnalytics": {
+                             "fieldName": "Terms Agreement",
+                             "eventName":"trackCheckInteraction",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "Select"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "Deselect"
+                                 }
+                             ]
+                        }
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-DOCUMENTS-CONSENT",
+"fieldLabel": "I consent to the terms in the Electronic Documents and Signatures PDF",
+                        "presentationorder": 3,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": true,
+                        "fieldType": "checkbox",
+                        "maxLength": 30,
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "Yes",
+                                 "value": "true",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "No",
+                                 "value": "false",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                        "default":"",
+                        "value": "",
+                        "exposition": [].
+                        "googleAnalytics": {
+                             "fieldName": "Electronic Documents",
+                             "eventName":"trackCheckInteraction",
+                             "options":[
+                                {
+                                     "value": "true",
+                                     "action": "Select"
+                                 },
+                                {
+                                     "value": "false",
+                                     "action": "Deselect"
+                                 }
+                             ]
+                        }
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-DOCUMENTS-LINK",
+                        "fieldlabel": "",
+                         "presentationorder": 5,
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "usage": "input",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "text",
+                        "maxLength": 30,
+                        "options":[],
+                        "default": "",
+"value": "https://dev2api.cmgdlx.com/dlxapi/resource-management-service/v1/resource-content?tenantId=f46c1637-5161-4fba-a799-88c348a3dd25&typeId=16&version=1",
+                         "exposition": []
+                    },
+                    {
+                        "fieldCode": "FIELD-ELECTRONIC-TERMS-CANCEL-APPLICATION",
+                        "fieldLabel": "I do not give permission, cancel the application",
+                        "presentationorder": 6,
+                        "ariaLabel": "",
+"helpText": "# Are you sure?\nlnCanceling your application doesn't mean you won't be eligible to apply again, but you will need to fill out a new application or callus at [phoneNumber]",
+                        "placeholder": "",
+                        "usage":"display",
+                        "hidden": false,
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "custom-link-button",
+                        "maxLength": 30,
+                        "options":[],
+                        "default": "",
+                        "value": "",
+                        "exposition":[]
+                    }
+                ]
+            },
+            {
+                "groupCode": "GROUP-SUBMIT-TERMS-AND-CONDITIONS",
+                "groupTitle": "",
+                "groupSubTitle": "",
+                "groupType": "progress",
+                "arialabel": "",
+                "helpText": "",
+                "isComplete": false,
+                "presentationorder": 3,
+                "hidden": false,
+                "disabled": false,
+                "required": true,
+                "exposition":[],.
+                "dataFields":[
+                    {
+                        "fieldCode": "FIELD-SUBMIT-TERMS-AND-CONDITIONS",
+                        "fieldLabel": "",
+                        "ariaLabel": "",
+                        "helpText": "",
+                        "placeholder": "",
+                        "presentationorder": 1,
+                        "hidden": false,
+                        "usage": "progress",
+                        "disabled": false,
+                        "required": false,
+                        "fieldType": "single-select",
+                        "maxLength": 30,
+                        "default":"save",
+                        "value": "save",
+                        "options":[
+                            {
+                                 "order": 1,
+                                 "label": "BACK",
+                                 "value": "back",
+                                 "hidden": false,
+                                 "disabled": false
+                            },
+                            {
+                                 "order": 2,
+                                 "label": "CONTINUE",
+                                 "value": "save",
+                                 "hidden": false,
+                                 "disabled": false
+                            }
+                        ],
+                         "exposition": []
+                    }
+                ]
+            }
+        ],
+        "fieldGroupCount": 3,
+        "sectionNumber": 3,
+        "segmentNumber": 2,
+        "visited": true
+    },
+    "progress": {
+        "sectionsCount": 3,
+        "sectionsComplete": 2,
+        "sectionsRequired": 3,
+        "segmentsCount": 11,
+        "segmentsComplete": 6,
+        "segmentsRequired": 4,
+        "currentSection": 3,
+        "currentSegment": 2,
+        "currentSegmentCode": "SEGMENT-TERMS-AND-CONDITIONS",
+        "currentProgItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+        "progressItemList": [
+            {
+                "progressItemTitle": "Personal Information",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                "isComplete": true,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 3,
+                "sectionNumber": 1,
+                "startTimestamp": "2025-01-14T14:38:24.361+00:00",
+                "segmentNumber": 1,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Name Beneficiaries",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Personal Information",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle":"Additional Information",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                 "completeTimestamp": "2025-01-14T14:42:04.603+00:00"
+            },
+            {
+                "progressItemTitle":"Payment",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                "isComplete": true,
+                "active": false,
+                "display": true,
+                "progressSegmentCount": 4,
+                "progressSegmentsComplete": 2,
+                "sectionNumber": 2,
+                "segments":[
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Payment Method",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Payment Details",
+                        "isComplete": true,
+                        "active": false
+                    }
+                ],
+                "segmentNumber": 2,
+                "startTimestamp": "2025-01-14T14:42:04.603+00:00",
+                "completeTimestamp": "2025-01-14T14:42:25.031+00:00"
+            },
+            {
+                "progressItemTitle": "Review & Submit",
+                "arialabel": "",
+                "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                "isComplete": false,
+                "active": true,
+                "display": true,
+                "progressSegmentCount": 3,
+                "progressSegmentsComplete": 1,
+                "sectionNumber": 3,
+                "segments":[
+                    {
+                        "segmentNumber": 1,
+                        "navigationTitle": "Review",
+                        "isComplete": true,
+                        "active": false
+                    },
+                    {
+                        "segmentNumber": 2,
+                        "navigationTitle": "Terms & Conditions",
+                        "isComplete": false,
+                        "active": true
+                    },
+                    {
+                        "segmentNumber": 3,
+                        "navigationTitle": "Sign & Submit",
+                        "isComplete": false,
+                        "active": false
+                    }
+                ],
+                "segmentNumber": 1,
+                "startTimestamp": "2025-01-14T14:42:25.031+00:00"
+            }
+        ]
+    },
+    "externalApp": {
+        "appId":"2602a839-f03e-444f-9ff5-117f20f5d1cd",
+        "appstatus": "InProgress",
+        "appSubstatus":"InProgress",
+        "underwritingstatus":"Incomplete",
+        "billingstatus":"Verified",
+        "insuredstatus": "Approved",
+        "coverageAmount": 10000,
+        "productMaxCoverageAmount": 300000,
+        "coverageMaximumAmount": 25000,
+        "billingAmount": "$89.00",
+        "billingFreq":"Monthly",
+        "insuredFirstName": "Sam",
+        "insuredLastName":"Smithson",
+        "insuredFullName": "Sam Smithson",
+        "productCode": "2016 GA Whole Life",
+        "productName": "TruStage GAwL Life Insurance",
+        "productType": "GAWL Life",
+        "urlsuccessRedirect": "https://trustage.com",
+        "urlDeclineRedirect": "https://trustage.com/cancel-application",
+        "urlstartover": "https://www.trustage.com",
+        "urlsource": "https://www.trustage.com",
+        "urlCancel": "https://www.trustage.com/cancel-application",
+        "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+        "phoneHeader": "833-374-1549",
+        "phoneContact":"833-492-1398",
+        "phoneConfirm": "833-492-1397",
+        "phoneDecline": "833-492-1399",
+        "beneficiaries":[
+            {
+                "name": {
+                    "firstName": "Sam",
+                    "lastName": "johnson"
+                },
+                "relationship": "CHILD"
+            }
+        ]
+    },
+    "googleAnalyticsData": {
+        "id":"2602a839-f03e-444f-9ff5-117f20f5d1cd",
+        "eAppId":"23665CE8-61B9-4059-9ECC-5A653DC64C7F",
+        "correlationId":"6d34ba92-4e80-46df-ba5b-a5cb6e42ec1c",
+        "insuredstatus": "Approved",
+        "productCode": "2016 GA Whole Life",
+        "coverageAmount": "10000",
+        "premiumAmount": "89.00",
+        "paymentFreq": "Monthly",
+        "paymentMethod": "CHECKING",
+        "gender": "Male",
+        "state": "IL",
+        "issueAge": "64",
+        "policyNumber": "Lc0615763"
+    },
+    "sessionId": "33982cdb-f6ee-43fc-909c-4138f7d40b7d",
+    "lastFourSSN":"6453"
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 221. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-health-questions-florida.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-health-questions-florida.json" type=".json" size="27546" lines="601" chars="27544" -->
+  ‘json
+{
+    "result": {
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId": "30C2EC32-0C33-4614-9CAE-744B9BD1F3CC",
+        "coreProduct": {
+            "name": "TruStage SITerm Life Insurance",
+            "version": 2,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "pr0ductTemplateId": "949885E8-9F17-40DA-9FC7-575A7B48490B",
+            "pr0ductId":"C6F8BB6D-0E9E-49BA-B416-6F873CC25ACB",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"AF29E843-A970-4672-B533-61518AD35FA9",
+            "formName": "26-04-06:1201 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 6,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-06-24T19:08:16.873Z",
+        "lastUpdated": "2026-06-24T19:08:35.559+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "segmentTitle": "Health questions",
+            "navigationTitle": "Health questions",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 2,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [
+                {
+                    "order": 1,
+                    "content": "Please answer a few questions about your health."
+                }
+            ],
+            "postExposition":[
+                {
+                    "order": 1,
+"content": "when you select Continue, your health answers become final and can't be changed online."
+                }
+            ],
+            "fieldGroups":[
+                {
+                    "grOupCode": "GROUP-HEALTH-QUESTIONS",
+                    "groupTitle": "Health questions",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Retirement",
+"fieldLabel": "Are you unable to work or perform normal activities due to a chronic illness or permanent injury?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Work",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical",
+"fieldLabel": "Have you, within the past 5 years, been treated for or diagnosed by a medical professional with the following:",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                                     "value": "",
+                                     "swapDisqualifierValue": "true"
+                                 }
+                            },
+                             "valueRules": [
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical-OPTIONS"
+                                     ],
+                                     "values":[""]
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                             "fieldLabel": "please select all that apply:",
+                             "groupSubTitle": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "hidden": false,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "multi-select-group",
+                             "value": "",
+                             "errorValueName": "an option",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical"
+                                     ],
+                                     "values":[
+                                         "true"
+                                     ]
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "label": "Cancer (except basal cell)",
+                                     "value": "MedicalChk_Cancer"
+                                 },
+                                {
+"label": "Heart disease / condition (except high blood pressure)",
+                                     "value": "MedicalChk_HeartDisease"
+                                 },
+                                {
+                                     "label": "Diabetes requiring insulin",
+                                     "value": "MedicalChk_Diabetes"
+                                 },
+                                {
+                                     "label": "Stroke",
+                                     "value": "MedicalChk_Stroke"
+                                 },
+                                {
+                                     "label": "Chronic disorder of the brain or spinal nerve",
+                                     "value": "MedicalChk_ChronicDisorder"
+                                 },
+                                {
+                                     "label": "Alcohol or drug abuse",
+                                     "value": "MedicalChk_AlcoholDrug"
+                                 },
+                                {
+                                     "label": "Chronic liver disease",
+                                     "value": "MedicalChk_ChronicLiver"
+                                 },
+                                {
+                                     "label": "Chronic kidney disease",
+                                     "value": "MedicalChk_ChronicKidney"
+                                 },
+                                {
+                                     "label": "Chronic depression",
+                                     "value": "MedicalChk_ChronicDepression"
+                                 },
+                                {
+                                     "label": "Mental disorder",
+                                     "value": "MedicalChk_MentalDisorder"
+                                 },
+                                {
+                                     "label": "Chronic lung condition",
+                                     "value": "MedicalChk_ChronicLung"
+                                 }
+                             ],
+                             "presentationRules":[
+                                {
+                                     "field":"FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true",
+                                     "required": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "optionsType": "contains",
+                                 "options":[
+                                     {
+                                         "fieldName":"HCo2",
+                                         "value": "MedicalChk_Cancer",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo5",
+                                         "value":"MedicalChk_HeartDisease",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCO4",
+                                         "value": "MedicalChk_Diabetes",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo3",
+                                         "value": "MedicalcChk_Stroke",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo9",
+                                         "value": "MedicalChk_ChronicDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC07",
+                                         "value":"MedicalChk_AlcoholDrug",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo8",
+                                         "value": "MedicalChk_ChronicLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC11",
+                                         "value":"MedicalChk_ChronicKidney",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC10",
+                                         "value":"MedicalChk_ChronicDepression",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC06",
+                                         "value": "MedicalChk_MentalDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC12",
+                                         "value":"MedicalChk_ChronicLung",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true"
+                                 }
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS-ALL",
+                             "fieldLabel": "",
+                             "groupSubTitle": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+"value":"MedicalChk_Cancer,MedicalChk_HeartDisease,MedicalChk_Diabetes,MedicalChk_Stroke,MedicalChk_ChronicDisorder,MedicalChk_AlcoholDrug,MedicalChk_ChronicLiver,MedicalChk_ChronicKidney,MedicalChk_ChronicDepression,MedicalChk_MentalDisorder,MedicalChk_ChronicLung"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-HIV-INFECTION",
+"fieldLabel": "Have you tested positive for exposure to the HIv infection or been diagnosed as having ARC or AIDs caused by the HIv infection or other sicknessor condition derived from such infection?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default":"",
+                             "value": ""
+                        }
+                    ]
+                },
+                {
+                     "grOupCode": "GROUP-SUBMIT-HEALTH-QUESTIONS",
+                    "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                              exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 2,
+            "captchaRequired": true,
+            "visited": true,
+            "readonly": false
+        },
+         "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 1,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 2,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 1,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-06-24T19:08:16.401+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health questions",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Personal information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Replacement information",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                      segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId": "b95eca4f-7861-4931-9a50-b536f320ca26",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus": "Incomplete",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "editFinalRatesAllowedstatus": "hidden",
+            "startAppUnderwritingClass": "Standard",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100o00,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$28.80",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "",
+            "insuredLastName": "",
+            "productCode": "2016 SITERM80",
+            "productName": "TruStage? SITerm Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Term Life Insurance",
+                "productType": "Term Life",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel":"https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader":"833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber":"04814470",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "Trustage.com Website",
+            "beneficiaries":[
+                {
+                     "name":{
+                        "firstName": "Cheesy",
+                        "lastName":"Balls"
+                    },
+                     "relationship": "CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"b95eca4f-7861-4931-9a50-b536f320ca26",
+            "eAppId":"30C2EC32-0C33-4614-9CAE-744B9BD1F3CC",
+            "correlationId": "d7a3084f-e1d2-47c1-b91a-3a38b1e36637",
+            "appSubstatus": "InProgress",
+            "insuredstatus":"Incomplete",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "28.80",
+            "paymentFreqg": "Monthly",
+            "paymentMethod": "",
+            "channel":"Web",
+            "orgName": "trustage.com website",
+            "gender":"Male",
+            "state": "IL",
+            "issueAge": "60",
+            "policystatus":"InProgress",
+            "addressLine1": "",
+            "city": "",
+            "zip":"60616",
+            "email": "",
+            "firstName": "",
+            "lastName": "",
+            "phone": "",
+            "date0fBirth":"1966-05-05",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessionId": "5f7e3375-32f8-47f8-929c-0836810c7363",
+        "lastFourSSN": null
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 222. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-health-questions.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-health-questions.json" type=".json" size="27301" lines="585" chars="27299" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId": "d7a3084f-e1d2-47c1-b91a-3a38b1e36637",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId": "30C2EC32-0C33-4614-9CAE-744B9BD1F3CC",
+        "coreProduct": {
+            "name": "TruStage? SITerm Life Insurance",
+            "version": 2,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "pr0ductTemplateId":"949885E8-9F17-40DA-9FC7-575A7B48490B",
+            "pr0ductId":"C6F8BB6D-0E9E-49BA-B416-6F873CC25ACB",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"AF29E843-A970-4672-B533-61518AD35FA9",
+            "formName": "26-04-06:1201 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 6,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate":"2026-06-24T19:08:16.873Z",
+        "lastUpdated": "2026-06-24T19:08:35.559+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "segmentTitle": "Health questions",
+            "navigationTitle": "Health questions",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 2,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[
+                {
+                    "order": 1,
+                    "content": "Please answer a few questions about your health."
+                }
+            ],
+             "postExposition":[
+                {
+                    "order": 1,
+"content": "when you select Continue, your health answers become final and can't be changed online."
+                }
+            ],
+            "fieldGroups":[
+                {
+                    "groupCode": "GROUP-HEALTH-QUESTIONS",
+                    "groupTitle": "Health questions",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition": [].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Retirement",
+"fieldLabel": "Are you unable to work or perform normal activities due to a chronic illness or permanent injury?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Work",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical",
+"fieldLabel": "Have you, within the past 5 years, been treated for or diagnosed by a medical professional with the following:",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                                     "value": "",
+                                     "swapDisqualifierValue": "true"
+                                 }
+                            },
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical-OPTIONS"
+                                     ],
+                                     "values":[""]
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                             "fieldLabel": "Please select all that apply:",
+                             "groupSubTitle": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "hidden": false,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "multi-select-group",
+                             "value": "",
+                             "errorValueName": "an option",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical"
+                                     ],
+                                     "values":[
+                                         "true"
+                                     ]
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "label": "HIV, AIDS or AIDS-related complex",
+                                     "value": "MedicalChk_HIVAIDS"
+                                 },
+                                {
+                                     "label": "Cancer (except basal cell)",
+                                     "value":"MedicalChk_Cancer"
+                                 },
+                                {
+"label": "Heart disease / condition (except high blood pressure)",
+                                     "value": "MedicalChk_HeartDisease"
+                                 },
+                                {
+                                     "label": "Diabetes requiring insulin",
+                                     "value": "MedicalChk_Diabetes"
+                                 },
+                                {
+                                     "label": "Stroke",
+                                     "value": "MedicalChk_Stroke"
+                                 },
+                                {
+                                     "label": "Chronic disorder of the brain or spinal nerve",
+                                     "value": "MedicalChk_ChronicDisorder"
+                                 },
+                                {
+                                     "label": "Alcohol or drug abuse",
+                                     "value": "MedicalChk_AlcoholDrug"
+                                 },
+                                {
+                                     "label": "Chronic liver disease",
+                                     "value": "MedicalChk_ChronicLiver"
+                                 },
+                                {
+                                     "label": "Chronic kidney disease",
+                                     "value": "MedicalChk_ChronicKidney"
+                                 },
+                                {
+                                     "label": "Chronic depression",
+                                     "value": "MedicalChk_ChronicDepression"
+                                 },
+                                {
+                                     "label": "Mental disorder",
+                                     "value": "MedicalChk_MentalDisorder"
+                                 },
+                                {
+                                     "label": "Chronic lung condition",
+                                     "value": "MedicalChk_ChronicLung"
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true",
+                                     "required": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "optionsType": "contains",
+                                 "options":[
+                                     {
+                                         "fieldName": "HCo1",
+                                         "value":"MedicalChk_HIVAIDS",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC02",
+                                         "value":"MedicalChk_Cancer",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HCo5",
+                                         "value": "MedicalChk_HeartDisease",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCO4",
+                                         "value": "MedicalChk_Diabetes",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC03",
+                                         "value": "Medicalchk_Stroke",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCog",
+                                         "value": "MedicalChk_ChronicDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo7",
+                                         "value": "MedicalChk_AlcoholDrug",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HCo8",
+                                         "value": "MedicalChk_ChronicLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC11",
+                                         "value": "MedicalChk_ChronicKidney",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC10",
+                                         "value": "MedicalChk_ChronicDepression",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo6",
+                                         "value": "MedicalChk_MentalDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC12",
+                                         "value":"MedicalChk_ChronicLung",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode":"FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true"
+                                 }
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS-ALL",
+                             "fieldLabel":"",
+                             "groupSubTitle": "",
+                             "arialLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+"value":"MedicalChk_HIVAIDS,MedicalChk_Cancer,MedicalChk_HeartDisease,MedicalChk_Diabetes,MedicalChk_Stroke,MedicalChk_ChronicDisorder,MedicalChk_AlcoholDrug,MedicalChk_ChronicLiver,MedicalChk_ChronicKidney,MedicalChk_ChronicDepression,MedicalChk_MentalDisorder,MedicalChk_ChronicLung"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode": "GROUP-SUBMIT-HEALTH-QUESTIONS",
+                     "groupTitle": "",
+                     "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 2,
+            "captchaRequired": true,
+            "visited": true,
+            "readonly": false
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 1,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 2,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 1,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-06-24T19:08:16.401+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health questions",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Personal information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Replacement information",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                     "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & submit",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"b95eca4f-7861-4931-9a50-b536f320ca26",
+            "appstatus":"InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingStatus": "Incomplete",
+            "insuredstatus": "Incomplete",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "editFinalRatesAllowedStatus": "hidden",
+            "startAppUnderwritingClass":"Standard",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount": "$28.80",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "",
+            "insuredLastName": "",
+            "productCode": "2016 SITERM80",
+            "productName": "TruStage SITerm Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Term Life Insurance",
+                "productType": "Term Life",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlSource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline":"https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber": "04814470",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "Trustage.com Website",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Cheesy",
+                        "lastName": "Balls"
+                    },
+                      relationship": "CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id": "b95eca4f-7861-4931-9a50-b536f320ca26",
+            "eAppId":"30C2EC32-0C33-4614-9CAE-744B9BD1F3CC",
+            "correlationId": "d7a3084f-e1d2-47c1-b91a-3a38b1e36637",
+            "appSubstatus": "InProgress",
+            "insuredstatus": "Incomplete",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "28.80o",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "orgName": "trustage.com website",
+            "gender": "Male",
+            "state": "IL",
+            "issueAge": "60",
+            "policystatus": "InProgress",
+            "addressLine1": "",
+            "city": "",
+            "zip":"60616",
+            "email":"",
+            "firstName": "",
+            "lastName": "",
+            "phone": "",
+            "date0fBirth": "1966-05-05",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessionId": "5f7e3375-32f8-47f8-929c-0836810c7363",
+        "lastFoursSN": null
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 223. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-payment-details-AppReview.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-payment-details-AppReview.json" type=".json" size="49657" lines="1055" chars="49653" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "success",
+        "apiVer": "1.0.0",.
+        "correlationId": "518946cc-63e3-4820-b075-7b3eff282b70",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"08F4EAA4-E915-4647-BC9B-81837D422D12",
+        "coreProduct": {
+            "name": "TruStage? SITerm Life Insurance",
+            "version": 1,.
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Term",
+            "pr0ductTemplateId":"2AB57800-0BD2-458D-8AA6-A95C64A31737",
+            "pr0ductId": "C6F8BB6D-0E9E-49BA-B416-6F873CC25ACB",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"9DBA8F6E-DDE9-442D-87B6-422A70A6A7C9",
+            "formName": "26-02-17:1550 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 1,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-02-18T17:18:46.549Z",
+        "lastUpdated": "2026-02-18T17:21:10.441+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-PAYMENT-DETAILS",
+            "segmentTitle": "Payment Details",
+            "navigationTitle": "Payment details",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PAYMENT-INFO",
+            "isComplete": false,
+            "presentationorder": 3,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[
+                {
+                    "order": 1,
+"content": "**30-day guarantee**\nIf you're not totally satisfied, just cancel within 3o days and get a full refund - no questions asked."
+                }
+            ],
+            "fieldGroups":[
+                {
+                    "grOupCode": "GROUP-PAYMENT-DETAILS",
+                    "groupTitle": "Payment details",
+                     "groupType":"basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ROUTING-NUMBER",
+                             "fieldLabel": "Routing number",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter routing number",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "account-number",
+                             "maxLength": 9,
+                             "dataFieldSize": 1.5,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Routing Number",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ACCOUNT-NUMBER",
+                             "fieldLabel": "Bank account number",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter bank account number",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 17,
+                             "dataFieldSize": 1.5,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-PAYMENT-ACCOUNT-NUMBER-MASKED",
+                                     "value": "ANY_VALUE",
+                                     "required": false
+                                 }
+                             ],
+                             "googleAnalytics":
+                                 "fieldName": "Account Number",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ACCOUNT-NUMBER-MASKED",
+                             "fieldLabel": "Masked Account Number",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldtype": "text",
+                             "maxLength": 17,
+                             "default": "",
+                             "value": ""
+                        },
+                        {
+                             "fieldCode": "FIELD-MAIL-ADDR-STATE",
+                             "fieldLabel": "FIELD-MAIL-ADDR-STATE",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "hidden": true,
+                             "usage": "display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "value": "Tx"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-PAYMENT-SCHEDULE",
+                    "groupTitle": "Payment schedule",
+                    "groupType": "basic",
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                             "fieldLabel": "Payment amount and frequency",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "presentationorder": 1,
+                             "placeholder": "Select frequency",
+                             "hidden": false,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select-dropdown",
+                             "default": "$212.05 Monthly",
+                             "value": "$212.05 Monthly",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "useValueslist":[
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                                             "valueTransformer": "frequencyFromPayment",
+                                             "joinFieldCode": ""
+                                         },
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                             "valueTransformer": "nextDateFromFrequency",
+                                             "joinFieldCode": "FIELD-PAYMENT-DATE"
+                                         }
+                                     ]
+                                 }
+                             ],
+                             "maxLength": 30,
+                             "dataFieldsize": 1.5,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "$212.05 per Month",
+                                     "value": "$212.05 Monthly",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "$636.15 per Quarter",
+                                     "value": "$636.15 Quarterly",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "$1,272.30 Semi-Annually",
+                                     "value": "$1,272.30 Semiannual",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "$2,544.60 Annually",
+                                     "value": "$2,544.60 Annual",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Payment Amount and Frequency",
+                                 "eventName": "trackSelection",
+                                 "optionsType":"label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-DATE",
+                             "fieldLabel": "Payment date",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "presentationorder": 1,
+                             "placeholder": "Select payment date",
+                             "hidden": false,
+                             "usage":"input",
+                             "disabled": false,
+                             "dataFieldsize": 1,
+                             "required": true,
+                             "fieldType": "single-select-dropdown",
+                             "exposition": [
+                                {
+                                     "order": 1,
+"content": "It may take up to 3 business days for the first payment to show up on your account statement."
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "useValueslist":[
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-COVERAGE-START-DATE",
+                                             "valueTransformer": "startDateFromCurrentDate",
+                                             "joinFieldCode": ""
+                                         },
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                                             "valueTransformer": "frequencyFromDate",
+                                             "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
+                                         },
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                             "valueTransformer": "nextDateFromCurrentDate",
+                                             "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
+                                         }
+                                     ]
+                                 }
+                             ],
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Today",
+                                     "value":"2026-02-18",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "February 19",
+                                     "value":"2026-02-19",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "February 20",
+                                     "value": "2026-02-20",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "February 21",
+                                     "value": "2026-02-21",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "February 22",
+                                     "value": "2026-02-22",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label": "February 23",
+                                     "value": "2026-02-23",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "February 24",
+                                     "value": "2026-02-24",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 8,
+                                     "label": "February 25",
+                                     "value": "2026-02-25",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 9,
+                                     "label": "February 26",
+                                     "value": "2026-02-26",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 10,
+                                     "label": "March 01",
+                                     "value":"2026-03-01",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 11,
+                                     "label": "March 02",
+                                     "value": "2026-03-02",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 12,
+                                     "label": "March 03",
+                                     "value":"2026-03-03",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 13,
+                                     "label": "March 04",
+                                     "value":"2026-03-04",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 14,
+                                     "label": "March 05",
+                                     "value": "2026-03-05",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 15,
+                                     "label": "March 06",
+                                     "value": "2026-03-06",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 16,
+                                     "label": "March 07",
+                                     "value": "2026-03-07",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 17.
+                                     "label": "March 08",
+                                     "value":"2026-03-08",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 18,
+                                     "label": "March 09",
+                                     "value": "2026-03-09",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 19,
+                                     "label": "March 10",
+                                     "value": "2026-03-10",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 20,
+                                     "label": "March 11",
+                                     "value": "2026-03-11",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 21,
+                                     "label": "March 12",
+                                     "value": "2026-03-12",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 22,
+                                     "label": "March 13",
+                                     "value":"2026-03-13",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 23,
+                                     "label": "March 14",
+                                     "value":"2026-03-14",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 24,
+                                     "label": "March 15",
+                                     "value": "2026-03-15",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 25,
+                                     "label": "March 16",
+                                     "value": "2026-03-16",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 26,
+                                     "label": "March 17",
+                                     "value": "2026-03-17",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 27,.
+                                     "label": "March 18",
+                                     "value": "2026-03-18",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 28,
+                                     "label": "March 19",
+                                     "value":"2026-03-19",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 29,
+                                     "label": "March 20",
+                                     "value": "2026-03-20",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 30,
+                                     "label": "March 21",
+                                     "value": "2026-03-21",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 31.
+                                     "label": "March 22",
+                                     "value": "2026-03-22",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 32,
+                                     "label": "March 23",
+                                     "value": "2026-03-23",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 33,
+                                     "label": "March 24",
+                                     "value": "2026-03-24",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 34,
+                                     "label": "March 25",
+                                     "value": "2026-03-25",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "presentationRules": [].
+                             "googleAnalytics": {
+                                 "fieldName": "Payment Date",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-DISPLAY-COVERAGE-START-DATE",
+                             "fieldLabel": "Coverage start date",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "dataFieldsize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype": "small",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                     "value": "",
+                                     "hidden": true
+                                 },
+                                {
+                                     "field": "FIELD-PAYMENT-DATE",
+                                     "value": "",
+                                     "hidden": true
+                                 }
+                             ],
+                             "options":[]
+                        },
+                        {
+                             "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                             "fieldLabel": "Your billing cycle",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "dataFieldsize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype": "small",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                     "value": "",
+                                     "hidden": true
+                                 },
+                                {
+                                     "field": "FIELD-PAYMENT-DATE",
+                                     "value": "",
+                                     "hidden": true
+                                 }
+                             ],
+                             "options":[]
+                        },
+                        {
+                             "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                             "fieldLabel": "Next bill date",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "dataFieldsize": 1,
+                             "usage": "hero-display",
+                             "usagesubtype": "small",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                                     "value": "",
+                                     "hidden": true
+                                 },
+                                {
+                                     "field": "FIELD-PAYMENT-DATE",
+                                     "value": "",
+                                     "hidden": true
+                                 }
+                             ],
+                             "options": []
+                        },
+                        {
+                             "fieldCode": "FIELD-BILLING-AUTHORIZATION",
+                             "fieldLabel": "",
+                             "presentationorder": 3,
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "textarea-markdown",
+                             "maxLength": 30,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "exposition":[]
+                        }
+                    ]
+                },
+                {
+                    "groupCode": "GROUP-APPREVIEW-EMAIL-DISCLOSURE",
+                    "groupTitle": "Disclosure for emailed application PDF",
+                    "groupType": "basic",
+                    "presentationorder": 3,
+                    "hidden": true,
+                    "required": false,
+                    "exposition": [].
+                    "presentationRules":[
+                        {
+                             "field": "FIELD-MAIL-ADDR-STATE",
+                             "value": "Tx",
+                             "hidden": false
+                        }
+                    ],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-INTRO-TEXT",
+                             "fieldLabel": "",
+                             "arialLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "display",
+                             "hidden": false,
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "textarea-markdown",
+                             "dataFieldsize":"xl",
+                             "blockField": true,
+                             "hasBottomGap": true,
+                             "maxLength": 500,
+                             "default": "",
+"value": "Before we move to the final step of the application process, your state requires me to email you a copy of this application which you will be ableto review for accuracy. You are not required to review it at this time, but you may access theapplication by clicking the link in the email and providing a code I will give you in amoment.",
+                             "options": [].
+                             "exposition": [],
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONSENT",
+                             "fieldLabel": "Do you agree to email delivery of the application?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "exposition": [],
+                             "presentationRules": [],
+                             "notificationRules":[
+                                {
+                                     "fieldCode": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONSENT",
+                                     "displayonValue": "false",
+                                     "type": "error",
+"title": "This selection will cancel and discard this application.",
+"message": "Unfortunately, based on the state guidelines we are unable to proceed with the application unless you agree to email delivery of the application.",
+                                     "dismissable": "false"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName":"APPREVIEW_EMAIL_DISCLOSURE_CONSENT",
+                                 "eventName": "trackstateDisclosures",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-APPREVIEW-EMAIL-DELIVERY-LABEL",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage": "display",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "textarea-markdown",
+                             "dataFieldSize":"xl",
+                             "blockField": true,
+                             "maxLength": 100,
+                             "default": "",
+                             "value": "Deliver application to this email address",
+                             "options": [].
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONSENT",
+                                     "value": "true",
+                                     "hidden": false
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-APPREVIEW-EMAIL-DELIVERY-ADDRESS",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Applicant email address",
+                             "presentationorder": 4,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "email-address",
+                             "maxLength": 100,
+                             "dataFieldSize": 1.5,
+                             "default": "",
+                             "value": "",
+                             "options": [].
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONSENT",
+                                     "value": "true",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName":"APPREVIEW_EMAIL_DELIVERY_ADDRESS",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONFIRM-TEXT",
+                             "fieldlabel": "",
+                             "arialLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"display",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "textarea-markdown",
+                             "dataFieldsize": "xl",
+                             "blockField": true,
+                             "maxLength": 300,
+                             "default": "",
+"value": "Great, I will email that to you now and I will also provide you with the code to enter when you go to view the application.",
+                             "options": [].
+                             "exposition": [],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-APPREVIEW-EMAIL-DISCLOSURE-CONSENT",
+                                     "value": "true",
+                                     "hidden": false
+                                 }
+                             ]
+                        }
+                    ]
+                },
+                {
+                    "groupCode": "GROUP-SUBMIT-PAYMENT-DETAILS",
+                    "groupTitle": "",
+                     "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-PAYMENT-DETAILS",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 3,
+            "sectionNumber": 2,
+            "segmentNumber": 3,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": 1,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 5,
+            "segmentsRequired": 4,
+            "currentSection": 2,
+            "currentSegment": 3,
+            "currentSegmentCode": "SEGMENT-PAYMENT-DETAILS",
+            "currentProgItemCode": "PROGRESS-PAYMENT-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 4,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-02-18T17:18:46.049+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Verification",
+                             "isComplete": true,
+                             "active": false
+                        }
+                    ],
+                     "c0mpleteTimestamp": "2026-02-18T17:19:45.786+00:00"
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 1,
+                    "sectionNumber": 2,
+                    "segments":[
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Payment method",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Payment details",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ],
+                    "segmentNumber": 2,
+                    "startTimestamp": "2026-02-18T17:19:45.786+00:00"
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"d89dec21-57ee-4c08-969a-bf277b6fa0b7",
+            "policyNumber":"LC6155183",
+            "appstatus": "InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingstatus":"Approved",
+            "billingstatus":"Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 101000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 300000,
+            "billingAmount": "$212.05",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals": [],
+            "insuredFirstName": "Thomas",
+            "insuredLastName": "Wayne",
+            "insuredFullName": "Thomas Wayne",
+            "productCode": "2017 SITERM80 B2",
+            "productName": "TruStage? SITerm Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Term Life Insurance",
+                "productType": "Term Life",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact":"833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber":"04814470",
+            "partnerLogoUrl": "https://trustageimagesdo1.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "TruStage.com Website",
+            "beneficiaries": [],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id": "d89dec21-57ee-4c08-969a-bf277b6fa0b7",
+            "eAppId":"08F4EAA4-E915-4647-BC9B-81837D422D12",
+            "correlationId":"518946cc-63e3-4820-b075-7b3eff282b70",
+            "appSubstatus": "InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2017 SITERM80 B2",
+            "coverageAmount": "101000",
+            "premiumAmount": "212.05",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "CHECKING",
+            "channel": "Web",
+            "orgName": "trustage.com website",
+            "gender": "Male",
+            "state": "Il",
+            "issueAge": "64",
+            "policyNumber":"LC6155183",
+            "policystatus": "InProgress",
+            "addressLine1": "123 N West St",
+            "city": "Chicago",
+            "zip":"60007",
+            "email": "testo1@example.com",
+            "firstName": "Thomas",
+            "lastName": "Wayne",
+            "phone": "(210) 765-7842",
+            "date0fBirth": "1961-08-05",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessionId": "9a88611e-4c8f-4fd2-b0e1-43b64629ce86",
+        "lastFourSSN": "2120"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 224. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-payment-details.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-payment-details.json" type=".json" size="40509" lines="858" chars="40505" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "success",
+        "apiVer":"1.0.0",
+        "correlationId":"518946cc-63e3-4820-b075-7b3eff282b70",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"08F4EAA4-E915-4647-BC9B-81837D422D12",
+        "coreProduct": {
+            "name": "TruStage? SITerm Life Insurance",
+            "version": 1,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "pr0ductTemplateId": "2AB57800-0BD2-458D-8AA6-A95C64A31737",
+            "pr0ductId": "C6F8BB6D-0E9E-49BA-B416-6F873CC25ACB",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"9DBA8F6E-DDE9-442D-87B6-422A70A6A7C9",
+            "formName": "26-02-17:1550 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 1,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate":"2026-02-18T17:18:46.549Z",
+        "lastUpdated": "2026-02-18T17:21:10.441+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-PAYMENT-DETAILS",
+            "segmentTitle": "Payment Details",
+            "navigationTitle": "Payment details",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PAYMENT-INFO",
+            "isComplete": false,
+            "presentationorder": 3,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[
+                {
+                    "order": 1,
+"content": "**30-day guarantee**\nIf you're not totally satisfied, just cancel within 3o days and get a full refund - no questions asked."
+                }
+            ],
+            "fieldGroups":[
+                {
+                    "grOupCode": "GROUP-PAYMENT-DETAILS",
+                    "groupTitle": "Payment details",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ROUTING-NUMBER",
+                             "fieldLabel": "Routing number",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter routing number",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "account-number",
+                             "maxLength": 9,
+                             "dataFieldSize": 1.5,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Routing Number",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ACCOUNT-NUMBER",
+                             "fieldLabel": "Bank account number",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter bank account number",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldtype": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 17,
+                             "dataFieldsize": 1.5,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-PAYMENT-ACCOUNT-NUMBER-MASKED",
+                                     "value": "ANY_VALUE",
+                                     "required": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Account Number",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-ACCOUNT-NUMBER-MASKED",
+                             "fieldLabel": "Masked Account Number",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage": "display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 17,
+                             "default": "",
+                             'value": ""
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-PAYMENT-SCHEDULE",
+                    "groupTitle": "Payment schedule",
+                    "groupType": "basic",
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY",
+                             "fieldLabel": "Payment amount and frequency",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "presentationorder": 1,
+                             "placeholder": "Select frequency",
+                             "hidden": false,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select-dropdown",
+                             "default": "$212.05 Monthly",
+                             "value": "$212.05 Monthly",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "useValueslist":[
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-BILLING-FREQUENCY",
+                                             "valueTransformer": "frequencyFromPayment",
+                                             "joinFieldCode": ""
+                                         },
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                             "valueTransformer": "nextDateFromFrequency",
+                                             "joinFieldCode": "FIELD-PAYMENT-DATE"
+                                         }
+                                     ]
+                                 }
+                             ],
+                             "maxLength": 30,
+                             "dataFieldsize": 1.5,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "$212.05 per Month",
+                                     "value": "$212.05 Monthly",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "$636.15 per Quarter",
+                                     "value": "$636.15 Quarterly",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "$1,272.30 Semi-Annually",
+                                     "value": "$1,272.30 Semiannual",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },

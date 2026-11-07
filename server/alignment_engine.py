@@ -22,6 +22,7 @@ from ocr_engine import get_rapid_ocr
 def normalize_bundle_identifier_ocr(raw_name: str) -> str:
     """
     Normalizes common RapidOCR substitutions in bundle/folder identifiers and filenames:
+    - Strips leading gutter line numbers + markdown heading hashes (e.g. '1 # DIXUI_...' -> 'DIXUI_...')
     - 'CommonUl_' / 'DIXUl_' / 'DIxUl_' / 'DIXUL_' -> 'CommonUI_' / 'DIXUI_'
     - 'partl' / 'partI' / 'part|' -> 'part1'
     - 'partZ' -> 'part2', 'partS' -> 'part5', 'partG'/'partb' -> 'part6', 'partB' -> 'part8', 'partg'/'partq' -> 'part9'
@@ -30,6 +31,7 @@ def normalize_bundle_identifier_ocr(raw_name: str) -> str:
     s = (raw_name or "").strip()
     if not s:
         return ""
+    s = re.sub(r"^\s*(?:\d+\s+)?#+\s*", "", s).strip()
     s = re.sub(r"\bDIxU[IlL]([_\-])", r"DIXUI\1", s)
     s = re.sub(r"([A-Za-z0-9])[Uu][lL]([_\-])", r"\1UI\2", s)
     s = re.sub(r"CommonUl([_\-])", r"CommonUI\1", s)

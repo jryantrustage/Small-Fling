@@ -524,6 +524,29 @@ async def undo_markdown_edits_endpoint(req: Request):
     res = await uia.undo_markdown_edits(serial=serial, display_id=disp_id, max_clicks=max_clicks)
     return res
 
+@router.post("/api/device/navigate-onedrive-markdown")
+async def navigate_onedrive_markdown_endpoint(req: Request):
+    """
+    Navigates Teams on the desktop display through:
+      Teams -> OneDrive -> Markdowns -> ficus-platform -> <bundle_folder_name> -> <target_file_name>
+    and prepares the opened Markdown editor in Fullscreen + Dark Mode + Edit Mode.
+    """
+    from services import ui_automator_service as uia
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    res = await uia.navigate_teams_onedrive_path_to_markdown(
+        serial=data.get("serial"),
+        display_id=data.get("display_id"),
+        bundle_folder_name=data.get("bundle_folder_name") or data.get("bundle_name"),
+        target_file_name=data.get("target_file_name") or data.get("file_name"),
+        target_part_number=data.get("target_part_number") or data.get("part_number"),
+        folder_path=data.get("folder_path"),
+        open_editor=bool(data.get("open_editor", True)),
+    )
+    return res
+
+
 
 
 

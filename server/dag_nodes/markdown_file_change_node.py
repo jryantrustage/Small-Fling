@@ -15,6 +15,8 @@ from services.adb_service import (
 from services.ui_automator_service import (
     predetermine_bundle_from_folder_screenshot,
     ensure_teams_maximized_and_dark_mode,
+    navigate_teams_onedrive_path_to_markdown,
+    DEFAULT_TEAMS_ONEDRIVE_PATH,
 )
 from services import state
 import db
@@ -30,7 +32,8 @@ class MarkdownFileChangeNode(BaseDagNode):
     accent_color = "#d2a8ff"
     default_position = {"x": 20.0, "y": 40.0}
     default_config = {
-        "mode": "auto",  # "scan_folder" | "switch_next" | "auto"
+        "mode": "auto",  # "scan_folder" | "switch_next" | "navigate_to_part" | "auto"
+        "onedrive_folder_path": list(DEFAULT_TEAMS_ONEDRIVE_PATH),
         "reopen_editor": True,
         "ensure_fullscreen": True,
         "ensure_dark_mode": True,
@@ -44,6 +47,7 @@ class MarkdownFileChangeNode(BaseDagNode):
         super().__init__()
         self.attached_actions = [
             "pin_authentication_guard",
+            "onedrive_folder_navigation",
             "folder_manifest_discovery",
             "fullscreen_dark_mode_guard",
         ]
@@ -130,14 +134,37 @@ class MarkdownFileChangeNode(BaseDagNode):
                 },
             )
 
-        # Default: mode == "scan_folder"
+        # Default: mode == "scan_folder" or "navigate_to_part"
         reopen_editor = bool(cfg.get("reopen_editor", True))
-        scan_res = await predetermine_bundle_from_folder_screenshot(
-            serial=serial,
-            display_id=disp_id,
-            reopen_editor=reopen_editor,
-            force_rescan=True,
-        )
+        if mode == "navigate_to_part":
+            scan_res = await navigate_teams_onedrive_path_to_markdown(
+                serial=serial,
+                display_id=disp_id,
+                bundle_folder_name=cfg.get("bundle_folder_name") or active_proj.get("bundle_name"),
+                target_file_name=cfg.get("target_file_name") or active_proj.get("part_file_name"),
+                target_part_number=cfg.get("target_part_number") or active_proj.get("part_number"),
+                folder_path=cfg.get("onedrive_folder_path") or list(DEFAULT_TEAMS_ONEDRIVE_PATH),
+                open_editor=reopen_editor,
+            )
+        else:
+            scan_res = await predetermine_bundle_from_folder_screenshot(
+                serial=serial,
+                display_id=disp_id,
+                reopen_editor=reopen_editor,
+                force_rescan=True,
+            )
+            if scan_res.get("status") != "success" and not scan_res.get("predetermined_parts"):
+                nav_fallback = await navigate_teams_onedrive_path_to_markdown(
+                    serial=serial,
+                    display_id=disp_id,
+                    bundle_folder_name=active_proj.get("bundle_name"),
+                    target_file_name=active_proj.get("part_file_name"),
+                    target_part_number=active_proj.get("part_number"),
+                    folder_path=cfg.get("onedrive_folder_path") or list(DEFAULT_TEAMS_ONEDRIVE_PATH),
+                    open_editor=reopen_editor,
+                )
+                if nav_fallback.get("success"):
+                    scan_res = nav_fallback
         if reopen_editor and (cfg.get("ensure_fullscreen", True) or cfg.get("ensure_dark_mode", True)):
             try:
                 await ensure_teams_maximized_and_dark_mode(

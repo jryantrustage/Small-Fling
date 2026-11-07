@@ -435,6 +435,89 @@ def test_detect_undo_button_cv():
     assert det_clean["undo_enabled"] is False
 
 
+@pytest.mark.asyncio
+async def test_navigate_teams_onedrive_path_to_part5(monkeypatch):
+    """
+    Verify navigate_teams_onedrive_path_to_markdown navigates:
+      Teams -> 'OneDrive' -> 'Markdowns' -> 'ficus-platform' -> 'DIXUI_impact_26-11-05-9-43pm' -> 'DIXUI_impact_26-11-05-9-43pm_part5.md'
+    and prepares the opened Markdown editor in Fullscreen + Dark Mode + Edit Mode.
+    """
+    import numpy as np
+    import cv2
+    from services import ui_automator_service as uia
+    from services import adb_service
+
+    tapped_targets = []
+    stage = {"idx": 0}
+
+    def make_stage_screen(idx: int) -> bytes:
+        img = np.full((1080, 1920, 3), 24, dtype=np.uint8)
+        if idx == 0:
+            cv2.putText(img, "OneDrive", (180, 420), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (235, 235, 235), 2)
+        elif idx == 1:
+            cv2.putText(img, "OneDrive", (180, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+            cv2.putText(img, "Markdowns", (240, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (235, 235, 235), 2)
+        elif idx == 2:
+            cv2.putText(img, "Markdowns", (180, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+            cv2.putText(img, "ficus-platform", (240, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (235, 235, 235), 2)
+        elif idx == 3:
+            cv2.putText(img, "ficus-platform", (180, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+            cv2.putText(img, "DIXUI_impact_26-11-05-9-43pm", (240, 360), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (235, 235, 235), 2)
+        else:
+            cv2.putText(img, "DIXUI_impact_26-11-05-9-43pm", (180, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2)
+            cv2.putText(img, "DIXUI_impact_26-11-05-9-43pm_part4.md", (240, 320), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (235, 235, 235), 2)
+            cv2.putText(img, "DIXUI_impact_26-11-05-9-43pm_part5.md", (240, 440), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (235, 235, 235), 2)
+        _, png = cv2.imencode(".png", img)
+        return png.tobytes()
+
+    async def fake_serial(s=None, force_refresh=False):
+        return "192.168.86.85:35681"
+
+    async def fake_ext_id(s=None, force_refresh=False):
+        return 26
+
+    async def fake_capture(target_display="desktop", serial=None, display_id=None, max_cache_age_s=0.0, bypass_lock=True):
+        return make_stage_screen(stage["idx"])
+
+    async def fake_shell(cmd, serial=None, timeout=5.0):
+        if "tap " in cmd:
+            tapped_targets.append((stage["idx"], cmd))
+            stage["idx"] += 1
+        return {"status": "ok", "stdout": "", "code": 0}
+
+    async def fake_prep(serial=None, display_id=None):
+        return {"success": True, "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md", "actions": ["Prepared editor in Fullscreen + Dark Mode + Edit Mode"]}
+
+    async def fake_max(serial=None, display_id=None):
+        return {"was_floating": False, "actions": []}
+
+    monkeypatch.setattr(uia, "get_active_adb_serial", fake_serial)
+    monkeypatch.setattr(uia, "detect_external_display_id", fake_ext_id)
+    monkeypatch.setattr(adb_service, "capture_display_screenshot", fake_capture)
+    monkeypatch.setattr(uia, "run_adb_shell", fake_shell)
+    monkeypatch.setattr(uia, "prepare_markdown_editor_window", fake_prep)
+    monkeypatch.setattr(adb_service, "maximize_floating_markdown_window", fake_max)
+
+    res = await uia.navigate_teams_onedrive_path_to_markdown(
+        bundle_folder_name="DIXUI_impact_26-11-05-9-43pm",
+        target_file_name="DIXUI_impact_26-11-05-9-43pm_part5.md",
+        target_part_number=5,
+    )
+    assert res["status"] == "success"
+    assert res["success"] is True
+    assert res["opened_file_name"] == "DIXUI_impact_26-11-05-9-43pm_part5.md"
+    assert res["part_number"] == 5
+    assert res["navigation_path"] == [
+        "OneDrive",
+        "Markdowns",
+        "ficus-platform",
+        "DIXUI_impact_26-11-05-9-43pm",
+        "DIXUI_impact_26-11-05-9-43pm_part5.md",
+    ]
+    assert len(tapped_targets) == 5
+
+
+
 
 
 
