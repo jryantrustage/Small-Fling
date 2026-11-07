@@ -66,9 +66,45 @@ def find_node_bounds(root: ET.Element, match_fn) -> Optional[Tuple[int, int, int
     return None
 
 
+def _find_formatting_toolbar_y_band(img: np.ndarray) -> Tuple[int, int, int]:
+    """
+    Dynamically locates the vertical band (tb_y1, tb_y2, center_y) of the Markdown formatting toolbar
+    across any display DPI (e.g., y~148 at 131 DPI, y~244 at 220 DPI, or y~104 when top bar is hidden).
+    Uses the active blue highlight pill (Pencil/Split/Preview) on the right side of the toolbar if present,
+    or falls back to horizontal border detection.
+    """
+    h, w = img.shape[:2]
+    scale_x = (w / 1920.0) if w > 0 else 1.0
+    scale_y = (h / 1080.0) if h > 0 else 1.0
+
+    search_y1 = max(0, int(80 * scale_y))
+    search_y2 = min(h, int(290 * scale_y))
+    right_x1 = max(0, int(w * 0.78))
+    right_x2 = min(w, int(w * 0.96))
+
+    crop_right = img[search_y1:search_y2, right_x1:right_x2]
+    if crop_right.size > 0:
+        hsv = cv2.cvtColor(crop_right, cv2.COLOR_BGR2HSV)
+        blue_mask = cv2.inRange(hsv, np.array([95, 50, 50]), np.array([135, 255, 255]))
+        conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        valid = [c for c in conts if 15 <= cv2.contourArea(c) <= 3500 * (scale_y ** 2)]
+        if valid:
+            valid.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+            _, by, _, bh = cv2.boundingRect(valid[0])
+            cy = search_y1 + by + bh // 2
+            pad = max(12, int(18 * scale_y))
+            return (max(0, cy - pad), min(h, cy + pad), cy)
+
+    # Fallback: default 220 DPI toolbar band
+    cy = int(246 * scale_y)
+    return (int(230 * scale_y), int(262 * scale_y), cy)
+
+
 def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     """
     High-speed Computer Vision locator for Teams Markdown Editor action buttons:
+    - 'undo' (undo button '↶' on far left of toolbar)
+    - 'redo' (redo button '↷' second from left of toolbar)
     - 'pencil' (edit mode)
     - 'split' (split screen view)
     - 'preview' (preview only)
@@ -78,18 +114,18 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     scale_x = (w / 1920.0) if w > 0 else 1.0
     scale_y = (h / 1080.0) if h > 0 else 1.0
 
+    tb_y1, tb_y2, center_y = _find_formatting_toolbar_y_band(img)
+
     results: Dict[str, Tuple[int, int]] = {
-        "pencil": (int(1660 * scale_x), int(246 * scale_y)),
-        "split": (int(1710 * scale_x), int(246 * scale_y)),
-        "preview": (int(1760 * scale_x), int(246 * scale_y)),
-        "theme_dropdown": (int(1840 * scale_x), int(246 * scale_y)),
+        "undo": (int(84 * scale_x), int(center_y)),
+        "redo": (int(150 * scale_x), int(center_y)),
+        "pencil": (int(1660 * scale_x), int(center_y)),
+        "split": (int(1710 * scale_x), int(center_y)),
+        "preview": (int(1760 * scale_x), int(center_y)),
+        "theme_dropdown": (int(1840 * scale_x), int(center_y)),
     }
 
-    # Search inside the markdown formatting toolbar icon strip (y: 230..262 on 1080p, x: >= 1615),
-    # avoiding the top/bottom horizontal toolbar borders at y~217 and y~269.
-    tb_y1, tb_y2 = int(230 * scale_y), int(262 * scale_y)
-    tb_x1, tb_x2 = int(1615 * scale_x), min(w, int(1895 * scale_x))
-
+    tb_x1, tb_x2 = int(1600 * scale_x), min(w, int(1895 * scale_x))
     crop = img[tb_y1:tb_y2, tb_x1:tb_x2]
     if crop.size == 0:
         return results
@@ -97,7 +133,6 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     is_dark = np.mean(gray) < 110
     if is_dark:
-        # Use max(B, G, R) > 105 so both the blue active button and gray inactive buttons are captured
         max_chan = np.max(crop, axis=2)
         icons_mask = max_chan > 105
     else:
@@ -123,12 +158,14 @@ def locate_toolbar_icons_cv(img: np.ndarray) -> Dict[str, Tuple[int, int]]:
 
     row_counts = np.sum(icons_mask, axis=1)
     active_rows = np.where(row_counts >= 2)[0]
-    center_y = int(tb_y1 + np.mean(active_rows)) if len(active_rows) > 0 else int(246 * scale_y)
+    if len(active_rows) > 0:
+        center_y = int(tb_y1 + np.mean(active_rows))
+        results["undo"] = (int(84 * scale_x), int(center_y))
+        results["redo"] = (int(150 * scale_x), int(center_y))
 
     if len(centers) >= 2:
         results["pencil"] = (int(centers[0]), int(center_y))
         if len(centers) >= 3 and (centers[-1] - centers[-2]) <= max(28, int(42 * scale_x)):
-            # Combine the Sun/Moon glyph and its dropdown chevron into the button center
             results["theme_dropdown"] = (int((centers[-2] + centers[-1]) // 2), int(center_y))
         else:
             results["theme_dropdown"] = (int(centers[-1]), int(center_y))
@@ -147,10 +184,9 @@ def _detect_active_toolbar_mode_button(img: np.ndarray) -> Optional[str]:
     h_i, w_i = img.shape[:2]
     scale_x = (w_i / 1920.0) if w_i > 0 else 1.0
     scale_y = (h_i / 1080.0) if h_i > 0 else 1.0
-    tb_y1 = int(205 * scale_y)
-    tb_y2 = int(280 * scale_y)
+    tb_y1, tb_y2, _ = _find_formatting_toolbar_y_band(img)
     tb_x1 = int(1580 * scale_x)
-    crop_tb = img[tb_y1:tb_y2, tb_x1:]
+    crop_tb = img[max(0, tb_y1 - int(10 * scale_y)):min(h_i, tb_y2 + int(10 * scale_y)), tb_x1:]
     if crop_tb.size == 0:
         return None
     hsv_p = cv2.cvtColor(crop_tb, cv2.COLOR_BGR2HSV)
@@ -158,14 +194,25 @@ def _detect_active_toolbar_mode_button(img: np.ndarray) -> Optional[str]:
     conts, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     valid_conts = [c for c in conts if cv2.contourArea(c) >= 15]
     valid_conts.sort(key=lambda c: cv2.contourArea(c), reverse=True)
+    icons = locate_toolbar_icons_cv(img)
+    px = icons["pencil"][0]
+    sx = icons["split"][0]
+    vx = icons["preview"][0]
     for c in valid_conts:
         bx, _, bw, _ = cv2.boundingRect(c)
-        norm_cx = (tb_x1 + bx + bw // 2) / scale_x
+        abs_cx = tb_x1 + bx + bw // 2
+        if abs(abs_cx - px) <= max(18, int(24 * scale_x)):
+            return "pencil"
+        if abs(abs_cx - sx) <= max(18, int(24 * scale_x)):
+            return "split"
+        if abs(abs_cx - vx) <= max(18, int(24 * scale_x)):
+            return "preview"
+        norm_cx = abs_cx / scale_x
         if norm_cx < 1685:
             return "pencil"
-        elif 1685 <= norm_cx < 1735:
+        elif 1685 <= norm_cx < 1745:
             return "split"
-        elif norm_cx >= 1735:
+        elif norm_cx >= 1745:
             return "preview"
     return None
 
@@ -1325,33 +1372,18 @@ def detect_undo_button_cv(img: Optional[np.ndarray]) -> Dict[str, Any]:
     scale_x = w / 1920.0
     scale_y = h / 1080.0
 
-    # Locate the formatting toolbar vertical center by finding the horizontal toolbar pill border or icons
-    # In fullscreen mode:
-    #   - If Teams app bar is visible at top, toolbar y center is around 0.16*h .. 0.21*h (y ~ 170..225 on 1080p)
-    #   - If cropped to editor pane, toolbar y center is around 0.14*h .. 0.18*h
-    tb_y1 = max(0, int(h * 0.09))
-    tb_y2 = min(h, int(h * 0.25))
-    ux1 = max(0, int(w * 0.033))
-    ux2 = min(w, int(w * 0.056))
-    rx1 = max(0, int(w * 0.068))
+    py1, py2, toolbar_cy = _find_formatting_toolbar_y_band(img)
+    ux1 = max(0, int(w * 0.026))
+    ux2 = min(w, int(w * 0.050))
+    rx1 = max(0, int(w * 0.050))
     rx2 = min(w, int(w * 0.090))
 
-    # Find the vertical row y where the formatting toolbar buttons ('B', 'I', 'S', 'H1' at x=0.11w..0.28w) have maximum glyph contrast
-    fmt_x1 = max(0, int(w * 0.11))
-    fmt_x2 = min(w, int(w * 0.28))
-    fmt_band = img[tb_y1:tb_y2, fmt_x1:fmt_x2]
+    fmt_band = img[py1:py2, max(0, int(w * 0.03)):min(w, int(w * 0.30))]
     if fmt_band.size == 0:
-        return {"detected": False, "undo_enabled": False, "coords": [int(w * 0.044), int(h * 0.16)]}
+        return {"detected": False, "undo_enabled": False, "coords": [int(w * 0.044), toolbar_cy]}
 
     fmt_gray = cv2.cvtColor(fmt_band, cv2.COLOR_BGR2GRAY)
     bg_med = float(np.median(fmt_gray))
-    row_contrast = np.percentile(np.abs(fmt_gray.astype(np.float32) - bg_med), 96, axis=1)
-    best_rel_y = int(np.argmax(row_contrast))
-    toolbar_cy = tb_y1 + best_rel_y
-
-    half_h = max(10, int(18 * scale_y))
-    py1 = max(0, toolbar_cy - half_h)
-    py2 = min(h, toolbar_cy + half_h)
 
     undo_patch = cv2.cvtColor(img[py1:py2, ux1:ux2], cv2.COLOR_BGR2GRAY) if ux2 > ux1 and py2 > py1 else np.zeros((1, 1), dtype=np.uint8)
     redo_patch = cv2.cvtColor(img[py1:py2, rx1:rx2], cv2.COLOR_BGR2GRAY) if rx2 > rx1 and py2 > py1 else np.zeros((1, 1), dtype=np.uint8)
@@ -1393,7 +1425,11 @@ async def undo_markdown_edits(
     until all accidental edits (such as injected characters or line breaks) are undone
     and the Undo button becomes disabled.
     """
-    from services.adb_service import capture_display_screenshot, direct_hid_to_display
+    from services.adb_service import (
+        capture_display_screenshot,
+        direct_hid_to_display,
+        maximize_floating_markdown_window,
+    )
     ser = await get_active_adb_serial(serial)
     if not ser or "mock" in str(ser).lower():
         return {"status": "mock", "undone_clicks": 0, "undo_enabled_remaining": False, "actions": []}

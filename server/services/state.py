@@ -3073,14 +3073,17 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
 
     align = alignment_status or latest_alignment_status or {}
     proj = db.get_active_project() or {}
+    align_fn = align.get("file_name") or ""
     canonical_fn = _extract_canonical_filename_from_project_or_lines(proj, document_lines)
-    candidate_name = align.get("file_name") or canonical_fn or proj.get("name") or ""
+    candidate_name = align_fn or canonical_fn or proj.get("name") or ""
 
     mp_info = align.get("multipart_info")
+    if (not mp_info or not mp_info.get("is_multipart")) and align.get("is_multipart") and align.get("part_number") is not None:
+        mp_info = dict(align)
     if not mp_info or not mp_info.get("is_multipart"):
-        mp_info = parse_multipart_markdown_filename(canonical_fn or candidate_name)
-    if (not mp_info or not mp_info.get("is_multipart")) and candidate_name != canonical_fn:
-        mp_info = parse_multipart_markdown_filename(candidate_name)
+        mp_info = parse_multipart_markdown_filename(candidate_name or canonical_fn)
+    if (not mp_info or not mp_info.get("is_multipart")) and canonical_fn and canonical_fn != candidate_name:
+        mp_info = parse_multipart_markdown_filename(canonical_fn)
 
     # Check document header lines 1..10 for total_parts (e.g., '(Part 2 of 3)' or 'Part: **2 of 3**')
     detected_total_parts = None

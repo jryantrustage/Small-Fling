@@ -2597,10 +2597,6 @@ async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Option
             dim1, dim2 = int(m_sz.group(1)), int(m_sz.group(2))
             h_px = min(dim1, dim2)
 
-    if target_dpi is None or target_dpi <= 0:
-        # Calibrate to target ~780dp virtual height for 24-35 lines
-        target_dpi = max(140, min(360, int(round((h_px / 780.0) * 160.0 / 10.0) * 10)))
-
     check_res = await run_adb_shell(f"wm density -d {did}", ser, timeout=1.8)
     out = check_res.get("stdout", "")
     current_dpi = 160
@@ -2609,8 +2605,9 @@ async def calibrate_display_dpi(serial: Optional[str] = None, display_id: Option
     elif m_phys := re.search(r'Physical density:\s*(\d+)', out):
         current_dpi = int(m_phys.group(1))
 
-    # Avoid unnecessary wm density surface recreation if display is already within calibrated 190..240 DPI range
-    if 190 <= current_dpi <= 240 and abs(current_dpi - target_dpi) <= 20:
+    # Preserve the display's existing density unless an explicit target_dpi was requested;
+    # changing wm density while Teams is open recreates the activity surface and hides the Undo button!
+    if target_dpi is None or target_dpi <= 0:
         target_dpi = current_dpi
 
     if current_dpi != target_dpi:

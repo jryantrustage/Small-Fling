@@ -213,7 +213,11 @@ def test_markdown_file_change_dag_node_and_group():
     ]
     state.multipart_bundle_state["current_part"] = 1
     state.multipart_bundle_state["total_parts"] = 9
-    synced = state.sync_multipart_state_from_alignment()
+    synced = state.sync_multipart_state_from_alignment({
+        "file_name": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+        "is_multipart": True,
+        "part_number": 1,
+    })
     assert synced["predetermined_parts"][0]["scope_label"] == "MD 1 / 9"
     assert synced["predetermined_parts"][8]["scope_label"] == "MD 9 / 9"
     mfc_state = state.dag_state["nodes"]["markdown_file_change"]
@@ -399,6 +403,37 @@ def test_markdown_editor_never_triggers_pin_prompt():
     cv2.putText(light_editor, "DIXUI_impact_26-11-05-9-43pm (Part 2 of 9)", (180, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (30, 30, 30), 2)
     cv2.putText(light_editor, "Enter your PIN", (400, 500), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (30, 30, 30), 2)
     assert detect_teams_auth_or_fingerprint_screen_cv(light_editor)["detected"] is False
+
+
+def test_detect_undo_button_cv():
+    """Verify detect_undo_button_cv identifies an active Undo button vs disabled Undo button in the toolbar."""
+    import numpy as np
+    import cv2
+    from services.ui_automator_service import detect_undo_button_cv
+
+    # Dark-mode editor with active blue Pencil pill at (1660, 246) and bright Undo glyph at (84, 246), dim Redo at (150, 246)
+    img = np.full((1080, 1920, 3), 28, dtype=np.uint8)
+    cv2.rectangle(img, (1642, 232), (1678, 260), (235, 130, 30), -1)  # Blue active Pencil pill in BGR
+    cv2.circle(img, (84, 246), 8, (220, 220, 220), 2)  # Bright enabled Undo icon
+    cv2.circle(img, (150, 246), 8, (70, 70, 70), 2)     # Dim disabled Redo icon
+
+    det_active = detect_undo_button_cv(img)
+    assert det_active["detected"] is True
+    assert det_active["undo_enabled"] is True
+    ux, uy = det_active["coords"]
+    assert 60 <= ux <= 110
+    assert 225 <= uy <= 265
+
+    # When Undo is also dimmed (no edits left to undo)
+    img_clean = np.full((1080, 1920, 3), 28, dtype=np.uint8)
+    cv2.rectangle(img_clean, (1642, 232), (1678, 260), (235, 130, 30), -1)
+    cv2.circle(img_clean, (84, 246), 8, (70, 70, 70), 2)
+    cv2.circle(img_clean, (150, 246), 8, (70, 70, 70), 2)
+
+    det_clean = detect_undo_button_cv(img_clean)
+    assert det_clean["detected"] is True
+    assert det_clean["undo_enabled"] is False
+
 
 
 
