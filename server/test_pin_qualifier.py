@@ -383,4 +383,23 @@ async def test_direct_hid_and_display_capture_routing(monkeypatch):
     assert any("input -d 2 mouse tap 320 380" in c for c in executed_cmds)
 
 
+def test_markdown_editor_never_triggers_pin_prompt():
+    """Verify neither dark-mode nor light-mode Markdown editor screens ever trigger PIN entry."""
+    import numpy as np
+    import cv2
+    from services.adb_service import detect_teams_auth_or_fingerprint_screen_cv
+
+    # 1. Dark-mode markdown editor (even if source text contains 'Enter your PIN' in code)
+    dark_editor = np.full((1080, 1920, 3), 38, dtype=np.uint8)
+    cv2.putText(dark_editor, "Enter your PIN", (400, 500), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (220, 220, 220), 2)
+    assert detect_teams_auth_or_fingerprint_screen_cv(dark_editor)["detected"] is False
+
+    # 2. Light-mode markdown editor with .md filename or part header
+    light_editor = np.full((1080, 1920, 3), 240, dtype=np.uint8)
+    cv2.putText(light_editor, "DIXUI_impact_26-11-05-9-43pm (Part 2 of 9)", (180, 160), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (30, 30, 30), 2)
+    cv2.putText(light_editor, "Enter your PIN", (400, 500), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (30, 30, 30), 2)
+    assert detect_teams_auth_or_fingerprint_screen_cv(light_editor)["detected"] is False
+
+
+
 

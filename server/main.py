@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
     os.chdir(str(config.SERVER_DIR))
     is_debug = sys.gettrace() is not None or "debugpy" in sys.modules
-    reload_enabled = os.environ.get("UVICORN_RELOAD", "0") == "1"
+    reload_enabled = os.environ.get("UVICORN_RELOAD", "1") == "1" and not is_debug
 
     uvicorn_kwargs = {
         "host": config.SERVER_HOST,

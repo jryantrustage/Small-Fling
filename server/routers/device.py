@@ -511,5 +511,19 @@ async def set_hid_target_endpoint(req: Request):
     )
     return {"status": "ok", "details": res}
 
+@router.post("/api/device/undo-edits")
+async def undo_markdown_edits_endpoint(req: Request):
+    """Clicks the Undo ('↶') button in the Teams Markdown editor toolbar until all edits are undone."""
+    from services import ui_automator_service as uia
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    serial = data.get("serial")
+    disp_id = data.get("display_id")
+    max_clicks = int(data.get("max_clicks", 15))
+    res = await uia.undo_markdown_edits(serial=serial, display_id=disp_id, max_clicks=max_clicks)
+    return res
+
+
 
 

@@ -1312,3 +1312,135 @@ async def ensure_teams_maximized_and_dark_mode(
     return await prepare_markdown_editor_window(serial=serial, display_id=display_id)
 
 
+def detect_undo_button_cv(img: Optional[np.ndarray]) -> Dict[str, Any]:
+    """
+    Detects the Undo ('↶') button on the far-left of the fullscreen Teams Markdown formatting toolbar
+    (red bounding box in user screenshot) and determines whether it is enabled (bright/high-contrast,
+    meaning edits exist in the editor that can be undone) vs disabled (dimmed gray).
+    """
+    if img is None or getattr(img, "size", 0) == 0:
+        return {"detected": False, "undo_enabled": False, "coords": [84, 165]}
+
+    h, w = img.shape[:2]
+    scale_x = w / 1920.0
+    scale_y = h / 1080.0
+
+    # Locate the formatting toolbar vertical center by finding the horizontal toolbar pill border or icons
+    # In fullscreen mode:
+    #   - If Teams app bar is visible at top, toolbar y center is around 0.16*h .. 0.21*h (y ~ 170..225 on 1080p)
+    #   - If cropped to editor pane, toolbar y center is around 0.14*h .. 0.18*h
+    tb_y1 = max(0, int(h * 0.09))
+    tb_y2 = min(h, int(h * 0.25))
+    ux1 = max(0, int(w * 0.033))
+    ux2 = min(w, int(w * 0.056))
+    rx1 = max(0, int(w * 0.068))
+    rx2 = min(w, int(w * 0.090))
+
+    # Find the vertical row y where the formatting toolbar buttons ('B', 'I', 'S', 'H1' at x=0.11w..0.28w) have maximum glyph contrast
+    fmt_x1 = max(0, int(w * 0.11))
+    fmt_x2 = min(w, int(w * 0.28))
+    fmt_band = img[tb_y1:tb_y2, fmt_x1:fmt_x2]
+    if fmt_band.size == 0:
+        return {"detected": False, "undo_enabled": False, "coords": [int(w * 0.044), int(h * 0.16)]}
+
+    fmt_gray = cv2.cvtColor(fmt_band, cv2.COLOR_BGR2GRAY)
+    bg_med = float(np.median(fmt_gray))
+    row_contrast = np.percentile(np.abs(fmt_gray.astype(np.float32) - bg_med), 96, axis=1)
+    best_rel_y = int(np.argmax(row_contrast))
+    toolbar_cy = tb_y1 + best_rel_y
+
+    half_h = max(10, int(18 * scale_y))
+    py1 = max(0, toolbar_cy - half_h)
+    py2 = min(h, toolbar_cy + half_h)
+
+    undo_patch = cv2.cvtColor(img[py1:py2, ux1:ux2], cv2.COLOR_BGR2GRAY) if ux2 > ux1 and py2 > py1 else np.zeros((1, 1), dtype=np.uint8)
+    redo_patch = cv2.cvtColor(img[py1:py2, rx1:rx2], cv2.COLOR_BGR2GRAY) if rx2 > rx1 and py2 > py1 else np.zeros((1, 1), dtype=np.uint8)
+
+    undo_contrast = float(np.max(np.abs(undo_patch.astype(np.float32) - bg_med))) if undo_patch.size > 0 else 0.0
+    redo_contrast = float(np.max(np.abs(redo_patch.astype(np.float32) - bg_med))) if redo_patch.size > 0 else 0.0
+
+    # Refine Undo glyph centroid inside undo_patch
+    ux_center = (ux1 + ux2) // 2
+    uy_center = toolbar_cy
+    if undo_patch.size > 0:
+        diff = np.abs(undo_patch.astype(np.float32) - bg_med)
+        ys, xs = np.where(diff >= max(25.0, undo_contrast * 0.65))
+        if len(xs) >= 4:
+            ux_center = int(ux1 + np.mean(xs))
+            uy_center = int(py1 + np.mean(ys))
+
+    # Undo is enabled when its glyph contrast is strong (>= 80) and significantly brighter/stronger than a disabled icon (~40)
+    undo_enabled = bool(undo_contrast >= 80.0 and (undo_contrast >= redo_contrast + 22.0 or undo_contrast >= 115.0))
+
+    return {
+        "detected": True,
+        "undo_enabled": undo_enabled,
+        "coords": [ux_center, uy_center],
+        "box_px": [ux1, py1, ux2 - ux1, py2 - py1],
+        "undo_contrast": round(undo_contrast, 1),
+        "redo_contrast": round(redo_contrast, 1),
+        "toolbar_cy": toolbar_cy,
+    }
+
+
+async def undo_markdown_edits(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    max_clicks: int = 15,
+) -> Dict[str, Any]:
+    """
+    Automatically clicks the Undo ('↶') button in the Teams Markdown editor toolbar
+    until all accidental edits (such as injected characters or line breaks) are undone
+    and the Undo button becomes disabled.
+    """
+    from services.adb_service import capture_display_screenshot, direct_hid_to_display
+    ser = await get_active_adb_serial(serial)
+    if not ser or "mock" in str(ser).lower():
+        return {"status": "mock", "undone_clicks": 0, "undo_enabled_remaining": False, "actions": []}
+
+    disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    actions: List[str] = []
+
+    # 1. Ensure the Markdown window is maximized first so the Undo ('↶') button is visible in the toolbar
+    max_res = await maximize_floating_markdown_window(serial=ser, display_id=disp_id)
+    if max_res.get("was_floating"):
+        actions.extend(max_res.get("actions", []))
+        await asyncio.sleep(0.5)
+
+    await dismiss_keyboard(ser, disp_id)
+
+    undone_clicks = 0
+    last_eval: Dict[str, Any] = {}
+
+    for step in range(max(1, int(max_clicks))):
+        snap = await capture_display_screenshot("desktop", serial=ser, display_id=disp_id, max_cache_age_s=0.0)
+        if not snap:
+            break
+        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            break
+
+        last_eval = detect_undo_button_cv(img)
+        if not last_eval.get("undo_enabled"):
+            actions.append(f"Undo button is disabled (contrast={last_eval.get('undo_contrast')}); document has no remaining edits to undo")
+            break
+
+        ux, uy = last_eval.get("coords", [84, 165])
+        await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=disp_id, focus_coords=[ux, uy])
+        await run_adb_shell(f"input {disp_pfx}tap {ux} {uy}", ser, timeout=2.0)
+        undone_clicks += 1
+        actions.append(f"Clicked Undo ('↶') button at ({ux}, {uy}) on display #{disp_id} (click #{undone_clicks}, contrast={last_eval.get('undo_contrast')})")
+        await asyncio.sleep(0.35)
+
+    await dismiss_keyboard(ser, disp_id)
+    return {
+        "status": "ok",
+        "undone_clicks": undone_clicks,
+        "undo_button": last_eval,
+        "undo_enabled_remaining": bool(last_eval.get("undo_enabled", False)),
+        "actions": actions,
+    }
+
+
+

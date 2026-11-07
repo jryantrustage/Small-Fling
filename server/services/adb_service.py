@@ -810,10 +810,11 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
     """
     Analyzes an external desktop display screenshot for:
       1. Blank White Teams Screen (Image 3): Teams titlebar at top-left ('Teams') with a pure blank white
-         body (mean_lum >= 230, std <= 18, white_pct >= 88%). Indicates the phone is displaying a
+         body (mean_lum >= 236, std <= 12, white_pct >= 94%). Indicates the phone is displaying a
          fingerprint prompt to unlock. Pressing ESCAPE (keycode 111) prompts for the PIN on desktop mode.
-      2. Desktop Mode Teams / Intune PIN Screen (Image 4): 'Managed by your organization', 'Enter your PIN'
-         (or RapidOCR 'EnteryourPIN'), 'PIN' input line, and 'OK' button.
+      2. Desktop Mode Teams / Intune PIN Screen (Image 4): Full-screen light gray/white Intune page
+         (body_mean >= 200, left_mean >= 200, right_mean >= 200, <= 22 OCR tokens, no markdown/gutter)
+         containing BOTH 'Managed by your organization' (or 'Forgot your PIN') AND 'Enter your PIN'.
     """
     if screen_img is None or getattr(screen_img, "size", 0) == 0:
         return {"detected": False, "auth_type": "none"}
@@ -830,7 +831,28 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
         body_std = float(np.std(body)) if body.size > 0 else 255.0
         white_pct = float(np.mean(body > 238) * 100.0) if body.size > 0 else 0.0
 
-        from ocr_engine import get_rapid_ocr
+        left_margin = screen_img[by1:by2, max(0, int(40 * scale_x)):min(w, int(350 * scale_x))]
+        right_margin = screen_img[by1:by2, max(0, int(1570 * scale_x)):min(w, int(1880 * scale_x))]
+        left_mean = float(np.mean(left_margin)) if left_margin.size > 0 else 0.0
+        right_mean = float(np.mean(right_margin)) if right_margin.size > 0 else 0.0
+
+        # FAST GUARD 1: Both the Teams PIN prompt (body_mean ~232) and Blank White Fingerprint screen (body_mean ~250)
+        # are full-screen light/white surfaces across the body AND left/right margins.
+        # Dark-mode Markdown Editor (~38) or Folder View (~18) or floating windows over dark backgrounds
+        # have body_mean < 200 or dark margins -> immediately return False without running OCR!
+        if body_mean < 200.0 or left_mean < 200.0 or right_mean < 200.0:
+            return {"detected": False, "auth_type": "none"}
+
+        from ocr_engine import get_rapid_ocr, find_gutter_numbers_cluster
+        # FAST GUARD 2: If the Markdown editor line-number gutter is present (even in Light Mode),
+        # this is a Markdown editor — NEVER an authentication or PIN screen!
+        try:
+            gutter_cluster = find_gutter_numbers_cluster(screen_img)
+            if gutter_cluster and len(gutter_cluster) >= 2:
+                return {"detected": False, "auth_type": "none"}
+        except Exception:
+            pass
+
         r = get_rapid_ocr()
         res, _ = r(screen_img) if r is not None else ([], None)
 
@@ -866,19 +888,24 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
         full_text = " ".join(t[5] for t in tokens)
         full_nospace = "".join(t[6] for t in tokens)
 
-        # Check for Desktop Mode PIN Prompt (Image 4: 'Enter your PIN' / 'EnteryourPIN' / 'ForgotyourPiN')
-        pin_keywords_nospace = (
-            "enteryourpin",
-            "enterpin",
-            "confirmyourpin",
-            "forgotyourpin",
-            "needtochangeit",
-            "organizationpin",
-            "devicepin",
+        non_auth_keywords = (
+            ".md", "part", "saving", "almosthere", "changesarebeing", "modifiedby",
+            "generatedby", "directorystructure", "filesinthispart", "characters", "devcode"
         )
-        if any(kw in full_nospace for kw in pin_keywords_nospace) or (
-            "managedbyyourorganization" in full_nospace and "pin" in full_nospace
-        ):
+        has_markdown_or_folder_tokens = any(kw in full_nospace for kw in non_auth_keywords)
+
+        # GUARD 3: Never match a screen that has Markdown/folder tokens or dense document text (> 22 OCR lines)
+        if has_markdown_or_folder_tokens or len(tokens) > 22:
+            return {"detected": False, "auth_type": "none"}
+
+        # Check for Desktop Mode PIN Prompt (Image 4: 'Managed by your organization' + 'Enter your PIN' + 'Forgot your PIN')
+        has_enter_your_pin = ("enteryourpin" in full_nospace or "confirmyourpin" in full_nospace)
+        has_org_or_forgot_pin = (
+            "managedbyyourorganization" in full_nospace
+            or "forgotyourpin" in full_nospace
+            or "needtochangeit" in full_nospace
+        )
+        if has_enter_your_pin and has_org_or_forgot_pin:
             return {
                 "detected": True,
                 "auth_type": "pin",
@@ -888,22 +915,14 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
                 "is_pin_safe": True,
                 "pin_field_coords": pin_field_coords,
                 "ok_btn_coords": ok_btn_coords,
-                "details": "Desktop mode Teams/Intune PIN prompt detected ('Enter your PIN')",
+                "details": "Desktop mode Teams/Intune PIN prompt detected ('Managed by your organization' + 'Enter your PIN')",
             }
 
         # Check for Blank White Teams Screen (Image 3: Teams in top-left + blank white body -> Fingerprint prompt on phone)
-        # Note: Must NOT match a floating light-mode markdown window or skeleton loader (Screenshots 2 & 4) where left/right
-        # desktop margins or the Teams sub-header (y=112..205) are dark!
         header_strip = screen_img[max(0, int(32 * scale_y)):min(h, int(108 * scale_y)), max(0, int(20 * scale_x)):min(w, int(1900 * scale_x))]
         header_mean = float(np.mean(header_strip)) if header_strip.size > 0 else 0.0
         subheader_strip = screen_img[max(0, int(112 * scale_y)):min(h, int(205 * scale_y)), max(0, int(80 * scale_x)):min(w, int(1840 * scale_x))]
         subheader_mean = float(np.mean(subheader_strip)) if subheader_strip.size > 0 else 0.0
-        left_margin = screen_img[by1:by2, max(0, int(40 * scale_x)):min(w, int(350 * scale_x))]
-        right_margin = screen_img[by1:by2, max(0, int(1570 * scale_x)):min(w, int(1880 * scale_x))]
-        left_mean = float(np.mean(left_margin)) if left_margin.size > 0 else 0.0
-        right_mean = float(np.mean(right_margin)) if right_margin.size > 0 else 0.0
-        non_auth_keywords = (".md", "part", "saving", "almosthere", "changesarebeing", "modifiedby", "generatedby")
-        has_markdown_or_folder_tokens = any(kw in full_nospace for kw in non_auth_keywords)
         is_blank_white_body = (
             body_mean >= 236.0
             and body_std <= 12.0
@@ -1226,7 +1245,7 @@ async def auto_handle_pin_authentication(
                 actions.append(f"Post-Escape desktop verification failed ({esc_err}); skipped PIN typing for safety")
 
         # B. Enter PIN 2992 ONLY when 'Enter your PIN' (mam_pin_prompt) is visually confirmed on Desktop Display (#ext_id)
-        #    NEVER send 'input -d 0 text 2992' to the phone screen!
+        #    NEVER send 'input -d 0 text 2992' to the phone screen, and NEVER send Backspace (keyevent 67)!
         if confirmed_mam_pin_prompt and ext_id and ext_id > 0:
             px, py = int(pin_coords[0]), int(pin_coords[1])
             ox, oy = int(ok_coords[0]), int(ok_coords[1])
@@ -1234,7 +1253,6 @@ async def auto_handle_pin_authentication(
             await run_adb_shell(
                 f"input -d {ext_id} tap {px} {py}; "
                 f"sleep 0.15; "
-                f"input -d {ext_id} keyevent 67 67 67 67 67 67 67 67; "
                 f"input -d {ext_id} text {active_pin}; "
                 f"sleep 0.2; "
                 f"input -d {ext_id} keyevent 66; "
