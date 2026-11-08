@@ -10382,3 +10382,200 @@ export { i18n, useTypedTranslation, nonHookTypedTranslation };
                                      "hidden": false,
                                      "disabled": false
                                  },
+                                {
+                                     "order": 4,
+                                     "label": "$2,544.60 Annually",
+                                     "value": "$2,544.60 Annual",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Payment Amount and Frequency",
+                                 "eventName": "trackSelection",
+                                 "optionsType": "label",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PAYMENT-DATE",
+                             "fieldLabel": "Payment date",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "presentationorder": 1,
+                             "placeholder": "Select payment date",
+                             "hidden": false,
+                             "usage":"input",
+                             "disabled": false,
+                             "dataFieldSize": 1,
+                             "required": true,
+                             "fieldType": "single-select-dropdown",
+                             "exposition":[
+                                {
+                                     "order": 1,
+"content": "It may take up to 3 business days for the first payment to show up on your account statement."
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "useValueslist":[
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-COVERAGE-START-DATE",
+                                             "valueTransformer":"startDateFromCurrentDate",
+                                             "joinFieldCode": ""
+                                         },
+                                         {
+                                             "fieldCode":"FIELD-DISPLAY-BILLING-FREQUENCY",
+                                             "valueTransformer": "frequencyFromDate",
+                                             "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
+                                         },
+                                         {
+                                             "fieldCode": "FIELD-DISPLAY-NEXT-BILLING-DATE",
+                                             "valueTransformer": "nextDateFromCurrentDate",
+                                             "joinFieldCode": "FIELD-PAYMENT-AMOUNT-FREQUENCY"
+                                         }
+                                     ]
+                                 }
+                             ],
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Today",
+                                     "value":"2026-02-18",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "February 19",
+                                     "value":"2026-02-19",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "February 20",
+                                     "value":"2026-02-20",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label": "February 21",
+                                     "value": "2026-02-21",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "February 22",
+                                     "value": "2026-02-22",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label": "February 23",
+                                     "value":"2026-02-23",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "February 24",
+                                     "value": "2026-02-24",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 8,
+                                     "label": "February 25",
+                                     "value": "2026-02-25",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 9,
+                                     "label": "February 26",
+                                     "value":"2026-02-26",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 10,
+                                     "label": "March 01",
+                                     "value": "2026-03-01",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 11.
+                                     "label": "March 02",
+                                     "value": "2026-03-02",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 12,
+                                     "label": "March 03",
+                                     "value":"2026-03-03",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 13,
+                                     "label": "March 04",
+                                     "value": "2026-03-04",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 14,
+                                     "label": "March 05",
+                                     "value":"2026-03-05",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 15,
+                                     "label": "March 06",
+                                     "value":"2026-03-06",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 16,
+                                     "label": "March 07",
+                                     "value": "2026-03-07",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 17.
+                                     "label": "March 08",
+                                     "value": "2026-03-08",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 18,
+                                     "label": "March 09",
+                                     "value":"2026-03-09",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 19,
+                                     "label": "March 10",
+                                     "value":"2026-03-10",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 20,
+                                     "label": "March 11",

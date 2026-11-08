@@ -172,12 +172,18 @@ _standby_frame_cache: Dict[str, bytes] = {}
 def _get_or_create_standby_frame(mode: str = "desktop") -> bytes:
     if mode in _standby_frame_cache:
         return _standby_frame_cache[mode]
-    img = np.zeros((540, 960, 3), dtype=np.uint8)
-    img[:] = (23, 17, 13) # #0d1117 in BGR
-    title = f"MATRIX CAPTURE STUDIO  |  {mode.upper()} VIEW"
-    sub = "Awaiting live display stream from Android device..."
-    cv2.putText(img, title, (60, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (157, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(img, sub, (60, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (158, 148, 139), 1, cv2.LINE_AA)
+    if str(mode).lower() == "phone":
+        img = np.zeros((1202, 540, 3), dtype=np.uint8)
+        img[:] = (23, 17, 13)  # #0d1117 in BGR
+        cv2.putText(img, "PHONE DISPLAY #0", (40, 560), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (157, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(img, "Connecting to Phone View...", (40, 610), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (158, 148, 139), 1, cv2.LINE_AA)
+    else:
+        img = np.zeros((540, 960, 3), dtype=np.uint8)
+        img[:] = (23, 17, 13)  # #0d1117 in BGR
+        title = f"MATRIX CAPTURE STUDIO  |  {mode.upper()} VIEW"
+        sub = "Awaiting live display stream from Android device..."
+        cv2.putText(img, title, (60, 250), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (157, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(img, sub, (60, 290), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (158, 148, 139), 1, cv2.LINE_AA)
     _, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
     frame_bytes = jpg.tobytes()
     _standby_frame_cache[mode] = frame_bytes
@@ -812,12 +818,20 @@ async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s
             _phone_last_wake_ts[ser] = now
             asyncio.create_task(run_adb_shell("input -d 0 keyevent 224", ser, timeout=1.5))
 
-        disp_map = await detect_surfaceflinger_displays(ser)
-        phone_id = disp_map.get("phone", "0")
-        cmd = ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"] if (phone_id and len(str(phone_id)) > 4) else ["-s", ser, "exec-out", "screencap", "-p"]
-        res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 3.0)
+        # Fast-path: use cached SurfaceFlinger physical display ID for Display #0 (phone)
+        phone_id = _display_map_cache.get(ser, {}).get("phone")
+        if not phone_id or len(str(phone_id)) <= 4:
+            disp_map = await detect_surfaceflinger_displays(ser)
+            phone_id = disp_map.get("phone", "0")
+
+        cmd = (
+            ["-s", ser, "exec-out", "screencap", "-d", str(phone_id), "-p"]
+            if (phone_id and len(str(phone_id)) > 4)
+            else ["-s", ser, "exec-out", "screencap", "-d", "0", "-p"]
+        )
+        res = await asyncio.to_thread(_exec_adb_sync_bin, cmd, 4.5)
         if res.returncode != 0 or not res.stdout:
-            res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 3.0)
+            res = await asyncio.to_thread(_exec_adb_sync_bin, ["-s", ser, "exec-out", "screencap", "-p"], 4.0)
         if res.returncode == 0 and (png_bytes := _extract_png_bytes(res.stdout)):
             # Check if SurfaceFlinger redacted Display #0 due to FLAG_SECURE (mean < 2.2 above navbar)
             try:
@@ -846,7 +860,7 @@ async def capture_phone_screenshot(serial: Optional[str] = None, max_cache_age_s
 
             _update_frame_cache(ser, "phone", png_bytes)
             return png_bytes
-        if cached and cached.get("raw_png") and (time.time() - cached.get("ts", 0.0) < 5.0):
+        if cached and cached.get("raw_png"):
             return cached["raw_png"]
         return None
     finally:
@@ -937,7 +951,8 @@ async def direct_hid_to_display(
         else:
             await run_adb_shell("input -d 0 keyevent 224; settings put secure show_ime_with_hard_keyboard 1", ser, timeout=2.0)
             actions.append("Directed HID to phone display #0 (woke Display #0 and restored phone soft IME)")
-        _frame_cache.pop((ser, "phone"), None)
+        if (ser, "phone") in _frame_cache:
+            _frame_cache[(ser, "phone")]["ts"] = 0.0
         asyncio.create_task(_refresh_phone_ui_xml_async(ser))
 
     try:
@@ -958,6 +973,9 @@ async def direct_hid_to_display(
         "actions": actions,
     }
 
+_phone_screencap_lock = asyncio.Lock()
+
+
 async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, quality: int = 80, max_dim: int = 1280) -> Optional[bytes]:
     ser = await get_active_adb_serial(serial)
     if not ser:
@@ -972,10 +990,11 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
         if jpg:
             return jpg
 
+    active_lock = _phone_screencap_lock if mode == "phone" else _screencap_lock
+    lock_timeout = 1.5 if mode == "phone" else 0.08
     acquired = False
     try:
-        # Non-blocking lock acquisition with 80ms timeout
-        await asyncio.wait_for(_screencap_lock.acquire(), timeout=0.08)
+        await asyncio.wait_for(active_lock.acquire(), timeout=lock_timeout)
         acquired = True
     except asyncio.TimeoutError:
         # If lock is held, return cached frame immediately
@@ -1006,7 +1025,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
                     _frame_cache[cache_key] = {"bytes": jpg, "raw_png": raw_bytes, "ts": time.time()}
                     return jpg
         else:  # mode == "phone"
-            raw_bytes = await capture_phone_screenshot(ser, bypass_lock=True)
+            raw_bytes = await capture_phone_screenshot(ser, max_cache_age_s=0.0, bypass_lock=True)
             if raw_bytes:
                 cached = _frame_cache.get(cache_key)
                 if cached:
@@ -1019,7 +1038,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
                     return jpg
     finally:
         if acquired:
-            _screencap_lock.release()
+            active_lock.release()
 
     # If capture failed on this frame, return previous cached frame or standby frame
     if cached:
@@ -1687,8 +1706,9 @@ async def unlock_phone_screen_1213(
         actions.append("Dismissed Teams BiometricPrompt on Display #0 via ESCAPE (keyevent 111)")
         await asyncio.sleep(0.3)
 
-    # Clear cached phone frame so UI immediately sees live unlocked phone screen
-    _frame_cache.pop((ser, "phone"), None)
+    # Mark cached phone frame stale so UI immediately refreshes live unlocked phone screen while preserving fallback
+    if (ser, "phone") in _frame_cache:
+        _frame_cache[(ser, "phone")]["ts"] = 0.0
 
     teams_auth_result = None
     if handle_teams_auth_after:

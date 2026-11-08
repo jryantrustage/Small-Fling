@@ -570,7 +570,8 @@ async def phone_tap_endpoint(req: Request):
         ty = int(data.get("y", h // 2))
 
     await adb.run_adb_shell(f"input -d 0 keyevent 224 && input touchscreen -d 0 tap {tx} {ty}", ser, timeout=3.0)
-    adb._frame_cache.pop((ser, "phone"), None)
+    if (ser, "phone") in adb._frame_cache:
+        adb._frame_cache[(ser, "phone")]["ts"] = 0.0
     return {"status": "ok", "serial": ser, "display_id": 0, "x": tx, "y": ty, "resolution": f"{w}x{h}"}
 
 @router.post("/api/device/undo-edits")

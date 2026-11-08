@@ -1,0 +1,1530 @@
+{
+  "status": "success",
+  "bundle": "DIXUI_impact_26-11-05-9-43pm",
+  "file": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+  "part": 5,
+  "phone_unlock": {
+    "status": "ok",
+    "serial": "192.168.86.85:35681",
+    "phone_unlock": {
+      "status": "ok",
+      "keyguard_unlocked": true,
+      "phone_pin_used": "1213",
+      "teams_pin_configured": "2992",
+      "lock_state": {
+        "status": "ok",
+        "keyguard_showing": false,
+        "input_restricted": false,
+        "has_teams_biometric": false,
+        "focused_window": "showing=false\n      inputRestricted=false\n  mCurrentFocus=null\n  mFocusedApp=null\n  mCurrentFocus=null\n  mFocusedApp=ActivityRecord{131350323 u0 android/com.android.internal.app.ResolverActivity t495}\n  mCurrentFocus=Window{9a04e82 u0 com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity}\n  mFocusedApp=ActivityRecord{103894023 u0 com.microsoft.teams/com.microsoft.skype.teams.files.open.views.FilePreviewActivity t502}",
+        "required_pin_type": "none"
+      },
+      "teams_auth": null,
+      "actions": [
+        "Checked Display #0 state: keyguard_showing=False, input_restricted=False, required_pin_type=none",
+        "Phone Display #0 is already unlocked (showing=false); skipped entering 1213"
+      ]
+    }
+  },
+  "auth": {
+    "status": "ok",
+    "serial": "192.168.86.85:35681",
+    "desktop_display_id": 27,
+    "teams_pin_auth": {
+      "status": "clean",
+      "auth_detected": false,
+      "auth_type": "none",
+      "pin_submitted": false,
+      "keyguard_unlocked": false,
+      "actions": []
+    }
+  },
+  "navigation": {
+    "status": "success",
+    "success": true,
+    "bundle_folder": "DIXUI_impact_26-11-05-9-43pm",
+    "opened_file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+    "part_number": 5,
+    "navigation_path": [
+      "OneDrive",
+      "Markdowns",
+      "ficus-platform",
+      "DIXUI_impact_26-11-05-9-43pm",
+      "DIXUI_impact_26-11-05-9-43pm_part5.md"
+    ],
+    "folder_scan": {
+      "is_folder_view": true,
+      "folder_name": "DIXUI_impact_26-11-05-9-43pm",
+      "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+      "files": [
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 2,
+          "bbox": [
+            87,
+            219,
+            409,
+            22
+          ],
+          "tap_coords": [
+            291,
+            230
+          ],
+          "score": 0.898,
+          "visual_row_index": 1
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part3.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part3.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 3,
+          "bbox": [
+            86,
+            307,
+            411,
+            23
+          ],
+          "tap_coords": [
+            291,
+            318
+          ],
+          "score": 0.875,
+          "visual_row_index": 2
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part4.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part4.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 4,
+          "bbox": [
+            85,
+            394,
+            412,
+            25
+          ],
+          "tap_coords": [
+            291,
+            406
+          ],
+          "score": 0.93,
+          "visual_row_index": 3
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 5,
+          "bbox": [
+            86,
+            483,
+            410,
+            23
+          ],
+          "tap_coords": [
+            291,
+            494
+          ],
+          "score": 0.872,
+          "visual_row_index": 4
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 6,
+          "bbox": [
+            85,
+            570,
+            413,
+            25
+          ],
+          "tap_coords": [
+            291,
+            582
+          ],
+          "score": 0.908,
+          "visual_row_index": 5
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part7.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part7.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 7,
+          "bbox": [
+            87,
+            659,
+            409,
+            23
+          ],
+          "tap_coords": [
+            291,
+            670
+          ],
+          "score": 0.913,
+          "visual_row_index": 6
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part8.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part8.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 8,
+          "bbox": [
+            84,
+            745,
+            413,
+            26
+          ],
+          "tap_coords": [
+            290,
+            758
+          ],
+          "score": 0.934,
+          "visual_row_index": 7
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part9.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part9.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 9,
+          "bbox": [
+            86,
+            835,
+            410,
+            23
+          ],
+          "tap_coords": [
+            291,
+            846
+          ],
+          "score": 0.872,
+          "visual_row_index": 8
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 1,
+          "bbox": [
+            85,
+            923,
+            411,
+            22
+          ],
+          "tap_coords": [
+            290,
+            934
+          ],
+          "score": 0.912,
+          "visual_row_index": 9
+        }
+      ],
+      "part_files": [
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 1,
+          "bbox": [
+            85,
+            923,
+            411,
+            22
+          ],
+          "tap_coords": [
+            290,
+            934
+          ],
+          "score": 0.912,
+          "visual_row_index": 9
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 2,
+          "bbox": [
+            87,
+            219,
+            409,
+            22
+          ],
+          "tap_coords": [
+            291,
+            230
+          ],
+          "score": 0.898,
+          "visual_row_index": 1
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part3.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part3.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 3,
+          "bbox": [
+            86,
+            307,
+            411,
+            23
+          ],
+          "tap_coords": [
+            291,
+            318
+          ],
+          "score": 0.875,
+          "visual_row_index": 2
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part4.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part4.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 4,
+          "bbox": [
+            85,
+            394,
+            412,
+            25
+          ],
+          "tap_coords": [
+            291,
+            406
+          ],
+          "score": 0.93,
+          "visual_row_index": 3
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 5,
+          "bbox": [
+            86,
+            483,
+            410,
+            23
+          ],
+          "tap_coords": [
+            291,
+            494
+          ],
+          "score": 0.872,
+          "visual_row_index": 4
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 6,
+          "bbox": [
+            85,
+            570,
+            413,
+            25
+          ],
+          "tap_coords": [
+            291,
+            582
+          ],
+          "score": 0.908,
+          "visual_row_index": 5
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part7.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part7.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 7,
+          "bbox": [
+            87,
+            659,
+            409,
+            23
+          ],
+          "tap_coords": [
+            291,
+            670
+          ],
+          "score": 0.913,
+          "visual_row_index": 6
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part8.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part8.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 8,
+          "bbox": [
+            84,
+            745,
+            413,
+            26
+          ],
+          "tap_coords": [
+            290,
+            758
+          ],
+          "score": 0.934,
+          "visual_row_index": 7
+        },
+        {
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part9.md",
+          "raw_text": "DIXUI_impact_26-11-05-9-43pm_part9.md",
+          "is_multipart": true,
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 9,
+          "bbox": [
+            86,
+            835,
+            410,
+            23
+          ],
+          "tap_coords": [
+            291,
+            846
+          ],
+          "score": 0.872,
+          "visual_row_index": 8
+        }
+      ],
+      "predetermined_parts": [
+        {
+          "part_number": 1,
+          "total_parts": 9,
+          "scope_label": "MD 1 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part1.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            290,
+            934
+          ],
+          "bbox": [
+            85,
+            923,
+            411,
+            22
+          ],
+          "visual_row_index": 9,
+          "status": "completed"
+        },
+        {
+          "part_number": 2,
+          "total_parts": 9,
+          "scope_label": "MD 2 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part2.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            230
+          ],
+          "bbox": [
+            87,
+            219,
+            409,
+            22
+          ],
+          "visual_row_index": 1,
+          "status": "completed"
+        },
+        {
+          "part_number": 3,
+          "total_parts": 9,
+          "scope_label": "MD 3 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part3.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            318
+          ],
+          "bbox": [
+            86,
+            307,
+            411,
+            23
+          ],
+          "visual_row_index": 2,
+          "status": "completed"
+        },
+        {
+          "part_number": 4,
+          "total_parts": 9,
+          "scope_label": "MD 4 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part4.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            406
+          ],
+          "bbox": [
+            85,
+            394,
+            412,
+            25
+          ],
+          "visual_row_index": 3,
+          "status": "completed"
+        },
+        {
+          "part_number": 5,
+          "total_parts": 9,
+          "scope_label": "MD 5 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            494
+          ],
+          "bbox": [
+            86,
+            483,
+            410,
+            23
+          ],
+          "visual_row_index": 4,
+          "status": "scanning"
+        },
+        {
+          "part_number": 6,
+          "total_parts": 9,
+          "scope_label": "MD 6 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            582
+          ],
+          "bbox": [
+            85,
+            570,
+            413,
+            25
+          ],
+          "visual_row_index": 5,
+          "status": "pending"
+        },
+        {
+          "part_number": 7,
+          "total_parts": 9,
+          "scope_label": "MD 7 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part7.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            670
+          ],
+          "bbox": [
+            87,
+            659,
+            409,
+            23
+          ],
+          "visual_row_index": 6,
+          "status": "pending"
+        },
+        {
+          "part_number": 8,
+          "total_parts": 9,
+          "scope_label": "MD 8 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part8.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            290,
+            758
+          ],
+          "bbox": [
+            84,
+            745,
+            413,
+            26
+          ],
+          "visual_row_index": 7,
+          "status": "pending"
+        },
+        {
+          "part_number": 9,
+          "total_parts": 9,
+          "scope_label": "MD 9 / 9",
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part9.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "tap_coords": [
+            291,
+            846
+          ],
+          "bbox": [
+            86,
+            835,
+            410,
+            23
+          ],
+          "visual_row_index": 8,
+          "status": "pending"
+        }
+      ],
+      "available_parts": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "total_parts": 9
+    },
+    "prepare_result": {
+      "success": true,
+      "maximized": true,
+      "edit_mode": true,
+      "dark_mode": true,
+      "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+      "alignment": {
+        "status": "teams markdown aligned",
+        "is_aligned": true,
+        "reason": null,
+        "missing": [],
+        "first_line_number": 8392,
+        "last_line_number": 8413,
+        "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+        "multipart_info": {
+          "is_multipart": true,
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 5,
+          "next_part_number": 6,
+          "next_file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "total_parts": null
+        },
+        "is_multipart": true,
+        "part_number": 5,
+        "total_parts": null,
+        "next_part_number": 6,
+        "next_file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+        "back_button_coords": [
+          65,
+          151
+        ],
+        "boxes": {
+          "teams_logo": {
+            "name": "Teams Logo / Header",
+            "color": "blue",
+            "hex": "#3b82f6",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Teams",
+            "expected": "Header bar containing 'Teams'",
+            "details": "Found 'Teams' in top header",
+            "text": "Teams",
+            "box_px": [
+              66,
+              60,
+              72,
+              26
+            ],
+            "box_norm": [
+              0.0516,
+              0.0586,
+              0.0563,
+              0.0254
+            ],
+            "dismissed": false
+          },
+          "file_name": {
+            "name": "Markdown Filename",
+            "color": "yellow",
+            "hex": "#eab308",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+            "expected": "Document tab displaying filename (*.md or >= 3 chars)",
+            "details": "Detected filename tab 'DIXUI_impact_26-11-05-9-43pm_part5.md'",
+            "text": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+            "box_px": [
+              104,
+              135,
+              440,
+              33
+            ],
+            "box_norm": [
+              0.0813,
+              0.1318,
+              0.3438,
+              0.0322
+            ],
+            "dismissed": false
+          },
+          "edit_mode": {
+            "name": "Edit Mode (Pencil Icon)",
+            "color": "white",
+            "hex": "#f8fafc",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "172 blue pixels",
+            "expected": "Blue active pencil icon, single edit pane (no split screen / duplicated text)",
+            "details": "Editor in active edit mode (single pane)",
+            "icon": "pencil",
+            "split_screen_detected": false,
+            "box_px": [
+              1054,
+              235,
+              33,
+              33
+            ],
+            "box_norm": [
+              0.8234,
+              0.2295,
+              0.0258,
+              0.0322
+            ],
+            "dismissed": false
+          },
+          "dark_mode": {
+            "name": "Dark Mode (Moon Icon)",
+            "color": "white",
+            "hex": "#f8fafc",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Luminance 33.9",
+            "expected": "Dark theme background (mean luminance < 55.0 with moon icon)",
+            "details": "Dark mode active (luminance 33.9 < 55.0)",
+            "icon": "moon",
+            "luminance": 33.9,
+            "box_px": [
+              1183,
+              231,
+              41,
+              41
+            ],
+            "box_norm": [
+              0.9242,
+              0.2256,
+              0.032,
+              0.04
+            ],
+            "dismissed": false
+          },
+          "first_line": {
+            "name": "First Line Number",
+            "color": "green",
+            "hex": "#22c55e",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Line 8392",
+            "expected": "Top line integer >= 1 in gutter or wrapped character anchor",
+            "details": "Top line number 8392 detected in gutter",
+            "line_number": 8392,
+            "box_px": [
+              48,
+              313,
+              53,
+              23
+            ],
+            "box_norm": [
+              0.0375,
+              0.3057,
+              0.0414,
+              0.0225
+            ],
+            "dismissed": false
+          },
+          "last_line": {
+            "name": "Last Line Number",
+            "color": "red",
+            "hex": "#ef4444",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Line 8413",
+            "expected": "Bottom line integer >= 8392 in gutter or wrapped character anchor",
+            "details": "Bottom line number 8413 detected in gutter",
+            "line_number": 8413,
+            "box_px": [
+              48,
+              877,
+              53,
+              24
+            ],
+            "box_norm": [
+              0.0375,
+              0.8564,
+              0.0414,
+              0.0234
+            ],
+            "dismissed": false
+          }
+        },
+        "resolution": {
+          "width": 1280,
+          "height": 1024
+        },
+        "orientation": "landscape",
+        "aspect_ratio": 1.25,
+        "dpi_factor": 1.375,
+        "dismissed": [],
+        "device_connected": true,
+        "timestamp": "2026-11-07T14:30:06.844489",
+        "classifiers": {
+          "has_issues": false,
+          "issue_count": 0,
+          "issues": [],
+          "all_results": [
+            {
+              "classifier_id": "pin_code_requested",
+              "issue_detected": false,
+              "issue_name": "PIN Code / Intune Authentication Prompt Active",
+              "fix_name": "Enter PIN Code from .env and submit to unlock editor",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "No PIN prompt active (clean)",
+              "target_coordinates": null,
+              "metadata": {
+                "auth_type": "none",
+                "auto_enter_pin": true,
+                "auth_eval": {
+                  "auth_type": "none",
+                  "details": "External display screenshot shows no authentication prompt",
+                  "is_pin_safe": false,
+                  "requires_keyguard_unlock": false,
+                  "requires_mam_pin": false,
+                  "requires_escape_for_pin": false
+                }
+              }
+            },
+            {
+              "classifier_id": "keyboard_open",
+              "issue_detected": false,
+              "issue_name": "Keyboard is open",
+              "fix_name": "close keyboard",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Keyboard auto-suppressed/hidden",
+              "target_coordinates": null,
+              "metadata": {
+                "ime_visible": false
+              }
+            },
+            {
+              "classifier_id": "markdown_fullscreen",
+              "issue_detected": false,
+              "issue_name": "Markdown editor is not in full screen mode",
+              "fix_name": "Maximize markdown editor window and auto-fix viewport layout",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Markdown editor is verified running in full screen mode",
+              "target_coordinates": null,
+              "metadata": {
+                "is_fullscreen": true,
+                "mode": "freeform",
+                "bounds": [
+                  0,
+                  39,
+                  1280,
+                  947
+                ],
+                "task_id": 503,
+                "display_id": 27,
+                "display_dimensions": [
+                  1280,
+                  1024
+                ],
+                "reason": "Activity task #503 occupies full display bounds"
+              }
+            },
+            {
+              "classifier_id": "edit_mode",
+              "issue_detected": false,
+              "issue_name": "Editor is not in edit mode (pencil not selected; split screen duplicate text active)",
+              "fix_name": "Tap edit button (pencil icon) to enter single-pane edit mode & suppress keyboard",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Editor is in active single-pane edit mode (verified 22 gutter line numbers)",
+              "target_coordinates": null,
+              "metadata": {
+                "edit_mode_active": true,
+                "split_screen_detected": false,
+                "gutter_cluster_size": 22
+              }
+            },
+            {
+              "classifier_id": "light_mode",
+              "issue_detected": false,
+              "issue_name": "light mode is selected",
+              "fix_name": "switch to dark mode",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Dark mode is active (moon icon verified)",
+              "target_coordinates": [
+                1203,
+                251
+              ],
+              "metadata": {}
+            },
+            {
+              "classifier_id": "modal_overlay",
+              "issue_detected": false,
+              "issue_name": "modal or mini-popup appearing over teams markdown",
+              "fix_name": "click X control to dismiss mini-modal pop-up dialog",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "No modal or mini-popup detected over teams markdown",
+              "target_coordinates": null,
+              "metadata": {}
+            },
+            {
+              "classifier_id": "matrix_app_overlay",
+              "issue_detected": false,
+              "issue_name": "mobile app matrix capture appearing over teams markdown",
+              "fix_name": "minimize or reposition matrix capture overlay",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Matrix Capture overlay not obscuring editor text",
+              "target_coordinates": null,
+              "metadata": {
+                "green_pixel_count": 0
+              }
+            },
+            {
+              "classifier_id": "ocr_degraded",
+              "issue_detected": false,
+              "issue_name": "previous ocr capture degraded",
+              "fix_name": "re-acquire settled frame with enhanced dwell",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Previous OCR healthy (22 lines extracted)",
+              "target_coordinates": null,
+              "metadata": {
+                "last_extracted_count": 22,
+                "status": "processed"
+              }
+            },
+            {
+              "classifier_id": "teams_markdown_visible",
+              "issue_detected": false,
+              "issue_name": "Teams markdown editor is not visible on display",
+              "fix_name": "Launch and display Teams markdown editor on external desktop screen",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Teams markdown editor is visible on external display (header and gutter verified)",
+              "target_coordinates": [
+                102,
+                73
+              ],
+              "metadata": {
+                "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md"
+              }
+            },
+            {
+              "classifier_id": "editor_cursor_focused",
+              "issue_detected": false,
+              "issue_name": "cursor is not present or focus is lost on Teams markdown editor",
+              "fix_name": "focus Teams markdown editor and place active blinking cursor",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Cursor is present and focus is on Teams markdown editor (intrinsic: window=True, input=True, visual caret=True)",
+              "target_coordinates": [
+                495,
+                479
+              ],
+              "metadata": {
+                "window_focused": true,
+                "preview_served": true,
+                "input_connection": false,
+                "visual_caret_found": true,
+                "caret_location": [
+                  495,
+                  479
+                ],
+                "display_id": 27
+              }
+            }
+          ],
+          "registered_classifiers": [
+            {
+              "id": "pin_code_requested",
+              "issue_description": "PIN Code / Intune Authentication Prompt Active",
+              "fix_description": "Enter PIN Code from .env and submit to unlock editor",
+              "severity": "blocking"
+            },
+            {
+              "id": "keyboard_open",
+              "issue_description": "Keyboard is open",
+              "fix_description": "close keyboard",
+              "severity": "warning"
+            },
+            {
+              "id": "markdown_fullscreen",
+              "issue_description": "Markdown editor is not in full screen mode",
+              "fix_description": "Maximize markdown editor window and auto-fix viewport layout",
+              "severity": "warning"
+            },
+            {
+              "id": "edit_mode",
+              "issue_description": "Editor is not in edit mode (pencil not selected; split screen duplicate text active)",
+              "fix_description": "Tap edit button (pencil icon) to enter single-pane edit mode & suppress keyboard",
+              "severity": "blocking"
+            },
+            {
+              "id": "view_mode",
+              "issue_description": "Editor is not in edit mode (split screen duplicate text active)",
+              "fix_description": "Select edit button (pencil icon) to enter single-pane edit mode",
+              "severity": "blocking"
+            },
+            {
+              "id": "light_mode",
+              "issue_description": "light mode is selected",
+              "fix_description": "switch to dark mode",
+              "severity": "blocking"
+            },
+            {
+              "id": "modal_overlay",
+              "issue_description": "modal or mini-popup appearing over teams markdown",
+              "fix_description": "click X control to dismiss mini-modal pop-up dialog",
+              "severity": "blocking"
+            },
+            {
+              "id": "matrix_app_overlay",
+              "issue_description": "mobile app matrix capture appearing over teams markdown",
+              "fix_description": "minimize or reposition matrix capture overlay",
+              "severity": "blocking"
+            },
+            {
+              "id": "ocr_degraded",
+              "issue_description": "previous ocr capture degraded",
+              "fix_description": "re-acquire settled frame with enhanced dwell",
+              "severity": "blocking"
+            },
+            {
+              "id": "teams_markdown_visible",
+              "issue_description": "Teams markdown editor is not visible on display",
+              "fix_description": "Launch and display Teams markdown editor on external desktop screen",
+              "severity": "blocking"
+            },
+            {
+              "id": "editor_cursor_focused",
+              "issue_description": "cursor is not present or focus is lost on Teams markdown editor",
+              "fix_description": "focus Teams markdown editor and place active blinking cursor",
+              "severity": "blocking"
+            }
+          ],
+          "auto_fix_enabled": false
+        },
+        "classifier_issues": []
+      },
+      "actions": [
+        "Tapped floating window Maximize [] control at (978, 135) on display #27",
+        "Pencil icon already active (single-pane Edit Mode verified)",
+        "Located theme pull-down anchor at (1187, 250) via toolbar vision engine",
+        "Tapped theme pull-down menu trigger at (1187, 250) on display 27",
+        "Using calibrated 'Dark Mode' menu row at (1094, 304)",
+        "Tapped 'Dark Mode' option at (1094, 304) on display 27",
+        "Post-selection editor luminance: 244.5 (< 55.0 indicates Dark Mode)",
+        "Pencil icon already active (single-pane Edit Mode verified)",
+        "Editor is already in Dark Mode (luminance 31.5 < 65.0)"
+      ],
+      "message": "Markdown editor maximized, Dark Mode & Edit Mode (Pencil) active (DIXUI_impact_26-11-05-9-43pm_part5.md) \u2714"
+    },
+    "actions": [
+      "Opened / focused Microsoft Teams on desktop display #27",
+      "Already on Teams folder files list view",
+      "Selected 'DIXUI_impact_26-11-05-9-43pm_part5.md' at (291, 494) in folder 'DIXUI_impact_26-11-05-9-43pm'",
+      "Tapped floating window Maximize [] control at (978, 135) on display #27",
+      "Pencil icon already active (single-pane Edit Mode verified)",
+      "Located theme pull-down anchor at (1187, 250) via toolbar vision engine",
+      "Tapped theme pull-down menu trigger at (1187, 250) on display 27",
+      "Using calibrated 'Dark Mode' menu row at (1094, 304)",
+      "Tapped 'Dark Mode' option at (1094, 304) on display 27",
+      "Post-selection editor luminance: 244.5 (< 55.0 indicates Dark Mode)",
+      "Pencil icon already active (single-pane Edit Mode verified)",
+      "Editor is already in Dark Mode (luminance 31.5 < 65.0)"
+    ]
+  },
+  "editor": {
+    "status": "ok",
+    "serial": "192.168.86.85:35681",
+    "desktop_display_id": 27,
+    "prepare_result": {
+      "success": true,
+      "maximized": true,
+      "edit_mode": true,
+      "dark_mode": true,
+      "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+      "alignment": {
+        "status": "teams markdown aligned",
+        "is_aligned": true,
+        "reason": null,
+        "missing": [],
+        "first_line_number": 8392,
+        "last_line_number": 8413,
+        "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+        "multipart_info": {
+          "is_multipart": true,
+          "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+          "base_prefix": "DIXUI_impact_26-11-05-9-43pm",
+          "part_number": 5,
+          "next_part_number": 6,
+          "next_file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+          "total_parts": null
+        },
+        "is_multipart": true,
+        "part_number": 5,
+        "total_parts": null,
+        "next_part_number": 6,
+        "next_file_name": "DIXUI_impact_26-11-05-9-43pm_part6.md",
+        "back_button_coords": [
+          65,
+          151
+        ],
+        "boxes": {
+          "teams_logo": {
+            "name": "Teams Logo / Header",
+            "color": "blue",
+            "hex": "#3b82f6",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Teams",
+            "expected": "Header bar containing 'Teams'",
+            "details": "Found 'Teams' in top header",
+            "text": "Teams",
+            "box_px": [
+              66,
+              60,
+              72,
+              26
+            ],
+            "box_norm": [
+              0.0516,
+              0.0586,
+              0.0563,
+              0.0254
+            ],
+            "dismissed": false
+          },
+          "file_name": {
+            "name": "Markdown Filename",
+            "color": "yellow",
+            "hex": "#eab308",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+            "expected": "Document tab displaying filename (*.md or >= 3 chars)",
+            "details": "Detected filename tab 'DIXUI_impact_26-11-05-9-43pm_part5.md'",
+            "text": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+            "box_px": [
+              104,
+              135,
+              440,
+              33
+            ],
+            "box_norm": [
+              0.0813,
+              0.1318,
+              0.3438,
+              0.0322
+            ],
+            "dismissed": false
+          },
+          "edit_mode": {
+            "name": "Edit Mode (Pencil Icon)",
+            "color": "white",
+            "hex": "#f8fafc",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "172 blue pixels",
+            "expected": "Blue active pencil icon, single edit pane (no split screen / duplicated text)",
+            "details": "Editor in active edit mode (single pane)",
+            "icon": "pencil",
+            "split_screen_detected": false,
+            "box_px": [
+              1054,
+              235,
+              33,
+              33
+            ],
+            "box_norm": [
+              0.8234,
+              0.2295,
+              0.0258,
+              0.0322
+            ],
+            "dismissed": false
+          },
+          "dark_mode": {
+            "name": "Dark Mode (Moon Icon)",
+            "color": "white",
+            "hex": "#f8fafc",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Luminance 33.9",
+            "expected": "Dark theme background (mean luminance < 55.0 with moon icon)",
+            "details": "Dark mode active (luminance 33.9 < 55.0)",
+            "icon": "moon",
+            "luminance": 33.9,
+            "box_px": [
+              1183,
+              231,
+              41,
+              41
+            ],
+            "box_norm": [
+              0.9242,
+              0.2256,
+              0.032,
+              0.04
+            ],
+            "dismissed": false
+          },
+          "first_line": {
+            "name": "First Line Number",
+            "color": "green",
+            "hex": "#22c55e",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Line 8392",
+            "expected": "Top line integer >= 1 in gutter or wrapped character anchor",
+            "details": "Top line number 8392 detected in gutter",
+            "line_number": 8392,
+            "box_px": [
+              48,
+              313,
+              53,
+              23
+            ],
+            "box_norm": [
+              0.0375,
+              0.3057,
+              0.0414,
+              0.0225
+            ],
+            "dismissed": false
+          },
+          "last_line": {
+            "name": "Last Line Number",
+            "color": "red",
+            "hex": "#ef4444",
+            "passed": true,
+            "status": "PASSED",
+            "detected_value": "Line 8413",
+            "expected": "Bottom line integer >= 8392 in gutter or wrapped character anchor",
+            "details": "Bottom line number 8413 detected in gutter",
+            "line_number": 8413,
+            "box_px": [
+              48,
+              877,
+              53,
+              24
+            ],
+            "box_norm": [
+              0.0375,
+              0.8564,
+              0.0414,
+              0.0234
+            ],
+            "dismissed": false
+          }
+        },
+        "resolution": {
+          "width": 1280,
+          "height": 1024
+        },
+        "orientation": "landscape",
+        "aspect_ratio": 1.25,
+        "dpi_factor": 1.375,
+        "dismissed": [],
+        "device_connected": true,
+        "timestamp": "2026-11-07T14:30:06.844489",
+        "classifiers": {
+          "has_issues": false,
+          "issue_count": 0,
+          "issues": [],
+          "all_results": [
+            {
+              "classifier_id": "pin_code_requested",
+              "issue_detected": false,
+              "issue_name": "PIN Code / Intune Authentication Prompt Active",
+              "fix_name": "Enter PIN Code from .env and submit to unlock editor",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "No PIN prompt active (clean)",
+              "target_coordinates": null,
+              "metadata": {
+                "auth_type": "none",
+                "auto_enter_pin": true,
+                "auth_eval": {
+                  "auth_type": "none",
+                  "details": "External display screenshot shows no authentication prompt",
+                  "is_pin_safe": false,
+                  "requires_keyguard_unlock": false,
+                  "requires_mam_pin": false,
+                  "requires_escape_for_pin": false
+                }
+              }
+            },
+            {
+              "classifier_id": "keyboard_open",
+              "issue_detected": false,
+              "issue_name": "Keyboard is open",
+              "fix_name": "close keyboard",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Keyboard auto-suppressed/hidden",
+              "target_coordinates": null,
+              "metadata": {
+                "ime_visible": false
+              }
+            },
+            {
+              "classifier_id": "markdown_fullscreen",
+              "issue_detected": false,
+              "issue_name": "Markdown editor is not in full screen mode",
+              "fix_name": "Maximize markdown editor window and auto-fix viewport layout",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Markdown editor is verified running in full screen mode",
+              "target_coordinates": null,
+              "metadata": {
+                "is_fullscreen": true,
+                "mode": "freeform",
+                "bounds": [
+                  0,
+                  39,
+                  1280,
+                  947
+                ],
+                "task_id": 503,
+                "display_id": 27,
+                "display_dimensions": [
+                  1280,
+                  1024
+                ],
+                "reason": "Activity task #503 occupies full display bounds"
+              }
+            },
+            {
+              "classifier_id": "edit_mode",
+              "issue_detected": false,
+              "issue_name": "Editor is not in edit mode (pencil not selected; split screen duplicate text active)",
+              "fix_name": "Tap edit button (pencil icon) to enter single-pane edit mode & suppress keyboard",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Editor is in active single-pane edit mode (verified 22 gutter line numbers)",
+              "target_coordinates": null,
+              "metadata": {
+                "edit_mode_active": true,
+                "split_screen_detected": false,
+                "gutter_cluster_size": 22
+              }
+            },
+            {
+              "classifier_id": "light_mode",
+              "issue_detected": false,
+              "issue_name": "light mode is selected",
+              "fix_name": "switch to dark mode",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Dark mode is active (moon icon verified)",
+              "target_coordinates": [
+                1203,
+                251
+              ],
+              "metadata": {}
+            },
+            {
+              "classifier_id": "modal_overlay",
+              "issue_detected": false,
+              "issue_name": "modal or mini-popup appearing over teams markdown",
+              "fix_name": "click X control to dismiss mini-modal pop-up dialog",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "No modal or mini-popup detected over teams markdown",
+              "target_coordinates": null,
+              "metadata": {}
+            },
+            {
+              "classifier_id": "matrix_app_overlay",
+              "issue_detected": false,
+              "issue_name": "mobile app matrix capture appearing over teams markdown",
+              "fix_name": "minimize or reposition matrix capture overlay",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Matrix Capture overlay not obscuring editor text",
+              "target_coordinates": null,
+              "metadata": {
+                "green_pixel_count": 0
+              }
+            },
+            {
+              "classifier_id": "ocr_degraded",
+              "issue_detected": false,
+              "issue_name": "previous ocr capture degraded",
+              "fix_name": "re-acquire settled frame with enhanced dwell",
+              "severity": "blocking",
+              "confidence": 1.0,
+              "details": "Previous OCR healthy (22 lines extracted)",
+              "target_coordinates": null,
+              "metadata": {
+                "last_extracted_count": 22,
+                "status": "processed"
+              }
+            },
+            {
+              "classifier_id": "teams_markdown_visible",
+              "issue_detected": false,
+              "issue_name": "Teams markdown editor is not visible on display",
+              "fix_name": "Launch and display Teams markdown editor on external desktop screen",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Teams markdown editor is visible on external display (header and gutter verified)",
+              "target_coordinates": [
+                102,
+                73
+              ],
+              "metadata": {
+                "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md"
+              }
+            },
+            {
+              "classifier_id": "editor_cursor_focused",
+              "issue_detected": false,
+              "issue_name": "cursor is not present or focus is lost on Teams markdown editor",
+              "fix_name": "focus Teams markdown editor and place active blinking cursor",
+              "severity": "warning",
+              "confidence": 1.0,
+              "details": "Cursor is present and focus is on Teams markdown editor (intrinsic: window=True, input=True, visual caret=True)",
+              "target_coordinates": [
+                495,
+                479
+              ],
+              "metadata": {
+                "window_focused": true,
+                "preview_served": true,
+                "input_connection": false,
+                "visual_caret_found": true,
+                "caret_location": [
+                  495,
+                  479
+                ],
+                "display_id": 27
+              }
+            }
+          ],
+          "registered_classifiers": [
+            {
+              "id": "pin_code_requested",
+              "issue_description": "PIN Code / Intune Authentication Prompt Active",
+              "fix_description": "Enter PIN Code from .env and submit to unlock editor",
+              "severity": "blocking"
+            },
+            {
+              "id": "keyboard_open",
+              "issue_description": "Keyboard is open",
+              "fix_description": "close keyboard",
+              "severity": "warning"
+            },
+            {
+              "id": "markdown_fullscreen",
+              "issue_description": "Markdown editor is not in full screen mode",
+              "fix_description": "Maximize markdown editor window and auto-fix viewport layout",
+              "severity": "warning"
+            },
+            {
+              "id": "edit_mode",
+              "issue_description": "Editor is not in edit mode (pencil not selected; split screen duplicate text active)",
+              "fix_description": "Tap edit button (pencil icon) to enter single-pane edit mode & suppress keyboard",
+              "severity": "blocking"
+            },
+            {
+              "id": "view_mode",
+              "issue_description": "Editor is not in edit mode (split screen duplicate text active)",
+              "fix_description": "Select edit button (pencil icon) to enter single-pane edit mode",
+              "severity": "blocking"
+            },
+            {
+              "id": "light_mode",
+              "issue_description": "light mode is selected",
+              "fix_description": "switch to dark mode",
+              "severity": "blocking"
+            },
+            {
+              "id": "modal_overlay",
+              "issue_description": "modal or mini-popup appearing over teams markdown",
+              "fix_description": "click X control to dismiss mini-modal pop-up dialog",
+              "severity": "blocking"
+            },
+            {
+              "id": "matrix_app_overlay",
+              "issue_description": "mobile app matrix capture appearing over teams markdown",
+              "fix_description": "minimize or reposition matrix capture overlay",
+              "severity": "blocking"
+            },
+            {
+              "id": "ocr_degraded",
+              "issue_description": "previous ocr capture degraded",
+              "fix_description": "re-acquire settled frame with enhanced dwell",
+              "severity": "blocking"
+            },
+            {
+              "id": "teams_markdown_visible",
+              "issue_description": "Teams markdown editor is not visible on display",
+              "fix_description": "Launch and display Teams markdown editor on external desktop screen",
+              "severity": "blocking"
+            },
+            {
+              "id": "editor_cursor_focused",
+              "issue_description": "cursor is not present or focus is lost on Teams markdown editor",
+              "fix_description": "focus Teams markdown editor and place active blinking cursor",
+              "severity": "blocking"
+            }
+          ],
+          "auto_fix_enabled": false
+        },
+        "classifier_issues": []
+      },
+      "actions": [
+        "Markdown editor is already maximized to full screen",
+        "Pencil icon already active (single-pane Edit Mode verified)",
+        "Editor is already in Dark Mode (luminance 31.5 < 65.0)"
+      ],
+      "message": "Markdown editor maximized, Dark Mode & Edit Mode (Pencil) active (DIXUI_impact_26-11-05-9-43pm_part5.md) \u2714"
+    },
+    "alignment": {
+      "is_aligned": true,
+      "file_name": "DIXUI_impact_26-11-05-9-43pm_part5.md",
+      "edit_mode_active": null,
+      "dark_mode_active": null,
+      "first_line_number": 9997,
+      "last_line_number": 10018
+    },
+    "undo_button": {
+      "detected": true,
+      "undo_enabled": false,
+      "coords": [
+        33,
+        250
+      ],
+      "box_px": [
+        33,
+        234,
+        31,
+        34
+      ],
+      "undo_contrast": 71.0,
+      "redo_contrast": 183.0,
+      "toolbar_cy": 251
+    }
+  }
+}
