@@ -1200,7 +1200,18 @@ function AppContent() {
         } catch {}
       }
       if (modeRes.ok) { try { const m = await modeRes.json(); setPipelineMode(m.pipeline_mode); } catch {} }
-      if (telRes.ok) { try { setTelemetry(await telRes.json()); } catch {} }
+      if (telRes.ok) {
+        try {
+          const telJson = await telRes.json();
+          const telPayload = telJson?.telemetry ? telJson.telemetry : telJson;
+          if (telPayload) setTelemetry(telPayload);
+          if (typeof telJson?.capture_loop_running === 'boolean') {
+            setIsCaptureLoopRunning(telJson.capture_loop_running);
+          } else if (typeof telJson?.loop_diagnosis?.loop_running === 'boolean') {
+            setIsCaptureLoopRunning(telJson.loop_diagnosis.loop_running);
+          }
+        } catch {}
+      }
     } catch { setBackendConnected(false); }
     finally { isFetchingRef.current = false; }
 
@@ -1349,6 +1360,36 @@ function AppContent() {
         if (data?.project) setActiveProject(data.project);
         if (Array.isArray(data?.projects)) {
           setProjects(data.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id)));
+        }
+        if (Array.isArray(data?.frames)) {
+          const nextFrames: FrameData[] = data.frames;
+          setFrames(nextFrames);
+          setSelectedFrameIds(new Set());
+          setSelectedLineNumbers(new Set());
+          const sortedNext = [...nextFrames].sort(
+            (a, b) =>
+              (a.page_index || 0) - (b.page_index || 0) ||
+              (a.created_at || '').localeCompare(b.created_at || '') ||
+              (a.top_line || 0) - (b.top_line || 0)
+          );
+          const initialFrame = sortedNext[0] || null;
+          setSelectedFrameId(initialFrame ? initialFrame.frame_id : null);
+          setOcrInspectImageId(initialFrame ? initialFrame.frame_id : 'dag_node3_capture_temp');
+          if (!initialFrame) {
+            setInspectorMode('live');
+          }
+        }
+        if (data?.document) {
+          setDocumentData({
+            total_lines: data.document.total_lines ?? 0,
+            issue_count: data.document.issue_count ?? 0,
+            min_line: data.document.min_line ?? 0,
+            max_line: data.document.max_line ?? 0,
+            lines: Array.isArray(data.document.lines) ? data.document.lines : []
+          });
+        }
+        if (data?.telemetry) {
+          setTelemetry(prev => ({ ...prev, ...data.telemetry }));
         }
         if (data?.multipart_state) {
           setMultipartState(prev => ({ ...prev, ...data.multipart_state }));
@@ -2243,6 +2284,12 @@ function AppContent() {
             } else {
               const isDifferentProject = msg.type === 'project_switched' || (msg.project?.id && msg.project.id !== activeProjectRef.current?.id);
               setActiveProject(msg.project || null);
+              if (msg.telemetry) {
+                setTelemetry(p => ({ ...p, ...msg.telemetry }));
+              }
+              if (msg.multipart_state) {
+                setMultipartState(p => ({ ...p, ...msg.multipart_state }));
+              }
               if (isDifferentProject) {
                 setInspectorMode('live');
                 setOcrInspectImageId('');
@@ -2258,7 +2305,7 @@ function AppContent() {
                 issue_count: docObj.issue_count ?? prev.issue_count,
                 min_line: docObj.min_line ?? prev.min_line,
                 max_line: docObj.max_line ?? prev.max_line,
-                lines: docObj.lines && docObj.lines.length > 0 ? docObj.lines : prev.lines
+                lines: Array.isArray(docObj.lines) ? docObj.lines : prev.lines
               }));
               if (docObj.token_stats) setTokenStats(docObj.token_stats);
               if (followCurrentProcess) {
@@ -2436,6 +2483,11 @@ function AppContent() {
             if (typeof msg.running === 'boolean') {
               setIsCaptureLoopRunning(msg.running);
             }
+            if (msg.telemetry) {
+              setTelemetry(p => ({ ...p, ...msg.telemetry }));
+            }
+          } else if (msg.type === 'loop_attention_required') {
+            setIsCaptureLoopRunning(false);
             if (msg.telemetry) {
               setTelemetry(p => ({ ...p, ...msg.telemetry }));
             }
@@ -2847,8 +2899,10 @@ function AppContent() {
 
   const globalCurrentLine = sortedFrames.length > 0
     ? Math.max(lastCaptured?.bottom_line || 0, documentData.max_line || 0)
-    : Math.max(telemetry.current_bottom_line || 0, documentData.max_line || 0, lastCapturedLine || 0);
-  const globalTargetLines = activeProject?.target_total_lines || telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0;
+    : Math.max(documentData.max_line || 0, activeProject?.max_line || activeProject?.line_count || 0);
+  const globalTargetLines = activeProject
+    ? (activeProject.target_total_lines || (activeProject.status === 'completed' ? globalCurrentLine : 0))
+    : (telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0);
   const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
 
   const projectGroups = useMemo<ProjectBundleGroup[]>(() => {
@@ -3302,15 +3356,16 @@ function AppContent() {
                     Predetermined ({multipartState.predetermined_parts.length}):
                   </span>
                   {multipartState.predetermined_parts.map(pt => {
-                    const livePart = alignmentData.part_number || multipartState.current_part || activeProject?.part_number || 1;
+                    const selectedPartNum = activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1;
                     const st = pt.status || 'pending';
-                    const isScan = pt.part_number === livePart || st === 'scanning';
-                    const isDone = !isScan && (st === 'completed' || pt.part_number < livePart);
+                    const isScan = pt.part_number === selectedPartNum || st === 'scanning';
+                    const isPaused = !isScan && st === 'paused';
+                    const isDone = !isScan && !isPaused && st === 'completed';
                     return (
                       <span
                         key={pt.part_number}
                         onClick={() => handleActivateBundlePart(pt.part_number, pt.file_name, activeProject?.bundle_id, activeProject?.bundle_name, multipartState.total_parts || multipartState.predetermined_parts?.length)}
-                        title={`${pt.file_name} • Status: ${isScan ? 'ACTIVE' : isDone ? 'DONE' : st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''} (Click to activate)`}
+                        title={`${pt.file_name} • Status: ${isScan ? 'ACTIVE' : isDone ? 'DONE' : isPaused ? 'PAUSED' : st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''} (Click to activate)`}
                         style={{
                           fontSize: '9px',
                           fontWeight: 800,
@@ -3318,12 +3373,12 @@ function AppContent() {
                           borderRadius: '4px',
                           cursor: 'pointer',
                           fontFamily: 'var(--font-mono, monospace)',
-                          background: isDone ? 'rgba(0, 255, 157, 0.16)' : isScan ? 'rgba(56, 189, 248, 0.2)' : 'rgba(48, 54, 61, 0.45)',
-                          color: isDone ? '#00ff9d' : isScan ? '#38bdf8' : '#8b949e',
-                          border: `1px solid ${isDone ? 'rgba(0, 255, 157, 0.4)' : isScan ? 'rgba(56, 189, 248, 0.5)' : '#30363d'}`
+                          background: isDone ? 'rgba(0, 255, 157, 0.16)' : isScan ? 'rgba(56, 189, 248, 0.2)' : isPaused ? 'rgba(227, 179, 65, 0.18)' : 'rgba(48, 54, 61, 0.45)',
+                          color: isDone ? '#00ff9d' : isScan ? '#38bdf8' : isPaused ? '#e3b341' : '#8b949e',
+                          border: `1px solid ${isDone ? 'rgba(0, 255, 157, 0.4)' : isScan ? 'rgba(56, 189, 248, 0.5)' : isPaused ? 'rgba(227, 179, 65, 0.45)' : '#30363d'}`
                         }}
                       >
-                        P{pt.part_number}{isDone ? '✓' : isScan ? '●' : ''}
+                        P{pt.part_number}{isDone ? '✓' : isScan ? '●' : isPaused ? '◐' : ''}
                       </span>
                     );
                   })}
@@ -3341,15 +3396,15 @@ function AppContent() {
                     ? multipartState.predetermined_parts
                     : [];
 
-                  // Resolve the markdown part currently open / being scanned on the Live Desktop (e.g. DIXUI_impact_..._part2.md -> 2)
+                  // Resolve the markdown part currently selected or open on the Live Desktop
+                  const selectedPartInBundle = group.parts.find(pt => pt.id === activeProject?.id)?.part_number;
                   const liveAlignFileName = group.is_active ? (alignmentData.file_name || multipartState.active_file_name || '') : '';
                   const liveAlignMatch = liveAlignFileName.match(/(?:part|pt)[_\-\s#]*(\d+)/i);
                   const liveAlignPartNum = group.is_active
                     ? (alignmentData.part_number || (liveAlignMatch ? parseInt(liveAlignMatch[1], 10) : 0) || multipartState.current_part || 0)
                     : 0;
-                  const curActivePartNum = liveAlignPartNum
-                    || group.parts.find(pt => pt.id === activeProject?.id)?.part_number
-                    || (group.is_active ? (multipartState.current_part || 1) : 1);
+                  const curActivePartNum = selectedPartInBundle
+                    || (group.is_active ? (multipartState.current_part || liveAlignPartNum || 1) : 1);
 
                   // Build unified process scope queue (MD 1 / N .. MD N / N) combining scanned part projects + predetermined folder files
                   const partByNumber = new Map<number, ProjectData>();
@@ -3370,9 +3425,9 @@ function AppContent() {
                   ).sort((a, b) => a - b);
 
                   const activeScanningFileName =
-                    liveAlignFileName ||
-                    predByNumber.get(curActivePartNum)?.file_name ||
                     partByNumber.get(curActivePartNum)?.part_file_name ||
+                    predByNumber.get(curActivePartNum)?.file_name ||
+                    liveAlignFileName ||
                     `${group.bundle_name}_part${curActivePartNum}.md`;
 
                   return (
@@ -3635,29 +3690,33 @@ function AppContent() {
                             const scopeLabel = `MD ${partNum} / ${expectedTotal}`;
 
                             if (part) {
-                              const isPartScanning = group.is_active && partNum === curActivePartNum;
                               const isPartSelected = part.id === activeProject?.id;
+                              const isPartScanning = isPartSelected || (group.is_active && partNum === curActivePartNum);
                               const partFileLabel =
                                 part.part_file_name ||
                                 predPt?.file_name ||
                                 (part.name.toLowerCase().endsWith('.md') ? part.name : `${part.name}.md`);
                               const partCaptures = part.frame_count ?? 0;
-                              const partTotalLines = part.total_lines ?? part.line_count ?? 0;
+                              const partCapturedLines = part.total_lines ?? part.line_count ?? 0;
+                              const partTargetLines = part.target_total_lines ?? 0;
                               const partVerifiedLines = (part.verified_lines && part.verified_lines > 0)
                                 ? part.verified_lines
                                 : (part.line_count ?? 0);
                               const isCompletedPart =
                                 !isPartScanning && (
-                                  predPt?.status === 'completed' ||
-                                  part.status === 'completed' ||
-                                  (partTotalLines > 0 && partVerifiedLines >= partTotalLines) ||
-                                  partNum < curActivePartNum
+                                  (partTargetLines > 0 && partCapturedLines >= partTargetLines - 4) ||
+                                  (part.status === 'completed' && partTargetLines <= 0 && partCapturedLines > 0)
                                 );
+                              const isPausedPart =
+                                !isPartScanning && !isCompletedPart && (partCapturedLines > 0 || partCaptures > 0);
+                              const partPct = partTargetLines > 0
+                                ? Math.min(100, Math.round((partCapturedLines / partTargetLines) * 100))
+                                : 0;
 
                               return (
                                 <div
                                   key={part.id}
-                                  className={`bundle-part-card ${(isPartScanning || (isPartSelected && !liveAlignPartNum)) ? 'active' : ''}`}
+                                  className={`bundle-part-card ${(isPartScanning || isPartSelected) ? 'active' : ''}`}
                                   data-testid="bundle-part-card"
                                   data-part-id={part.id}
                                   data-part-number={partNum}
@@ -3691,15 +3750,17 @@ function AppContent() {
                                           fontWeight: 800,
                                           padding: '1px 4px',
                                           borderRadius: '3px',
-                                          color: isPartScanning ? '#38bdf8' : isCompletedPart ? '#00ff9d' : '#8b949e',
+                                          color: isPartScanning ? '#38bdf8' : isCompletedPart ? '#00ff9d' : isPausedPart ? '#e3b341' : '#8b949e',
                                           background: isPartScanning
                                             ? 'rgba(56, 189, 248, 0.16)'
                                             : isCompletedPart
                                             ? 'rgba(0, 255, 157, 0.14)'
+                                            : isPausedPart
+                                            ? 'rgba(227, 179, 65, 0.16)'
                                             : 'rgba(139, 148, 158, 0.15)'
                                         }}
                                       >
-                                        {isPartScanning ? 'ACTIVE ●' : isCompletedPart ? 'DONE ✓' : 'READY'}
+                                        {isPartScanning ? 'ACTIVE ●' : isCompletedPart ? 'DONE ✓' : isPausedPart ? (partTargetLines > 0 ? `PAUSED ${partPct}%` : 'PAUSED ●') : 'READY'}
                                       </span>
                                       <button
                                         type="button"
@@ -3736,7 +3797,11 @@ function AppContent() {
                                   <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
                                     <span style={{ color: '#58a6ff', fontWeight: 600 }}>{partCaptures} captures</span>
                                     <span>•</span>
-                                    <span>{partTotalLines.toLocaleString()} total lines</span>
+                                    <span>
+                                      {partTargetLines > 0 && partTargetLines !== partCapturedLines
+                                        ? `${partCapturedLines.toLocaleString()} / ${partTargetLines.toLocaleString()} lines (${partPct}%)`
+                                        : `${partCapturedLines.toLocaleString()} total lines`}
+                                    </span>
                                     <span>•</span>
                                     <span style={{ color: '#00ff9d', fontWeight: 600 }}>{partVerifiedLines.toLocaleString()} verified</span>
                                   </div>

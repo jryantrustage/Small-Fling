@@ -1080,16 +1080,20 @@ async def predetermine_bundle_from_folder_screenshot(
             for ep in (state.multipart_bundle_state.get("exported_parts") or [])
             if ep.get("part_number") is not None
         }
+        paused_part_nums = set()
         try:
             for p_row in db.get_projects():
                 p_bid = str(p_row.get("bundle_id") or "")
                 p_bname = str(p_row.get("bundle_name") or "")
                 p_num = int(p_row.get("part_number") or 0)
-                p_tot = int(p_row.get("total_lines") or p_row.get("target_total_lines") or 0)
-                p_cnt = int(p_row.get("line_count") or 0)
+                p_tot = int(p_row.get("target_total_lines") or 0)
+                p_cnt = max(int(p_row.get("max_line") or 0), int(p_row.get("line_count") or 0))
+                p_st = str(p_row.get("status") or "").lower()
                 if p_num > 0 and (p_bid == bundle_id or (p_bname and p_bname[:8].lower() == eff_prefix[:8].lower())):
-                    if p_row.get("status") == "completed" or (p_tot > 0 and p_cnt >= p_tot):
+                    if (p_tot > 0 and p_cnt >= p_tot - 4) or (p_st == "completed" and p_tot <= 0 and p_cnt > 0):
                         completed_part_nums.add(p_num)
+                    elif p_cnt > 0 or p_tot > 0:
+                        paused_part_nums.add(p_num)
         except Exception:
             pass
 
@@ -1105,8 +1109,10 @@ async def predetermine_bundle_from_folder_screenshot(
             pno = int(pt["part_number"])
             if pno == part_to_open:
                 pt["status"] = "scanning"
-            elif pno in completed_part_nums or pno < part_to_open:
+            elif pno in completed_part_nums:
                 pt["status"] = "completed"
+            elif pno in paused_part_nums:
+                pt["status"] = "paused"
             else:
                 pt["status"] = "pending"
 
@@ -1911,12 +1917,30 @@ async def navigate_teams_onedrive_path_to_markdown(
     # Update predetermined_parts in state if bundle folder was scanned
     if folder_scan.get("predetermined_parts"):
         pred_parts = folder_scan["predetermined_parts"]
+        done_pnums = set()
+        paused_pnums = set()
+        try:
+            for p_row in db.get_projects():
+                p_bname = str(p_row.get("bundle_name") or "")
+                p_num = int(p_row.get("part_number") or 0)
+                p_tot = int(p_row.get("target_total_lines") or 0)
+                p_cnt = max(int(p_row.get("max_line") or 0), int(p_row.get("line_count") or 0))
+                p_st = str(p_row.get("status") or "").lower()
+                if p_num > 0 and p_bname and p_bname[:8].lower() == eff_bundle[:8].lower():
+                    if (p_tot > 0 and p_cnt >= p_tot - 4) or (p_st == "completed" and p_tot <= 0 and p_cnt > 0):
+                        done_pnums.add(p_num)
+                    elif p_cnt > 0 or p_tot > 0:
+                        paused_pnums.add(p_num)
+        except Exception:
+            pass
         for pt in pred_parts:
             pno = int(pt.get("part_number") or 0)
-            if pno < eff_part:
-                pt["status"] = "completed"
-            elif pno == eff_part:
+            if pno == eff_part:
                 pt["status"] = "scanning"
+            elif pno in done_pnums:
+                pt["status"] = "completed"
+            elif pno in paused_pnums:
+                pt["status"] = "paused"
             else:
                 pt["status"] = "pending"
         state.multipart_bundle_state.update({

@@ -4475,12 +4475,13 @@ async def check_and_update_alignment(
             res = state.sanitize_for_json(res)
             state.latest_alignment_status.clear()
             state.latest_alignment_status.update(res)
-            if (res.get("first_line_number") or 0) > 0:
-                try: state.latest_telemetry["current_top_line"] = int(res["first_line_number"])
-                except Exception: pass
-            if (res.get("last_line_number") or 0) > 0:
-                try: state.latest_telemetry["current_bottom_line"] = int(res["last_line_number"])
-                except Exception: pass
+            if getattr(state, "capture_loop_running", False):
+                if (res.get("first_line_number") or 0) > 0:
+                    try: state.latest_telemetry["current_top_line"] = int(res["first_line_number"])
+                    except Exception: pass
+                if (res.get("last_line_number") or 0) > 0:
+                    try: state.latest_telemetry["current_bottom_line"] = int(res["last_line_number"])
+                    except Exception: pass
             if not res.get("is_aligned", False) and state.orchestration_state.get("status") == "RUNNING":
                 state.orchestration_state.update({"status": "PAUSED", "step_label": "PAUSED: teams markdown not aligned"})
                 state.latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({res.get('reason')})"

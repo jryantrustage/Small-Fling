@@ -744,12 +744,15 @@ async def activate_project(project_id: str):
     ocr_imgs = _get_available_ocr_images(project_id=project_id)
     all_projs = db.get_projects()
 
+    diag = state.get_loop_diagnosis()
     await state.ws_manager.broadcast({
         "type": "project_switched",
         "project": proj,
         "projects": all_projs,
         "dag": state.dag_state,
-        "telemetry": state.latest_telemetry
+        "telemetry": state.latest_telemetry,
+        "diagnosis": diag,
+        "multipart_state": state.multipart_bundle_state,
     })
     await state.ws_manager.broadcast({
         "type": "frame_deleted" if frames_list else "frames_purged",
@@ -769,6 +772,7 @@ async def activate_project(project_id: str):
         "telemetry": state.latest_telemetry,
         "token_stats": state.token_stats,
         "dag": state.dag_state,
+        "loop_diagnosis": diag,
         "multipart_state": state.multipart_bundle_state,
         "ocr_images": ocr_imgs
     }

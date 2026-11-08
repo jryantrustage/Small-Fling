@@ -50,26 +50,26 @@ async def get_dismissed_alignment_items_api():
     return {"dismissed_items": list(state.dismissed_alignment_items)}
 @router.get("/api/telemetry")
 async def get_telemetry():
-    return {"telemetry": state.get_fresh_telemetry(), "token_stats": state.token_stats, "alignment": state.latest_alignment_status, "document_summary": state.get_document_metrics(), "loop_diagnosis": state.get_loop_diagnosis()}
+    return {"telemetry": state.get_fresh_telemetry(), "token_stats": state.token_stats, "alignment": state.latest_alignment_status, "document_summary": state.get_document_metrics(), "loop_diagnosis": state.get_loop_diagnosis(), "capture_loop_running": bool(getattr(state, "capture_loop_running", False))}
 @router.post("/api/telemetry")
 async def update_telemetry(p: TelemetryUpdateRequest):
     return await handle_telemetry_update(p)
 @router.get("/api/orchestrate")
 async def get_orchestration_state():
-    return {"orchestration": state.orchestration_state, "telemetry": state.get_fresh_telemetry(), "loop_diagnosis": state.get_loop_diagnosis()}
+    return {"orchestration": state.orchestration_state, "telemetry": state.get_fresh_telemetry(), "loop_diagnosis": state.get_loop_diagnosis(), "capture_loop_running": bool(getattr(state, "capture_loop_running", False))}
 @router.post("/api/orchestrate")
 async def handle_orchestration_command(payload: OrchestrationRequest):
     return await handle_orchestrate_command(payload)
 @router.get("/api/dag/status")
 async def get_dag_status():
     proj = db.get_active_project()
-    target_tot = (
-        (proj.get("target_total_lines", 0) if proj else 0)
-        or state.latest_telemetry.get("target_total_lines", 0)
-        or state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0)
-    )
+    diag = state.get_loop_diagnosis()
+    if proj:
+        target_tot = int(proj.get("target_total_lines") or diag.get("target_total_lines") or 0)
+    else:
+        target_tot = int(state.latest_telemetry.get("target_total_lines", 0) or state.dag_state["nodes"].get("init_end", {}).get("total_lines", 0) or 0)
     node_5 = state.dag_state["nodes"].get("verification_trigger", {})
-    return {"status": "success", "dag": state.dag_state, "target_total_lines": target_tot, "current_top_line": state.latest_telemetry.get("current_top_line", 0), "current_bottom_line": state.latest_telemetry.get("current_bottom_line", 0), "current_page": state.latest_telemetry.get("current_page", 1), "active_node": state.dag_state.get("current_active_node"), "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}), "telemetry": state.get_fresh_telemetry(), "latest_telemetry": state.get_fresh_telemetry(), "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {}), "loop_diagnosis": state.get_loop_diagnosis()}
+    return {"status": "success", "dag": state.dag_state, "target_total_lines": target_tot, "current_top_line": state.latest_telemetry.get("current_top_line", 0), "current_bottom_line": diag.get("frontier_line", state.latest_telemetry.get("current_bottom_line", 0)), "current_page": state.latest_telemetry.get("current_page", 1), "active_node": state.dag_state.get("current_active_node"), "node_5_config": node_5.get("config", {}), "trigger_decision": node_5.get("trigger_decision", {}), "telemetry": state.get_fresh_telemetry(), "latest_telemetry": state.get_fresh_telemetry(), "capture_telemetry": state.latest_telemetry.get("capture_telemetry", {}), "loop_diagnosis": diag, "capture_loop_running": bool(getattr(state, "capture_loop_running", False))}
 @router.get("/api/dag/nodes/metadata")
 async def get_all_dag_nodes_metadata():
     return {"status": "success", "nodes": [n.get_metadata() for n in dag_node_registry.get_all_nodes()]}

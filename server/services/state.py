@@ -712,16 +712,19 @@ def save_diagnostics_trace() -> None:
 
 def load_diagnostics_trace() -> None:
     global project_diagnostics_trace, total_dag2_loops_executed
+    cur_pid = get_current_project_id()
     if DIAGNOSTICS_TRACE_FILE.exists():
         try:
             with open(DIAGNOSTICS_TRACE_FILE, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
-                    project_diagnostics_trace.update(loaded)
-                    runs = project_diagnostics_trace.get("loop_runs", [])
-                    if runs:
-                        max_idx = max((r.get("loop_index", 0) or 0) for r in runs)
-                        total_dag2_loops_executed = max(total_dag2_loops_executed, max_idx)
+                    loaded_pid = loaded.get("project_id")
+                    if not cur_pid or not loaded_pid or loaded_pid == cur_pid:
+                        project_diagnostics_trace.update(loaded)
+                        runs = project_diagnostics_trace.get("loop_runs", [])
+                        if runs:
+                            max_idx = max((r.get("loop_index", 0) or 0) for r in runs)
+                            total_dag2_loops_executed = max(total_dag2_loops_executed, max_idx)
         except Exception as e:
             print(f"[load_diagnostics_trace] Error: {e}")
 
@@ -2047,33 +2050,129 @@ def sync_resume_frontier_state(
 
     proj = db.get_active_project() or {}
     proj_target = int(proj.get("target_total_lines") or 0)
-    proj_is_completed = str(proj.get("status") or "").lower() == "completed"
+    proj_status_raw = str(proj.get("status") or "").lower()
+    if proj_status_raw == "completed" and proj_target > 0 and last_bot < proj_target - 4:
+        try:
+            if proj.get("id"):
+                db.update_project_status(proj["id"], "active")
+        except Exception:
+            pass
+        proj_is_completed = False
+    else:
+        proj_is_completed = (proj_status_raw == "completed") and (proj_target <= 0 or last_bot >= proj_target - 4)
+
     if last_bot <= 0 and proj_target == 0:
         target_total = 0
         latest_telemetry["target_total_lines"] = 0
+        latest_telemetry["current_top_line"] = 0
+        latest_telemetry["current_bottom_line"] = 0
+        latest_telemetry["current_page"] = 1
         headless_telemetry_session["target_total_lines"] = 0
+        headless_telemetry_session["current_top_line"] = 0
+        headless_telemetry_session["current_bottom_line"] = 0
+        headless_telemetry_session["pages_captured"] = 0
+        headless_telemetry_session["completion_percent"] = 0.0
+        headless_telemetry_session["total_lines_reached"] = False
+        headless_telemetry_session["status"] = "IDLE"
+        project_diagnostics_trace["project_id"] = proj.get("id")
         project_diagnostics_trace["target_total_lines"] = 0
+        project_diagnostics_trace["frontier_line"] = 0
+        project_diagnostics_trace["next_expected_top_line"] = 1
         project_diagnostics_trace["is_completed"] = False
+        project_diagnostics_trace["current_status"] = "IDLE"
+        project_diagnostics_trace["last_stop_reason"] = None
         orchestration_state["eof_reached"] = False
         orchestration_state["status"] = "IDLE"
         orchestration_state["manual_attention_required"] = False
         orchestration_state["halt_reason"] = None
+        orchestration_state["next_target_top"] = 1
+        orchestration_state["cursor_line"] = 1
+        orchestration_state["character_tracking_mode"] = False
+        orchestration_state["character_tracking_line"] = 0
+        orchestration_state["bottom_text_anchor"] = ""
+        orchestration_state["target_top_text_anchor"] = ""
+        orchestration_state["bottom_anchor_window"] = []
+        dag_state.get("groups", {}).get("initialize", {}).update({
+            "status": "idle",
+            "progress": {
+                "percent": 0,
+                "stage": "Ready to initialize",
+                "status": "idle",
+                "total_lines": 0,
+                "verified": False,
+            },
+        })
         dag_state.get("nodes", {}).get("init_end", {}).update({
             "total_lines": 0,
             "status": "idle",
+            "telemetry_insight": None,
+            "error": None,
+        })
+        dag_state.get("nodes", {}).get("reset_home", {}).update({
+            "status": "idle",
+            "verified": False,
+            "is_active": False,
+            "first_line": 0,
+            "error": None,
+        })
+        dag_state.get("nodes", {}).get("frame_acquire", {}).update({
+            "status": "idle",
+            "page": 1,
+            "is_active": False,
+        })
+        dag_state.get("nodes", {}).get("local_ai_ocr", {}).update({
+            "status": "idle",
+            "is_active": False,
+        })
+        dag_state.get("nodes", {}).get("frame_ocr", {}).update({
+            "status": "idle",
+            "top_line": 0,
+            "bottom_line": 0,
+            "target_top_line": 1,
+            "extracted_line_count": 0,
+            "character_tracking_mode": False,
+            "character_tracking_line": 0,
+            "bottom_text_anchor": "",
+            "target_top_text_anchor": "",
+            "bottom_anchor_window": [],
+        })
+        dag_state.get("nodes", {}).get("arrow_down", {}).update({
+            "status": "idle",
+            "prev_bottom": 0,
+            "target_top": 1,
+            "target_top_line": 1,
+            "new_top_line": 1,
+            "arrow_count": 0,
+            "character_tracking_mode": False,
+            "character_tracking_line": 0,
+            "bottom_text_anchor": "",
+            "target_top_text_anchor": "",
+            "bottom_anchor_window": [],
+            "eof_reached": False,
+        })
+        dag_state.get("nodes", {}).get("verification_trigger", {}).update({
+            "status": "idle",
+            "target_top": 1,
+            "target_top_line": 1,
+            "expected_top": 1,
+            "remaining_lines": 0,
+            "loop_count": 0,
+            "is_complete": False,
         })
         dag_state.get("nodes", {}).get("document_assemble", {}).update({
             "is_complete": False,
             "completion_percent": 0.0,
             "total_captured_lines": 0,
+            "effective_bottom_line": 0,
             "status": "idle",
+            "telemetry_insight": None,
+            "error": None,
         })
     else:
         target_total = int(
             proj_target
-            or latest_telemetry.get("target_total_lines")
-            or headless_telemetry_session.get("target_total_lines")
-            or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+            or (last_bot if proj_is_completed else 0)
+            or (latest_telemetry.get("target_total_lines") if not proj else 0)
             or 0
         )
 
@@ -2084,7 +2183,42 @@ def sync_resume_frontier_state(
             "total_lines": target_total,
             "status": "completed",
             "telemetry_insight": f"Calibrated {target_total:,} total lines at EOF ✔",
+            "error": None,
         })
+        if last_bot <= 0:
+            # Part has calibrated target_total_lines, but 0 frames captured yet
+            latest_telemetry["current_top_line"] = 1
+            latest_telemetry["current_bottom_line"] = 0
+            latest_telemetry["current_page"] = 1
+            dag_state.get("nodes", {}).get("frame_ocr", {}).update({
+                "status": "idle",
+                "top_line": 0,
+                "bottom_line": 0,
+                "target_top_line": 1,
+            })
+            dag_state.get("nodes", {}).get("arrow_down", {}).update({
+                "status": "idle",
+                "prev_bottom": 0,
+                "target_top": 1,
+                "target_top_line": 1,
+                "new_top_line": 1,
+                "eof_reached": False,
+            })
+            dag_state.get("nodes", {}).get("verification_trigger", {}).update({
+                "status": "idle",
+                "target_top": 1,
+                "target_top_line": 1,
+                "expected_top": 1,
+                "remaining_lines": target_total,
+                "is_complete": False,
+            })
+            dag_state.get("nodes", {}).get("document_assemble", {}).update({
+                "is_complete": False,
+                "completion_percent": 0.0,
+                "total_captured_lines": 0,
+                "effective_bottom_line": 0,
+                "status": "idle",
+            })
 
     if last_bot > 0:
         # Project already has captured frames / OCR lines — mark Phase I completed and sync frontier
@@ -2643,18 +2777,33 @@ def get_loop_diagnosis() -> Dict[str, Any]:
 
     proj = db.get_active_project() or {}
     proj_target = int(proj.get("target_total_lines") or 0)
-    if proj_target > 0 and str(proj.get("status") or "").lower() != "completed":
+    proj_status_raw = str(proj.get("status") or "").lower()
+    if proj_status_raw == "completed" and proj_target > 0 and frontier_line < proj_target - 4:
+        try:
+            if proj.get("id"):
+                db.update_project_status(proj["id"], "active")
+        except Exception:
+            pass
+        proj_status_raw = "active"
+
+    if proj_target > 0 and proj_status_raw != "completed":
         if int(latest_telemetry.get("target_total_lines") or 0) != proj_target:
             latest_telemetry["target_total_lines"] = proj_target
         if int(headless_telemetry_session.get("target_total_lines") or 0) != proj_target:
             headless_telemetry_session["target_total_lines"] = proj_target
-    target_lines = int(
-        proj_target
-        or latest_telemetry.get("target_total_lines")
-        or headless_telemetry_session.get("target_total_lines")
-        or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
-        or 0
-    )
+
+    if proj:
+        target_lines = int(
+            proj_target
+            or (frontier_line if (proj_status_raw == "completed" and frontier_line > 0) else 0)
+        )
+    else:
+        target_lines = int(
+            latest_telemetry.get("target_total_lines")
+            or headless_telemetry_session.get("target_total_lines")
+            or dag_state.get("nodes", {}).get("init_end", {}).get("total_lines")
+            or 0
+        )
     from ocr_engine import is_eof_reached_with_offline_awareness
     tail_txt = ""
     if frontier_line > 0 and document_lines:
@@ -2670,7 +2819,7 @@ def get_loop_diagnosis() -> Dict[str, Any]:
         offline_detected=offline_det,
         tail_text=tail_txt,
     )
-    proj_status_completed = str(proj.get("status") or "").lower() == "completed"
+    proj_status_completed = (proj_status_raw == "completed") and (target_lines <= 0 or frontier_line >= target_lines - 4 or is_eof)
     trace_matches_proj = project_diagnostics_trace.get("project_id") in (None, proj.get("id"))
     explicitly_completed = bool(
         proj_status_completed
@@ -2681,11 +2830,14 @@ def get_loop_diagnosis() -> Dict[str, Any]:
                 or orchestration_state.get("eof_reached")
                 or dag_state.get("nodes", {}).get("document_assemble", {}).get("is_complete")
             )
-            and (target_lines <= 0 or frontier_line >= target_lines - 3 or is_eof)
+            and (
+                (target_lines > 0 and (frontier_line >= target_lines - 3 or is_eof))
+                or (target_lines <= 0 and frontier_line > 0 and is_eof)
+            )
         )
     )
     is_complete = bool(explicitly_completed or (target_lines > 0 and (frontier_line >= target_lines or is_eof)))
-    if is_complete and frontier_line > 0 and target_lines != frontier_line:
+    if is_complete and frontier_line > 0 and (target_lines <= 0 or frontier_line >= target_lines - 4) and target_lines != frontier_line:
         target_lines = frontier_line
     pct = 100.0 if is_complete else (round(min(100.0, (frontier_line / max(1, target_lines)) * 100.0), 1) if target_lines > 0 else 0.0)
 
@@ -3063,7 +3215,13 @@ def _extract_canonical_filename_from_project_or_lines(proj: Dict[str, Any], line
     return part_fn or align_fn or str((proj or {}).get("name") or "")
 
 
-def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+_last_auto_switched_desktop_part: Optional[int] = None
+
+
+def sync_multipart_state_from_alignment(
+    alignment_status: Optional[Dict[str, Any]] = None,
+    prefer_active_project: bool = False,
+) -> Dict[str, Any]:
     """
     Synchronizes multipart_bundle_state with the latest alignment status, predetermined folder manifest,
     project bundle fields (bundle_id, part_number, total_parts, part_file_name), and document header lines.
@@ -3071,14 +3229,20 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
     global multipart_bundle_state
     from alignment_engine import parse_multipart_markdown_filename
 
-    align = alignment_status or latest_alignment_status or {}
     proj = db.get_active_project() or {}
-    align_fn = align.get("file_name") or ""
-    canonical_fn = _extract_canonical_filename_from_project_or_lines(proj, document_lines)
-    candidate_name = align_fn or canonical_fn or proj.get("name") or ""
+    proj_part_num = int(proj.get("part_number") or 0) or None
+    proj_total_parts = int(proj.get("total_parts") or 0) or None
+    proj_bundle_id = proj.get("bundle_id")
+    proj_bundle_name = proj.get("bundle_name")
+    proj_part_fn = str(proj.get("part_file_name") or "").strip()
 
-    mp_info = align.get("multipart_info")
-    if (not mp_info or not mp_info.get("is_multipart")) and align.get("is_multipart") and align.get("part_number") is not None:
+    align = (alignment_status or {}) if prefer_active_project else (alignment_status or latest_alignment_status or {})
+    align_fn = "" if (prefer_active_project or proj_part_num) else (align.get("file_name") or "")
+    canonical_fn = proj_part_fn or _extract_canonical_filename_from_project_or_lines(proj, document_lines)
+    candidate_name = canonical_fn or align_fn or proj.get("name") or ""
+
+    mp_info = None if (prefer_active_project or proj_part_num) else align.get("multipart_info")
+    if (not mp_info or not mp_info.get("is_multipart")) and not (prefer_active_project or proj_part_num) and align.get("is_multipart") and align.get("part_number") is not None:
         mp_info = dict(align)
     if not mp_info or not mp_info.get("is_multipart"):
         mp_info = parse_multipart_markdown_filename(candidate_name or canonical_fn)
@@ -3097,16 +3261,14 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
                 break
 
     predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
-    proj_part_num = proj.get("part_number")
-    proj_total_parts = proj.get("total_parts")
-    proj_bundle_id = proj.get("bundle_id")
-    proj_bundle_name = proj.get("bundle_name")
 
     if mp_info and mp_info.get("is_multipart"):
         multipart_bundle_state["is_multipart"] = True
         if mp_info.get("base_prefix"):
             multipart_bundle_state["base_prefix"] = mp_info["base_prefix"]
-        if mp_info.get("part_number") is not None:
+        if proj_part_num is not None:
+            multipart_bundle_state["current_part"] = int(proj_part_num)
+        elif mp_info.get("part_number") is not None:
             multipart_bundle_state["current_part"] = int(mp_info["part_number"])
         if mp_info.get("total_parts") is not None:
             multipart_bundle_state["total_parts"] = int(mp_info["total_parts"])
@@ -3124,7 +3286,7 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
             if parsed_proj.get("is_multipart"):
                 multipart_bundle_state["is_multipart"] = True
                 multipart_bundle_state["base_prefix"] = parsed_proj.get("base_prefix") or multipart_bundle_state.get("base_prefix", "")
-                multipart_bundle_state["current_part"] = parsed_proj.get("part_number")
+                multipart_bundle_state["current_part"] = int(proj_part_num or parsed_proj.get("part_number") or 1)
                 if detected_total_parts is not None:
                     multipart_bundle_state["total_parts"] = detected_total_parts
                 multipart_bundle_state["next_part_number"] = parsed_proj.get("next_part_number")
@@ -3135,7 +3297,7 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
         multipart_bundle_state["is_multipart"] = True
         if proj_bundle_name and not multipart_bundle_state.get("base_prefix"):
             multipart_bundle_state["base_prefix"] = str(proj_bundle_name)
-        if proj_part_num and not multipart_bundle_state.get("current_part"):
+        if proj_part_num:
             multipart_bundle_state["current_part"] = int(proj_part_num)
         if proj_total_parts and not multipart_bundle_state.get("total_parts"):
             multipart_bundle_state["total_parts"] = int(proj_total_parts)
@@ -3166,7 +3328,7 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
         if avail:
             multipart_bundle_state["available_parts"] = avail
             multipart_bundle_state["total_parts"] = max(multipart_bundle_state.get("total_parts") or 0, max(avail))
-        cur_p = int(multipart_bundle_state.get("current_part") or proj_part_num or 1)
+        cur_p = int(proj_part_num or multipart_bundle_state.get("current_part") or 1)
         multipart_bundle_state["current_part"] = cur_p
         next_candidates = [p for p in predetermined if int(p.get("part_number") or 0) > cur_p]
         if next_candidates:
@@ -3177,19 +3339,27 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
             multipart_bundle_state["next_part_number"] = None
             multipart_bundle_state["next_file_name"] = None
 
-        exported_part_nums = {
-            int(ep["part_number"])
-            for ep in (multipart_bundle_state.get("exported_parts") or [])
-            if ep.get("part_number") is not None
-        }
+        completed_part_nums = set()
+        paused_part_nums = set()
         if proj_bundle_id:
             try:
                 for bp in db.get_bundle_projects(str(proj_bundle_id)):
                     bp_num = int(bp.get("part_number") or 0)
-                    bp_tot = int(bp.get("total_lines") or bp.get("target_total_lines") or 0)
-                    bp_cnt = int(bp.get("line_count") or 0)
-                    if bp_num > 0 and (bp.get("status") == "completed" or (bp_tot > 0 and bp_cnt >= bp_tot)):
-                        exported_part_nums.add(bp_num)
+                    bp_target = int(bp.get("target_total_lines") or 0)
+                    bp_captured = max(int(bp.get("max_line") or 0), int(bp.get("line_count") or 0))
+                    bp_status = str(bp.get("status") or "").lower()
+                    if bp_num > 0:
+                        if bp_target > 0 and bp_captured >= bp_target - 4:
+                            completed_part_nums.add(bp_num)
+                        elif bp_status == "completed" and bp_target <= 0 and bp_captured > 0:
+                            completed_part_nums.add(bp_num)
+                        elif bp_captured > 0 or bp_target > 0:
+                            paused_part_nums.add(bp_num)
+                            if bp_status == "completed" and bp.get("id"):
+                                try:
+                                    db.update_project_status(bp["id"], "active")
+                                except Exception:
+                                    pass
             except Exception:
                 pass
         for pt in predetermined:
@@ -3198,14 +3368,17 @@ def sync_multipart_state_from_alignment(alignment_status: Optional[Dict[str, Any
             pt["scope_label"] = f"MD {pno} / {tot_for_label}"
             if pno == cur_p:
                 pt["status"] = "scanning"
-            elif pno in exported_part_nums or pno < cur_p:
+            elif pno in completed_part_nums:
                 pt["status"] = "completed"
+            elif pno in paused_part_nums:
+                pt["status"] = "paused"
             else:
                 pt["status"] = "pending"
 
     active_fn_resolved = (
-        align.get("file_name")
+        proj_part_fn
         or canonical_fn
+        or align.get("file_name")
         or multipart_bundle_state.get("last_opened_file")
         or ""
     )
@@ -3288,15 +3461,20 @@ async def activate_or_create_bundle_part_project(
     if not eff_file_name.lower().endswith(".md"):
         eff_file_name = f"{eff_file_name}.md"
 
-    # 1. If the currently active project is a DIFFERENT part that has reached EOF, mark it completed
+    # 1. If the currently active project is a DIFFERENT part that has reached its calibrated EOF target, mark it completed
     active_pid = active_proj.get("id")
     active_pnum = int(active_proj.get("part_number") or 0)
-    active_lines = int(active_proj.get("line_count") or 0)
+    active_lines = max(int(active_proj.get("max_line") or 0), int(active_proj.get("line_count") or 0))
     active_frames = int(active_proj.get("frame_count") or 0)
-    active_target = int(active_proj.get("total_lines") or active_proj.get("target_total_lines") or 0)
-    if active_pid and active_pnum != target_part and active_lines > 0 and active_target > 0 and active_lines >= active_target:
+    active_target = int(active_proj.get("target_total_lines") or 0)
+    if active_pid and active_pnum != target_part and active_lines > 0 and active_target > 0 and active_lines >= active_target - 4:
         try:
             db.update_project_status(active_pid, "completed")
+        except Exception:
+            pass
+    elif active_pid and active_proj.get("status") == "completed" and active_target > 0 and active_lines < active_target - 4:
+        try:
+            db.update_project_status(active_pid, "active")
         except Exception:
             pass
 
@@ -3383,19 +3561,26 @@ async def activate_or_create_bundle_part_project(
     multipart_bundle_state["total_parts"] = eff_total_parts
     multipart_bundle_state["last_opened_file"] = eff_file_name
     multipart_bundle_state["active_file_name"] = eff_file_name
-    mp_sync = sync_multipart_state_from_alignment()
+    mp_sync = sync_multipart_state_from_alignment(prefer_active_project=True)
 
     switched_proj = db.get_project(target_pid) if target_pid else db.get_active_project()
     updated_projects = db.get_projects()
+    frames_list = db.get_frames(switched_proj["id"]) if switched_proj else []
+    doc_payload = None
+    try:
+        from routers.frames_document import _doc_payload
+        doc_payload = _doc_payload()
+    except Exception:
+        pass
 
     if broadcast and switched_proj:
-        frames_list = db.get_frames(switched_proj["id"])
         await ws_manager.broadcast({
             "type": "project_switched",
             "project": switched_proj,
             "projects": updated_projects,
             "dag": dag_state,
             "telemetry": latest_telemetry,
+            "diagnosis": get_loop_diagnosis(),
         })
         await ws_manager.broadcast({
             "type": "project_updated",
@@ -3406,6 +3591,11 @@ async def activate_or_create_bundle_part_project(
             "type": "frame_deleted" if frames_list else "frames_purged",
             "frames": frames_list,
         })
+        if doc_payload is not None:
+            await ws_manager.broadcast({
+                "type": "document_updated",
+                "data": doc_payload,
+            })
         await ws_manager.broadcast({
             "type": "multipart_transition_status",
             "multipart_state": mp_sync,
@@ -3415,6 +3605,12 @@ async def activate_or_create_bundle_part_project(
         "status": "success",
         "project": switched_proj,
         "projects": updated_projects,
+        "frames": frames_list,
+        "document": doc_payload,
+        "telemetry": latest_telemetry,
+        "token_stats": token_stats,
+        "dag": dag_state,
+        "loop_diagnosis": get_loop_diagnosis(),
         "multipart_state": mp_sync,
         "part_number": target_part,
         "total_parts": eff_total_parts,
@@ -3427,7 +3623,10 @@ async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Di
     When the Live Desktop OCR bounding box detects that a different markdown part of the bundle
     is open on the external monitor (e.g. 'DIXUI_impact_26-11-05-9-43pm_part2.md' while MD 1/9 was active),
     automatically switches (or creates and activates) the MD 2/9 project so it transitions from QUEUED -> ACTIVE.
+    Only auto-switches when the detected part on the desktop actually changes, so a user's manual part selection
+    in the sidebar is not overridden by background polling of an unchanged desktop screen.
     """
+    global _last_auto_switched_desktop_part
     if getattr(sys.modules[__name__], "capture_loop_running", False):
         return None
     align = alignment_status or latest_alignment_status or {}
@@ -3444,6 +3643,17 @@ async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Di
     active_proj = db.get_active_project() or {}
     active_part = int(active_proj.get("part_number") or 0)
     active_prefix = str(active_proj.get("bundle_name") or "").strip()
+
+    if _last_auto_switched_desktop_part is None:
+        _last_auto_switched_desktop_part = detected_part
+        if detected_part == active_part:
+            return None
+    elif detected_part == _last_auto_switched_desktop_part:
+        # The file open on the desktop display has not changed since our last check;
+        # respect whichever part the user currently has selected in the UI.
+        return None
+    else:
+        _last_auto_switched_desktop_part = detected_part
 
     if detected_part == active_part:
         return None
@@ -3658,22 +3868,35 @@ def load_persisted_state():
                 tel = db.get_project_telemetry(pid)
                 max_db_ln = max(lines_db.keys()) if lines_db else 0
                 last_fr = frames_db[-1] if frames_db else {}
-                latest_telemetry["target_total_lines"] = int(p.get("target_total_lines") or max_db_ln or 0)
-                latest_telemetry["current_top_line"] = int(last_fr.get("top_line") or (min(lines_db.keys()) if lines_db else 1))
-                latest_telemetry["current_bottom_line"] = int(last_fr.get("bottom_line") or max_db_ln or 0)
-                latest_telemetry["current_page"] = int(last_fr.get("page_index") or len(frames_db) or 1)
-                if tel.get("telemetry"):
-                    latest_telemetry.update(tel["telemetry"])
+                proj_target_ln = int(p.get("target_total_lines") or 0)
+                if proj_target_ln > 0 and str(p.get("status") or "").lower() == "completed" and max_db_ln < proj_target_ln - 4:
+                    try:
+                        db.update_project_status(pid, "active")
+                        p["status"] = "active"
+                    except Exception:
+                        pass
+                if tel.get("telemetry") and isinstance(tel["telemetry"], dict):
+                    safe_tel = {
+                        k: v for k, v in tel["telemetry"].items()
+                        if k not in ("target_total_lines", "current_top_line", "current_bottom_line", "current_page")
+                    }
+                    latest_telemetry.update(safe_tel)
                 if tel.get("token_stats"):
                     token_stats.update(tel["token_stats"])
-                if p.get("target_total_lines"):
-                    latest_telemetry["target_total_lines"] = p["target_total_lines"]
+                latest_telemetry["target_total_lines"] = int(
+                    proj_target_ln
+                    or (max_db_ln if str(p.get("status") or "").lower() == "completed" else 0)
+                    or 0
+                )
+                latest_telemetry["current_top_line"] = int(last_fr.get("top_line") or (min(lines_db.keys()) if lines_db else 0))
+                latest_telemetry["current_bottom_line"] = int(last_fr.get("bottom_line") or max_db_ln or 0)
+                latest_telemetry["current_page"] = int(last_fr.get("page_index") or len(frames_db) or 1)
                 vfs_db = db.get_vfs_files(pid)
                 if vfs_db:
                     ws = analyzer_workspaces.setdefault(pid, {"project_id": pid})
                     ws.setdefault("vfs_files", vfs_db)
                 try:
-                    sync_multipart_state_from_alignment()
+                    sync_multipart_state_from_alignment(prefer_active_project=True)
                 except Exception:
                     pass
             else:
@@ -3695,8 +3918,8 @@ def load_persisted_state():
         except Exception:
             pass
     try:
-        sync_resume_frontier_state()
         load_diagnostics_trace()
+        sync_resume_frontier_state()
         ensure_diagnostics_trace_backfilled()
     except Exception as e:
         print(f"Error loading diagnostics trace: {e}")

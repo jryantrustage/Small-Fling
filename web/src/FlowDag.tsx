@@ -102,6 +102,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   const [runningPhase, setRunningPhase] = useState<number | null>(null);
   const [nodeActionFeedback, setNodeActionFeedback] = useState<string>('');
   const [universalConfigNode, setUniversalConfigNode] = useState<NodeMeta | null>(null);
+  const [showInitProgressGuardModal, setShowInitProgressGuardModal] = useState<boolean>(false);
 
   // Tunable parameters inside the compact node popover
   const [linesPerPage, setLinesPerPage] = useState<number>(activeProject?.lines_per_page || 49);
@@ -138,7 +139,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     fetchDagStatus();
     const timer = window.setInterval(fetchDagStatus, 1400);
     return () => window.clearInterval(timer);
-  }, [fetchDagStatus]);
+  }, [fetchDagStatus, activeProjectId]);
 
   // Close compact popover on outside click
   useEffect(() => {
@@ -187,30 +188,26 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     }
   };
 
+  const projCapturedMax = activeProject
+    ? Math.max(activeProject.max_line || 0, activeProject.line_count || 0, activeProject.total_lines || 0)
+    : undefined;
   const frontierBottomLine =
-    dagStatus?.loop_diagnosis?.frontier_line !== undefined && dagStatus.loop_diagnosis.frontier_line > 0
-      ? dagStatus.loop_diagnosis.frontier_line
-      : Math.max(
-          dagStatus?.current_bottom_line || 0,
-          dagStatus?.dag?.nodes?.frame_ocr?.bottom_line || 0
-        );
+    projCapturedMax === 0 && (activeProject?.frame_count ?? 0) === 0
+      ? 0
+      : dagStatus?.loop_diagnosis?.frontier_line !== undefined
+        ? dagStatus.loop_diagnosis.frontier_line
+        : Math.max(
+            dagStatus?.current_bottom_line || 0,
+            dagStatus?.dag?.nodes?.frame_ocr?.bottom_line || 0
+          );
   const autoResumeTopLine =
-    dagStatus?.loop_diagnosis?.next_expected_top_line !== undefined && dagStatus.loop_diagnosis.next_expected_top_line > 0
-      ? dagStatus.loop_diagnosis.next_expected_top_line
-      : frontierBottomLine > 0
-        ? frontierBottomLine + 1
-        : 1;
+    frontierBottomLine <= 0
+      ? 1
+      : dagStatus?.loop_diagnosis?.next_expected_top_line !== undefined && dagStatus.loop_diagnosis.next_expected_top_line > 0
+        ? dagStatus.loop_diagnosis.next_expected_top_line
+        : frontierBottomLine + 1;
 
-  // Run an entire phase group (Phase 0: markdown_file_change, Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
-  const handleRunPhase = async (phase: 0 | 1 | 2 | 3) => {
-    let forceReset = false;
-    if (phase === 1 && frontierBottomLine > 0) {
-      const ok = window.confirm(
-        `Project already has captured lines up to Line ${frontierBottomLine.toLocaleString()}.\n\nClick OK only if you want to RESET to Line 1 and clear existing progress, or Cancel to keep your progress and use Phase II to auto-resume at Line ${autoResumeTopLine.toLocaleString()}.`
-      );
-      if (!ok) return;
-      forceReset = true;
-    }
+  const executePhaseRequest = async (phase: 0 | 1 | 2 | 3, forceReset: boolean = false) => {
     setRunningPhase(phase);
     const groupMap: Record<number, DagGroup> = {
       0: 'markdown_file_change',
@@ -229,7 +226,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           mode: phase === 0 ? 'scan_folder' : undefined,
           reopen_editor: phase === 0 ? true : undefined,
           force_rescan: phase === 0 ? true : undefined,
-          force_reset: forceReset || undefined,
+          force_reset: forceReset ? true : false,
           resume_from_line: phase === 2 && frontierBottomLine > 0 ? autoResumeTopLine : undefined,
         }),
       });
@@ -238,6 +235,15 @@ export const FlowDag: React.FC<FlowDagProps> = ({
     } finally {
       setRunningPhase(null);
     }
+  };
+
+  // Run an entire phase group (Phase 0: markdown_file_change, Phase I: initialize, Phase II: capture_entire_markdown, Phase III: post_capture_analyzer)
+  const handleRunPhase = async (phase: 0 | 1 | 2 | 3) => {
+    if (phase === 1 && frontierBottomLine > 0) {
+      setShowInitProgressGuardModal(true);
+      return;
+    }
+    await executePhaseRequest(phase, false);
   };
 
   // Toggle outgoing edge / connector for a node
@@ -873,6 +879,276 @@ export const FlowDag: React.FC<FlowDagProps> = ({
               <span>{nodeActionFeedback}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Aesthetic Existing Capture Progress Modal (Replaces native window.confirm on Phase I Initialize) */}
+      {showInitProgressGuardModal && (
+        <div
+          className="modal-backdrop"
+          data-testid="init-progress-guard-modal"
+          onClick={() => setShowInitProgressGuardModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(6, 9, 15, 0.78)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '500px',
+              borderRadius: '14px',
+              background: 'linear-gradient(180deg, #161b22 0%, #0d1117 100%)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.72), 0 0 0 1px rgba(255, 255, 255, 0.04)',
+              overflow: 'hidden',
+              color: '#f0f6fc',
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 18px',
+                background: 'linear-gradient(90deg, rgba(16, 185, 129, 0.14) 0%, rgba(56, 189, 248, 0.1) 100%)',
+                borderBottom: '1px solid rgba(48, 54, 61, 0.85)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: 'rgba(16, 185, 129, 0.18)',
+                    border: '1px solid rgba(16, 185, 129, 0.45)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#10b981',
+                  }}
+                >
+                  <Sparkles size={16} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '13.5px', fontWeight: 800, color: '#f0f6fc', letterSpacing: '0.2px' }}>
+                    Existing Capture Progress Detected
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#8b949e', fontFamily: 'var(--font-mono, monospace)' }}>
+                    {activeProject?.part_file_name || activeProject?.name || 'Active Markdown Project'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowInitProgressGuardModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#8b949e',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '6px',
+                }}
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {(() => {
+                const effTarget =
+                  activeProject?.target_total_lines ||
+                  dagStatus?.loop_diagnosis?.target_total_lines ||
+                  dagStatus?.target_total_lines ||
+                  targetTotalLines ||
+                  0;
+                const pct = effTarget > 0 ? Math.min(100, Math.round((frontierBottomLine / effTarget) * 100)) : 0;
+                const frameCnt = dagStatus?.loop_diagnosis?.captured_frames_count ?? activeProject?.frame_count ?? 0;
+                return (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: 'rgba(13, 17, 23, 0.9)',
+                      border: '1px solid rgba(48, 54, 61, 0.9)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
+                      <span style={{ color: '#8b949e', fontWeight: 600 }}>Captured Frontier</span>
+                      <span style={{ color: '#00ff9d', fontWeight: 800, fontFamily: 'var(--font-mono, monospace)' }}>
+                        Line 1 → Line {frontierBottomLine.toLocaleString()}
+                        {effTarget > 0 ? ` / ${effTarget.toLocaleString()} (${pct}%)` : ''}
+                      </span>
+                    </div>
+                    {effTarget > 0 && (
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '7px',
+                          borderRadius: '999px',
+                          background: 'rgba(48, 54, 61, 0.7)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${pct}%`,
+                            height: '100%',
+                            borderRadius: '999px',
+                            background: 'linear-gradient(90deg, #10b981 0%, #38bdf8 100%)',
+                          }}
+                        />
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '10.5px',
+                        color: '#8b949e',
+                        fontFamily: 'var(--font-mono, monospace)',
+                      }}
+                    >
+                      <span>📸 {frameCnt.toLocaleString()} Frames Captured</span>
+                      <span style={{ color: '#38bdf8', fontWeight: 700 }}>
+                        Next Target: Line {autoResumeTopLine.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: '12px', color: '#c9d1d9', lineHeight: 1.5 }}>
+                This part already has captured lines up to{' '}
+                <strong style={{ color: '#00ff9d' }}>Line {frontierBottomLine.toLocaleString()}</strong>. How would you
+                like to proceed?
+              </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <button
+                  type="button"
+                  data-testid="init-modal-resume-btn"
+                  onClick={async () => {
+                    setShowInitProgressGuardModal(false);
+                    await executePhaseRequest(2, false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #34d399',
+                    background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Play size={14} fill="currentColor" />
+                    <span>Resume Capture at Line {autoResumeTopLine.toLocaleString()} (Recommended)</span>
+                  </span>
+                  <span style={{ fontSize: '10px', opacity: 0.9, fontFamily: 'var(--font-mono, monospace)' }}>
+                    Keep {frontierBottomLine.toLocaleString()} lines
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="init-modal-recalibrate-keep-btn"
+                  onClick={async () => {
+                    setShowInitProgressGuardModal(false);
+                    await executePhaseRequest(1, false);
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '9px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(56, 189, 248, 0.45)',
+                    background: 'rgba(56, 189, 248, 0.12)',
+                    color: '#38bdf8',
+                    fontSize: '11.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <RotateCw size={13} />
+                    <span>Align Viewport to Line {autoResumeTopLine.toLocaleString()} (Keep Progress)</span>
+                  </span>
+                  <span style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono, monospace)' }}>
+                    Phase I Safe Sync
+                  </span>
+                </button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+                  <button
+                    type="button"
+                    data-testid="init-modal-reset-clear-btn"
+                    onClick={async () => {
+                      setShowInitProgressGuardModal(false);
+                      await executePhaseRequest(1, true);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: '1px solid rgba(248, 81, 73, 0.45)',
+                      background: 'rgba(248, 81, 73, 0.1)',
+                      color: '#ff7b72',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🗑️ Reset to Line 1 &amp; Clear {frontierBottomLine.toLocaleString()} Lines
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="init-modal-cancel-btn"
+                    onClick={() => setShowInitProgressGuardModal(false)}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '8px',
+                      border: '1px solid #30363d',
+                      background: '#21262d',
+                      color: '#c9d1d9',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
