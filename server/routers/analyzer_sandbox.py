@@ -112,15 +112,46 @@ def _format_workspace_response(project_id: str, ws: Dict[str, Any]) -> Dict[str,
 
     repaired_tags = ws.get("repaired_tags") or []
     line_count_mismatches = ws.get("line_count_mismatches") or []
+    size_mismatches = ws.get("size_mismatches") or []
+    chars_mismatches = ws.get("chars_mismatches") or []
+    metric_mismatches = ws.get("metric_mismatches") or []
+    markers_summary = ws.get("markers_summary") or {}
+    distinct_metrics_summary = ws.get("distinct_metrics_summary") or {}
     dir_tree = ws.get("directory_tree") or {}
 
+    non_gen_files = [f for f in vfs_files if f.get("tag_status") != "generated"]
+    if not distinct_metrics_summary and non_gen_files:
+        distinct_metrics_summary = {
+            "total_files": len(non_gen_files),
+            "size_matched_count": sum(1 for f in non_gen_files if f.get("size_matches")),
+            "size_mismatched_count": sum(1 for f in non_gen_files if not f.get("size_matches")),
+            "lines_matched_count": sum(1 for f in non_gen_files if f.get("lines_matches")),
+            "lines_mismatched_count": sum(1 for f in non_gen_files if not f.get("lines_matches")),
+            "chars_matched_count": sum(1 for f in non_gen_files if f.get("chars_matches")),
+            "chars_mismatched_count": sum(1 for f in non_gen_files if not f.get("chars_matches")),
+            "markers_paired_count": sum(1 for f in non_gen_files if f.get("markers_paired", True)),
+            "all_three_matched_count": sum(
+                1 for f in non_gen_files
+                if f.get("size_matches") and f.get("lines_matches") and f.get("chars_matches")
+            ),
+            "fully_verified_count": sum(1 for f in non_gen_files if f.get("all_metrics_match")),
+        }
+
     tag_parse_report = {
-        "total_files": len([f for f in vfs_files if f.get("tag_status") != "generated"]),
+        "total_files": len(non_gen_files),
         "total_vfs_files_with_generated": len(vfs_files),
         "repaired_tags_count": len(repaired_tags),
         "repaired_tags": repaired_tags,
         "line_count_mismatches_count": len(line_count_mismatches),
         "line_count_mismatches": line_count_mismatches,
+        "size_mismatches_count": len(size_mismatches),
+        "size_mismatches": size_mismatches,
+        "chars_mismatches_count": len(chars_mismatches),
+        "chars_mismatches": chars_mismatches,
+        "metric_mismatches_count": len(metric_mismatches),
+        "metric_mismatches": metric_mismatches,
+        "markers_summary": markers_summary,
+        "distinct_metrics_summary": distinct_metrics_summary,
         "directory_tree": dir_tree,
         "sources": ws.get("sources") or [],
     }

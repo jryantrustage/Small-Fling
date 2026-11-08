@@ -15,11 +15,41 @@ interface VfsFileEntry {
   path: string;
   normalized_path: string;
   ext: string;
+  size?: number;
+  expected_size?: number;
+  actual_size?: number;
+  size_delta?: number;
+  size_matches?: boolean;
   expected_lines: number;
   actual_lines: number;
   line_count_delta?: number;
+  lines_matches?: boolean;
   line_count_matches?: boolean;
+  expected_chars?: number;
+  actual_chars?: number;
+  chars_delta?: number;
+  chars_matches?: boolean;
+  has_start_marker?: boolean;
+  has_end_marker?: boolean;
+  markers_paired?: boolean;
+  all_metrics_match?: boolean;
+  distinct_verification?: {
+    size?: { expected: number; actual: number; delta: number; matches: boolean };
+    lines?: { expected: number; actual: number; delta: number; matches: boolean };
+    chars?: { expected: number; actual: number; delta: number; matches: boolean };
+    markers?: {
+      start_md_line: number;
+      end_md_line: number;
+      has_start_marker: boolean;
+      has_end_marker: boolean;
+      paired: boolean;
+    };
+    all_match?: boolean;
+    mismatch_reasons?: string[];
+  };
+  mismatch_reasons?: string[];
   content: string;
+  tag_start_md_line?: number;
   start_md_line: number;
   end_md_line: number;
   source_frame_ids: string[];
@@ -376,17 +406,54 @@ export const AnalyzerSandboxWorkspace: React.FC<AnalyzerSandboxWorkspaceProps> =
         {tagParseReport && (
           <div
             style={{
-              padding: '5px 10px',
+              padding: '6px 10px',
               background: 'rgba(56, 189, 248, 0.06)',
               borderBottom: '1px solid #21262d',
               fontSize: '10px',
               color: '#8b949e',
               display: 'flex',
-              justifyContent: 'space-between',
+              flexDirection: 'column',
+              gap: '4px',
             }}
           >
-            <span>Repaired Tags: <strong style={{ color: '#00ff9d' }}>{tagParseReport.repaired_tags_count ?? 0}</strong></span>
-            <span>Delta Files: <strong style={{ color: '#e3b341' }}>{tagParseReport.delta_files_count ?? 0}</strong></span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span title="Tracked <!-- CODESCAN_FILE_START --> and <!-- CODESCAN_FILE_END --> markers">
+                Markers:{' '}
+                <strong style={{ color: '#58a6ff' }}>
+                  {tagParseReport.markers_summary?.paired_markers_count ?? tagParseReport.total_files ?? 0}/
+                  {tagParseReport.markers_summary?.total_start_markers ?? tagParseReport.total_files ?? 0}
+                </strong>{' '}
+                paired
+              </span>
+              <span>
+                Healed: <strong style={{ color: '#00ff9d' }}>{tagParseReport.repaired_tags_count ?? 0}</strong>
+              </span>
+            </div>
+            {tagParseReport.distinct_metrics_summary && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '9.5px' }}>
+                <span title="Distinct Size (UTF-8 bytes) matches against CODESCAN_FILE_START">
+                  Size:{' '}
+                  <strong style={{ color: '#00ff9d' }}>
+                    {tagParseReport.distinct_metrics_summary.size_matched_count}/
+                    {tagParseReport.distinct_metrics_summary.total_files}
+                  </strong>
+                </span>
+                <span title="Distinct Line Count matches against CODESCAN_FILE_START">
+                  Lines:{' '}
+                  <strong style={{ color: '#00ff9d' }}>
+                    {tagParseReport.distinct_metrics_summary.lines_matched_count}/
+                    {tagParseReport.distinct_metrics_summary.total_files}
+                  </strong>
+                </span>
+                <span title="Distinct Character Count matches against CODESCAN_FILE_START">
+                  Chars:{' '}
+                  <strong style={{ color: '#00ff9d' }}>
+                    {tagParseReport.distinct_metrics_summary.chars_matched_count}/
+                    {tagParseReport.distinct_metrics_summary.total_files}
+                  </strong>
+                </span>
+              </div>
+            )}
           </div>
         )}
 
@@ -441,23 +508,49 @@ export const AnalyzerSandboxWorkspace: React.FC<AnalyzerSandboxWorkspaceProps> =
                     </span>
                   </div>
 
-                  {/* Status Badge: ✔ Valid | ⚠️ Tag Healed | ❌ TS Error */}
-                  {hasErrors ? (
-                    <span className="vfs-status-badge error" title={`${fileDiags.length} TS Compiler Error(s)`}>
-                      <XCircle size={10} />
-                      <span>❌ {fileDiags.length}</span>
-                    </span>
-                  ) : isTagHealed ? (
-                    <span className="vfs-status-badge healed" title={`Tag status: ${file.tag_status}`}>
-                      <AlertTriangle size={10} />
-                      <span>⚠️ Healed</span>
-                    </span>
-                  ) : (
-                    <span className="vfs-status-badge valid" title="Valid VFS file & AST">
-                      <CheckCircle2 size={10} />
-                      <span>✔ Valid</span>
-                    </span>
-                  )}
+                  {/* Distinct Verification & Status Badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                    {file.tag_status !== 'generated' && (file.expected_lines > 0 || (file.expected_size ?? 0) > 0) && (
+                      <span
+                        style={{
+                          fontSize: '9px',
+                          fontFamily: 'var(--font-mono)',
+                          padding: '1px 4px',
+                          borderRadius: '4px',
+                          background: file.all_metrics_match
+                            ? 'rgba(0, 255, 157, 0.1)'
+                            : 'rgba(227, 179, 65, 0.12)',
+                          color: file.all_metrics_match ? '#00ff9d' : '#e3b341',
+                          border: `1px solid ${file.all_metrics_match ? 'rgba(0,255,157,0.28)' : 'rgba(227,179,65,0.32)'}`,
+                        }}
+                        title={
+                          `Distinct CODESCAN_FILE_START verification:\n` +
+                          `• Size: ${file.actual_size ?? 0} / ${file.expected_size ?? file.size ?? 0}B (${file.size_matches ? '✔ Match' : `Δ ${file.size_delta ?? 0}B`})\n` +
+                          `• Lines: ${file.actual_lines} / ${file.expected_lines} (${file.lines_matches ? '✔ Match' : `Δ ${file.line_count_delta ?? 0}`})\n` +
+                          `• Chars: ${file.actual_chars ?? 0} / ${file.expected_chars ?? 0} (${file.chars_matches ? '✔ Match' : `Δ ${file.chars_delta ?? 0}`})\n` +
+                          `• Markers: Ln ${file.tag_start_md_line ?? file.start_md_line} → Ln ${file.end_md_line} (${file.markers_paired !== false ? 'Paired ✔' : 'Unclosed ⚠️'})`
+                        }
+                      >
+                        S{file.size_matches ? '✓' : '!'} L{file.lines_matches ? '✓' : '!'} C{file.chars_matches ? '✓' : '!'}
+                      </span>
+                    )}
+                    {hasErrors ? (
+                      <span className="vfs-status-badge error" title={`${fileDiags.length} TS Compiler Error(s)`}>
+                        <XCircle size={10} />
+                        <span>❌ {fileDiags.length}</span>
+                      </span>
+                    ) : isTagHealed ? (
+                      <span className="vfs-status-badge healed" title={`Tag status: ${file.tag_status}`}>
+                        <AlertTriangle size={10} />
+                        <span>⚠️ {file.tag_status === 'metric_mismatch' ? 'Δ Metric' : 'Healed'}</span>
+                      </span>
+                    ) : (
+                      <span className="vfs-status-badge valid" title="Valid VFS file & AST">
+                        <CheckCircle2 size={10} />
+                        <span>✔ Valid</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })
@@ -475,8 +568,72 @@ export const AnalyzerSandboxWorkspace: React.FC<AnalyzerSandboxWorkspaceProps> =
             </span>
             {activeFile && (
               <span style={{ fontSize: '10.5px', color: '#8b949e', textTransform: 'none' }}>
-                (MD Ln {activeFile.start_md_line}–{activeFile.end_md_line} • {editorLines.length} lines)
+                (MD Ln {activeFile.tag_start_md_line ?? activeFile.start_md_line}–{activeFile.end_md_line} • {editorLines.length} lines)
               </span>
+            )}
+            {activeFile && activeFile.tag_status !== 'generated' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: activeFile.markers_paired !== false ? 'rgba(56, 189, 248, 0.12)' : 'rgba(248, 81, 73, 0.15)',
+                    color: activeFile.markers_paired !== false ? '#38bdf8' : '#f85149',
+                    border: '1px solid rgba(56, 189, 248, 0.28)',
+                  }}
+                  title="Tracked <!-- CODESCAN_FILE_START --> and <!-- CODESCAN_FILE_END --> markdown line boundaries"
+                >
+                  Markers: START L{activeFile.tag_start_md_line ?? activeFile.start_md_line} →{' '}
+                  {activeFile.markers_paired !== false ? `END L${activeFile.end_md_line} ✔` : 'UNCLOSED ⚠️'}
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: activeFile.size_matches ? 'rgba(0, 255, 157, 0.1)' : 'rgba(227, 179, 65, 0.14)',
+                    color: activeFile.size_matches ? '#00ff9d' : '#e3b341',
+                    border: `1px solid ${activeFile.size_matches ? 'rgba(0,255,157,0.3)' : 'rgba(227,179,65,0.35)'}`,
+                  }}
+                  title="Distinct size verification against CODESCAN_FILE_START size attribute (UTF-8 bytes)"
+                >
+                  size: {(activeFile.actual_size ?? 0).toLocaleString()}/{(activeFile.expected_size ?? activeFile.size ?? 0).toLocaleString()}B{' '}
+                  {activeFile.size_matches ? '✔' : `(${(activeFile.size_delta ?? 0) >= 0 ? '+' : ''}${activeFile.size_delta ?? 0}B)`}
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: activeFile.lines_matches ? 'rgba(0, 255, 157, 0.1)' : 'rgba(227, 179, 65, 0.14)',
+                    color: activeFile.lines_matches ? '#00ff9d' : '#e3b341',
+                    border: `1px solid ${activeFile.lines_matches ? 'rgba(0,255,157,0.3)' : 'rgba(227,179,65,0.35)'}`,
+                  }}
+                  title="Distinct lines verification against CODESCAN_FILE_START lines attribute"
+                >
+                  lines: {activeFile.actual_lines.toLocaleString()}/{activeFile.expected_lines.toLocaleString()}{' '}
+                  {activeFile.lines_matches ? '✔' : `(${(activeFile.line_count_delta ?? 0) >= 0 ? '+' : ''}${activeFile.line_count_delta ?? 0})`}
+                </span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: activeFile.chars_matches ? 'rgba(0, 255, 157, 0.1)' : 'rgba(227, 179, 65, 0.14)',
+                    color: activeFile.chars_matches ? '#00ff9d' : '#e3b341',
+                    border: `1px solid ${activeFile.chars_matches ? 'rgba(0,255,157,0.3)' : 'rgba(227,179,65,0.35)'}`,
+                  }}
+                  title="Distinct chars verification against CODESCAN_FILE_START chars attribute"
+                >
+                  chars: {(activeFile.actual_chars ?? 0).toLocaleString()}/{(activeFile.expected_chars ?? 0).toLocaleString()}{' '}
+                  {activeFile.chars_matches ? '✔' : `(${(activeFile.chars_delta ?? 0) >= 0 ? '+' : ''}${activeFile.chars_delta ?? 0})`}
+                </span>
+              </div>
             )}
             {isDirty && (
               <span style={{ fontSize: '10px', color: '#e3b341', fontWeight: 700 }}>● Modified</span>

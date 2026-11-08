@@ -1468,12 +1468,17 @@ _STITCHER_TRANSLATE_TABLE = str.maketrans({
     "\uff1b": ";",
     "\uff0c": ",",
 })
-_RE_CODESCAN_END_SEARCH = re.compile(r"<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*END\b", re.IGNORECASE)
-_RE_CODESCAN_END_MATCH = re.compile(r"^\s*<[\-!\s]*C[O0]DESCAN[_\s]*FILE[_\s]*END[\-\s>]*$", re.IGNORECASE)
-_RE_CODESCAN_START_MATCH = re.compile(r"^\s*<\s*!?\s*\-*\s*C[O0]DESCAN[_\s]*FILE[_\s]*START\b(.*)$", re.IGNORECASE)
+_RE_CODESCAN_END_SEARCH = re.compile(r"(?:<\s*!?\s*\-*\s*)?C[O0]DESCAN[_\-\s]*FILE[_\-\s]*END\b", re.IGNORECASE)
+_RE_CODESCAN_END_MATCH = re.compile(r"^\s*(?:<[\-!\s]*)?C[O0]DESCAN[_\-\s]*FILE[_\-\s]*END[\-\s>]*$", re.IGNORECASE)
+_RE_CODESCAN_START_MATCH = re.compile(r"^\s*(?:<\s*!?\s*\-*\s*)?C[O0]DESCAN[_\-\s]*FILE[_\-\s]*START\b(.*)$", re.IGNORECASE)
 _RE_CODESCAN_TAIL_STRIP = re.compile(r"[\-\s>]+$")
-_RE_CODESCAN_ATTR = re.compile(r'\b(path|type|size|lines|chars)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+)', re.IGNORECASE)
-_RE_CODESCAN_UNCLOSED_ATTR = re.compile(r'\b(path|type|size|lines|chars)\s*=\s*["\']([^"\'\s>]+)$', re.IGNORECASE)
+_RE_CODESCAN_ATTR = re.compile(r'(?:^|(?<=[\s"\']))[0-9Il|]?(path|type|size|lines|chars)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s"\'>]+)', re.IGNORECASE)
+_RE_CODESCAN_UNCLOSED_ATTR = re.compile(r'(?:^|(?<=[\s"\']))[0-9Il|]?(path|type|size|lines|chars)\s*=\s*["\']([^"\'\s>]+)$', re.IGNORECASE)
+_OCR_DIGIT_FIX_TABLE = str.maketrans({"o": "0", "O": "0", "l": "1", "I": "1", "|": "1"})
+_RE_OCR_CODE_FENCE_AFTER_START = re.compile(
+    r"^\s*[\s`'*‘’\"\-]*(typescript|tsx|ts|javascript|jsx|js|json|css|scss|less|html|markdown|md|yaml|yml|xml|sql|sh|bash|python|py)\s*$",
+    re.IGNORECASE,
+)
 _RE_SYNTH_ROW_TAG = re.compile(r"^\[?L(\d{1,6})\]?\s*(?:[:|.)\]>\-]\s*|\s+)(.*)$", re.IGNORECASE)
 _RE_SYNTH_ROW_ONLY = re.compile(r"^\[?L\d{1,6}\]?$", re.IGNORECASE)
 _RE_GUTTER_PREFIX = re.compile(r"^(\d{1,6})\s*([>#`\.\-\|\{\[\s\"'].*|[a-zA-Z_\-\.\/].*)$")
@@ -1529,11 +1534,17 @@ def _recognize_row_slice_cached(ocr_inst, tight_crop: np.ndarray) -> Tuple[str, 
 def _fix_codescan_attr_match(m_attr: re.Match) -> str:
     key = m_attr.group(1).lower()
     raw_val = m_attr.group(2).strip().strip("\"'`")
+    if key in ("size", "lines", "chars"):
+        raw_val = raw_val.translate(_OCR_DIGIT_FIX_TABLE)
     return f'{key}="{raw_val}"'
 
 
 def _fix_codescan_unclosed_attr_match(m_attr: re.Match) -> str:
-    return f'{m_attr.group(1).lower()}="{m_attr.group(2)}"'
+    key = m_attr.group(1).lower()
+    raw_val = m_attr.group(2).strip()
+    if key in ("size", "lines", "chars"):
+        raw_val = raw_val.translate(_OCR_DIGIT_FIX_TABLE)
+    return f'{key}="{raw_val}"'
 
 
 def _normalize_codescan_tags(text: str) -> str:
@@ -2661,6 +2672,25 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
                         if fallback_short:
                             line_str = indent_prefix + fallback_short
 
+        # If bottom_line is a wrapped CODESCAN_FILE_START tag whose 2nd visual row sits at yc + pitch_y
+        # (where the left gutter is occluded by the bottom-left Cloud/Offline badge), join its 2nd sub-row before sanitizing
+        if (
+            ln == bottom_line
+            and not is_wrapped
+            and "codescan" in line_str.lower()
+            and "start" in line_str.lower()
+            and "chars=" not in line_str.lower()
+            and (yc + pitch_y) <= (float(h) - 100.0 * scale_y)
+        ):
+            _, next_c_ink, next_txt, next_conf = _inspect_row_ink(yc + pitch_y)
+            if next_c_ink >= 10 and next_txt:
+                cleaned_next = re.sub(r"^(?:Offline|Saving|Saved)\s+", "", next_txt.strip(), flags=re.IGNORECASE)
+                if any(tok in cleaned_next.lower() for tok in ("type=", "size=", "lines=", "chars=", "-->")):
+                    line_str = join_wrapped_row_slices([line_str, cleaned_next])
+                    is_wrapped = True
+                    wrapped_line_count = 2
+                    bottom_wrapped_extra_rows = max(bottom_wrapped_extra_rows, 1)
+
         line_str = LocalOllamaStitcher.sanitize_line_text(ln, line_str)
         is_blank = False
 
@@ -2803,6 +2833,12 @@ class LocalOllamaStitcher:
                 is_blank = True
             else:
                 text = self.sanitize_line_text(ln, item.get("text", ""))
+                prev_ex = existing_lines.get(ln - 1)
+                prev_txt = str(prev_ex.get("text", "") if isinstance(prev_ex, dict) else (getattr(prev_ex, "text", prev_ex) if prev_ex else ""))
+                if "CODESCAN_FILE_START" in prev_txt:
+                    m_fence = _RE_OCR_CODE_FENCE_AFTER_START.match(text)
+                    if m_fence:
+                        text = f"```{m_fence.group(1).lower()}"
                 is_blank = not bool(text.strip())
             is_wrapped = item.get("is_wrapped", False)
             wcount = item.get("wrapped_line_count", 1)

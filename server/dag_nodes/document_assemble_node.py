@@ -84,6 +84,60 @@ class DocumentAssembleNode(BaseDagNode):
         loop_iter = (state.dag_state["nodes"].get("document_assemble", {}).get("loop_iteration") or 0) + 1
         now_mono = time.perf_counter()
 
+        # Track <!-- CODESCAN_FILE_START --> and <!-- CODESCAN_FILE_END --> markers and verify size/lines/chars distinctly
+        codescan_verification: Dict[str, Any] = {}
+        try:
+            from dag_nodes.markdown_tag_parser_node import verify_codescan_file_markers_and_metrics
+            cs_res = verify_codescan_file_markers_and_metrics(
+                doc_lines,
+                project_id=blackboard.project_id,
+                self_heal=bool(is_complete),
+                recover_wrapped_from_png=bool(is_complete),
+                preloaded_frame_ranges=[],
+            )
+            ms = cs_res["markers_summary"]
+            dms = cs_res["distinct_metrics_summary"]
+            codescan_verification = {
+                "markers_summary": {
+                    "total_start_markers": ms["total_start_markers"],
+                    "total_end_markers": ms["total_end_markers"],
+                    "paired_markers_count": ms["paired_markers_count"],
+                    "unclosed_start_markers_count": ms["unclosed_start_markers_count"],
+                    "orphan_end_markers_count": ms["orphan_end_markers_count"],
+                },
+                "distinct_metrics_summary": dms,
+                "metric_mismatches_count": len(cs_res["metric_mismatches"]),
+                "files": [
+                    {
+                        "index": f["index"],
+                        "path": f["path"],
+                        "normalized_path": f["normalized_path"],
+                        "tag_start_md_line": f["tag_start_md_line"],
+                        "end_md_line": f["end_md_line"],
+                        "markers_paired": f["markers_paired"],
+                        "expected_size": f["expected_size"],
+                        "actual_size": f["actual_size"],
+                        "size_delta": f["size_delta"],
+                        "size_matches": f["size_matches"],
+                        "expected_lines": f["expected_lines"],
+                        "actual_lines": f["actual_lines"],
+                        "line_count_delta": f["line_count_delta"],
+                        "lines_matches": f["lines_matches"],
+                        "expected_chars": f["expected_chars"],
+                        "actual_chars": f["actual_chars"],
+                        "chars_delta": f["chars_delta"],
+                        "chars_matches": f["chars_matches"],
+                        "all_metrics_match": f["all_metrics_match"],
+                        "mismatch_reasons": f["mismatch_reasons"],
+                        "distinct_verification": f["distinct_verification"],
+                    }
+                    for f in cs_res["vfs_files"]
+                ],
+            }
+            blackboard.metadata["codescan_verification"] = codescan_verification
+        except Exception as cs_err:
+            print(f"[DocumentAssembleNode] codescan verification note: {cs_err}")
+
         # Write out reproduced markdown file to disk (throttled during large active capture loops, immediate on completion)
         if is_complete or max_k <= 1000 or loop_iter % 25 == 0 or (now_mono - _last_markdown_disk_flush_mono) >= 0.5:
             _last_markdown_disk_flush_mono = now_mono
@@ -123,6 +177,17 @@ class DocumentAssembleNode(BaseDagNode):
             else:
                 complete_suffix = " • 100% COMPLETE ✔"
 
+        ms_brief = codescan_verification.get("markers_summary", {})
+        dms_brief = codescan_verification.get("distinct_metrics_summary", {})
+        markers_suffix = ""
+        if ms_brief.get("total_start_markers", 0) > 0:
+            markers_suffix = (
+                f" • Markers {ms_brief.get('paired_markers_count', 0)}/{ms_brief.get('total_start_markers', 0)} "
+                f"(Size:{dms_brief.get('size_matched_count', 0)} "
+                f"Lines:{dms_brief.get('lines_matched_count', 0)} "
+                f"Chars:{dms_brief.get('chars_matched_count', 0)})"
+            )
+
         state.dag_state["nodes"]["document_assemble"].update({
             "status": "completed",
             "total_captured_lines": captured_count,
@@ -133,16 +198,17 @@ class DocumentAssembleNode(BaseDagNode):
             "occluded_tail_lines": occluded_shortfall,
             "loop_iteration": loop_iter,
             "reconstructed_length": len(full_markdown),
-            "evaluator": "Document Integrity Evaluator",
+            "codescan_verification": codescan_verification,
+            "evaluator": "Document Integrity & CODESCAN Marker Evaluator",
             "healing_step": None if is_complete else "Capturing next page slice",
-            "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + complete_suffix,
+            "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + markers_suffix + complete_suffix,
             "error": None
         })
 
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Document assemble: {captured_count} lines verified" + (complete_suffix if is_complete else f" ({pct}%)"),
+            message=f"Document assemble: {captured_count} lines verified" + markers_suffix + (complete_suffix if is_complete else f" ({pct}%)"),
             is_complete=is_complete,
             total_lines=total_lines_target,
             data={
@@ -155,6 +221,7 @@ class DocumentAssembleNode(BaseDagNode):
                 "occluded_tail_lines": occluded_shortfall,
                 "eof_reason": eof_reason,
                 "loop_iteration": loop_iter,
-                "reconstructed_length": len(full_markdown)
+                "reconstructed_length": len(full_markdown),
+                "codescan_verification": codescan_verification,
             }
         )

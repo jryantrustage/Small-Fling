@@ -1659,6 +1659,70 @@ async def get_verified_lines_report():
             else:
                 report_lines.append(f"- Missing Lines {s} → {e} ({e - s + 1} lines)")
 
+    # ── CODESCAN_FILE_START / CODESCAN_FILE_END Markers & Distinct (size / lines / chars) Verification ──
+    report_lines.append("")
+    report_lines.append("## CODESCAN File Markers & Distinct Metrics Verification (size / lines / chars)")
+    try:
+        from dag_nodes.markdown_tag_parser_node import verify_codescan_file_markers_and_metrics
+        ordered_md_lines = []
+        if max_ln > 0:
+            for ln_i in range(1, max_ln + 1):
+                entry_i = doc_lines.get(ln_i, "")
+                txt_i = (
+                    getattr(entry_i, "text", "")
+                    if hasattr(entry_i, "text")
+                    else (entry_i.get("text", "") if isinstance(entry_i, dict) else str(entry_i))
+                )
+                ordered_md_lines.append(str(txt_i))
+        cs_verify = verify_codescan_file_markers_and_metrics(
+            ordered_md_lines,
+            project_id=pid,
+            self_heal=False,
+            recover_wrapped_from_png=True,
+            preloaded_frame_ranges=[],
+        )
+        ms = cs_verify["markers_summary"]
+        dms = cs_verify["distinct_metrics_summary"]
+        report_lines.append(
+            f"- **Tracked Markers**: `{ms['total_start_markers']}` `<!-- CODESCAN_FILE_START -->` | "
+            f"`{ms['total_end_markers']}` `<!-- CODESCAN_FILE_END -->` | "
+            f"`{ms['paired_markers_count']}` Paired | "
+            f"`{ms['unclosed_start_markers_count']}` Unclosed Start | "
+            f"`{ms['orphan_end_markers_count']}` Orphan End"
+        )
+        report_lines.append(
+            f"- **Distinct Metric Matches ({dms['total_files']} files)**: "
+            f"**Size**: `{dms['size_matched_count']}/{dms['total_files']}` ✔ | "
+            f"**Lines**: `{dms['lines_matched_count']}/{dms['total_files']}` ✔ | "
+            f"**Chars**: `{dms['chars_matched_count']}/{dms['total_files']}` ✔ | "
+            f"**All 3 + Paired**: `{dms['fully_verified_count']}/{dms['total_files']}` ✔"
+        )
+        report_lines.append("")
+        if cs_verify["vfs_files"]:
+            report_lines.append("| # | File | Markers (Start → End) | Size (Act / Exp) | Lines (Act / Exp) | Chars (Act / Exp) | Distinct Status |")
+            report_lines.append("|---|---|---|---|---|---|---|")
+            for vf in cs_verify["vfs_files"]:
+                fname = Path(vf["path"].replace("\\", "/")).name or vf["normalized_path"]
+                m_str = (
+                    f"Ln {vf['tag_start_md_line']} → Ln {vf['end_md_line']} ✔"
+                    if vf.get("markers_paired")
+                    else f"Ln {vf['tag_start_md_line']} → Unclosed ⚠️"
+                )
+                sz_icon = "✔" if vf.get("size_matches") else f"❌ ({vf.get('size_delta', 0):+d}B)"
+                ln_icon = "✔" if vf.get("lines_matches") else f"❌ ({vf.get('line_count_delta', 0):+d})"
+                ch_icon = "✔" if vf.get("chars_matches") else f"❌ ({vf.get('chars_delta', 0):+d})"
+                sz_col = f"{vf['actual_size']:,} / {vf['expected_size']:,} {sz_icon}"
+                ln_col = f"{vf['actual_lines']:,} / {vf['expected_lines']:,} {ln_icon}"
+                ch_col = f"{vf['actual_chars']:,} / {vf['expected_chars']:,} {ch_icon}"
+                st_col = "✔ All Match" if vf.get("all_metrics_match") else ("⚠️ " + "; ".join(vf.get("mismatch_reasons") or ["Mismatch"]))
+                report_lines.append(
+                    f"| {vf['index']} | `{fname}` | {m_str} | {sz_col} | {ln_col} | {ch_col} | {st_col} |"
+                )
+        else:
+            report_lines.append("_No `<!-- CODESCAN_FILE_START -->` blocks detected in active document._")
+    except Exception as cs_rep_err:
+        report_lines.append(f"⚠️ CODESCAN marker verification error: {cs_rep_err}")
+
     report_lines.append("")
     report_lines.append("## Line Fidelity & Verbatim Sampling")
     sample_indices = sorted_line_keys[:5]
@@ -1674,6 +1738,73 @@ async def get_verified_lines_report():
 
     report_text = "\n".join(report_lines)
     return PlainTextResponse(report_text, headers={"Content-Type": "text/markdown; charset=utf-8"})
+
+
+@router.get("/api/document/codescan-verify")
+async def get_codescan_markers_and_metrics_verification(
+    project_id: Optional[str] = Query(None, description="Optional project ID to verify"),
+    self_heal: bool = Query(False, description="Whether to self-heal OCR-corrupted markers from frame PNGs"),
+):
+    """
+    Tracks all <!-- CODESCAN_FILE_START --> and <!-- CODESCAN_FILE_END --> markers in the
+    active or specified project's markdown, and verifies distinctly whether each file block's
+    size, lines, and chars match the declared attributes in CODESCAN_FILE_START.
+    """
+    from dag_nodes.markdown_tag_parser_node import verify_codescan_file_markers_and_metrics
+
+    pid = project_id or state.get_current_project_id()
+    md_lines: List[str] = []
+    source_desc = "state.document_lines"
+
+    if (not project_id or project_id == state.get_current_project_id()) and state.document_lines:
+        max_k = max((int(k) for k in state.document_lines.keys() if int(k) > 0), default=0)
+        for ln_i in range(1, max_k + 1):
+            entry_i = state.document_lines.get(ln_i, "")
+            txt_i = (
+                getattr(entry_i, "text", "")
+                if hasattr(entry_i, "text")
+                else (entry_i.get("text", "") if isinstance(entry_i, dict) else str(entry_i))
+            )
+            md_lines.append(str(txt_i))
+    elif pid:
+        db_lines = db.get_document_lines(pid)
+        if db_lines:
+            max_k = max((int(k) for k in db_lines.keys() if int(k) > 0), default=0)
+            md_lines = [str((db_lines.get(ln_i) or {}).get("text", "")) for ln_i in range(1, max_k + 1)]
+            source_desc = f"db.document_lines[{pid}]"
+
+    if not md_lines:
+        fallback_md = Path("c:/Projects/Small-Fling/storage/reproduced_Matrix_main.md")
+        if fallback_md.exists():
+            md_lines = fallback_md.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+            source_desc = str(fallback_md)
+
+    res = await asyncio.to_thread(
+        verify_codescan_file_markers_and_metrics,
+        md_lines,
+        pid,
+        self_heal,
+        True,
+        None,
+    )
+    return {
+        "status": "ok",
+        "project_id": pid,
+        "source": source_desc,
+        "total_markdown_lines": len(md_lines),
+        "markers_summary": res["markers_summary"],
+        "distinct_metrics_summary": res["distinct_metrics_summary"],
+        "repaired_tags_count": len(res["repaired_tags"]),
+        "repaired_tags": res["repaired_tags"],
+        "size_mismatches": res["size_mismatches"],
+        "line_count_mismatches": res["line_count_mismatches"],
+        "chars_mismatches": res["chars_mismatches"],
+        "metric_mismatches": res["metric_mismatches"],
+        "files": [
+            {k: v for k, v in vf.items() if k != "content"}
+            for vf in res["vfs_files"]
+        ],
+    }
 
 
 # ─── GROUND-TRUTH REFERENCE MARKDOWN INGESTION, SCORING & AUTO-HEAL ───────────
