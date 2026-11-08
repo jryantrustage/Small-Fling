@@ -491,7 +491,8 @@ async def enforce_desktop_markdown_endpoint(req: Request):
 @router.post("/api/device/auto-pin")
 async def auto_pin_endpoint(req: Request):
     """
-    Automatically enters the device/Intune PIN ONLY when a verified Teams PIN prompt is displayed on desktop.
+    Automatically enters the Teams/Intune PIN (2992) when a Teams PIN prompt is displayed on either
+    the Phone Screen (Display #0) or the Desktop Display (#ext_id), while strictly separating Phone Unlock PIN (1213).
     """
     data = {}
     try: data = await req.json()
@@ -500,7 +501,14 @@ async def auto_pin_endpoint(req: Request):
     disp_id = data.get("display_id")
     pin = data.get("pin")
     force = bool(data.get("force", True))
-    res = await adb.auto_handle_pin_authentication(serial=serial, ext_display_id=disp_id, pin=pin, force=force)
+    target_display = data.get("target_display") or data.get("mode")
+    res = await adb.auto_handle_pin_authentication(
+        serial=serial,
+        ext_display_id=disp_id,
+        pin=pin,
+        force=force,
+        target_display=target_display,
+    )
     return {"status": "ok", "details": res}
 
 @router.get("/api/device/hid-target")
@@ -539,10 +547,12 @@ async def set_hid_target_endpoint(req: Request):
 
 
 @router.post("/api/device/phone-tap")
-async def phone_tap_endpoint(req: Request):
+@router.post("/api/device/display-tap")
+async def display_tap_endpoint(req: Request):
     """
-    Sends a touch tap directly to the Phone Screen (Display #0) at normalized (norm_x, norm_y)
-    or pixel (x, y) coordinates, wakes Display #0, and refreshes the phone UI mirror.
+    Sends a touch/click tap to either the Phone Screen (Display #0, mode='phone')
+    or the External Desktop Mode Display (Display #ext_id, mode='desktop') at normalized
+    (norm_x, norm_y) or pixel (x, y) coordinates, and immediately invalidates the frame cache.
     """
     data = {}
     try: data = await req.json()
@@ -551,6 +561,48 @@ async def phone_tap_endpoint(req: Request):
     if not ser:
         return {"status": "error", "message": "No active ADB device"}
 
+    mode = str(data.get("mode") or "phone").strip().lower()
+    if mode not in ("phone", "desktop"):
+        mode = "phone"
+
+    if mode == "desktop":
+        ext_id = data.get("display_id") or await adb.detect_external_display_id(ser) or 3
+        w, h = 1920, 1080
+        cached = adb._frame_cache.get((ser, "desktop"))
+        if cached and cached.get("raw_png"):
+            try:
+                import cv2, numpy as np
+                img = cv2.imdecode(np.frombuffer(cached["raw_png"], np.uint8), cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    h, w = img.shape[:2]
+            except Exception:
+                pass
+        else:
+            try:
+                dw, dh = await adb.get_display_dimensions(ser, ext_id)
+                if dw > 0 and dh > 0:
+                    w, h = dw, dh
+            except Exception:
+                pass
+
+        if "norm_x" in data and "norm_y" in data:
+            tx = max(0, min(w - 1, int(round(float(data["norm_x"]) * w))))
+            ty = max(0, min(h - 1, int(round(float(data["norm_y"]) * h))))
+        else:
+            tx = int(data.get("x", w // 2))
+            ty = int(data.get("y", h // 2))
+
+        await adb.run_adb_shell(
+            f"settings put secure show_ime_with_hard_keyboard 0; "
+            f"input -d {ext_id} tap {tx} {ty} >/dev/null 2>&1",
+            ser,
+            timeout=3.0,
+        )
+        if (ser, "desktop") in adb._frame_cache:
+            adb._frame_cache[(ser, "desktop")]["ts"] = 0.0
+        return {"status": "ok", "serial": ser, "mode": "desktop", "display_id": ext_id, "x": tx, "y": ty, "resolution": f"{w}x{h}"}
+
+    # Default: Phone Screen (Display #0)
     w, h = 1080, 2404
     cached = adb._frame_cache.get((ser, "phone"))
     if cached and cached.get("raw_png"):
@@ -572,7 +624,94 @@ async def phone_tap_endpoint(req: Request):
     await adb.run_adb_shell(f"input -d 0 keyevent 224 && input touchscreen -d 0 tap {tx} {ty}", ser, timeout=3.0)
     if (ser, "phone") in adb._frame_cache:
         adb._frame_cache[(ser, "phone")]["ts"] = 0.0
-    return {"status": "ok", "serial": ser, "display_id": 0, "x": tx, "y": ty, "resolution": f"{w}x{h}"}
+    return {"status": "ok", "serial": ser, "mode": "phone", "display_id": 0, "x": tx, "y": ty, "resolution": f"{w}x{h}"}
+
+
+@router.post("/api/device/phone-keypad")
+async def phone_keypad_endpoint(req: Request):
+    """
+    Dedicated Phone Screen (Display #0) HID Numeric Keypad endpoint.
+    Strictly routes digits (0-9), Enter (66), Backspace (67), Escape (111), or full PIN actions
+    ONLY to the Phone Display #0 (-d 0), NEVER to Desktop Mode, and immediately refreshes the
+    phone live stream frame cache so the user sees the input in real time.
+    """
+    data = {}
+    try: data = await req.json()
+    except Exception: pass
+    ser = await adb.get_active_adb_serial(data.get("serial"))
+    if not ser:
+        return {"status": "error", "message": "No active ADB device"}
+
+    action = str(data.get("action") or "key").strip().lower()
+    key = str(data.get("key") or "").strip().upper()
+    text_val = str(data.get("text") or "").strip()
+    submit_enter = bool(data.get("submit_enter", False))
+    focus_pin_box = bool(data.get("focus_pin_box", False))
+
+    DIGIT_KEYCODES = {
+        "0": 7, "1": 8, "2": 9, "3": 10, "4": 11,
+        "5": 12, "6": 13, "7": 14, "8": 15, "9": 16,
+    }
+
+    if action == "phone_unlock_1213":
+        res = await adb.unlock_phone_screen_1213(serial=ser, phone_pin="1213", handle_teams_auth_after=False)
+        if (ser, "phone") in adb._frame_cache:
+            adb._frame_cache[(ser, "phone")]["ts"] = 0.0
+        return {"status": "ok", "target": "phone", "display_id": 0, "action": action, "details": res}
+
+    if action == "teams_pin_2992":
+        res = await adb.auto_handle_pin_authentication(
+            serial=ser,
+            pin="2992",
+            force=True,
+            target_display="phone",
+        )
+        if (ser, "phone") in adb._frame_cache:
+            adb._frame_cache[(ser, "phone")]["ts"] = 0.0
+        if (ser, "desktop") in adb._frame_cache:
+            adb._frame_cache[(ser, "desktop")]["ts"] = 0.0
+        return {"status": "ok", "target": "phone", "display_id": 0, "action": action, "details": res}
+
+    cmds = ["input -d 0 keyevent 224"]
+    if focus_pin_box:
+        # Tap the Teams PIN input box on Display #0 (portrait 1080x2404 -> 540, 1035)
+        cmds.append("input touchscreen -d 0 tap 540 1035")
+        cmds.append("sleep 0.12")
+
+    if action == "text" and text_val:
+        safe_txt = "".join(ch for ch in text_val if ch.isalnum())
+        if safe_txt:
+            cmds.append(f"input -d 0 text {safe_txt}")
+        if submit_enter:
+            cmds.append("sleep 0.15")
+            cmds.append("input -d 0 keyevent 66")
+            cmds.append("input touchscreen -d 0 tap 540 1145")
+    elif key in DIGIT_KEYCODES:
+        kc = DIGIT_KEYCODES[key]
+        cmds.append(f"input -d 0 keyevent {kc}")
+    elif key in ("ENTER", "OK", "SUBMIT", "RETURN"):
+        cmds.append("input -d 0 keyevent 66")
+        if bool(data.get("tap_ok", False)):
+            cmds.append("input touchscreen -d 0 tap 540 1145")
+    elif key in ("BACKSPACE", "DEL", "DELETE"):
+        cmds.append("input -d 0 keyevent 67")
+    elif key in ("ESC", "ESCAPE"):
+        cmds.append("input -d 0 keyevent 111")
+
+    await adb.run_adb_shell("; ".join(cmds), ser, timeout=3.5)
+    if (ser, "phone") in adb._frame_cache:
+        adb._frame_cache[(ser, "phone")]["ts"] = 0.0
+    if (ser, "desktop") in adb._frame_cache:
+        adb._frame_cache[(ser, "desktop")]["ts"] = 0.0
+
+    return {
+        "status": "ok",
+        "target": "phone",
+        "display_id": 0,
+        "action": action,
+        "key": key,
+        "text": text_val,
+    }
 
 @router.post("/api/device/undo-edits")
 async def undo_markdown_edits_endpoint(req: Request):

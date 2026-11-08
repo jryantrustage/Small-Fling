@@ -195,6 +195,7 @@ export interface TelemetryToasterProps {
   onMaximizedChange?: (maximized: boolean) => void;
   activeTab?: 'overview' | 'pacer' | 'tokens' | 'events';
   onActiveTabChange?: (tab: 'overview' | 'pacer' | 'tokens' | 'events') => void;
+  hideMinimizedBar?: boolean;
 }
 
 export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
@@ -203,7 +204,7 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
   onReturnAlignmentOverlay, onOpenStudio, selectedDag = 'all', onSelectDag,
   selectedNodeId, onSelectNodeId, apiBase, onRefresh, onOpenPromptModal,
   isExpanded: controlledExpanded, isMaximized: controlledMaximized, onMaximizedChange,
-  activeTab: controlledActiveTab, onActiveTabChange
+  activeTab: controlledActiveTab, onActiveTabChange, hideMinimizedBar = false
 }) => {
   const [internalSelectedDag, setInternalSelectedDag] = useState<'all' | 'markdown_file_change' | 'initialize' | 'capture_entire_markdown' | 'position_navigation' | 'verify_assemble' | 'post_capture_analyzer'>(selectedDag);
   const currentDag = onSelectDag ? selectedDag : internalSelectedDag;
@@ -369,6 +370,10 @@ export const TelemetryToaster: React.FC<TelemetryToasterProps> = ({
     COMPLETED: { bg: 'rgba(188, 140, 255, 0.15)', text: '#bc8cff', border: 'rgba(188, 140, 255, 0.3)' },
   };
   const phaseStyle = phaseColors[(telemetry.phase || 'STANDBY').toUpperCase()] || { bg: 'rgba(139, 148, 158, 0.15)', text: '#8b949e', border: 'rgba(139, 148, 158, 0.3)' };
+
+  if (!isExpanded && hideMinimizedBar) {
+    return null;
+  }
 
   return (
     <div

@@ -4816,15 +4816,45 @@ function AppContent() {
                           className="btn btn-xs"
                           onClick={async () => {
                             try {
-                              await fetch(`${API_BASE}/api/device/auto-pin`, {
+                              const res = await fetch(`${API_BASE}/api/device/auto-pin`, {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                   serial: deviceInfo?.active_serial,
                                   pin: '2992',
                                   force: true,
+                                  target_display: liveMode,
                                 }),
                               });
+                              const data = await res.json().catch(() => null);
+                              if (liveMode === 'phone' && (!data || !data.authenticated)) {
+                                const kpRes = await fetch(`${API_BASE}/api/device/phone-keypad`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    action: 'teams_pin_2992',
+                                    serial: deviceInfo?.active_serial,
+                                  }),
+                                });
+                                if (kpRes.status === 404) {
+                                  const taps: Array<[number, number]> = [
+                                    [0.500, 0.396],
+                                    [0.500, 0.665],
+                                    [0.735, 0.810],
+                                    [0.735, 0.810],
+                                    [0.500, 0.665],
+                                    [0.735, 0.885],
+                                    [0.500, 0.458],
+                                  ];
+                                  for (const [nx, ny] of taps) {
+                                    await fetch(`${API_BASE}/api/device/phone-tap`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ norm_x: nx, norm_y: ny, serial: deviceInfo?.active_serial }),
+                                    });
+                                  }
+                                }
+                              }
                               setStreamKey(Date.now());
                             } catch {}
                           }}
@@ -6679,6 +6709,7 @@ function AppContent() {
         apiBase={API_BASE}
         onRefresh={fetchData}
         onOpenPromptModal={handleOpenPromptModal}
+        hideMinimizedBar={inspectorMode === 'live' && !showBoundingBoxes}
       />
 
       {isPromptModalOpen && (

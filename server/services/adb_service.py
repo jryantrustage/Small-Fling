@@ -983,9 +983,10 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
 
     cache_key = (ser, mode)
     now = time.time()
-    # Fast-path cache check: return fresh frame if captured within last 600ms
+    cache_ttl = 0.15 if mode == "phone" else 0.5
+    # Fast-path cache check: return fresh frame if captured within cache_ttl
     cached = _frame_cache.get(cache_key)
-    if cached and (now - cached.get("ts", 0.0) < 0.6):
+    if cached and (now - cached.get("ts", 0.0) < cache_ttl):
         jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
         if jpg:
             return jpg
@@ -1007,7 +1008,7 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
     try:
         # Re-check cache inside lock
         cached = _frame_cache.get(cache_key)
-        if cached and (time.time() - cached.get("ts", 0.0) < 0.6):
+        if cached and (time.time() - cached.get("ts", 0.0) < cache_ttl):
             jpg = _get_cached_jpeg(cached, quality=quality, max_dim=max_dim)
             if jpg:
                 return jpg
@@ -1049,19 +1050,95 @@ async def capture_screen(mode: str = "desktop", serial: Optional[str] = None, qu
 
 def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray]) -> Dict[str, Any]:
     """
-    Analyzes an external desktop display screenshot for:
-      1. Blank White Teams Screen (Image 3): Teams titlebar at top-left ('Teams') with a pure blank white
+    Analyzes an external desktop display OR phone display screenshot for:
+      1. Phone Mode Teams / Intune PIN Screen (Portrait Display #0):
+         Light/white upper card (y: 0.08..0.54, upper_mean >= 165) with Gboard numeric keypad below,
+         containing 'Managed by your organization' / 'Enter your PIN' / 'Forgot your PIN'.
+      2. Blank White Teams Screen (Desktop Display): Teams titlebar at top-left ('Teams') with a pure blank white
          body (mean_lum >= 236, std <= 12, white_pct >= 94%). Indicates the phone is displaying a
-         fingerprint prompt to unlock. Pressing ESCAPE (keycode 111) prompts for the PIN on desktop mode.
-      2. Desktop Mode Teams / Intune PIN Screen (Image 4): Full-screen light gray/white Intune page
+         fingerprint or Teams PIN prompt on Display #0.
+      3. Desktop Mode Teams / Intune PIN Screen: Full-screen light gray/white Intune page
          (body_mean >= 200, left_mean >= 200, right_mean >= 200, <= 22 OCR tokens, no markdown/gutter)
          containing BOTH 'Managed by your organization' (or 'Forgot your PIN') AND 'Enter your PIN'.
     """
+    if isinstance(screen_img, (bytes, bytearray)):
+        screen_img = cv2.imdecode(np.frombuffer(screen_img, np.uint8), cv2.IMREAD_COLOR)
     if screen_img is None or getattr(screen_img, "size", 0) == 0:
         return {"detected": False, "auth_type": "none"}
 
     try:
         h, w = screen_img.shape[:2]
+        is_portrait_phone = h > w
+
+        if is_portrait_phone:
+            # Portrait Phone Display #0 check:
+            # In Teams Intune PIN prompt on phone (e.g. 1080x2404 or scaled 431x960),
+            # the upper card (y: 0.08..0.54) is light/white while the lower half is the dark numeric keypad.
+            uy1, uy2 = max(0, int(h * 0.08)), min(h, int(h * 0.54))
+            ux1, ux2 = max(0, int(w * 0.06)), min(w, int(w * 0.94))
+            upper_card = screen_img[uy1:uy2, ux1:ux2]
+            upper_mean = float(np.mean(upper_card)) if upper_card.size > 0 else 0.0
+            if upper_mean < 165.0:
+                return {"detected": False, "auth_type": "none"}
+
+            from ocr_engine import get_rapid_ocr
+            r = get_rapid_ocr()
+            res, _ = r(screen_img) if r is not None else ([], None)
+
+            tokens = []
+            phys_w, phys_h = 1080.0, 2404.0
+            sx_phys = phys_w / float(max(1, w))
+            sy_phys = phys_h / float(max(1, h))
+            pin_field_coords = [int(phys_w * 0.50), int(phys_h * 0.396)]
+            ok_btn_coords = [int(phys_w * 0.50), int(phys_h * 0.458)]
+            keypad_enter_coords = [int(phys_w * 0.735), int(phys_h * 0.885)]
+
+            for box, txt, score in (res or []):
+                pts = np.array(box)
+                tx1, ty1 = int(pts[:, 0].min()), int(pts[:, 1].min())
+                tx2, ty2 = int(pts[:, 0].max()), int(pts[:, 1].max())
+                tcx, tcy = (tx1 + tx2) // 2, (ty1 + ty2) // 2
+                clean = str(txt).strip()
+                clean_low = clean.lower()
+                clean_nospace = re.sub(r"\s+", "", clean_low)
+                tokens.append((tx1, ty1, tx2, ty2, clean, clean_low, clean_nospace))
+
+                if tcy <= int(h * 0.62):
+                    if clean_nospace == "pin":
+                        pin_field_coords = [int(phys_w * 0.50), int(tcy * sy_phys)]
+                    elif "enteryourpin" in clean_nospace:
+                        pin_field_coords = [int(phys_w * 0.50), int(min(h * 0.52, ty2 + h * 0.042) * sy_phys)]
+                    elif clean_nospace == "ok" and tcy >= int(h * 0.35):
+                        ok_btn_coords = [int(tcx * sx_phys), int(tcy * sy_phys)]
+
+            full_nospace = "".join(t[6] for t in tokens)
+            non_auth_keywords = (
+                ".md", "audiobook", "podcast", "library", "featured", "directorystructure", "filesinthispart"
+            )
+            if any(kw in full_nospace for kw in non_auth_keywords):
+                return {"detected": False, "auth_type": "none"}
+
+            has_enter_your_pin = ("enteryourpin" in full_nospace or "confirmyourpin" in full_nospace)
+            has_org_or_forgot_pin = any(
+                k in full_nospace
+                for k in ("managedbyyourorganization", "forgotyourpin", "needtochangeit", "trustage", "organization")
+            )
+            if (has_enter_your_pin and has_org_or_forgot_pin) or (has_enter_your_pin and "ok" in full_nospace) or (has_org_or_forgot_pin and "pin" in full_nospace):
+                return {
+                    "detected": True,
+                    "auth_type": "pin",
+                    "auth_subtype": "mam_pin_prompt_phone",
+                    "display_target": "phone",
+                    "requires_escape_for_pin": False,
+                    "requires_mam_pin": True,
+                    "is_pin_safe": True,
+                    "pin_field_coords": pin_field_coords,
+                    "ok_btn_coords": ok_btn_coords,
+                    "keypad_enter_coords": keypad_enter_coords,
+                    "details": "Phone screen (Display #0) Teams/Intune PIN prompt detected ('Managed by your organization' + 'Enter your PIN')",
+                }
+            return {"detected": False, "auth_type": "none"}
+
         scale_x = w / 1920.0
         scale_y = h / 1080.0
 
@@ -1151,6 +1228,7 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
                 "detected": True,
                 "auth_type": "pin",
                 "auth_subtype": "mam_pin_prompt",
+                "display_target": "desktop",
                 "requires_escape_for_pin": False,
                 "requires_mam_pin": True,
                 "is_pin_safe": True,
@@ -1159,7 +1237,7 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
                 "details": "Desktop mode Teams/Intune PIN prompt detected ('Managed by your organization' + 'Enter your PIN')",
             }
 
-        # Check for Blank White Teams Screen (Image 3: Teams in top-left + blank white body -> Fingerprint prompt on phone)
+        # Check for Blank White Teams Screen (Image 3: Teams in top-left + blank white body -> Fingerprint or PIN prompt on phone)
         header_strip = screen_img[max(0, int(32 * scale_y)):min(h, int(108 * scale_y)), max(0, int(20 * scale_x)):min(w, int(1900 * scale_x))]
         header_mean = float(np.mean(header_strip)) if header_strip.size > 0 else 0.0
         subheader_strip = screen_img[max(0, int(112 * scale_y)):min(h, int(205 * scale_y)), max(0, int(80 * scale_x)):min(w, int(1840 * scale_x))]
@@ -1179,12 +1257,13 @@ def detect_teams_auth_or_fingerprint_screen_cv(screen_img: Optional[np.ndarray])
                 "detected": True,
                 "auth_type": "pin",
                 "auth_subtype": "fingerprint_blank_teams",
+                "display_target": "phone",
                 "requires_escape_for_pin": True,
                 "requires_mam_pin": True,
                 "is_pin_safe": True,
                 "pin_field_coords": pin_field_coords,
                 "ok_btn_coords": ok_btn_coords,
-                "details": "Blank white Teams screen detected (phone displaying fingerprint unlock; send Escape to prompt for PIN 2992 on desktop)",
+                "details": "Blank white Teams screen detected on desktop (phone displaying Teams authentication / PIN prompt on Display #0)",
             }
 
         # Check for Username / Password / OAuth prompt (only when not a PIN prompt)
@@ -1216,13 +1295,10 @@ async def detect_auth_screen_type(
 ) -> Dict[str, Any]:
     """
     Differentiates between:
-      1. 'pin': A visually verified Teams numeric PIN prompt on the Desktop Display ('Enter your PIN' /
-         'Managed by your organization') or a Blank White Teams screen on the Desktop Display where
-         the phone is displaying a fingerprint prompt for Teams and Escape prompts for the desktop PIN.
-         STRICTLY requires visual confirmation on the Desktop Display so that numeric fields or search
-         bars on the phone (e.g. Audible) NEVER trigger PIN entry!
-      2. 'username_password': A Username, Email, Password, or OAuth sign-in screen
-         (e.g., BrokerAuthorizationActivity, AccountChooserActivity, SignInActivity, Webview).
+      1. 'pin': A visually verified Teams numeric PIN prompt on the Desktop Display ('mam_pin_prompt')
+         OR on the Phone Display #0 ('mam_pin_prompt_phone') OR a Blank White Teams screen on the Desktop Display
+         ('fingerprint_blank_teams') indicating that Teams authentication is active on the Phone Display #0.
+      2. 'username_password': A Username, Email, Password, or OAuth sign-in screen.
          STRICTLY PROHIBITS PIN ENTRY so PIN digits (e.g. 2992) are never typed into username fields!
       3. 'none': Normal application screen (clean, no auth prompt).
     """
@@ -1232,6 +1308,7 @@ async def detect_auth_screen_type(
             return {
                 "auth_type": cv_eval["auth_type"],
                 "auth_subtype": cv_eval.get("auth_subtype", ""),
+                "display_target": cv_eval.get("display_target", "desktop"),
                 "details": cv_eval.get("details", ""),
                 "is_pin_safe": bool(cv_eval.get("is_pin_safe", False)),
                 "requires_keyguard_unlock": False,
@@ -1239,10 +1316,11 @@ async def detect_auth_screen_type(
                 "requires_escape_for_pin": bool(cv_eval.get("requires_escape_for_pin", False)),
                 "pin_field_coords": cv_eval.get("pin_field_coords"),
                 "ok_btn_coords": cv_eval.get("ok_btn_coords"),
+                "keypad_enter_coords": cv_eval.get("keypad_enter_coords"),
             }
         return {
             "auth_type": "none",
-            "details": "External display screenshot shows no authentication prompt",
+            "details": "Provided screenshot shows no authentication prompt",
             "is_pin_safe": False,
             "requires_keyguard_unlock": False,
             "requires_mam_pin": False,
@@ -1288,8 +1366,32 @@ async def detect_auth_screen_type(
             "requires_escape_for_pin": False,
         }
 
-    # 2. Require Microsoft Teams to be present in the active window/activity state before considering any Teams PIN prompt
-    if combined_acts_lower and "com.microsoft.teams" not in combined_acts_lower:
+    # 2. Check Phone Display #0 first if Teams or CompanyPortal is active on Display #0
+    try:
+        phone_bytes = await capture_phone_screenshot(serial=ser, max_cache_age_s=0.25, bypass_lock=True)
+        if phone_bytes:
+            img_phone = cv2.imdecode(np.frombuffer(phone_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if img_phone is not None:
+                phone_cv = detect_teams_auth_or_fingerprint_screen_cv(img_phone)
+                if phone_cv.get("detected") and phone_cv.get("auth_subtype") == "mam_pin_prompt_phone":
+                    return {
+                        "auth_type": "pin",
+                        "auth_subtype": "mam_pin_prompt_phone",
+                        "display_target": "phone",
+                        "details": phone_cv.get("details", ""),
+                        "is_pin_safe": True,
+                        "requires_keyguard_unlock": False,
+                        "requires_mam_pin": True,
+                        "requires_escape_for_pin": False,
+                        "pin_field_coords": phone_cv.get("pin_field_coords"),
+                        "ok_btn_coords": phone_cv.get("ok_btn_coords"),
+                        "keypad_enter_coords": phone_cv.get("keypad_enter_coords"),
+                    }
+    except Exception:
+        pass
+
+    # 3. Require Microsoft Teams to be present in the active window/activity state before considering Desktop PIN check
+    if combined_acts_lower and "com.microsoft.teams" not in combined_acts_lower and "companyportal" not in combined_acts_lower:
         return {
             "auth_type": "none",
             "details": "Microsoft Teams is not active in window focus; skipping PIN check",
@@ -1299,7 +1401,7 @@ async def detect_auth_screen_type(
             "requires_escape_for_pin": False,
         }
 
-    # 3. Live screenshot visual verification explicitly from the Desktop Display (NEVER Display #0)
+    # 4. Live screenshot visual verification from the Desktop Display
     try:
         snap_bytes = await capture_display_screenshot(
             target_display="desktop",
@@ -1316,6 +1418,7 @@ async def detect_auth_screen_type(
                     return {
                         "auth_type": cv_eval["auth_type"],
                         "auth_subtype": cv_eval.get("auth_subtype", ""),
+                        "display_target": cv_eval.get("display_target", "desktop"),
                         "details": cv_eval.get("details", ""),
                         "is_pin_safe": bool(cv_eval.get("is_pin_safe", False)),
                         "requires_keyguard_unlock": False,
@@ -1329,7 +1432,7 @@ async def detect_auth_screen_type(
 
     return {
         "auth_type": "none",
-        "details": "No Teams authentication prompt active on desktop display",
+        "details": "No Teams authentication prompt active on phone or desktop display",
         "is_pin_safe": False,
         "requires_keyguard_unlock": False,
         "requires_mam_pin": False,
@@ -1342,18 +1445,21 @@ async def auto_handle_pin_authentication(
     ext_display_id: Optional[int] = None,
     pin: Optional[str] = None,
     force: bool = False,
-    screen_img: Optional[np.ndarray] = None
+    screen_img: Optional[np.ndarray] = None,
+    target_display: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Assures PIN code authentication is automatically handled ONLY when Microsoft Teams on the
-    external desktop display explicitly prompts for a PIN ('Enter your PIN' / 'mam_pin_prompt')
-    or displays the Blank White Teams Fingerprint Screen ('fingerprint_blank_teams' -> Escape -> 'Enter your PIN').
+    Handles Microsoft Teams PIN code authentication (2992) across BOTH:
+      1. The Phone Screen (Display #0) when Teams opens the Intune 'Enter your PIN' prompt on the phone
+         (often accompanied by a Blank White Teams window on the Desktop Display).
+      2. The Desktop Display (#ext_id) when Teams opens 'Enter your PIN' on the external desktop monitor.
 
-    STRICT SAFETY INVARIANTS:
-      - NEVER types the PIN (2992) on the phone display (Display #0), preventing accidental entry into
-        phone apps (such as Audible, messages, or browser search bars).
-      - NEVER types the PIN unless 'Enter your PIN' is visually confirmed on the desktop display (#ext_id).
-      - Explicitly directs Mouse & Keyboard HID between phone and desktop mode as necessary.
+    STRICT TWO-PIN SAFETY INVARIANTS:
+      - Phone Unlock PIN (1213) is ONLY for the Android OS Lockscreen (Keyguard) on Display #0.
+        If the Android OS Lockscreen is active, this function unlocks the OS with 1213 first — NEVER 2992!
+      - Teams Passcode (2992) is ONLY entered into Microsoft Teams ('Enter your PIN') once the Android OS
+        Lockscreen is confirmed unlocked.
+      - Explicitly directs Mouse & Keyboard HID between phone (Display #0) and desktop mode (#ext_id).
     """
     import config
     teams_pin_default = getattr(config, "TEAMS_PIN", None) or getattr(config, "DEVICE_PIN", "2992") or "2992"
@@ -1387,23 +1493,38 @@ async def auto_handle_pin_authentication(
         }
 
     ext_id = ext_display_id if (ext_display_id and ext_display_id > 0) else await detect_external_display_id(ser)
-    if not ext_id or ext_id <= 0:
-        return {
-            "status": "no_external_display",
-            "auth_detected": False,
-            "auth_type": "none",
-            "pin_submitted": False,
-            "keyguard_unlocked": False,
-            "actions": ["No external desktop display detected; refusing to type PIN on phone display #0"]
-        }
-
     actions: List[str] = []
+    keyguard_unlocked = False
 
-    # 1. Differentiate Authentication Screen Type using explicit Desktop Display capture
+    # 1. CRITICAL OS LOCKSCREEN GUARD: Ensure Phone Display #0 Android OS Lockscreen is unlocked (with 1213, NEVER 2992)
+    try:
+        lock_state = await detect_phone_lockscreen_state(ser)
+        if lock_state.get("keyguard_showing") or lock_state.get("input_restricted"):
+            unlock_res = await unlock_phone_screen_1213(
+                serial=ser,
+                phone_pin=phone_unlock_pin_val,
+                handle_teams_auth_after=False,
+            )
+            keyguard_unlocked = bool(unlock_res.get("keyguard_unlocked", False))
+            actions.extend(unlock_res.get("actions", []))
+            if not keyguard_unlocked:
+                return {
+                    "status": "keyguard_still_locked",
+                    "auth_detected": True,
+                    "auth_type": "phone_keyguard",
+                    "pin_submitted": False,
+                    "keyguard_unlocked": False,
+                    "actions": actions + ["Phone OS Lockscreen is still locked; refused to type Teams PIN 2992 into OS Lockscreen"],
+                }
+            await asyncio.sleep(0.45)
+    except Exception:
+        pass
+
+    # 2. Differentiate Authentication Screen Type across Phone (Display #0) & Desktop (#ext_id)
     auth_eval = await detect_auth_screen_type(ser, ext_id, screen_img=screen_img)
     auth_type = auth_eval.get("auth_type", "none")
 
-    # 2. If Username / Password / Account Chooser is detected: STRICTLY PROHIBIT PIN ENTRY!
+    # 3. If Username / Password / Account Chooser is detected: STRICTLY PROHIBIT PIN ENTRY!
     if auth_type == "username_password":
         msg = f"Username / Password prompt detected ({auth_eval.get('details')}). Suppressed automated PIN entry to prevent entering PIN into username field."
         actions.append(msg)
@@ -1422,33 +1543,70 @@ async def auto_handle_pin_authentication(
             "auth_detected": True,
             "auth_type": "username_password",
             "pin_submitted": False,
-            "keyguard_unlocked": False,
+            "keyguard_unlocked": keyguard_unlocked,
             "message": msg,
             "actions": actions
         }
 
-    # 3. If no Teams auth prompt is active on the desktop display, return clean immediately
+    # 4. If no Teams auth prompt was auto-detected, check if user explicitly clicked 'Teams PIN (2992)' (force=True)
     if auth_type != "pin":
-        return {
-            "status": "clean",
-            "auth_detected": False,
-            "auth_type": "none",
-            "pin_submitted": False,
-            "keyguard_unlocked": False,
-            "actions": []
-        }
+        if force:
+            # Re-verify phone screenshot directly with fresh capture in case cache was stale
+            try:
+                fresh_phone_bytes = await capture_phone_screenshot(serial=ser, max_cache_age_s=0.0, bypass_lock=True)
+                if fresh_phone_bytes:
+                    img_p = cv2.imdecode(np.frombuffer(fresh_phone_bytes, np.uint8), cv2.IMREAD_COLOR)
+                    if img_p is not None:
+                        p_eval = detect_teams_auth_or_fingerprint_screen_cv(img_p)
+                        if p_eval.get("detected") and p_eval.get("auth_type") == "pin":
+                            auth_eval = {
+                                "auth_type": "pin",
+                                "auth_subtype": p_eval.get("auth_subtype", "mam_pin_prompt_phone"),
+                                "display_target": "phone",
+                                "pin_field_coords": p_eval.get("pin_field_coords"),
+                                "ok_btn_coords": p_eval.get("ok_btn_coords"),
+                                "keypad_enter_coords": p_eval.get("keypad_enter_coords"),
+                                "requires_escape_for_pin": False,
+                            }
+                            auth_type = "pin"
+            except Exception:
+                pass
 
-    # 4. Handle Visually Verified Teams Fingerprint / PIN Prompt on Desktop Display (#ext_id)
+            # If user explicitly clicked 'Teams PIN (2992)' while in Phone view (or target_display == 'phone')
+            # and phone OS lockscreen is verified unlocked, allow direct entry on Phone Display #0
+            if auth_type != "pin" and str(target_display or "").lower() == "phone":
+                auth_eval = {
+                    "auth_type": "pin",
+                    "auth_subtype": "mam_pin_prompt_phone",
+                    "display_target": "phone",
+                    "pin_field_coords": [540, 1035],
+                    "ok_btn_coords": [540, 1145],
+                    "keypad_enter_coords": [795, 2125],
+                    "requires_escape_for_pin": False,
+                }
+                auth_type = "pin"
+
+        if auth_type != "pin":
+            return {
+                "status": "clean",
+                "auth_detected": False,
+                "auth_type": "none",
+                "pin_submitted": False,
+                "keyguard_unlocked": keyguard_unlocked,
+                "actions": actions
+            }
+
+    # 5. Handle Teams Fingerprint / PIN Prompt on Phone Display (#0) or Desktop Display (#ext_id)
     pin_submitted = False
     try:
-        pin_coords = auth_eval.get("pin_field_coords") or [960, 635]
-        ok_coords = auth_eval.get("ok_btn_coords") or [935, 725]
-        confirmed_mam_pin_prompt = bool(auth_eval.get("auth_subtype") == "mam_pin_prompt")
+        subtype = auth_eval.get("auth_subtype", "")
+        disp_target = auth_eval.get("display_target", "desktop")
+        pin_coords = auth_eval.get("pin_field_coords")
+        ok_coords = auth_eval.get("ok_btn_coords")
 
-        # A. Blank White Teams Screen on Desktop -> Phone is displaying Teams Fingerprint Prompt
-        #    Direct HID to dismiss the fingerprint prompt with ESCAPE (keyevent 111), then return HID to Desktop
-        if auth_eval.get("requires_escape_for_pin"):
-            # Check if phone display #0 actually has BiometricPrompt / AuthController focused
+        # A. If Desktop shows Blank White Teams Screen ('fingerprint_blank_teams'),
+        #    check Phone Display #0 for BiometricPrompt (dismiss with Escape) or 'Enter your PIN' on Phone Display #0!
+        if auth_eval.get("requires_escape_for_pin") or subtype == "fingerprint_blank_teams":
             win_chk = await run_adb_shell("dumpsys window | grep -E 'mCurrentFocus|mFocusedApp'", ser, timeout=1.2)
             win_out_low = (win_chk.get("stdout", "") or "").lower()
             has_phone_biometric_dialog = any(
@@ -1458,44 +1616,96 @@ async def auto_handle_pin_authentication(
                 await direct_hid_to_display(ser, target_mode="phone", ext_display_id=ext_id)
                 await run_adb_shell("input -d 0 keyevent 111", ser, timeout=1.5)
                 actions.append("Directed HID to phone display #0 and sent ESCAPE (keyevent 111) to dismiss biometric prompt")
+                await asyncio.sleep(0.7)
 
-            await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[240, 40])
-            await run_adb_shell(f"input -d {ext_id} keyevent 111", ser, timeout=2.0)
-            actions.append(
-                f"Directed HID to desktop display #{ext_id} and sent ESCAPE (keyevent 111) on blank white Teams screen to prompt for PIN"
-            )
-            await asyncio.sleep(0.9)
+            # Check if 'Enter your PIN' is now visible on Phone Display #0
+            phone_snap = await capture_phone_screenshot(serial=ser, max_cache_age_s=0.0, bypass_lock=True)
+            if phone_snap:
+                img_phone_after = cv2.imdecode(np.frombuffer(phone_snap, np.uint8), cv2.IMREAD_COLOR)
+                if img_phone_after is not None:
+                    p_eval = detect_teams_auth_or_fingerprint_screen_cv(img_phone_after)
+                    if p_eval.get("detected") and p_eval.get("auth_subtype") == "mam_pin_prompt_phone":
+                        subtype = "mam_pin_prompt_phone"
+                        disp_target = "phone"
+                        pin_coords = p_eval.get("pin_field_coords")
+                        ok_coords = p_eval.get("ok_btn_coords")
 
-            # Capture a fresh screenshot explicitly from the desktop display (#ext_id) to confirm 'Enter your PIN' appeared
-            confirmed_mam_pin_prompt = False
-            try:
-                snap_after_esc = await capture_display_screenshot(
-                    target_display="desktop",
-                    serial=ser,
-                    display_id=ext_id,
-                    max_cache_age_s=0.0,
-                    bypass_lock=True,
+            # If not on Phone Display #0, send ESCAPE on Desktop Display #ext_id and check Desktop
+            if subtype != "mam_pin_prompt_phone" and ext_id and ext_id > 0:
+                await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[240, 40])
+                await run_adb_shell(f"input -d {ext_id} keyevent 111", ser, timeout=2.0)
+                actions.append(
+                    f"Directed HID to desktop display #{ext_id} and sent ESCAPE (keyevent 111) on blank white Teams screen"
                 )
-                if snap_after_esc:
-                    img_after_esc = cv2.imdecode(np.frombuffer(snap_after_esc, np.uint8), cv2.IMREAD_COLOR)
-                    if img_after_esc is not None:
-                        esc_eval = detect_teams_auth_or_fingerprint_screen_cv(img_after_esc)
-                        if esc_eval.get("pin_field_coords"):
-                            pin_coords = esc_eval["pin_field_coords"]
-                        if esc_eval.get("ok_btn_coords"):
-                            ok_coords = esc_eval["ok_btn_coords"]
-                        if esc_eval.get("detected") and esc_eval.get("auth_subtype") == "mam_pin_prompt":
-                            confirmed_mam_pin_prompt = True
-                        else:
-                            actions.append("Post-Escape desktop screenshot did not show 'Enter your PIN' prompt; skipped PIN typing")
-            except Exception as esc_err:
-                actions.append(f"Post-Escape desktop verification failed ({esc_err}); skipped PIN typing for safety")
+                await asyncio.sleep(0.8)
 
-        # B. Enter PIN 2992 ONLY when 'Enter your PIN' (mam_pin_prompt) is visually confirmed on Desktop Display (#ext_id)
-        #    NEVER send 'input -d 0 text 2992' to the phone screen, and NEVER send Backspace (keyevent 67)!
-        if confirmed_mam_pin_prompt and ext_id and ext_id > 0:
-            px, py = int(pin_coords[0]), int(pin_coords[1])
-            ox, oy = int(ok_coords[0]), int(ok_coords[1])
+                # Re-check both Phone Display #0 and Desktop Display #ext_id
+                phone_snap2 = await capture_phone_screenshot(serial=ser, max_cache_age_s=0.0, bypass_lock=True)
+                if phone_snap2:
+                    img_p2 = cv2.imdecode(np.frombuffer(phone_snap2, np.uint8), cv2.IMREAD_COLOR)
+                    if img_p2 is not None:
+                        p_eval2 = detect_teams_auth_or_fingerprint_screen_cv(img_p2)
+                        if p_eval2.get("detected") and p_eval2.get("auth_subtype") == "mam_pin_prompt_phone":
+                            subtype = "mam_pin_prompt_phone"
+                            disp_target = "phone"
+                            pin_coords = p_eval2.get("pin_field_coords")
+                            ok_coords = p_eval2.get("ok_btn_coords")
+
+                if subtype != "mam_pin_prompt_phone":
+                    snap_after_esc = await capture_display_screenshot(
+                        target_display="desktop",
+                        serial=ser,
+                        display_id=ext_id,
+                        max_cache_age_s=0.0,
+                        bypass_lock=True,
+                    )
+                    if snap_after_esc:
+                        img_after_esc = cv2.imdecode(np.frombuffer(snap_after_esc, np.uint8), cv2.IMREAD_COLOR)
+                        if img_after_esc is not None:
+                            esc_eval = detect_teams_auth_or_fingerprint_screen_cv(img_after_esc)
+                            if esc_eval.get("detected") and esc_eval.get("auth_subtype") == "mam_pin_prompt":
+                                subtype = "mam_pin_prompt"
+                                disp_target = "desktop"
+                                pin_coords = esc_eval.get("pin_field_coords")
+                                ok_coords = esc_eval.get("ok_btn_coords")
+
+        # B1. Teams PIN Prompt on Phone Screen (Display #0)
+        if subtype == "mam_pin_prompt_phone" or disp_target == "phone":
+            # Double-check OS Keyguard is NOT locked before sending 2992 to Display #0
+            recheck_lock = await detect_phone_lockscreen_state(ser)
+            if recheck_lock.get("keyguard_showing") or recheck_lock.get("input_restricted"):
+                actions.append("Aborted sending Teams PIN 2992 to Display #0 because Android OS Keyguard is showing")
+            else:
+                px, py = (int(pin_coords[0]), int(pin_coords[1])) if (pin_coords and len(pin_coords) >= 2) else (540, 952)
+                ox, oy = (int(ok_coords[0]), int(ok_coords[1])) if (ok_coords and len(ok_coords) >= 2) else (540, 1101)
+                await direct_hid_to_display(ser, target_mode="phone", ext_display_id=ext_id, focus_coords=[px, py])
+                await run_adb_shell(
+                    f"input -d 0 keyevent 224; "
+                    f"input touchscreen -d 0 tap {px} {py}; "
+                    f"sleep 0.15; "
+                    f"input -d 0 text {active_pin}; "
+                    f"sleep 0.20; "
+                    f"input -d 0 keyevent 66; "
+                    f"sleep 0.12; "
+                    f"input touchscreen -d 0 tap 794 2128; "
+                    f"sleep 0.12; "
+                    f"input touchscreen -d 0 tap {ox} {oy}",
+                    ser,
+                    timeout=4.5,
+                )
+                pin_submitted = True
+                actions.append(
+                    f"Directed HID to Phone Display #0, tapped PIN box ({px}, {py}), entered Teams PIN ({active_pin}), sent ENTER (keyevent 66), and tapped OK ({ox}, {oy})"
+                )
+                if (ser, "phone") in _frame_cache:
+                    _frame_cache[(ser, "phone")]["ts"] = 0.0
+                if (ser, "desktop") in _frame_cache:
+                    _frame_cache[(ser, "desktop")]["ts"] = 0.0
+
+        # B2. Teams PIN Prompt on Desktop Display (#ext_id)
+        elif subtype == "mam_pin_prompt" and ext_id and ext_id > 0:
+            px, py = (int(pin_coords[0]), int(pin_coords[1])) if (pin_coords and len(pin_coords) >= 2) else (960, 635)
+            ox, oy = (int(ok_coords[0]), int(ok_coords[1])) if (ok_coords and len(ok_coords) >= 2) else (935, 725)
             await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=ext_id, focus_coords=[px, py])
             await run_adb_shell(
                 f"input -d {ext_id} tap {px} {py}; "
@@ -1509,6 +1719,8 @@ async def auto_handle_pin_authentication(
             )
             pin_submitted = True
             actions.append(f"Directed HID to desktop display #{ext_id} and submitted PIN {active_pin} to verified Teams PIN prompt")
+            if (ser, "desktop") in _frame_cache:
+                _frame_cache[(ser, "desktop")]["ts"] = 0.0
 
         if actions:
             try:
@@ -1516,7 +1728,8 @@ async def auto_handle_pin_authentication(
                 await ws_manager.broadcast({
                     "type": "pin_authentication_handled",
                     "pin_length": len(active_pin),
-                    "auth_subtype": auth_eval.get("auth_subtype", "pin"),
+                    "auth_subtype": subtype or auth_eval.get("auth_subtype", "pin"),
+                    "display_target": disp_target,
                     "pin_submitted": pin_submitted,
                     "actions": actions
                 })
@@ -1527,10 +1740,11 @@ async def auto_handle_pin_authentication(
             "status": "ok",
             "auth_detected": True,
             "auth_type": "pin",
-            "auth_subtype": auth_eval.get("auth_subtype", "pin"),
+            "auth_subtype": subtype or auth_eval.get("auth_subtype", "pin"),
+            "display_target": disp_target,
             "escape_sent": bool(auth_eval.get("requires_escape_for_pin", False)),
             "pin_submitted": pin_submitted,
-            "keyguard_unlocked": False,
+            "keyguard_unlocked": keyguard_unlocked,
             "actions": actions
         }
     except Exception as e:
@@ -2065,7 +2279,8 @@ async def awake_keepalive_loop():
             await asyncio.sleep(10.0)
 
 async def mjpeg_stream_generator(mode: str = "desktop", serial: Optional[str] = None, fps: float = 2.0, quality: int = 75, max_dim: int = 960):
-    interval = 1.0 / max(0.5, min(fps, 4.0))
+    eff_fps = max(fps, 4.0) if mode == "phone" else fps
+    interval = 1.0 / max(0.5, min(eff_fps, 5.0))
     try:
         while True:
             jpg = await capture_screen(mode=mode, serial=serial, quality=quality, max_dim=max_dim)
