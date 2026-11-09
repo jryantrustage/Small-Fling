@@ -86,18 +86,65 @@ class DocumentAssembleNode(BaseDagNode):
 
         # Track <!-- CODESCAN_FILE_START --> and <!-- CODESCAN_FILE_END --> markers and verify size/lines/chars distinctly
         codescan_verification: Dict[str, Any] = {}
+        part_header_metadata: Dict[str, Any] = {}
+        hierarchical_progress: Dict[str, Any] = {}
+        ocr_steering_guide: Dict[str, Any] = {}
         try:
-            from dag_nodes.markdown_tag_parser_node import verify_codescan_file_markers_and_metrics
+            from dag_nodes.markdown_tag_parser_node import (
+                verify_codescan_file_markers_and_metrics,
+                auto_rescan_mismatched_files_with_steering_guide,
+                _build_frame_range_index,
+            )
+            frame_ranges = _build_frame_range_index(blackboard.project_id)
             cs_res = verify_codescan_file_markers_and_metrics(
                 doc_lines,
                 project_id=blackboard.project_id,
                 self_heal=bool(is_complete),
                 recover_wrapped_from_png=bool(is_complete),
-                preloaded_frame_ranges=[],
+                preloaded_frame_ranges=frame_ranges,
             )
+            # If any closed file block has a metric mismatch, run targeted steering-guided rescan from correlated PNG frames
+            rescan_info = auto_rescan_mismatched_files_with_steering_guide(
+                cs_res,
+                project_id=blackboard.project_id,
+                max_files_per_pass=2,
+            )
+            if rescan_info.get("rescanned_lines", 0) > 0:
+                doc_lines = []
+                for ln_i in range(1, max_k + 1):
+                    val_i = state.document_lines.get(ln_i, "")
+                    doc_lines.append(val_i.get("text", "") if isinstance(val_i, dict) else (val_i.text if hasattr(val_i, "text") else str(val_i)))
+                full_markdown = "\n".join(doc_lines)
+                cs_res = verify_codescan_file_markers_and_metrics(
+                    doc_lines,
+                    project_id=blackboard.project_id,
+                    self_heal=bool(is_complete),
+                    recover_wrapped_from_png=False,
+                    preloaded_frame_ranges=frame_ranges,
+                )
+
+            part_header_metadata = cs_res.get("part_header_metadata", {})
+            hierarchical_progress = cs_res.get("hierarchical_progress", {})
+            ocr_steering_guide = cs_res.get("ocr_steering_guide", {})
+            if rescan_info.get("repairs"):
+                ocr_steering_guide["recent_auto_repairs"] = rescan_info["repairs"]
+
+            # Reconcile target_total_lines with part_header_metadata["declared_lines"] if uncalibrated or skewed by Offline badge
+            decl_part_lines = int(part_header_metadata.get("declared_lines") or 0)
+            if decl_part_lines > 0 and (total_lines_target <= 0 or abs(total_lines_target - decl_part_lines) <= 15):
+                if total_lines_target != decl_part_lines:
+                    total_lines_target = decl_part_lines
+                    blackboard.total_lines = decl_part_lines
+                    state.latest_telemetry["target_total_lines"] = decl_part_lines
+                    if "init_end" in state.dag_state.get("nodes", {}):
+                        state.dag_state["nodes"]["init_end"]["total_lines"] = decl_part_lines
+
             ms = cs_res["markers_summary"]
             dms = cs_res["distinct_metrics_summary"]
             codescan_verification = {
+                "part_header_metadata": part_header_metadata,
+                "hierarchical_progress": hierarchical_progress,
+                "ocr_steering_guide": ocr_steering_guide,
                 "markers_summary": {
                     "total_start_markers": ms["total_start_markers"],
                     "total_end_markers": ms["total_end_markers"],
@@ -112,6 +159,8 @@ class DocumentAssembleNode(BaseDagNode):
                         "index": f["index"],
                         "path": f["path"],
                         "normalized_path": f["normalized_path"],
+                        "short_name": f.get("short_name", ""),
+                        "type": f.get("type") or f.get("ext", ""),
                         "tag_start_md_line": f["tag_start_md_line"],
                         "end_md_line": f["end_md_line"],
                         "markers_paired": f["markers_paired"],
@@ -128,6 +177,9 @@ class DocumentAssembleNode(BaseDagNode):
                         "chars_delta": f["chars_delta"],
                         "chars_matches": f["chars_matches"],
                         "all_metrics_match": f["all_metrics_match"],
+                        "distinct_accuracy_pct": f.get("distinct_accuracy_pct", 0.0),
+                        "lifecycle_status": f.get("lifecycle_status", "scanning_active"),
+                        "source_frame_ids": f.get("source_frame_ids", []),
                         "mismatch_reasons": f["mismatch_reasons"],
                         "distinct_verification": f["distinct_verification"],
                     }
@@ -135,6 +187,15 @@ class DocumentAssembleNode(BaseDagNode):
                 ],
             }
             blackboard.metadata["codescan_verification"] = codescan_verification
+            blackboard.metadata["part_header_metadata"] = part_header_metadata
+            blackboard.metadata["hierarchical_progress"] = hierarchical_progress
+            blackboard.metadata["ocr_steering_guide"] = ocr_steering_guide
+            state.latest_telemetry["part_header_metadata"] = part_header_metadata
+            state.latest_telemetry["codescan_hierarchy"] = hierarchical_progress
+            state.latest_telemetry["ocr_steering_guide"] = ocr_steering_guide
+            state.orchestration_state["part_header_metadata"] = part_header_metadata
+            state.orchestration_state["codescan_hierarchy"] = hierarchical_progress
+            state.orchestration_state["ocr_steering_guide"] = ocr_steering_guide
         except Exception as cs_err:
             print(f"[DocumentAssembleNode] codescan verification note: {cs_err}")
 
@@ -199,6 +260,9 @@ class DocumentAssembleNode(BaseDagNode):
             "loop_iteration": loop_iter,
             "reconstructed_length": len(full_markdown),
             "codescan_verification": codescan_verification,
+            "part_header_metadata": part_header_metadata,
+            "hierarchical_progress": hierarchical_progress,
+            "ocr_steering_guide": ocr_steering_guide,
             "evaluator": "Document Integrity & CODESCAN Marker Evaluator",
             "healing_step": None if is_complete else "Capturing next page slice",
             "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + markers_suffix + complete_suffix,
@@ -223,5 +287,8 @@ class DocumentAssembleNode(BaseDagNode):
                 "loop_iteration": loop_iter,
                 "reconstructed_length": len(full_markdown),
                 "codescan_verification": codescan_verification,
+                "part_header_metadata": part_header_metadata,
+                "hierarchical_progress": hierarchical_progress,
+                "ocr_steering_guide": ocr_steering_guide,
             }
         )

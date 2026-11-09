@@ -547,10 +547,118 @@ def analyze_dag2_performance_report(loop_history: Optional[List[Dict[str, Any]]]
         "target_total_lines": telemetry.get("target_total_lines", 9946),
         "current_top_line": telemetry.get("current_top_line", 1),
         "current_bottom_line": telemetry.get("current_bottom_line", 50),
+        "codescan_hierarchy": telemetry.get("codescan_hierarchy") or {},
+        "part_header_metadata": telemetry.get("part_header_metadata") or {},
+        "ocr_steering_guide": telemetry.get("ocr_steering_guide") or {},
     }
 
+    report["dag_positioning_and_ocr_prompt"] = generate_dag_file_positioning_and_ocr_prompt(report)
+    report["telemetry_correlation_and_steering_rescan_prompt"] = generate_telemetry_correlation_and_steering_rescan_prompt(report)
     report["ai_optimization_prompt"] = generate_dag2_ai_optimization_prompt(report)
     return report
+
+
+def generate_dag_file_positioning_and_ocr_prompt(report: Dict[str, Any]) -> str:
+    """
+    Prompt 1: Fixes and steers the DAG operation that positions the markdown file for
+    acquisition and optimal OCR processing so that every character in the file is accurately acquired.
+    """
+    hierarchy = report.get("codescan_hierarchy") or {}
+    part_meta = report.get("part_header_metadata") or {}
+    steering = report.get("ocr_steering_guide") or {}
+    active_file = (hierarchy.get("active_file") or steering.get("active_file_driver") or {})
+    part_info = hierarchy.get("part") or {}
+    bundle_info = hierarchy.get("bundle") or {}
+
+    return f"""# Prompt 1: DAG File Positioning & Optimal Character-Level OCR Acquisition
+
+## Objective
+Fix and steer the DAG viewport positioning and frame acquisition pipeline (`eof_calibration`, `home_navigation`, `frame_acquire`, `local_ai_ocr`, `frame_ocr`, `arrow_down`, `verification_trigger`) so that every Markdown part and every embedded `<!-- CODESCAN_FILE_START ... -->` block is positioned deterministically and acquired with 100% character accuracy.
+
+## Active Instance Context & Ground-Truth Drivers
+- **Scan Scope:** `{steering.get('scan_scope', 'multi_part_bundle' if bundle_info.get('is_multipart') else 'single_markdown')}`
+- **Bundle / Part:** `{bundle_info.get('name', 'Markdown Scan')}` — Part `{part_info.get('number', 1)}` of `{part_info.get('total_parts', 1)}`
+- **Part Header Ground Truth:** Declared Files: `{part_info.get('files_declared', 0)}` (Project Total: `{bundle_info.get('total_project_files', 0)}`) | Declared Part Size: `{part_info.get('size_kb_declared', 0)} KB` | Declared Lines: `{part_info.get('lines_declared', report.get('target_total_lines', 0))}` | Declared Chars: `{part_info.get('chars_declared', 0)}`
+- **Active File Task (`CODESCAN_FILE_START`):**
+  - `path`: `{active_file.get('path', 'N/A')}`
+  - `type`: `{active_file.get('type', 'N/A')}`
+  - `size`: `{active_file.get('actual_size', 0)} / {active_file.get('expected_size', 0)} bytes`
+  - `lines`: `{active_file.get('actual_lines', 0)} / {active_file.get('expected_lines', 0)} lines`
+  - `chars`: `{active_file.get('actual_chars', 0)} / {active_file.get('expected_chars', 0)} chars`
+  - `source_frame_ids`: `{active_file.get('source_frame_ids', [])}`
+
+## Required DAG Positioning & Optimal OCR Rules
+1. **Fullscreen Single-Pane Dark-Mode Viewport Enforcement (`frame_acquire` & `alignment_engine.py`)**:
+   - Before capturing any frame on Display `#2+` (Android Desktop mode), verify the Teams Markdown editor is in **Fullscreen** (`is_fullscreen == True`), **Single-Pane Edit Mode**, and **Dark Mode** (`gutter_bg_mean < 48.0`) with the Android soft keyboard (`InputMethod`) suppressed.
+   - Exclude the bottom-left floating `Offline` / `Saving` pill (`x < 220, y > 0.88 * H`) from the gutter digit band (`x = 58..178px`) so `Offline` is never misread as `Ln 205` or `Ln 0`.
+
+2. **Part Header Calibration & Ground-Truth Reconciliation (`eof_calibration` & `document_assemble`)**:
+   - Parse Lines 1–6 at the top of the file (`# <bundle> (Part X of Y)`, `Part: **X of Y** | Files in this part: **N** (Total project files: **M**)`, `Part Size: **S KB** | Lines: **L** | Characters: **C**`).
+   - Reconcile `target_total_lines` directly with the part header's `Lines: **L**` attribute so premature EOF termination cannot occur when the `Offline` badge obscures the bottom gutter line number.
+
+3. **Deterministic Viewport Pacing Across Normal & Ultra-Long Wrapped Lines (`arrow_down` & `verification_trigger`)**:
+   - Standard code lines: Advance exactly `target_top_line = bottom_line + 1` using calibrated `DPAD_DOWN` steps and verify row-pitch alignment (`~31px/row`).
+   - Multi-page wrapped lines (e.g., `.svg` `<path d="M..."/>` or minified bundles where a single logical line wraps across multiple 1080p screens with no gutter number on continuation screens):
+     - Detect `is_wrapped_continuation` when `gutter_numbers == []` and text density is high (`text_rows >= 8`).
+     - Switch `arrow_down` into **Wrapped Continuation Page Advance Mode** (`PAGE_DOWN` / `18x DPAD_DOWN` per screen) while tracking accumulated character count against `CODESCAN_FILE_START` `chars="..."` and `size="..."`.
+     - Concatenate distinct continuation slices (`_merge_wrapped_line_continuation`) without overwriting the line's prefix until the closing tag (`</svg>`, `-->`, or next integer gutter line `N + 1`) appears.
+
+4. **Character-Exact ROI Slicing & VLM Prompt Steering (`frame_ocr` & `ocr_service.py`)**:
+   - Crop each visual row horizontally from `code_start_x` (`gutter_right_x + 12px`) to `1916px` with `2x` Lanczos upscaling and CLAHE contrast normalization so thin punctuation (`|`, `;`, `_`, `"`, `<`, `>`, `\\`, `{{`, `}}`) is never clipped or eroded.
+   - Inject `ocr_steering_guide.steering_prompt_hint` into the VLM system prompt so token decoding knows the active file's `path`, `type`, and expected `size`/`lines`/`chars`.
+""".strip()
+
+
+def generate_telemetry_correlation_and_steering_rescan_prompt(report: Dict[str, Any]) -> str:
+    """
+    Prompt 2: Enhances telemetry and tracking of both single-markdown and multi-part
+    markdown scans to correlate every OCR result to its source screen capture and
+    drive targeted re-scan self-healing via the instance-data steering guide.
+    """
+    steering = report.get("ocr_steering_guide") or {}
+    rescan_targets = steering.get("rescan_targets") or []
+    rescan_json = json.dumps(rescan_targets[:5], indent=2) if rescan_targets else "[]"
+
+    return f"""# Prompt 2: Single & Multi-Part Telemetry, Frame-to-OCR Correlation, & Instance-Data Steering Guide Re-Scan
+
+## Objective
+Enhance the telemetry and instance-data tracking for both **single Markdown scans** and **multi-part Markdown bundle scans** so every OCR line and `CODESCAN_FILE_START` block is bi-directionally correlated to its exact source screen capture (`frame_id`, `filename`, `top_line..bottom_line`, and row Y-coordinates) and automatically re-scanned whenever `size`, `lines`, or `chars` diverge from the declared ground-truth attributes.
+
+## 1. Hierarchical Ground-Truth Drivers (Part Header + Per-File Markers)
+1. **Top-of-File Part Header Driver (`part_header_metadata`)**:
+   - Extracted from Lines 1–6 of each Markdown part:
+     - `bundle_name`, `part_number`, `total_parts`, `files_in_part`, `total_project_files`, `part_size_kb`, `declared_lines`, `declared_chars`.
+   - Continuously compared against assembled document totals (`actual_files_found`, `actual_size_kb`, `actual_lines`, `actual_chars`) to compute `overall_ocr_accuracy_pct`.
+2. **Per-File Marker Driver (`<!-- CODESCAN_FILE_START path="..." type="..." size="..." lines="..." chars="..." -->` .. `<!-- CODESCAN_FILE_END -->`)**:
+   - Every embedded file block is parsed and verified for distinct metric equivalence:
+     - `actual_lines == expected_lines`
+     - `actual_chars == expected_chars`
+     - `actual_size == expected_size` (UTF-8 byte length with CRLF/LF normalization check)
+   - Any discrepancy flags the file with `metric_mismatch_details` (`lines`, `chars`, `size`) and records the exact markdown line span (`content_start_md_line..content_end_md_line`).
+
+## 2. Frame-to-OCR Provenance Correlation (`source_frame_ids` & Row Coordinates)
+- Every captured frame (`f_<timestamp>`) persists its `frame_id`, `filename`, `top_line`, `bottom_line`, and `line_y_map` (`line_num -> y_center_px`) in project instance data (`frames.json` and `lines_map`).
+- During `verify_codescan_file_markers_and_metrics()`, each file block's Markdown line span `[start_md_line, end_md_line]` is intersected with all frame `[top_line, bottom_line]` intervals to populate `source_frame_ids` on both the file entry and the active `ocr_steering_guide`.
+
+## 3. Instance-Data Steering Guide (`ocr_steering_guide`) & Automated Re-Scan Loop
+Include `ocr_steering_guide` directly in `state.latest_telemetry`, `state.orchestration_state`, and `blackboard.metadata` so every DAG node and OCR worker is steered in real time:
+```json
+{{
+  "scan_scope": "{steering.get('scan_scope', 'multi_part_bundle')}",
+  "goal": "100%_accurate_markdown_reproduction",
+  "part_header_driver": {json.dumps(steering.get('part_header_driver') or {}, indent=2)},
+  "active_file_driver": {json.dumps(steering.get('active_file_driver') or {}, indent=2)},
+  "rescan_targets": {rescan_json}
+}}
+```
+
+## 4. Closed-Loop Self-Healing Re-Scan Execution (`auto_rescan_mismatched_files_with_steering_guide`)
+Whenever `ocr_steering_guide.requires_rescan == True`:
+1. Select each target in `ocr_steering_guide.rescan_targets` (`path`, `expected_size`, `expected_lines`, `expected_chars`, `md_line_range`, `source_frame_ids`).
+2. Load the correlated raw PNG screen captures (`captures/<frame_id>.png`) covering `md_line_range`.
+3. Re-detect gutter row coordinates (`detect_teams_alignment`), slice each missing or low-confidence row band (`y_center +/- pitch`), and run high-precision steered OCR (`extract_rows_via_row_slicing` + `steering_prompt_hint`) with exact character/indentation preservation.
+4. Update `project.lines_map` in place, re-run `verify_codescan_file_markers_and_metrics()`, and confirm `distinct_accuracy_pct == 100.0%` before finalizing the part or auto-chaining to the next Markdown part in the bundle.
+""".strip()
 
 
 def generate_dag2_ai_optimization_prompt(report: Dict[str, Any]) -> str:
@@ -735,5 +843,13 @@ Please review the code in [`server/routers/orchestration.py`](file:///c:/Project
 | Event ID | Timestamp (Epoch ms) | Duration | Caller Node | Key Event / Sequence | Display | Window Transition | Viewport State |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 {ke_table}
+
+---
+
+{report.get('dag_positioning_and_ocr_prompt') or generate_dag_file_positioning_and_ocr_prompt(report)}
+
+---
+
+{report.get('telemetry_correlation_and_steering_rescan_prompt') or generate_telemetry_correlation_and_steering_rescan_prompt(report)}
 """
     return prompt.strip()

@@ -7103,3 +7103,5581 @@
                         {
                              "fieldCode": "FIELD-CITIZENSHIP",
                              "fieldLabel": "Are you a citizen or permanent resident of the usA?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": true,
+                             "usage":"input",
+                             "disabled": false,
+                             "required": false,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-COLLECT-CITIZENSHIP",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "required": true
+                                 },
+                                {
+                                     "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Status",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-CHECK",
+"fieldLabel": "Will the coverage applied for replace, discontinue, or change any existing life coverage or annuities in this or any other company?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Replace",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REPLACEMENT-NOTICE-GEORGIA",
+"fieldLabel": "As a Georgia resident, we are required to provide you the following information:InlnPlease review the [Replacement Noticej]",
+                             "arialabel": "",
+"helpText": "## Replacing Your Life Insurance Policy?InlnAre you thinking about buying a new policy and discontinuing or changing an existing policy? If youare, your decision could be a good one - or a mistake. You will not know for sure unless youmake a careful comparison of your existing policy and the proposed policy.InlnMake sure youunderstand the facts. Below you will find a check list of some of the items you should considerin making your decision. TAKE TIME TO READ IT.InInDo not let one agent or insurer prevent youfrom obtaining information from another agent or insurer which may be to your advantage.InHearboth sides before you decide. This way you can be sure you are making a decision that is inyour best interest.Inwe are required to notify your existing company that you may be replacingtheir policy.InlnITEMs To cONsIDERnIf the policy coverages are basically similar, premiums fora new policy may be higher because rates increase as your age increases.InCash values anddividends, if any, may grow slower under a new policy initially because of the initial costs ofissuing a policy.InYour present insurance company may be able to make a change on terms whichmay be more favorable than if you replace existing insurance with new insurance.InIf you borrowagainst an existing policy to pay premiums on a new policy, death benefits payable under yourexisting policy will be reduced by the amount of any unpaid loan, including unpaid interest.InCurrent interest rates are not guaranteed. Guaranteed interest rates are usuallyconsiderably lower than current rates. what rates are guaranteed?\nAre premiums guaranteed orsubject to change - up or down?nParticipating policies pay dividends that may materiallyreduce the cost of insurance over the life of the contract. Dividends, however, are notguaranteed.InlnCAuTIoN, you are urged not to take action to terminate, assign, or alter yourexisting life insurance coverage until after you have been issued the new policy, examined itand have found it to be acceptable to you.In\nAnd, REMEMBER, you have thirty (30) daysfollowing receipt of any life insurance policy to examine its contents. If you are notsatisfied with it for any reason, you have the right to return it to the insurer at its home orbranch office or to the agent through whom it was purchased, for a full refund of premium.",
+                             "helpTextTitle": "Replacement Notice",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage": "display",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "info-partial",
+                             "blockField": true,
+                             "options":[].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "GA",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Georgia Replacement Notice",
+                                 "eventName": "trackotherButtons",
+                                "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"display",
+                             "fieldType": "boolean",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        },
+                        {
+                             "fieldCode": "FIELD-MAIL-ADDR-STATE",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage":"display",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 2,
+                             "value": "wy"
+                        },
+                        {
+                             "fieldCode": "FIELD-COLLECT-CITIZENSHIP",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"display",
+                             "fieldType": "text",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        }
+                    ]
+                },
+                {
+                    "groupCode": "GROUP-ADD-EXISTING-COVERAGE",
+                    "groupTitle": "",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content": "Coverage [key]"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                    "groupType": "repeatable",
+                    "jsonValueField": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "disabled": false,
+                    "hidden": true,
+                    "required": false,
+                    "presentationRules":[
+                        {
+                             "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                             "value": "true",
+                             "required": true,
+                             "hidden": false
+                        },
+                        {
+                             "field": "FIELD-MAIL-ADDR-STATE",
+                             "value": "wy",
+                             "maxEntries": 3
+                        }
+                    ],
+                     "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-EXISTING-COVERAGE-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default":"",
+                             "value": "",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-NAME",
+                             "fieldLabel": "Name of current insurance company",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter name of current insurance company",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 55,
+                             "options": [],.
+                             "default": "",
+                             "value": "",
+                             "dataFieldSize": 8,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-EXISTING-COVERAGE-CHECK",
+                                     "value": "true",
+                                     "required": true,
+                                     "hidden": false
+                                 },
+                                {
+                                     "field":"FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "dataFieldsize": 6
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "companyName"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Name of Current Insurance Company [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-HOME-OFFICE-WYOMING",
+                             "fieldLabel": "Insurer Home Office Location",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter home office location",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "dataFieldsize": 6,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-POLICY-NUMBER",
+                             "fieldLabel": "Policy number (optional)",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter policy number",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "regex",
+                             "regex": "^[-a-zA-Z0-9]*$",
+                             "maxLength": 12,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "dataFieldSize": 4,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "dataFieldsize": 6,
+                                     "presentationorder": 2,
+                                     "exposition":[
+                                         {
+                                             "order": 1.
+"content": "If a number has not been assigned by the existing insurer, indicate alternative identification, such as an application or receiptnumber."
+                                         }
+                                     ]
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "policyNumber"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Policy Number [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-EXISTING-COVERAGE-INSURED-WYOMING",
+                             "fieldLabel": "Insured",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter Insured",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select-search",
+                             "maxLength": 12,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "dataFieldsize": 6,
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingExistingCoverage"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Insurer Home Office Location [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                             "fieldLabel": "Do you know your surrender charge?",
+                             "arialabel": "",
+"helpText": "## Surrender ChargelnlnLook to your existing policy's data page to determine the surrender charge percentage and dollar amount.",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "radio-vertical",
+                             "maxLength": 200,
+                             "errorValueName": "an option",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "I know my surrender charge",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "I don't know my surrender charge",
+                                     "value": "false",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "Not applicable",
+                                     "value":"unknown",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-MAIL-ADDR-STATE",
+                                     "value": "wy",
+                                     "required": true,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "wyomingSurrenderCharge"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Surrender Charge [key]",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+"fieldCode" : "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-AMOUNT-WYOMING",
+                          "fieldLabel": "How would you like to enter your surrender charge?",
+                          "ariaLabel": "",
+                          "helpText": "",
+                          "placeholder": "",
+                          "presentationorder": 4,
+                          "usage": "input",
+                          "usageSubtype":"hideChildren",
+                          "blockField": false,
+                          "hidden": true,
+                          "disabled": false,
+                          "required": false,
+                          "fieldType": "nested-multi-select",
+                          "maxLength": 200,
+                          "options":[
+                            {
+                               "label": "Percentage",
+                               "value": "Surrender_Charge_Percentage"
+                            },
+                            {
+                               "value": "Surrender_Charge_Percentage_Value",
+                               "placeholder": "Enter percentage",
+                               "optionType": "percentage",
+                               "order": 2,
+                               "required": true
+                            },
+                            {
+                               "label": "Dollar Amount",
+                               "value": "Surrender_Charge_Dollar_Amount"
+                            },
+                            {
+                               "value":"Surrender_Charge_Dollar_Amount_Value",
+                               "placeholder": "Enter dollar amount",
+                               "optionType":"dollar-amount",
+                               "order": 2,
+                               "required": true
+                            }
+                          ],
+                          "default": "",
+                          "value": "",
+                          "presentationRules": [
+                            {
+                               "field": "FIELD-EXISTING-COVERAGE-SURRENDER-CHARGE-WYOMING",
+                               "value": "true",
+                               "required": true,
+                               "hidden": false
+                            }
+                          ],
+                          "valueRules":[
+                            {
+                               "uSe":"USE_FIELD_GROUP_JSON",
+                               "jsonAttribute": "wyomingSurrenderChargeAmount"
+                            }
+                          ],
+                          "googleAnalytics": {
+                             "fieldName": "Surrender Charge Amount [key]",
+                             "eventName": "trackInput",
+                             "optionsType":"inputstatus",
+                             "options":[]
+                          }
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                             "fieldLabel": "+ Add Another Policy",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 22,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-ADD-OTHER-EXISTING-COVERAGE",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                    "maxEntries": 2
+                },
+                {
+                    "groupCode": "GROUP-SUBMIT-ADDITIONAL-INFO",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADDITIONAL-INFO",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 3,
+            "sectionNumber": 1,
+            "segmentNumber": 4,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 3,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 4,
+            "currentSegmentCode": "SEGMENT-ADDITIONAL-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 3,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2025-09-24T19:38:41.097+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                     "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                }
+            ]
+        },
+         "externalApp": {
+            "appId":"99887f7d-90d8-4602-b614-4c51ef9b3d9c",
+            "policyNumber":"LC5982124",
+            "appstatus": "InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingStatus": "Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100o00,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$42.70",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "Astrix",
+            "insuredLastName": "Zuckerbug",
+            "insuredFullName": "Astrix Zuckerbug",
+            "productCode": "2016 SITERM80",
+            "productName": "Trustage Term Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Test - Term Life Insurance - Hello Sprint Review",
+                "productType": "Term Life 2: Battle",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Mark",
+                        "lastName": "Zuckerbug"
+                    },
+                     "relationship": "CHILD"
+                }
+            ],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"99887f7d-90d8-4602-b614-4c51ef9b3d9c",
+            "eAppId":"6B102830-365F-4547-B662-AFC74F9E177B",
+            "correlationId": "",
+            "appSubstatus": "InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "42.70",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel":"Web",
+            "gender":"Male",
+            "state": "wy",
+            "issueAge": "65",
+            "policyNumber":"LC5982124",
+            "policystatus": "InProgress",
+            "addressLine1": "1523 Elm Court",
+            "city": "Cheyenne",
+            "zip":"82001",
+            "email": "william.oswald@trustage.com",
+            "firstName": "Astrix",
+            "lastName":"Zuckerbug",
+            "phone": "(563) 451-7647",
+            "date0fBirth": "1960-01-15"
+        },
+        "sessionId":"d3ecff13-b79d-49d4-b8b8-ce22a3c5da10",
+        "lastFourSSN": "9111"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 354. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-1.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-1.json" type=".json" size="70323" lines="1298" chars="70317" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "success",
+        "apiVer":"1.0.0",
+        "correlationId":"e5d09578-35a4-491c-bb46-15be2afe95c9",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId": "F2F1CF9C-989A-480F-89C4-4BCA6954AFCB",
+        "coreProduct": {
+            "name": "Trustage Advantage Whole Life",
+            "version": 1,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "whole",
+            "pr0ductTemplateId":"ED6A8625-B675-4A94-A800-2822C84827D7",
+            "pr0ductId":"44B30520-5726-448E-8B72-A03A3FAAF782",
+            "tenantId":"475B8867-FE2A-4627-AA0F-948076F401DB"
+        },
+        "insuranceForm": {
+            "formId":"91320DBC-80CD-4774-A122-CFF376C205EC",
+            "formName": "26-02-11:0918 TruStage TAwL 2.0 Insurance Form Template",
+            "formVersion": 1,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate":"2026-02-18T17:11:33.577Z",
+        "lastUpdated": "2026-02-18T17:11:47.283+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "segmentTitle": "Health Questions",
+            "navigationTitle": "Health Questions",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 3,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [
+                {
+                    "order": 1,
+                     "content": "please answer a few questions about your health."
+                }
+            ],
+             "postExposition": [
+                {
+                    "order": 1,
+"content": "when you select Continue, your health answers become final and can't be changed online."
+                }
+            ],
+            "fieldGroups":[
+                {
+                    "grOupCode": "GROUP-HEALTH-QUESTIONS",
+                    "groupTitle": "Health Questions",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition": [].
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A",
+"fieldLabel": "Within the past 5 years, has a medical professional diagnosed you with, treated you for, recommended treatment or medication, or have you beenhospitalized for any of the following:",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition":[],
+                             "googleAnalytics": {
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+"fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A-OPTIONS",
+                                     "value": "",
+                                     "swapDisqualifierValue": "true"
+                                 }
+                            },
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A-OPTIONS"
+                                     ],
+                                     "values":[
+                                         ````
+                                     ]
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A-OPTIONS",
+                             "fieldLabel": "Please select all that apply:",
+                             "groupSubTitle": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "hidden": false,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "multi-select-group",
+                             "value": "",
+                             "errorValueName": "an option",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A"
+                                     ],
+                                     "values":[
+                                         "true"
+                                     ]
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "label":"ALS (Lou Gehrig's)",
+                                     "value":"MedicalChk_ALs"
+                                 },
+                                {
+"label": "Cardiovascular or Heart Disease (excluding High Blood Pressure) (if yes, check all that apply)",
+                                     "value": "MedicalChk_Heart"
+                                 },
+                                {
+"label": "Heart Attack, Heart Blockage, Bypass Graft, or Stent Placement",
+                                     "value": "MedicalChk_HeartAttack"
+                                 },
+                                {
+                                     "label": "Diet or Exercise Control only (no medication)",
+                                     "value": "MedicalChk_DiabetesDiet"
+                                 },
+                                {
+                                     "label": "Epilepsy or other Seizure Disorder",
+                                     "value": "MedicalChk_BrainSpinalEpilepsy"
+                                 },
+                                {
+                                     "label": "Asthma requiring daily treatment",
+                                     "value": "MedicalChk_ChronicLungAsthma"
+                                 },
+                                {
+                                     "label": "Depression or Anxiety",
+                                     "value": "MedicalChk_MentalDepression"
+                                 },
+                                {
+                                     "label":"Hepatitis",
+                                     "value": "MedicalChk_ChronicLiverHepatitis"
+                                 },
+                                {
+                                     "label": "Alzheimer's Disease, Dementia or Memory Loss",
+                                     "value": "MedicalChk_Dementia"
+                                 },
+                                {
+                                     "label": "Heart Valve Replacement",
+                                     "value":"MedicalChk_HeartValveReplacement"
+                                 },
+                                {
+                                     "label": "Diabetes (if yes, check all that apply)",
+                                     "value": "MedicalChk_Diabetes"
+                                 },
+                                {
+                                     "label": "oral Medication (non-insulin)",
+                                     "value": "MedicalChk_DiabetesOralMedication"
+                                 },
+                                {
+                                     "label": "Transient Ischemic Attack (TIA or Ministroke)",
+                                     "value": "MedicalChk_BrainSpinalTIA"
+                                 },
+                                {
+                                     "label": "COPD or Emphysema",
+                                     "value":"MedicalChk_ChronicLungCoPD"
+                                 },
+                                {
+                                     "label": "Bipolar Disorder",
+                                     "value": "MedicalChk_MentalBiplor"
+                                 },
+                                {
+                                     "label": "Hemochromotosis",
+                                     "value": "MedicalChk_ChronicLiverHemochromotosis"
+                                 },
+                                {
+"label": "Cancer (excluding Basal or Squamous Cell Skin Cancer)",
+                                     "value":"MedicalChk_Cancer"
+                                 },
+                                {
+                                     "label": "Cardiomyopathy or Congestive Heart Failure (CHF)",
+                                     "value": "MedicalChk_HeartCardiomyopathy"
+                                 },
+                                {
+                                     "label": "Insulin (oral and/or injectable)",
+                                     "value": "MedicalChk_DiabetesInsulin"
+                                 },
+                                {
+"label": "Disorder of the Brain or Spinal Nerves (if yes, check all that apply)",
+                                     "value":"MedicalChk_BrainSpinal"
+                                 },
+                                {
+                                     "label": "Stroke",
+                                     "value": "MedicalChk_BrainSpinalstroke"
+                                 },
+                                {
+                                     "label": "Sarcoidosis or Fibrosis",
+                                     "value": "MedicalChk_ChronicLungFibrosis"
+                                 },
+                                {
+                                     "label": "other (please specify)",
+                                     "value": "MedicalChk_Mentalother"
+                                 }
+                             ],
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A",
+                                     "value": "true",
+                                     "required": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "",
+                                 "eventName": "trackHealthQuestions",
+                                 "optionsType": "contains",
+                                 "options":[
+                                     {
+                                         "fieldName":"HC15",
+                                         "value": "MedicalChk_ALs",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC10",
+                                         "value":"MedicalChk_Heart",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC18",
+                                         "value": "MedicalChk_HeartAttack",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC24",
+                                         "value":"MedicalChk_DiabetesDiet",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC27",
+                                         "value":"MedicalChk_BrainSpinalEpilepsy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC34",
+                                         "value": "MedicalChk_ChronicLungAsthma",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC38",
+                                         "value": "MedicalChk_MentalDepression",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC41",
+                                         "value": "MedicalChk_ChronicLiverHepatitis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC14",
+                                         "value":"MedicalChk_Dementia",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC19",
+                                         "value":"MedicalChk_HeartValveReplacement",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC11",
+                                         "value":"MedicalChk_Diabetes",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC25",
+                                         "value": "MedicalChk_DiabetesOralMedication",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC28",
+                                         "value": "MedicalChk_BrainSpinalTIA",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC35",
+                                         "value":"MedicalChk_ChronicLungCoPD",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC39",
+                                         "value":"MedicalChk_MentalBiplor",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC42",
+                                         "value": "MedicalChk_ChronicLiverHemochromotosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC02",
+                                         "value":"MedicalChk_Cancer",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC20",
+                                         "value":"MedicalChk_HeartCardiomyopathy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC26",
+                                         "value": "MedicalChk_DiabetesInsulin",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC12",
+                                         "value": "MedicalChk_BrainSpinal",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC29",
+                                         "value": "MedicalChk_BrainSpinalstroke",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC36",
+                                         "value":"MedicalChk_ChronicLungFibrosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC4o",
+                                         "value": "MedicalChk_Mentalother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC43",
+                                         "value": "MedicalChk_ChronicLiverOther",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo8",
+                                         "value": "MedicalChk_CirrhosisLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC21",
+                                         "value":"MedicalChk_HeartPulmonaryHypertension",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC30",
+                                         "value":"MedicalChk_BrainSpinalMultipleSclerosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC13",
+                                         "value": "MedicalChk_ChronicLung",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC37",
+                                         "value":"MedicalChk_ChronicLungother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_MentalotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_ChronicLiverOtherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo7",
+                                         "value": "MedicalChk_AlcoholDrug",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC22",
+                                         "value":"MedicalChk_HeartRhythmDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC31",
+                                         "value": "MedicalChk_BrainSpinalParkinson",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value": "MedicalChk_ChronicLungOtherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "RC14",
+                                         "value": "MedicalChk_Mental",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC16",
+                                         "value": "MedicalChk_MuscularDystrophy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC23",
+                                         "value":"MedicalChk_Heartother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC32",
+                                         "value":"MedicalChk_BrainSpinalAneurysm",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC15",
+                                         "value":"MedicalChk_ChronicLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC13",
+                                         "value":"MedicalChk_Biploar",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_HeartotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC33",
+                                         "value": "MedicalChk_BrainSpinalother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC16",
+                                         "value":"MedicalChk_ChronicKidney",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC17",
+                                         "value":"MedicalChk_SuicideAttempt",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_BrainSpinalotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value": "Q_SubMed_HIVAIDS",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A",
+                                     "value": "true"
+                                 }
+                            }
+                        },
+                        {
+                             "fieldCode":"FIELD-HEALTH-QUESTION-Q_Med_Past5Years_A-OPTIONS-ALL",
+                             "fieldLabel": "",
+                             "groupSubTitle": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+"value":"MedicalChk_ALS,MedicalChk_Heart,MedicalChk_HeartAttack,MedicalChk_DiabetesDiet,MedicalChk_BrainSpinalEpilepsy,MedicalChk_ChronicLungAsthma,MedicalChk_MentalDepression,MedicalChk_ChronicLiverHepatitis,MedicalChk_Dementia,MedicalChk_HeartValveReplacement,MedicalChk_Diabetes,MedicalChk_DiabetesOralMedication,MedicalChk_BrainSpinalTIA,MedicalChk_ChronicLungCoPD,MedicalChk_MentalBiplor,MedicalChk_ChronicLiverHemochromotosis,MedicalChk_Cancer,MedicalChk_HeartCardiomyopathy,MedicalChk_DiabetesInsulin,MedicalChk_BrainSpinal,MedicalChk_BrainSpinalStroke,MedicalChk_ChronicLungFibrosis,MedicalChk_Mentalother,MedicalChk_ChronicLiverOther,MedicalChk_CirrhosisLiver,MedicalChk_HeartPulmonaryHypertension,MedicalChk_BrainSpinalMultipleSclerosis,MedicalChk_ChronicLung,MedicalChk_ChronicLungOther,MedicalChk_MentalotherFreeText,MedicalChk_ChronicLiverOtherFreeText,MedicalChk_AlcoholDrug,MedicalChk_HeartRhythmDisorder,MedicalChk_BrainSpinalParkinson,MedicalChk_ChronicLungotherFreeText,MedicalChk_Mental,MedicalChk_MuscularDystrophy,MedicalChk_Heartother,MedicalChk_BrainSpinalAneurysm,MedicalChk_ChronicLiver,MedicalChk_Biploar,MedicalChk_HeartOtherFreeText,MedicalChk_BrainSpinalother,MedicalChk_ChronicKidney,MedicalChk_SuicideAttempt,MedicalChk_BrainSpinalotherFreeText,Q_SubMed_HIVAIDS"
+                         },
+                         {
+                             "fieldCode":"FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B",
+"fieldLabel": "within the past 5 years, has a medical professional diagnosed you with, treated you for, recommended treatment or medication, or have you beenhospitalized for:",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+"fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B-OPTIONS",
+                                     "value": "",
+                                     "swapDisqualifierValue": "true"
+                                 }
+                            },
+                             "valueRules": [
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B-OPTIONS"
+                                     ],
+                                     "values":[
+                                         ````
+                                     ]
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode":"FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B-OPTIONS",
+                             "fieldLabel": "Please select all that apply:",
+                             "groupSubTitle": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "hidden": false,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "multi-select-group",
+                             "value": "",
+                             "errorValueName": "an option",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B"
+                                     ],
+                                     "values":[
+                                         "true"
+                                     ]
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "label":"ALS (Lou Gehrig's)",
+                                     "value": "MedicalChk_ALs"
+                                 },
+                                {
+"label": "Cardiovascular or Heart Disease (excluding High Blood Pressure) (if yes, check all that apply)",
+                                     "value":"MedicalChk_Heart"
+                                 },
+                                {
+"label": "Heart Attack, Heart Blockage, Bypass Graft, or Stent Placement",
+                                     "value":"MedicalChk_HeartAttack"
+                                 },
+                                {
+                                     "label": "Diet or Exercise Control only (no medication)",
+                                     "value": "MedicalChk_DiabetesDiet"
+                                 },
+                                {
+                                     "label": "Epilepsy or other Seizure Disorder",
+                                     "value": "MedicalChk_BrainSpinalEpilepsy"
+                                 },
+                                {
+                                     "label": "Asthma requiring daily treatment",
+                                     "value": "MedicalChk_ChronicLungAsthma"
+                                 },
+                                {
+                                     "label": "Depression or Anxiety",
+                                     "value":"MedicalChk_MentalDepression"
+                                 },
+                                {
+                                     "label":"Hepatitis",
+                                     "value": "MedicalChk_ChronicLiverHepatitis"
+                                 },
+                                {
+                                     "label": "Alzheimer's Disease, Dementia or Memory Loss",
+                                     "value": "MedicalChk_Dementia"
+                                 },
+                                {
+                                     "label": "Heart Valve Replacement",
+                                     "value": "MedicalChk_HeartValveReplacement"
+                                 },
+                                {
+                                     "label": "Diabetes (if yes, check all that apply)",
+                                     "value": "MedicalChk_Diabetes"
+                                 },
+                                {
+                                     "label": "Oral Medication (non-insulin)",
+                                     "value": "MedicalChk_DiabetesOralMedication"
+                                 },
+                                {
+                                     "label": "Transient Ischemic Attack (TIA or Ministroke)",
+                                     "value": "MedicalChk_BrainSpinalTIA"
+                                 },
+                                {
+                                     "label": "CoPD or Emphysema",
+                                     "value":"MedicalChk_ChronicLungCOPD"
+                                 },
+                                {
+                                     "label": "Bipolar Disorder",
+                                     "value": "MedicalChk_MentalBiplor"
+                                 },
+                                {
+                                     "label": "Hemochromotosis",
+                                     "value": "MedicalChk_ChronicLiverHemochromotosis"
+                                 },
+                                {
+"label": "Cancer (excluding Basal or Squamous Cell Skin Cancer)",
+                                     "value":"MedicalChk_Cancer"
+                                 },
+                                {
+                                     "label": "Cardiomyopathy or Congestive Heart Failure (CHF)",
+                                     "value": "MedicalChk_HeartCardiomyopathy"
+                                 },
+                                {
+                                     "label": "Insulin (oral and/or injectable)",
+                                     "value": "MedicalChk_DiabetesInsulin"
+                                 },
+                                {
+"label": "Disorder of the Brain or Spinal Nerves (if yes, check all that apply)",
+                                     "value": "MedicalChk_BrainSpinal"
+                                 },
+                                {
+                                     "label": "Stroke",
+                                     "value": "MedicalChk_BrainSpinalstroke"
+                                 },
+                                {
+                                     "label": "Sarcoidosis or Fibrosis",
+                                     "value":"MedicalChk_ChronicLungFibrosis"
+                                 },
+                                {
+                                     "label": "other (please specify)",
+                                     "value":"MedicalChk_Mentalother"
+                                 }
+                             ],
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B",
+                                     "value": "true",
+                                     "required": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "",
+                                 "eventName": "trackHealthQuestions",
+                                 "optionsType": "contains",
+                                 "options":[
+                                     {
+                                         "fieldName":"HC15",
+                                         "value":"MedicalChk_ALs",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "RC10",
+                                         "value": "MedicalChk_Heart",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC18",
+                                         "value":"MedicalChk_HeartAttack",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC24",
+                                         "value": "MedicalChk_DiabetesDiet",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC27",
+                                         "value": "MedicalChk_BrainSpinalEpilepsy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC34",
+                                         "value":"MedicalChk_ChronicLungAsthma",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC38",
+                                         "value": "MedicalChk_MentalDepression",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC41",
+                                         "value":"MedicalChk_ChronicLiverHepatitis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC14",
+                                         "value":"MedicalChk_Dementia",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC19",
+                                         "value":"MedicalChk_HeartValveReplacement",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC11",
+                                         "value":"MedicalChk_Diabetes",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC25",
+                                         "value":"MedicalChk_DiabetesOralMedication",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC28",
+                                         "value":"MedicalChk_BrainSpinalTIA",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC35",
+                                         "value": "MedicalChk_ChronicLungCoPD",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC39",
+                                         "value": "MedicalChk_MentalBiplor",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC42",
+                                         "value": "MedicalChk_ChronicLiverHemochromotosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC02",
+                                         "value":"MedicalChk_Cancer",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC20",
+                                         "value": "MedicalChk_HeartCardiomyopathy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC26",
+                                         "value":"MedicalChk_DiabetesInsulin",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC12",
+                                         "value": "MedicalChk_BrainSpinal",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC29",
+                                         "value": "MedicalChk_BrainSpinalstroke",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC36",
+                                         "value":"MedicalChk_ChronicLungFibrosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC40",
+                                         "value": "MedicalChk_Mentalother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC43",
+                                         "value":"MedicalChk_ChronicLiverOther",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HCo8",
+                                         "value":"MedicalChk_CirrhosisLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC21",
+                                         "value":"MedicalChk_HeartPulmonaryHypertension",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC30",
+                                         "value": "MedicalChk_BrainSpinalMultipleSclerosis",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC13",
+                                         "value":"MedicalChk_ChronicLung",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC37",
+                                         "value":"MedicalChk_ChronicLungother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_MentalotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_ChronicLiverotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC07",
+                                         "value": "MedicalChk_AlcoholDrug",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC22",
+                                         "value":"MedicalChk_HeartRhythmDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC31",
+                                         "value":"MedicalChk_BrainSpinalParkinson",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value": "MedicalChk_ChronicLungotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "RC14",
+                                         "value": "MedicalChk_Mental",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC16",
+                                         "value": "MedicalChk_MuscularDystrophy",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC23",
+                                         "value":"MedicalChk_Heartother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC32",
+                                         "value": "MedicalChk_BrainSpinalAneurysm",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC15",
+                                         "value":"MedicalChk_ChronicLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC13",
+                                         "value":"MedicalChk_Biploar",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_HeartotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC33",
+                                         "value": "MedicalChk_BrainSpinalother",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"RC16",
+                                         "value": "MedicalChk_ChronicKidney",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC17",
+                                         "value": "MedicalChk_SuicideAttempt",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"MedicalChk_BrainSpinalotherFreeText",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "",
+                                         "value":"Q_SubMed_HIVAIDS",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B",
+                                     "value": "true"
+                                 }
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Q_Med_Past5Years_B-OPTIONS-ALL",
+                             "fieldLabel": "",
+                             "groupSubTitle": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+"value":"MedicalChk_ALS,MedicalChk_Heart,MedicalChk_HeartAttack,MedicalChk_DiabetesDiet,MedicalChk_BrainSpinalEpilepsy,MedicalChk_ChronicLungAsthma,MedicalChk_MentalDepression,MedicalChk_ChronicLiverHepatitis,MedicalChk_Dementia,MedicalChk_HeartValveReplacement,MedicalChk_Diabetes,MedicalChk_DiabetesOralMedication,MedicalChk_BrainSpinalTIA,MedicalChk_ChronicLungCoPD,MedicalChk_MentalBiplor,MedicalChk_ChronicLiverHemochromotosis,MedicalChk_Cancer,MedicalChk_HeartCardiomyopathy,MedicalChk_DiabetesInsulin,MedicalChk_BrainSpinal,MedicalChk_BrainSpinalStroke,MedicalChk_ChronicLungFibrosis,MedicalChk_Mentalother,MedicalChk_ChronicLiverother,MedicalChk_CirrhosisLiver,MedicalChk_HeartPulmonaryHypertension,MedicalChk_BrainSpinalMultipleSclerosis,MedicalChk_ChronicLung,MedicalChk_ChronicLungother,MedicalChk_MentalotherFreeText,MedicalChk_ChronicLiverOtherFreeText,MedicalChk_AlcoholDrug,MedicalChk_HeartRhythmDisorder,MedicalChk_BrainSpinalParkinson,MedicalChk_ChronicLungOtherFreeText,MedicalChk_Mental,MedicalChk_MuscularDystrophy,MedicalChk_Heartother,MedicalChk_BrainSpinalAneurysm,MedicalChk_ChronicLiver,MedicalChk_Biploar,MedicalChk_HeartOtherFreeText,MedicalChk_BrainSpinalother,MedicalChk_ChronicKidney,MedicalChk_SuicideAttempt,MedicalChk_BrainSpinalOtherFreeText,Q_SubMed_HIVAIDs"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-SUBMIT-HEALTH-QUESTIONS",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "arialabel":"",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default":"",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 3,
+            "captchaRequired": false,
+            "visited": true
+        },
+         "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 13,
+            "segmentsComplete": 2,
+            "segmentsRequired": 3,
+            "currentSection": 1,
+            "currentSegment": 3,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 2,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-02-18T17:11:33.040+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Verification",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Health Questions Continued",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 5,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 6,
+                             "navigationTitle": "Final Rate",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                      segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"c89668be-31ac-4644-a0c2-ee3cb9ba122a",
+            "policyNumber": "MC1477204",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus": "Incomplete",
+            "billingstatus":"Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "finalRatesSectionNumber": 1,
+            "finalRatesSegmentNumber": 6,
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount": "$47.08",
+            "billingFreq":"Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders":[],
+            "modals":[],
+            "insuredFirstName": "Greenest",
+            "insuredLastName": "Goblindo",
+            "insuredFullName": "Greenest Goblindo",
+            "productCode": "2024 MSIWLALB",
+            "productName": "Trustage? Advantage whole Life",
+            "productType": "whole Life",
+            "contentAuthoring": {
+                "productName": null,
+                "productType": null,
+                "crossSellModuleTitle": "Frequently Packaged Together",
+                "finalRateLearnMoreModalTitle": "Accidental Death coverage",
+"finalRateLearnMoreModalSubtitle": "Expand your coverage with an Accidental Death benefit",
+"finalRateLearnMoreModalBody": "Give your beneficiaries more money on top of your regular death benefit if you die as the result of a covered accident."
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact":"833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber": "04814470",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "Trustage.com Website",
+            "beneficiaries": [].
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"c89668be-31ac-4644-a0c2-ee3cb9ba122a",
+            "eAppId":"F2F1CF9C-989A-480F-89C4-4BCA6954AFCB",
+            "correlationId":"e5d09578-35a4-491c-bb46-15be2afe95c9",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2024 MSIWLALB",
+            "coverageAmount": "10000",
+            "premiumAmount": "47.08",
+            "paymentFreq":"Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "orgName": "trustage.com website",
+            "gender": "Male",
+            "state": "IL",
+            "issueAge": "58",
+            "policyNumber": "MC1477204",
+            "policystatus": "InProgress",
+            "addressLine1": "124 N West St",
+            "city": "Chicago",
+            "zip":"60008",
+            "email": "testo1@example.com",
+            "firstName": "Greenest",
+            "lastName": "Goblindo",
+            "phone": "(888) 765-7845",
+            "date0fBirth":"1967-06-09",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessionId": "14547228-97c1-4bda-a773-1e10b4a6aaee",
+        "lastFourSSN": "2188"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 355. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-2.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-2.json" type=".json" size="26361" lines="535" chars="26353" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId":"e5d09578-35a4-491c-bb46-15be2afe95c9",
+        "errors":[]
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"F2F1CF9C-989A-480F-89C4-4BCA6954AFCB",
+        "coreProduct": {
+            "name": "Trustage Advantage whole Life",
+            "version": 1,
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "whole",
+            "pr0ductTemplateId":"ED6A8625-B675-4A94-A800-2822C84827D7",
+            "pr0ductId": "44B30520-5726-448E-8B72-A03A3FAAF782",
+            "tenantId": "475B8867-FE2A-4627-AA0F-948076F401DB"
+        },
+        "insuranceForm": {
+            "formId":"91320DBC-80CD-4774-A122-CFF376C205EC",
+            "formName": "26-02-11:0918 TruStage TAwL 2.0 Insurance Form Template",
+            "formVersion": 1,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-02-18T17:11:33.577Z",
+        "lastUpdated": "2026-02-18T17:12:27.692+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS-CONTINUED",
+            "segmentTitle": "Health Questions Continued",
+            "navigationTitle": "Health Questions Continued",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 4,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[
+                {
+                    "order": 1,
+                    "content": "We have a few more health questions for you."
+                }
+            ],
+             "fieldGroups":[
+                {
+                    "grOupCode" : "GROUP-HEALTH-QUESTIONS-CONTINUED",
+                    "groupTitle": "Health Questions Continued",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-height",
+                             "fieldLabel":"Height",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "height-granular",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[].
+                             "presentationRules": [],
+                             "exposition": [],
+                             "dataFieldsize": 4,
+                             "googleAnalytics": {
+                                 "fieldName": "Height",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Weight",
+                             "fieldLabel":"Weight",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter weight in pounds",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType":"weight",
+                             "maxLength": 3,
+                             "default": "",
+                             "value": "",
+                             "options": [].
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Weight",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "grOupCode": "GROUP-REVIEW-APPLICANT-CERTIFICATION",
+                    "groupTitle": "Permissions",
+"groupSubTitle": "This application must be completed and signed by the person being insured. As the person completing this application, please certify one of thefollowing.",
+                    "groupType": "basic",
+                    "groupPartition": true,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode":"FIELD-APPLICANT-CERTIFICATION",
+                             "fieldLabel": "Applicant Certification",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-question",
+                             "maxLength": 100,
+                             "options":[
+                                {
+                                     "label": "I am the insured, Bob Saget",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "label": "I am not the insured, Bob Saget",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Applicant Certification",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "I am the insured"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "I am not the insured"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode":"FIELD-PRESCRIPTION-RECORD-AUTH",
+                             "fieldLabel": "click to read [Prescription record authorizationj",
+                             "arialabel": "",
+"helpText": "## Prescription Record AuthorizationlnlnI authorize any health care providers, pharmacy benefit manager/ pharmaceutical firm, insurance companies,consumer reporting agency, the Department of Motor Vehicles, financial institution, or employerwith information about my physical or mental health condition, substance or alcohol use, sTD's,diagnosis or treatment of Human Immunodeficiency Virus (HIv), prescription drug records,financial status, employment status, or other relevant information about me, to give allinformation (except psychiatric treatment notes) to the Company or its reinsurers to determineeligibility for insurance or benefits. Such information will be released only to reinsurers,persons performing business duties as delegated or contracted for by the Company related to myapplication and insurance-related functions, as permitted or required by law, or as I furtherauthorize. Health information shared for these purposes is not subject to federal healthinformation privacy laws; however, state privacy laws do apply.InlnI agree this authorizationis valid for 24 months or such time limit as permitted in the state where the policy isdelivered, a copy is as valid as the original, and I or my authorized representative canreceive a copy upon Authorized Request. For purposes of collecting information in connectionwith a claim for benefits, this Authorization is valid for the duration of the claim.InlnIunderstand that: (1) I can revoke this authorization at any time by Authorized Request to theCompany; (2) revocation of this authorization will not affect any prior action taken by theCompany in reliance upon this authorization, and (3) failure to sign, or revocation of thisauthorization may impair the Company's ability to evaluate claims or process applications andmay be a basis for denying this application or a claim for benefits.",
+                             "helpTextTitle": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage":"display",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "info-partial",
+                             "options": [],.
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Prescription record authorization",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-PRESCRIPTION-PERMISSION",
+"fieldLabel": "I give permission to check Bob Saget's prescription records ",
+                             "presentationorder": 3,
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "checkbox",
+                             "maxLength": 100,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "true",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "false",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "disabled": true
+                                 }
+                             ],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Permissions",
+                                 "eventName":"trackCheckInteraction",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Select"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "Deselect"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-REVIEW-CANCEL-APPLICATION",
+                             "fieldLabel": "I do not give permission, cancel the application",
+                             "presentationorder": 4,
+                             "ariaLabel": "",
+"helpText": "# Are you sure?\nlnCanceling your application doesn't mean you won't be eligible to apply again, but you will need to fill out a new application orcall us at [phoneNumberj",
+                             "placeholder": "",
+                             "usage":"display",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "custom-link-button",
+                             "maxLength": 30,
+                             "options": [].
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [
+                                {
+                                     "field":"FIELD-IDENTITY-INFO-LOCKED",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "I do not give permission, cancel the application",
+                                 "eventName": "trackotherButtons",
+                                 "optionsType": "click",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-IDENTITY-INFO-LOCKED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 13,
+                             "usage": "display",
+                             "fieldType": "boolean",
+                             "hidden": true,
+                             "disabled": true,
+                             "required": false,
+                             "default": "",
+                             "value": "false"
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-SUBMIT-HEALTH-QUESTIONS-CONTINUED",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "grouptype": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS-CONTINUED",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition": []
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 3,
+            "sectionNumber": 1,
+            "segmentNumber": 4,
+            "captchaRequired": false,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 13,
+            "segmentsComplete": 3,
+            "segmentsRequired": 3,
+            "currentSection": 1,
+            "currentSegment": 4,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS-CONTINUED",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Application",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 3,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-02-18T17:11:33.040+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Verification",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Health Questions Continued",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 5,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 6,
+                             "navigationTitle": "Final Rate",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"c89668be-31ac-4644-a0c2-ee3cb9ba122a",
+            "policyNumber": "MC1477204",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus":"Incomplete",
+            "billingStatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "finalRatesSectionNumber": 1,
+            "finalRatesSegmentNumber": 6,
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount": "$47.08",
+            "billingFreq":"Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "Bob",
+            "insuredLastName": "Saget",
+            "insuredFullName": "Bob Saget",
+            "productCode": "2024 MSIWLALB",
+            "productName": "TruStage Advantage whole Life",
+            "productType": "whole Life",
+            "contentAuthoring": {
+                "productName": null,
+                "productType": null,
+                "crossSellModuleTitle": "Frequently Packaged Together",
+                "finalRateLearnMoreModalTitle": "Accidental Death coverage",
+"finalRateLearnMoreModalSubtitle": "Expand your coverage with an Accidental Death benefit",
+"finalRateLearnMoreModalBody": "Give your beneficiaries more money on top of your regular death benefit if you die as the result of a covered accident."
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlSource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline":"https://trustage.com/cancel-application",
+            "phoneHeader":"833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber":"04814470",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "Trustage.com Website",
+            "beneficiaries": [].
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id": "c89668be-31ac-4644-a0c2-ee3cb9ba122a",
+            "eAppId":"F2F1CF9C-989A-480F-89C4-4BCA6954AFCB",
+            "correlationId":"e5d09578-35a4-491c-bb46-15be2afe95c9",
+            "appSubstatus": "InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2024 MSIWLALB",
+            "coverageAmount":"10000",
+            "premiumAmount": "47.08",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel":"Web",
+            "orgName": "trustage.com website",
+            "gender": "Male",
+            "state": "IL",
+            "issueAge": "58",
+            "policyNumber": "MC1477204",
+            "policystatus": "InProgress",
+            "addressLine1": "124 N West St",
+            "city": "Chicago",
+            "zip":"60008",
+            "email": "testo1@example.com",
+            "firstName": "Bob",
+            "lastName": "Saget",
+            "phone": "(888) 765-7845",
+            "date0fBirth": "1967-06-09",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessionId": "14547228-97c1-4bda-a773-1e10b4a6aaee",
+        "lastFourSSN": "2188"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 356. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-3.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg-tawl-3.json" type=".json" size="35011" lines="748" chars="35007" -->
+   'json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId": "d52bdf84-bcd5-4560-b8e5-d9f453c0f92e",
+        "errors":[]
+    },
+    "payload":{
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"7781F52C-44C8-4970-A858-A64B184E59B6",
+        "coreProduct": {
+            "name": "TruStage? Advantage Whole Life 2.0",
+            "version": 1,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Whole",
+            "pr0ductTemplateId":"ED6A8625-B675-4A94-A800-2822C84827D7",
+            "pr0ductId": "FB7D895B-9951-4AB4-A35F-9E4D56EBCBA0",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"391F001A-8A93-401E-BA50-A5BF2D8F1E02",
+            "formName": "26-04-03:1040 TruStage TAwL 2.0 Insurance, Agent Form Template",
+            "formVersion": 14,
+            "formTemplateType": "DIX-AA"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-07-02T20:59:46.296Z",
+        "lastUpdated": "2026-07-02T21:00:35.965+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "segmentTitle": "Enter Health Information",
+            "navigationTitle": "Enter Health Information",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-HEALTH-AND-REPLACEMENT",
+            "isComplete": false,
+            "presentationorder": 1,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[],
+            "fieldGroupCount": 2,
+            "fieldGroups":[
+                {
+                    "grOupCode" : "GROUP-HEALTH-QUESTIONS",
+                    "groupTitle": "Health Questions",
+                     "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-TOBACCO",
+"fieldLabel": "Have you used tobacco or nicotine products within the past 12 months?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "questionId": "Q_Med_Tobacco"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-RECKLESS-DRIVING",
+"fieldLabel": "Within the past 5 years have you had 2 or more convictions of reckless driving or driving under the influence?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "questionId": "Q_Med_Reckless_Driving"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-NORMAL-ACTIVITIES",
+"fieldLabel": " Do you require assistance or supervision with activities of daily living such as dressing, bathing, cooking, cleaning, or shopping?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'questionId": "Q_Med_NormalActivities"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-REQUIREDOXYGEN",
+"fieldLabel": "Have you been advised by a medical professional to use, or do you require the use of, oxygen?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'questionId":"Q_Med_Requiredoxygen"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-WHEELCHAIR",
+"fieldLabel": "Have you been advised by a medical professional to use, or do you require permanent use of, a wheelchair or mobility scooter?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "questionId": "Q_Med_wheelchair"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-HOSPITALIZED",
+"fieldLabel": "Are you currently, or within the past 3 months have you been advised by a medical professional to be confined in a hospital, nursing facility, orreceive hospice care?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "questionId": "Q_Med_Hospitalized"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-RECEIVINGDIALYSIS",
+                             "fieldLabel": "Are you currently receiving dialysis?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "questionId": "Q_Med_ReceivingDialysis"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-INCOMPLETE-TEST",
+"fieldLabel": "Within the past 6 months, have you been advised by a medical professional to have surgery, diagnostic testing (other than for HIv), or any procedurewhich you have not completed, or the results are unknown?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 8,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default":"",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'questionId": "Q_Med_Incomplete_Test"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-PAST5YEARS-A",
+"fieldLabel": "Within the past 5 years, has a medical professional diagnosed you with, treated you for, recommended treatment or medication, or have you beenhospitalized for any of the following:",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 9,
+                             "dataFieldsize": 3,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"Yes",
+                                     "value": "Yes",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "No",
+                                     "value": "No",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             'questionId":"Q_Med_Past5Years_A"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-MED-PAST5YEARS-A-OPTIONS",
+                             "fieldLabel": "Please select all that apply:",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 10,
+                             "dataFieldSize": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "nested-multi-select",
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"ALS (Lou Gehrig's)",
+                                     "value": "Q_SubMed_ALS",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+                                     "label": "Alzheimer's Disease, Dementia or Memory Loss",
+                                     "value":"Q_SubMed_Dementia",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+"label": "Cancer (excluding Basal or Squamous Cell Skin Cancer)",
+                                     "value":"Q_SubMed_Cancer",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+                                     "label": "Cirrhosis of the Liver",
+                                     "value": "Q_SubMed_CirrhosisLiver",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+"label": "Drug or Alcohol Abuse, including having been advised by a medical professional to seek treatment or counseling which may or may not havebeen completed",
+                                     "value":"Q_SubMed_Alcohol_Drug",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+                                     "label": "Muscular Dystrophy",
+                                     "value": "Q_SubMed_Muscular_Dystrophy",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+                                     "label":"Schizophrenia",
+                                     "value": "Q_SubMed_Schizophrenia",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 1,
+                                     "label": "Suicide Attempt",
+                                     "value":"Q_SubMed_Suicide_Attempt",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-HEIGHT",
+                             "fieldLabel":"Height",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 11,
+                             "dataFieldsize": 3,
+                             "usage":"input",
+                             "fieldType": "height-granular",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "maxLength": 300,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName":"Height",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-WEIGHT",
+                             "fieldLabel":"Weight",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 12,
+                             "usage": "input",
+                             "fieldType": "weight",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "maxLength": 3,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Weight",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-SUBMIT-HEALTH-QUESTIONS",
+                    "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "SAVE & CLOSE",
+                                     "value": "close",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "SAVE & CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                              exposition": []
+                        }
+                    ]
+                }
+            ],
+            "sectionNumber": 2,
+            "segmentNumber": 1,
+            "captchaRequired": true,
+            "visited": true,
+            "readonly": false
+        },
+        "progress": {
+            "sectionsCount": 4,
+            "sectionsComplete": 1,
+            "sectionsRequired": 4,
+            "segmentsCount": 14,
+            "segmentsComplete": 2,
+            "segmentsRequired": 1,
+            "currentSection": 2,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "currentProgItemCode": "PROGRESS-HEALTH-AND-REPLACEMENT",
+            "progressItemList": [
+                {
+                    "progressItemTitle": "Applicant Contact Info",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 2,
+                    "progressSegmentsComplete": 2,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-07-02T20:59:45.055+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Contact Information",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle":"Authorization",
+                             "isComplete": true,
+                             "active": false
+                        }
+                    ],
+                    "completeTimestamp": "2026-07-02T21:00:35.964+00:00"
+                },
+                {
+                    "progressItemTitle": "Health & Replacement",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-HEALTH-AND-REPLACEMENT",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Enter Health Information",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Additional Health Information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Enter replacement information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "state Specific Disclosures",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ],
+                     "segmentNumber": 1,
+                    "startTimestamp": "2026-07-02T21:00:35.964+00:00"
+                },
+                {
+                    "progressItemTitle": "Beneficiaries & Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-BENEFICIARIES-AND-PAYMENT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Signature",
+                    "arialabel":"",
+                    "progressItemCode": "PROGRESS-SIGNATURE",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 4,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"3e46fbdd-1acb-45a4-a2a8-a047457edd6c",
+            "policyNumber":"MC1000007800",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingStatus": "Incomplete",
+            "billingStatus": "Incomplete",
+            "insuredstatus": "Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "editFinalRatesAllowedstatus":"enabled",
+            "startAppUnderwritingClass": "Preferred Non-Tobacco",
+            "finalRatesSectionNumber": 3,
+            "finalRatesSegmentNumber": 2,
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount": "$47.40",
+            "billingFreq":"Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals":[],
+            "insuredFirstName": "Cheese",
+            "insuredLastName": "Balls",
+            "insuredFullName": "Cheese Balls",
+            "productCode": "2024 MSIWLALB",
+            "productName": "Trustage Advantage whole Life 2.0",
+            "productType": "whole Life",
+            "contentAuthoring": {
+                "productName": null,
+                "productType": null,
+                "crossSellModuleTitle": "Frequently Packaged Together",
+                "finalRateLearnMoreModalTitle": "Accidental Death coverage",
+"finalRateLearnMoreModalSubtitle": "Expand your coverage with an Accidental Death benefit",
+"finalRateLearnMoreModalBody": "Give your beneficiaries more money on top of your regular death benefit if you die as the result of a covered accident."
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect":"https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "partnerContractNumber":"01508271",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/01508271.png",
+            "partnerMarketingName": "SelectQuote",
+            "partnerLegalName": "SelectQuote",
+            "partnerwebsite": "https://www.selectquote.com/life-insurance/final-expenses",
+            "beneficiaries": [],
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id":"3e46fbdd-1acb-45a4-a2a8-a047457edd6c",
+            "eAppId":"7781F52C-44C8-4970-A858-A64B184E59B6",
+            "correlationId": "d52bdf84-bcd5-4560-b8e5-d9f453c0f92e",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2024 MSIWLALB",
+            "coverageAmount":"10000",
+            "premiumAmount": "47.40o",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "channel": "Phone",
+            "orgName": "SelectQuote",
+            "gender": "Male",
+            "state": "co",
+            "issueAge": "60",
+            "policyNumber":"MC1000007800",
+            "policystatus":"InProgress",
+            "addressLine1": "100 Cheesy Ln",
+            "city": "Chicago",
+            "zip":"80001",
+            "email": "cheeseballs@trustage.com",
+            "firstName": "Cheese",
+            "lastName":"Balls",
+            "phone":"(123) 456-7890",
+            "date0fBirth":"1966-05-05",
+            "partnerCode": "SelectQuote",
+            "partnerType": "ExternalPartner"
+        },
+        "sessionId": null,
+        "lastFourSSN":"6456"
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 357. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term-health-seg.json" type=".json" size="36247" lines="777" chars="36245" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "success",
+        "apiVer": "1.0.0",
+        "correlationId": "7d2755c2-dfb9-4ba8-a431-569c1d1dc838",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"A6BDA6C8-39E3-46E8-841B-F695B181723C",
+        "coreProduct": {
+            "name": "TruStage? SITerm Life Insurance",
+            "version": 1,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "pr0ductTemplateId":"2AB57800-0BD2-458D-8AA6-A95C64A31737",
+            "pr0ductId": "C6F8BB6D-0E9E-49BA-B416-6F873CC25ACB",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+         "insuranceForm": {
+            "formId":"9DBA8F6E-DDE9-442D-87B6-422A70A6A7C9",
+            "formName": "26-02-17:1550 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 1,
+            "formTemplateType": "DIX-DTC"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-02-18T17:16:03.701Z",
+        "lastUpdated": "2026-02-18T17:16:08.451Z",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "segmentTitle": "Health questions",
+            "navigationTitle": "Health questions",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 2,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[
+                {
+                    "order": 1,
+                     'content": "Please answer a few questions about your health."
+                }
+            ],
+             "postExposition":[
+                {
+                    "order": 1,
+"content": "when you select Continue, your health answers become final and can't be changed online."
+                }
+            ],
+             "fieldGroups":[
+                {
+                    "grOupCode" : "GROUP-HEALTH-QUESTIONS",
+                     "groupTitle": "Health questions",
+                    "groupType": "basic",
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "required": false,
+                    "exposition":[],
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Retirement",
+"fieldLabel": "Are you unable to work or perform normal activities due to a chronic illness or permanent injury?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label":"Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Work",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical",
+"fieldLabel": "Have you, within the past 5 years, been treated for or diagnosed by a medical professional with the following:",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 2,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [].
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ],
+                                 "swapField": {
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                                     "value": "",
+                                     "swapDisqualifierValue": "true"
+                                 }
+                            },
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical-OPTIONS"
+                                     ],
+                                     "values":[
+                                         ````
+                                     ]
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS",
+                             "fieldLabel": "Please select all that apply:",
+                             "groupSubTitle": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 3,
+                             "hidden": false,
+                             "usage": "input",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "multi-select-group",
+                             "value": "",
+                             "errorValueName": "an option",
+                             "valueRules":[
+                                {
+                                     "uSe": "MODIFY_VALUE",
+                                     "fieldCodes":[
+                                         "FIELD-HEALTH-QUESTION-Medical"
+                                     ],
+                                     "values":[
+           "true"
+                                     ]
+                                 }
+                             ],
+                             "options":[
+                                {
+                                     "label": "HIV or AIDS",
+                                     "value": "MedicalChk_HIVAIDS"
+                                 },
+                                {
+                                     "label": "Cancer (except basal cell)",
+                                     "value":"MedicalChk_Cancer"
+                                 },
+                                {
+"label": "Heart Disease /Condition (except high blood pressure)",
+                                     "value":"MedicalChk_HeartDisease"
+                                 },
+                                {
+                                     "label": "Diabetes requiring insulin",
+                                     "value": "MedicalChk_Diabetes"
+                                 },
+                                {
+                                     "label": "Stroke",
+                                     "value": "MedicalChk_Stroke"
+                                 },
+                                {
+                                     "label": "Chronic disorder of the Brain or Spinal Nerve",
+                                     "value": "MedicalChk_ChronicDisorder"
+                                 },
+                                {
+                                     "label": "Alcohol or drug abuse",
+                                     "value": "MedicalChk_AlcoholDrug"
+                                 },
+                                {
+                                     "label": "Chronic liver disease",
+                                     "value": "MedicalChk_ChronicLiver"
+                                 },
+                                {
+                                     "label": "Chronic kidney disease",
+                                     "value": "MedicalChk_ChronicKidney"
+                                 },
+                                {
+                                     "label": "Chronic Depression",
+                                     "value":"MedicalChk_ChronicDepression"
+                                 },
+                                {
+                                     "label": "Mental disorder",
+                                     "value": "MedicalChk_MentalDisorder"
+                                 },
+                                {
+                                     "label": "Chronic lung condition",
+                                     "value": "MedicalChk_ChronicLung"
+                                 }
+                             ],
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true",
+                                     "required": true
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "Specifics",
+                                 "eventName": "trackHealthQuestions",
+                                 "optionsType": "contains",
+                                 "options":[
+                                     {
+                                         "fieldName":"HCo1",
+                                         "value":"MedicalChk_HIVAIDS",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC02",
+                                         "value":"MedicalChk_Cancer",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HCo5",
+                                         "value":"MedicalChk_HeartDisease",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCO4",
+                                         "value": "MedicalChk_Diabetes",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC03",
+                                         "value": "Medicalchk_Stroke",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCog",
+                                         "value":"MedicalChk_ChronicDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC07",
+                                         "value": "MedicalChk_AlcoholDrug",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HCo8",
+                                         "value":"MedicalChk_ChronicLiver",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName":"HC11",
+                                         "value": "MedicalChk_ChronicKidney",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC10",
+                                         "value":"MedicalChk_ChronicDepression",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC06",
+                                         "value": "MedicalChk_MentalDisorder",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     },
+                                     {
+                                         "fieldName": "HC12",
+                                         "value":"MedicalChk_ChronicLung",
+                                         "action": "Yes",
+                                         "actionNegate": "No"
+                                     }
+                                 ],
+                                 "swapField":{
+                                     "fieldCode": "FIELD-HEALTH-QUESTION-Medical",
+                                     "value": "true"
+                                 }
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Medical-OPTIONS-ALL",
+                             "fieldLabel": "",
+                             "groupSubTitle": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 4,
+                             "hidden": true,
+                             "usage": "input",
+                             "disabled": true,
+                             "required": false,
+                             "fieldType": "text",
+"value":"MedicalChk_HIVAIDS,MedicalChk_Cancer,MedicalChk_HeartDisease,MedicalChk_Diabetes,MedicalChk_Stroke,MedicalChk_ChronicDisorder,MedicalChk_AlcoholDrug,MedicalChk_ChronicLiver,MedicalChk_ChronicKidney,MedicalChk_ChronicDepression,MedicalChk_MentalDisorder,MedicalChk_ChronicLung"
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Tobacco_User",
+"fieldLabel": "Have you used any form of tobacco, including nicotine substitutes, in the last 12 months?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 5,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "false",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "notificationRules": [
+                                {
+                                     "fieldCode":"FIELD-HEALTH-QUESTION-Tobacco_User",
+                                     "displayonValue": "true",
+                                     "type": "info",
+                                     "title": "Coverage Update",
+"message": "Your monthly price will increase due to your nicotine or tobacco use. Your new price will be reflected in the next step.",
+                                     "dismissable": "true"
+                                 }
+                             ],
+                             "googleAnalytics": {
+                                 "fieldName": "TI",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Driving_History",
+"fieldLabel": "Have you within the past 5 years had your license suspended or revoked, or been convicted of driving under the influence?",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 6,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "RCo1",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Felony_History",
+                             "fieldLabel": "Have you ever been convicted of a felony?",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 7,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "hidden": false,
+                                     "label": "Yes",
+                                     "order": 1,
+                                     "value": "true"
+                                 },
+                                {
+                                     "hidden": false,
+                                     "label": "No",
+                                     "order": 2,
+                                     "value": "false"
+                                 }
+                             ],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName":"RCO2",
+                                 "eventName": "trackHealthQuestions",
+                                 "options":[
+                                     {
+                                         "value": "true",
+                                         "action": "Yes"
+                                     },
+                                     {
+                                         "value": "false",
+                                         "action": "No"
+                                     }
+                                 ]
+                            }
+                        },
+                        {
+                             "fieldCode":"FIELD-HEALTH-QUESTION-height",
+                             "fieldLabel":"Height",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 8,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "height-granular",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options": [],
+                             "presentationRules": [],
+                             "exposition": [],
+                             "dataFieldsize": 4,
+                             "googleAnalytics": {
+                                 "fieldName": "Height",
+                                 "eventName": "trackInput",
+                                 "optionsType": "inputstatus",
+                                 "options":[]
+                            }
+                        },
+                        {
+                             "fieldCode": "FIELD-HEALTH-QUESTION-Weight",
+                             "fieldLabel": "Weight",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter weight in pounds",
+                             "presentationorder": 9,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "weight",
+                             "maxLength": 3,
+                             "default": "",
+                             "value": "",
+                             "options":[].
+                             "presentationRules": [],
+                             "exposition": [],
+                             "googleAnalytics": {
+                                 "fieldName": "Weight",
+                                 "eventName": "trackInput",
+                                 "optionsType":"inputstatus",
+                                 "options":[]
+                            }
+                        }
+                    ]
+                },
+                {
+                    "grOupCode" : "GROUP-SUBMIT-HEALTH-QUESTIONS",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                     "groupType": "progress",
+                    "arialabel":"",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-HEALTH-QUESTIONS",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 2,
+            "captchaRequired": false,
+            "visited": true
+        },
+         "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 12,
+            "segmentsComplete": 1,
+            "segmentsRequired": 4,
+            "currentSection": 1,
+            "currentSegment": 2,
+            "currentSegmentCode": "SEGMENT-HEALTH-QUESTIONS",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle":"Application",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 1,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2026-02-18T17:16:03.045+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name beneficiaries",
+                             "isComplete": true,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health questions",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Contact information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Verification",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "arialabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"44859b1b-e63f-4d2d-9740-754fb2508fe2",
+            "appstatus": "InProgress",
+            "appsubstatus": "InProgress",
+            "underwritingstatus":"Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus":"Incomplete",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "startAppUnderwritingClass": "Standard Non-Tobacco",
+            "coverageAmount": 101000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 300000,
+            "billingAmount": "$212.05",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoverageStartDate": null,
+            "riders":[],
+            "modals":[],
+            "insuredFirstName": "Green",
+            "insuredLastName": "Goblin",
+            "insuredFullName": "Green Goblin",
+            "productCode": "2017 SITERM80 B2",
+            "productName": "TruStage? SITerm Life Insurance",
+            "productType": "Term Life",
+            "contentAuthoring": {
+                "productName": "Term Life Insurance",
+                "productType": "Term Life",
+                "crossSellModuleTitle": null,
+                "finalRateLearnMoreModalTitle": null,
+                "finalRateLearnMoreModalSubtitle": null,
+                "finalRateLearnMoreModalBody": null
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact":"833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline":"833-492-1399",
+            "partnerContractNumber":"04814470",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/04814470.png",
+            "partnerMarketingName": "trustage.com website",
+            "partnerLegalName": "Trustage.com Website",
+            "beneficiaries": [],
+            "banners":[]
+        },
+        "googleAnalyticsData": {
+            "id":"44859b1b-e63f-4d2d-9740-754fb2508fe2",
+            "eAppId":"A6BDA6C8-39E3-46E8-841B-F695B181723C",
+            "correlationId": "7d2755c2-dfb9-4ba8-a431-569c1d1dc838",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Incomplete",
+            "productCode": "2017 SITERM80 B2",
+            "coverageAmount": "101000",
+            "premiumAmount": "212.05",
+            "paymentFreq":"Monthly",
+            "paymentMethod": "",
+            "channel": "Web",
+            "orgName": "trustage.com website",
+            "gender": "Male",
+            "state":"IL",
+            "issueAge": "64",
+            "policystatus": "InProgress",
+            "addressLine1": "123 N West St",
+            "city": "Chicago",
+            "zip":"60007",
+            "email": "testo1@example.com",
+            "firstName": "Green",
+            "lastName": "Goblin",
+            "phone": "(210) 765-7842",
+            "date0fBirth":"1961-08-05",
+            "partnerCode": "Trustage.com Website",
+            "partnerType": "InternalPartner"
+        },
+        "sessi0nId":"d483ee04-196a-4697-881f-1eaf886a7f11",
+        "lastFourSSN": null
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 358. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term-segment-completed.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term-segment-completed.json" type=".json" size="22763" lines="519" chars="22762" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",
+        "correlationId": "2a1e7331-9861-4195-9fe1-b22cc40d114e",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"04DBE041-7DAC-4F4D-89F9-075BB77ABB07",
+        "coreProduct": {
+            "name": "TruStage? SITerm Life Insurance",
+            "version": 7.
+            "category": "Trustage",
+            "type": "Life",
+            "subtype": "Term",
+            "pr0ductTemplateId":"F5A4FA77-C762-489B-BD06-31D046746A33",
+            "pr0ductId": "4FF773A6-19F8-44A0-8804-A2E72257E604",
+            "tenantId": "EEE3F273-C37B-45CD-8EE9-1C549620AAC5"
+        },
+        "insuranceForm": {
+            "formId": "C90CAD3C-8B73-48FA-97E9-94E2341A4BAA",
+            "formName": "24-09-24:1439 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 19
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2024-12-06T14:48:20.054Z",
+        "lastUpdated": "2024-12-06T14:48:27.805Z",
+        "forwardEnabled": true,
+        "backEnabled": false,
+        "segment": {
+            "segmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "segmentTitle": "Name Beneficiaries",
+            "navigationTitle": "Name Beneficiaries",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": true,
+            "presentationorder": 1,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[],
+            "fieldGroups":[
+                {
+                    "groupCode": "GROUP-ADD-BENEFICIARIES",
+                    "groupTitle": "welcome! who would you like to help protect?",
+                    "exposition":[
+                        {
+                             "order": 1,
+                             "content": "**Beneficiary [key]**"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                     "groupType":"repeatable",
+                    "jsonValueField": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                    "ariaLabel": "",
+"helpText": "## Beneficiary ##lnlnBefore you move on to the health questions (just a few!) and your instant decision, name one or more beneficiaries. Money willbe divided equally between your loved ones if you die. (Name up to four. You can change thislater if you need to.)",
+                    "helpTextTitle": "Additional Information",
+                    "isComplete": false,
+                    "presentationorder": 1,
+                    "disabled": false,
+                    "hidden": false,
+                    "required": true,
+                    "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+"value": " [{\"relationship\":\"CHIlD\",\"firstName\":\"Sally\", \"lastName\":\"Sue\"}]",
+                             "presentationRules": []
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-RELATIONSHIP",
+                             "fieldLabel":"Relationship",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Select relationship",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"Child",
+                                     "value": "CHILD",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"Friend",
+                                     "value": "FRIEND",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "Grandchild",
+                                     "value": "GRANDCHILD",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Parent",
+                                     "value": "PARENT",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "Partner",
+                                     "value": "PARTNER",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label": "Sibling",
+                                     "value": "SIBLING",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "Spouse",
+                                     "value": "SPOUSE",
+                                     "disabled": false,
+                                     "hidden": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "relationship"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-FIRST-NAME",
+                             "fieldLabel": "First Name",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter first name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "first-name",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "firstName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-MIDDLE-NAME",
+                             "fieldLabel": "Middle Name (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter middle name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "middleName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-LAST-NAME",
+                             "fieldLabel": "Last Name",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter last name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "last-name",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "lastName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-SUFFIX",
+                             "fieldLabel": "Suffix (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Select suffix",
+                             "presentationorder": 4,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"I",
+                                     "value":"I",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"II",
+                                     "value": "II",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"III",
+                                     "value":"III",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Iv",
+                                     "value": "Iv",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "y",
+                                     "value": "y",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label":"Jr",
+                                     "value": "JR",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label":"Sr",
+                                     "value": "SR",
+                                     "disabled": false,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "suffix"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-ADD-OTHER-BENEFICIARY",
+                             "fieldLabel": "+ Add Another Beneficiary",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 15,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules":[
+                                {
+                                     "field": "FIELD-ADD-OTHER-BENEFICIARY",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                    "maxEntries": 4
+                },
+                {
+                    "groupCode":"GROUP-SUBMIT-ADD-BENEFICIARIES",
+                    "groupTitle": "",
+                     "groupSubTitle": "",
+                    "grouptype": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADD-BENEFICIARIES",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 1,
+            "visited": true
+        },
+         "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 11,
+            "segmentsComplete": 1,
+            "segmentsRequired": 3,
+            "currentSection": 1,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Personal Information",
+                    "arialabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 1,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2024-12-06T14:48:19.342+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": true,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Personal Information",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 4,
+                             "navigationTitle": "Additional Information",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                     "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId": "cadc1ace-ccc2-40cc-9cad-17210add8cea",
+            "appstatus":"InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingstatus":"Incomplete",
+            "billingstatus": "Incomplete",
+            "insuredstatus": "Incomplete",
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 100000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$28.80",
+            "billingFreq":"Monthly",
+            "insuredFirstName": "",
+            "insuredLastName": "",
+            "productCode": "2016 SITERM80",
+            "productType": "Term Life",
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://trustage.com",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact":"833-492-1398",
+            "phoneConfirm":"833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Sally",
+                        "lastName": "Sue"
+                    },
+                    "relationship": "CHILD"
+                }
+            ]
+        },
+         "googleAnalyticsData": {
+            "id":"cadc1ace-ccc2-40cc-9cad-17210add8cea",
+            "eAppId":"04DBE041-7DAC-4F4D-89F9-075BB77ABB07",
+            "correlationId": "2a1e7331-9861-4195-9fe1-b22cc40d114e",
+            "insuredstatus": "Incomplete",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "10000",
+            "premiumAmount": "28.80o",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "",
+            "gender":"Male",
+            "state":"IL",
+            "issueAge": "64"
+        },
+        "sessionId":"51b56a3c-bc95-45dd-98ad-5a2d8a25f469",
+        "lastFoursSN": null
+    }
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 359. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-term.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-term.json" type=".json" size="22834" lines="518" chars="22834" -->
+   "json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer": "1.0.0",.
+        "correlationId":"8042dbac-68c6-4ec6-a9fc-387539ebd60e",
+        "errors": []
+    },
+    "payload": {
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"382DEC06-1A0E-4AA4-AC99-D60EF9284A07",
+        "coreProduct": {
+            "name": "Trustage Term Life Insurance",
+            "version": 6,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Term",
+            "productTemplateId":"CEF9B054-2170-46D7-8DF7-EC44B7A7CDE1",
+            "pr0ductId": "773294EC-3C41-439C-A026-37575C7DEE4D",
+            "tenantId": "F46C1637-5161-4FBA-A799-88C348A3DD25"
+        },
+        "insuranceForm": {
+            "formId":"6E25FE5C-A5D6-4AD6-A0F9-065F7D18D58F",
+            "formName": "24-10-28:1240 TruStage SITerm Life Insurance Form Template",
+            "formVersion": 2
+        },
+        "recordstate": "Started",
+        "createdDate":"2024-11-04T14:57:47.120Z",
+        "lastUpdated": "2024-11-04T14:57:47.520Z",
+        "forwardEnabled": false,
+        "backEnabled": false,
+        "segment": {
+            "segmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "segmentTitle": "Name Beneficiaries",
+            "navigationTitle": "Name Beneficiaries",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-PERSONAL-INFO",
+            "isComplete": false,
+            "presentationorder": 1,
+            "hidden": false,
+            "required": false,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition":[],
+            "fieldGroups": [
+                {
+                    "groupCode": "GROUP-ADD-BENEFICIARIES",
+                    "groupTitle": "Welcome! who would you like to help protect?",
+                    "exposition": [
+                        {
+                             "order": 1,
+                             "content": "**Beneficiary [key]**"
+                        }
+                    ],
+                     "groupSubTitle": "",
+                    "groupType": "repeatable",
+                    "jsonValueField": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                    "arialabel":"",
+"helpText": "## Beneficiary ##\nlnBefore you move on to the health questions (just a few!) and your instant decision, name one or more beneficiaries. Money willbe divided equally between your loved ones if you die. (Name up to four. You can change thislater if you need to.)",
+                    "helpTextTitle": "Additional Information",
+                    "isComplete": false,
+                    "presentationorder": 1,
+                    "disabled": false,
+                    "hidden": false,
+                    "required": true,
+                    "dataFields":[
+                        {
+                             "fieldCode": "GROUP-ADD-BENEFICIARIES-HIDDEN-FIELD",
+                             "fieldLabel": "",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "usage":"input",
+                             "hidden": true,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "default": "",
+"value": " [{\"relationship\":\"CHILD\",\"firstName\":\"Albert\",\"middleName\":\"Robert\",\"lastName\":\"Barkley\",I"suffix\":l"Il"},{\"relationship\":\"CHILD\",\"firstName\":\"Emily\",\"middleName\":\"Anne\",\"lastName\":\"Barkleyl"}}",
+                             "presentationRules":[]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-RELATIONSHIP",
+                             "fieldLabel": "Relationship",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Select relationship",
+                             "presentationorder": 1,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "dataFieldsize": 1,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "Child",
+                                     "value": "CHILD",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"Friend",
+                                     "value": "FRIEND",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"Grandchild",
+                                     "value": "GRANDCHILD",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Parent",
+                                     "value": "PARENT",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label":"Partner",
+                                     "value": "PARTNER",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label":"Sibling",
+                                     "value": "SIBLING",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "Spouse",
+                                     "value": "SPOUSE",
+                                     "disabled": false,
+                                     "hidden": false
+                                 }
+                             ],
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute":"relationship"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-FIRST-NAME",
+                             "fieldLabel": "First Name",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter first name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "first-name",
+                             "maxLength": 50,
+                             "default": "",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "firstName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-MIDDLE-NAME",
+                             "fieldLabel": "Middle Name (optional)",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter middle name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "text",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "presentationRules": [].
+                             "valueRules":[
+                                {
+                                     "uSe": "USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "middleName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-LAST-NAME",
+                             "fieldLabel": "Last Name",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Enter last name",
+                             "presentationorder": 3,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": true,
+                             "fieldType": "last-name",
+                             "maxLength": 50,
+                             "default":"",
+                             "value": "",
+                             "exposition": [],
+                             "presentationRules": [],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "lastName"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode": "FIELD-BENEFICIARY-SUFFIX",
+                             "fieldLabel":"Suffix (optional)",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "Select suffix",
+                             "presentationorder": 4,
+                             "usage": "input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "exposition":[],
+                             "presentationRules": [],
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"I",
+                                     "value": "I",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label":"II",
+                                     "value":"II",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label":"III",
+                                     "value":"III",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 4,
+                                     "label":"Iv",
+                                     "value": "Iv",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 5,
+                                     "label": "y",
+                                     "value": "y",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 6,
+                                     "label":"Jr",
+                                     "value": "JR",
+                                     "disabled": false,
+                                     "hidden": false
+                                 },
+                                {
+                                     "order": 7,
+                                     "label": "Sr",
+                                     "value": "SR",
+                                     "disabled": false,
+                                     "hidden": false
+                                 }
+                             ],
+                             "valueRules":[
+                                {
+                                     "uSe":"USE_FIELD_GROUP_JSON",
+                                     "jsonAttribute": "suffix"
+                                 }
+                             ]
+                        },
+                        {
+                             "fieldCode":"FIELD-ADD-OTHER-BENEFICIARY",
+                             "fieldLabel": "+ Add Another Beneficiary",
+                             "arialabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 15,
+                             "usage":"input",
+                             "hidden": false,
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "expand",
+                             "default": "",
+                             "value": "false",
+                             "presentationRules": [
+                                {
+                                     "field": "FIELD-ADD-OTHER-BENEFICIARY",
+                                     "value": "true",
+                                     "hidden": true
+                                 }
+                             ]
+                        }
+                    ],
+                    "maxEntries": 4
+                },
+                {
+                    "groupCode": "GROUP-SUBMIT-ADD-BENEFICIARIES",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-ADD-BENEFICIARIES",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "save",
+                             "value": "save",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label":"BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "fieldGroupCount": 2,
+            "sectionNumber": 1,
+            "segmentNumber": 1,
+            "visited": true
+        },
+        "progress": {
+            "sectionsCount": 3,
+            "sectionsComplete": O,
+            "sectionsRequired": 3,
+            "segmentsCount": 10,
+            "segmentsComplete": 0,
+            "segmentsRequired": 2,
+            "currentSection": 1,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-BENEFICIARIES-INFO",
+            "currentProgItemCode": "PROGRESS-PERSONAL-INFO",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Personal Information",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 1,
+                    "startTimestamp": "2024-11-04T14:57:46.636+00:00",
+                    "segmentNumber": 1,
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Name Beneficiaries",
+                             "isComplete": false,
+                             "active": true
+                        },
+                        {
+                             "segmentNumber": 2,
+                             "navigationTitle": "Health Questions",
+                             "isComplete": false,
+                             "active": false
+                        },
+                        {
+                             "segmentNumber": 3,
+                             "navigationTitle": "Personal Information",
+                             "isComplete": false,
+                             "active": false
+                        }
+                    ]
+                },
+                {
+                    "progressItemTitle": "Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PAYMENT-INFO",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 2,
+                     "segments":[]
+                },
+                {
+                    "progressItemTitle": "Review & Submit",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-REVIEW-AND-SUBMIT",
+                    "isComplete": false,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 3,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 3,
+                    "segments":[]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"11ddf713-b654-4447-b1cc-6acff5cd81a9",
+            "appstatus": "InProgress",
+            "appSubstatus": "InProgress",
+            "underwritingStatus": "Incomplete",
+            "billingstatus":"Incomplete",
+            "insuredstatus": "Incomplete",
+            "coverageAmount": 40000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$107.70",
+            "billingFreq":"Monthly",
+            "insuredFirstName": "Robert",
+            "insuredLastName": "Barkley",
+            "insuredFullName": "",
+            "productCode": "2016 SITERM80",
+            "productType": "Term Life",
+            "urlsuccessRedirect": "https://www.trustage.com",
+            "urlDeclineRedirect": "https://www.trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlPrescriptionDecline":"https://www.trustage.com/cancel-application",
+            "phoneHeader":"833-374-1549",
+            "phoneContact": "833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "beneficiaries":[
+                {
+                    "name": {
+                        "firstName": "Albert",
+                        "lastName": "Barkley"
+                    },
+                     relationship": "CHILD"
+                },
+                {
+                     "name":{
+                        "firstName": "Emily",
+                        "lastName": "Barkley"
+                    },
+                     "relationship": "CHILD"
+                }
+            ]
+        },
+         "googleAnalyticsData": {
+            "id": "11ddf713-b654-4447-b1cc-6acff5cd81a9",
+            "eAppId":"382DEC06-1A0E-4AA4-AC99-D60EF9284A07",
+            "correlationId": "ee538d2a-f013-48b3-9ec9-5870034da7c1",
+            "appSubstatus": "SuspectedFraud",
+            "insuredstatus": "SuspectedFraudBadActor",
+            "productCode": "2016 SITERM80",
+            "coverageAmount": "40000",
+            "premiumAmount": "107.70",
+            "premiumFrequency": "Monthly",
+            "channel":"Web",
+            "gender":"Male",
+            "state": "WI",
+            "issueAge": "64"
+        },
+        "lastFoursSN": null
+    }
+}
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 36o. 'C:\DevCode\DIxuI\src\mocks\mock-api\mock-get-insurance-app-voice-signature.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-insurance-app-voice-signature.json" type=".json" size="21183" lines="344" chars="21181" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId": "0f3c9d21-6f4c-4d6a-90f1-2a4c1f9ad7b2",
+        "errors":[]
+    },
+    "payload":{
+        "consumerId": null,
+        "memberNumber": null,
+        "insuranceAppVersion": 1,
+        "complete": false,
+        "submittedDate": null,
+        "insuranceAppId":"9C2F1A44-5B67-4E90-8F21-C4D7E0B3A518",
+        "coreProduct": {
+            "name": "TruStage? Advantage Whole Life 2.0",
+            "version": 1,
+            "category": "Trustage",
+            "type": "life",
+            "subtype": "Whole",
+            "pr0ductTemplateId":"ED6A8625-B675-4A94-A800-2822C84827D7",
+            "pr0ductId":"FB7D895B-9951-4AB4-A35F-9E4D56EBCBA0",
+            "tenantId": "7E744FCF-BD11-4CA8-906F-3CD574CEFC7A"
+        },
+        "insuranceForm": {
+            "formId":"391F001A-8A93-401E-BA50-A5BF2D8F1E02",
+            "formName": "26-04-03:1040 TruStage TAwL 2.0 Insurance, Agent Form Template",
+            "formVersion": 14,
+            "formTemplateType": "DIX-AA"
+        },
+        "recordstate": "In Progress",
+        "createdDate": "2026-07-02T20:59:46.296Z",
+        "lastUpdated": "2026-07-02T21:14:12.108+00:00",
+        "forwardEnabled": false,
+        "backEnabled": true,
+        "segment": {
+            "segmentCode": "SEGMENT-VOICE-SIGNATURE",
+            "segmentTitle": "Voice signature",
+            "navigationTitle": "Voice signature",
+            "segmentSubTitle": "",
+            "arialabel": "",
+            "helpText": "",
+            "progressItemCode": "PROGRESS-SIGNATURE",
+            "isComplete": false,
+            "presentationorder": 1,
+            "hidden": false,
+            "required": true,
+            "prefilled": false,
+            "prefillsource": "",
+            "exposition": [],
+            "fieldGroupCount": 4,
+            "fieldGroups": [
+                {
+                    "grOupCode" : "GROUP-VOICE-SIGNATURE",
+                    "groupTitle": "Initial disclosure",
+                     "groupSubTitle": "",
+                     "groupType": "basic",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 1,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "exposition":[
+                        {
+                             "order": 1.
+"content": "The final step will be to record your voice signature. To begin, I'll share a brief disclosure with you, then ask you to confirm a couple of items andthen gather your voice signature.InlnYou have a right to apply for this coverage and authorizepayment in writing. Any person who knowingly presents a false or fraudulent claim for paymentof a loss or benefit, or knowingly presents false information in an application for insurancemay be guilty of a crime and subject to fines and confinement in prison, and denial ofinsurance benefits, depending on state law.IninI am a licensed and appointed insurance agentrepresenting Trustage Insurance Agency. I offer, sell, and service insurance products underwritten by [CMFG Life Insurance Company]. My employer and I receive compensation throughthe sale of insurance products. The insurance products are not federally insured, may losevalue and are not guaranteed by any other financial institution."
+                        }
+                    ],
+                     "dataFields":[]
+                },
+                {
+                    "groupCode": "GROUP-VOICE-SIGNATURE-SCRIPTING",
+                    "groupTitle": "Voice signature scripting",
+                     "groupSubTitle": "",
+                    "groupType": "basic",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 2,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "exposition":[
+                        {
+                             "order": 1,
+"content": "Can you confirm that your full name is [Applicant name] questions</h3>InnI will now read back the replacement information you provided earlier in ourcall.InlnDo you have any existing life insurance policies or annuity contracts?[yes/nojlnlnwill this policy replace, change, or use funds from any existing life insurancepolicy or annuity contract? [yes/no]\n\nName of the existing insurer: [Existing insurerJ\n\nPolicy or contract number of the existing coverage: [Existing policy numberJ\n\nArethese answers correct as I have read them back to you? [yes/no]\nln<h3 style='font-family:GTAmerica-Extended, Helvetica, sans-serif; font-weight: 4oo; font-size: 20px; line-height:26px; letter-spacing: -1px; color: #262c30; margin: 8px 0 -24px;'>Billing authorization</h3>\n\nI have reviewed the billing authorization language with you and you willreceive an initial bill of [price]\n\nYou have chosen to pay by [payment method] from theaccount ending in [account last 4], on the [payment date] of each [payment frequency], in theamount of [price].In\nDo you authorize CMFG Life to withdraw your premium from that accountuntil you tell us to stop? [yes/noj\nlnIf you need anything after we conclude today, includinganything for your records, or if you need to update that banking info or change how you paypremium in the future, you can cancel the consent you provide today and tell us how you want tobe billed by calling 1-888-888-0375.In\n<h3 style='font-family: GTAmerica-Extended, Helvetica,sans-serif; font-weight: 400; font-size: 20px; line-height: 26px; letter-spacing: -1px; color:#262c30; margin: 8px 0 -24px;'>Health questions</h3>\nnNext, I will ask you to confirm I haveaccurately recorded your answers to the application health questions asked earlier in our calland that you agree to the following statement:InlnHave you used tobacco or nicotine productswithin the past 12 months? [yes/nojInlnwithin the past 5 years have you had 2 or more convictions of reckless driving or driving under the influence? [yes/noj\n\nDo you requireassistance or supervision with activities of daily living such as dressing, bathing, cooking.cleaning, or shopping? [yes/noj\nlnHave you been advised by a medical professional to use, ordo you require the use of, oxygen? [yes/nojnlnHave you been advised by a medical professionalto use, or do you require permanent use of, a wheelchair or mobility scooter? [yes/nojlnlnAreyou currently, or ithin the past 3 months have you been advised by a medical professional tobe confined in a hospital, nursing facility, or receive hospice care? [yes/nojlnlnAre youcurrently receiving dialysis? [yes/noj\nlnwithin the past 6 months, have you been advised by amedical professional to have surgery, diagnostic testing (other than for HIv), or any procedurewhich you have not completed, or the results are unknown? [yes/no\nlnwithin the past 5 years,has a medical professional diagnosed you with, treated you for, recommended treatment ormedication, or have you been hospitalized for any of the conditions listed in the application?[yes/no]\n\nI have recorded your height as [height] and your weight as [weight].In\nAll of mystatements and answers are true to the best of my knowledge and belief. This application andany supplemental applications will be the basis of any insurance issued. I understand thatbenefits may be denied during the first 2 years of the effective date if I fail to give trueand complete answers in this application, as described in the incontestability provision of thepolicy, and that this insurance becomes effective only if my application is approved and apolicy issued and my first full premium due is received while I am alive and within 21 days ofthe policy's effective date and answers to questions concerning my insurability are as statedin this application.InlnAgents are not authorized to determine insurability, void, waive orchange any terms of the application, or make a contract for CMFG Life.InlnDo you agree to thisstatement? [yes/noj\nln<h3 style='font-family: GTAmerica-Extended, Helvetica, sans-serif; font-weight: 400; font-size: 20px; line-height: 26px; letter-spacing: -1px; color: #262c30; margin:8px 0 -24px;'>Privacy notice</h3>\nlnDo you agree & consent to using the internet to access theprivacy notice located at www.trustage.com/privacy [yes/noj\nlnIf you have any problemsaccessing this site or locating this notice on this site, please call 888-888-3944.nlnDo youacknowledge that you have been given the opportunity to review the privacy notice?[yes/nojlnln<h3 style='font-family: GTAmerica-Extended, Helvetica, sans-serif; font-weight:400; font-size: 20px; line-height: 26px; letter-spacing: -1px; color: #262c30; margin: 8px 0-24px;'>Signature</h3>\nnTo sign your application, first, please state your full name:[Applicant name].InlnAnd now, please state the last 4 digits of your social security number:[last 4].InlnCan you confirm that today's date is [date]."
+                        }
+                    ],
+                     "dataFields":[]
+                },
+                {
+                     "groupCode": "GROUP-NEXT-STEPS",
+                    "groupTitle": "Next steps for applicant",
+                    "groupSubTitle": "",
+                    "groupType": "basic",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 3,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "exposition":[
+                        {
+                             "order": 1.
+"content": "Thank you for providing your voice signature. Your application is now complete.InlnYou will receive a confirmation for your personal records.There are no additional steps you need to take at this time. We will begin processing yourapplication and may contact you to request additional information.InlnIf you have any questionsabout your application please contact us at 1-888-888-3942."
+                        }
+                    ],
+                     "dataFields":[]
+                },
+                {
+                     "grOupCode" : "GROUP-SUBMIT-VOICE-SIGNATURE",
+                     "groupTitle": "",
+                    "groupSubTitle": "",
+                    "groupType": "progress",
+                    "ariaLabel": "",
+                    "helpText": "",
+                    "isComplete": false,
+                    "presentationorder": 4,
+                    "hidden": false,
+                    "disabled": false,
+                    "required": false,
+                    "dataFields":[
+                        {
+                             "fieldCode": "FIELD-SUBMIT-VOICE-SIGNATURE",
+                             "fieldLabel": "",
+                             "ariaLabel": "",
+                             "helpText": "",
+                             "placeholder": "",
+                             "presentationorder": 1,
+                             "hidden": false,
+                             "usage": "progress",
+                             "disabled": false,
+                             "required": false,
+                             "fieldType": "single-select",
+                             "maxLength": 30,
+                             "default": "",
+                             "value": "",
+                             "options":[
+                                {
+                                     "order": 1,
+                                     "label": "BACK",
+                                     "value": "back",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 2,
+                                     "label": "SAVE & CLOSE",
+                                     "value": "close",
+                                     "hidden": false,
+                                     "disabled": false
+                                 },
+                                {
+                                     "order": 3,
+                                     "label": "SAVE & CONTINUE",
+                                     "value": "save",
+                                     "hidden": false,
+                                     "disabled": false
+                                 }
+                             ],
+                             "exposition":[]
+                        }
+                    ]
+                }
+            ],
+            "sectionNumber": 4,
+            "segmentNumber": 1,
+            "captchaRequired": false,
+            "visited": true,
+            "readonly": false
+        },
+         "progress": {
+            "sectionsCount": 4,
+            "sectionsComplete": 3,
+            "sectionsRequired": 4,
+            "segmentsCount": 14,
+            "segmentsComplete": 13,
+            "segmentsRequired": 1,
+            "currentSection": 4,
+            "currentSegment": 1,
+            "currentSegmentCode": "SEGMENT-VOICE-SIGNATURE",
+            "currentProgItemCode": "PROGRESS-SIGNATURE",
+            "progressItemList":[
+                {
+                    "progressItemTitle": "Applicant Contact Info",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-PERSONAL-INFO",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 2,
+                    "progressSegmentsComplete": 2,
+                    "sectionNumber": 1,
+                    "segmentNumber": 1,
+                    "startTimestamp": "2026-07-02T20:59:45.055+00:00",
+                    "completeTimestamp": "2026-07-02T21:00:35.964+00:00",
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Health & Replacement",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-HEALTH-AND-REPLACEMENT",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 4,
+                    "progressSegmentsComplete": 4,
+                    "sectionNumber": 2,
+                    "segmentNumber": 1,
+                    "startTimestamp": "2026-07-02T21:00:35.964+00:00",
+                    "completeTimestamp": "2026-07-02T21:06:11.221+00:00",
+                    "segments":[]
+                },
+                {
+                    "progressItemTitle": "Beneficiaries & Payment",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-BENEFICIARIES-AND-PAYMENT",
+                    "isComplete": true,
+                    "active": false,
+                    "display": true,
+                    "progressSegmentCount": 6,
+                    "progressSegmentsComplete": 6,
+                    "sectionNumber": 3,
+                    "segmentNumber": 1,
+                    "startTimestamp": "2026-07-02T21:06:11.221+00:00",
+                    "completeTimestamp": "2026-07-02T21:14:12.107+00:00",
+                    "segments":[]
+                },
+                {
+                     "progressItemTitle": "Signature",
+                    "ariaLabel": "",
+                    "progressItemCode": "PROGRESS-SIGNATURE",
+                    "isComplete": false,
+                    "active": true,
+                    "display": true,
+                    "progressSegmentCount": 1,
+                    "progressSegmentsComplete": 0,
+                    "sectionNumber": 4,
+                    "segmentNumber": 1,
+                    "startTimestamp": "2026-07-02T21:14:12.107+00:00",
+                    "segments":[
+                        {
+                             "segmentNumber": 1,
+                             "navigationTitle": "Voice signature",
+                             "isComplete": false,
+                             "active": true
+                        }
+                    ]
+                }
+            ]
+        },
+        "externalApp": {
+            "appId":"3e46fbdd-1acb-45a4-a2a8-a047457edd6c",
+            "policyNumber":"MC1000007800",
+            "appstatus":"InProgress",
+            "appSubstatus":"InProgress",
+            "underwritingStatus": "Complete",
+            "billingstatus":"Complete",
+            "insuredstatus":"Approved",
+            "underwritingclassNotification": false,
+            "agentDecisioningNotification": false,
+            "editFinalRatesAllowedstatus":"disabled",
+            "startAppUnderwritingClass": "Preferred Non-Tobacco",
+            "finalRatesSectionNumber": 3,
+            "finalRatesSegmentNumber": 2,
+            "coverageAmount": 10000,
+            "productMaxCoverageAmount": 300000,
+            "coverageMaximumAmount": 100000,
+            "billingAmount":"$47.40",
+            "billingFreq": "Monthly",
+            "billingPaymentDate": null,
+            "billingDisplayCoveragestartDate": null,
+            "riders": [],
+            "modals": [],
+            "insuredFirstName": "Cheese",
+            "insuredLastName": "Balls",
+            "insuredFullName": "Cheese Balls",
+            "productCode": "2024 MSIWLALB",
+            "productName": "TruStage? Advantage whole Life 2.",
+            "productType": "whole Life",
+            "contentAuthoring": {
+                "productName": null,
+                "productType": null,
+                "crossSellModuleTitle": "Frequently Packaged Together",
+                "finalRateLearnMoreModalTitle": "Accidental Death coverage",
+"finalRateLearnMoreModalsubtitle": "Expand your coverage with an Accidental Death benefit",
+"finalRateLearnMoreModalBody": "Give your beneficiaries more money on top of your regular death benefit if you die as the result of a covered accident."
+            },
+            "urlsuccessRedirect": "https://trustage.com",
+            "urlDeclineRedirect": "https://trustage.com/cancel-application",
+            "urlstartover": "https://www.trustage.com",
+            "urlsource": "https://www.trustage.com",
+            "urlCancel": "https://www.trustage.com/cancel-application",
+            "urlPrescriptionDecline": "https://trustage.com/cancel-application",
+            "phoneHeader": "833-374-1549",
+            "phoneContact":"833-492-1398",
+            "phoneConfirm": "833-492-1397",
+            "phoneDecline": "833-492-1399",
+            "partnerContractNumber": "01508271",
+            "partnerLogoUrl": "https://trustageimagesd01.azureedge.net/logo/01508271.png",
+            "partnerMarketingName":"SelectQuote",
+            "partnerLegalName": "SelectQuote",
+            "partnerwebsite": "https://www.selectquote.com/life-insurance/final-expenses",
+            "beneficiaries": [].
+            "banners":[]
+        },
+         "googleAnalyticsData": {
+            "id": "3e46fbdd-1acb-45a4-a2a8-a047457edd6c",
+            "eAppId":"9C2F1A44-5B67-4E90-8F21-C4D7E0B3A518",
+            "correlationId": "0f3c9d21-6f4c-4d6a-90f1-2a4c1f9ad7b2",
+            "appSubstatus":"InProgress",
+            "insuredstatus": "Approved",
+            "productCode": "2024 MSIWLALB",
+            "coverageAmount": "1000o",
+            "premiumAmount": "47.40",
+            "paymentFreq": "Monthly",
+            "paymentMethod": "ACH",
+            "channel":"Phone",
+            "orgName":"SelectQuote",
+            "gender":"Male",
+            "state": "co",
+            "issueAge": "60",
+            "policyNumber":"MC1000007800",
+            "policystatus":"InProgress",
+            "addressLine1": "100 Cheesy Ln",
+            "city": "Chicago",
+            "zip":"80001",
+            "email": "cheeseballs@trustage.com",
+            "firstName": "Cheese",
+            "lastName": "Balls",
+            "phone":"(123) 456-7890",
+            "date0fBirth": "1966-05-05",
+            "partnerCode": "SelectQuote",
+            "partnerType": "ExternalPartner"
+        },
+        "sessionId": null,
+        "lastFourSSN": "6456"
+    }
+}
+
+```
+<!-- CODESCAN_FILE_END -->
+
+---
+
+### 361. 'C:\DevCode\DIxUI\src\mocks\mock-api\mock-get-loan-form.json'
+
+<!-- CODESCAN_FILE_START path="C:\DevCode\DIXUI\src\mocks\mock-api\mock-get-loan-form.json" type=".json" size="68232" lines="49" chars="68230" -->
+   json
+{
+    "result": {
+        "code": O,
+        "message": "Success",
+        "apiVer":"1.0.0",
+        "correlationId": "eb3c1420-68f4-4b88-a387-5341de4dac60",
+        "errors": []
+    },
+    "payload": {
+        "formId":"D4D0DA0C-2525-42F8-BB9C-1B414F808CDA",
+        "tenantId":"F46C1637-5161-4FBA-A799-88C348A3DD25",
+        "loanFormTemplateId": "C095D3A9-D512-424D-A783-69307131BF45",
+        "recordstate": "Active",
+        "name": "7.3.24 v1 Term Life",
+        "formTemplateType": null,
+        "description": "Loan Form",
+        "version": 2.
+        "versionDescription": "Initial version",
+        "c0rePr0ductId":"EF8E659D-C6E4-4A9D-8E5E-70E17CDB78F0",
+        "metadataJSON": "{}",
+        "businessRulesJSON": "{}",
+"specificationjson": "{\"formstructureVersion\":3,\"progress\":{\"progressItemlist\": [{\"progressItemTitle\":\"Beneficiaries\",\"arialabel\":\"\",\"progressItemCode\":\"PRoGREsS-BENEFICIARIES\",\"isComplete\":false,\"active\":false,\"display\":true,\"progressSegmentCount\":1,\"progressSegmentsComplete\":0},{\"progressItemTitle\":\"HealthQuestions\",\"ariaLabel\":\"\", I"progressItemCode\":\"PROGRESS-HEALTH-QuEsTIoNs\", \"isComplete\":false,\"active\":false,\"display\":true,\"progressSegmentCount\":1,\"progressSegmentsComplete\":0},{\"progressItemTitle\":\"PersonalInformation\",\"ariaLabel\":\"\", \"progressItemCode\":\"PROGRESS-PERSONAL-INFol", \"isComplete\":false,\"active\":false,\"display\":true,\"progressSegmentCount\":1,I"progressSegmentsComplete\":0},{\"progressItemTitle\":\"PaymentInformation\",\"ariaLabel\":\"\",\"progressItemCode\":\"PROGRESS-PAYMENT-INFol", \"isComplete\":false,\"active\":false,\"display\":true,\"progressSegmentCount\":1,I"progressSegmentsComplete\":O},{\"progressItemTitle\":\"ReviewInformation\",\"ariaLabel\":\"\",\"progressItemCode\":\"PROGRESS-REVIEW-APPLICATIoN\",\"isComplete\":false,I"active\":false,\"display\":true,\"progressSegmentCount\":2,\"progressSegmentsComplete\":0},{\"progressItemTitle\":\"Agree and Sign\",I"arialabel\":\"\",\"progressItemCode\":\"PROGRESS-DIsCLosuREs\",\"isComplete\":false, \"active\":false,I"display\":true,I"progressSegmentCount\":2,\"progressSegmentsComplete\":0}l,\"sectionCount\":6,\"sectionsComplete\":0,\"segmentCount\":8,\"segmentsComplete\":0,\"sectionsRequired\":6,\"segmentsRequired\":2},\"tokenSubstitutions\":[{\"token\":\"Borrower Term Uppercase\",\"replacement\":\"Applicant\"},{\"token\":\"BorrowerTerm Lowercase\",\"replacement\":\"applicant\"},{\"token\":\"Informal Product Reference\",\"replacement\":\"money\"}],\"presentationRules\":[l,\"sections\":[{\"sectionCode\":\"SECTION-BENEFICIARIES\",\"sectionTitle\":\"Beneficiaries\",\"ariaLabel\":\"\",\"isComplete\":false,\"segmentCount\":1,\"segmentsComplete\":0,\"presentationorder\":1,\"hidden\":false,\"required\":true,\"segments\":[{\"segmentCode\":\"SEGMENT-BENEFICIARIES-INFO\",\"segmentTitle\":\"BeneficiaryDetails\",\"navigationTitle\":\"BeneficiaryDetails\",\"segmentsubTitle\":\"\",\"arialabel\":\"\",\"helpText\":\"}",\"progressItemCode\":\"pROGRESS-BENEFICIARIES\",\"isComplete\":false,\"presentationOrder\":1,\"hidden\":false,\"required\":false,I"prefilled\":false,\"prefillSource\":\"}",I"exposition\":[{\"order\":1,\"content\":\"Beforeyou move on to the health questions (just a few!) and your instant decision, name one or morebeneficiaries. Money will be divided equally between your loved ones if you die. (Name up tofour. You can change this later if you need to.)\"}l,\"progressTo\":[l,\"fieldGroups\":[{\"groupCode\":\"GROUP-ADD-BENEFICIARIES\",\"groupTitle\":\"Name Your Beneficiaries\",\"exposition\":[{\"order\":1,\"content\":\"**Beneficiary[key]**\"}l, \"groupSubTitle\":\"\",\"groupType\":\"repeatable\",\"jsonValueField\":\"GRoUP-ADD-BENEFICIARIES-HIDDEN-FIELD\",\"arialabel\":\"}",\"helpText\":\"}",\"isComplete\":false,\"presentationorder\":1,\"disabled\":false,\"hidden\":false,\"required\":true,\"dataFields\":[{\"fieldCode\":\"GRoUP-ADD-BENEFICIARIES-HIDDEN-FIElD\",\"fieldlabel\":\"\",\"arialabel\":\"\",I"helpText\":\"\",I"placeholder\":\"\",I"usage\":\"input\",\"hidden\":true,\"disabled\":false,\"required\":false,\"fieldType\":\"text\",\"default\":\"\",\"value\":\"\",I"presentationRules\":[l},{\"fieldCode\":\"FIELD-BENEFICIARY-RELATIONSHIP\",\"fieldLabel\":\"Relationship to you\",I"arialabel\":\"\",I"helpText\":\"\",I"placeholder\":\"Selectrelationship\",\"presentationorder\":1,\"usage\":\"input\",\"hidden\":false,\"disabled\":false,\"required\":true,\"dataFieldsize\":2,\"fieldType\":\"single-select\",\"maxlength\":30,\"options\":[{\"order\":1,\"label\":\"Child\",\"value\":\"CHIlD\",\"disabled\":false, \"hidden\":false}.{\"order\":2,\"label\":\"Friend\", \"value\":\"FRIEND\",\"disabled\":false,\"hidden\":false},{\"order\":3,\"label\":\"Grandchild\",\"value\":\"GRANDCHILD\",\"disabled\":false,\"hidden\":false},{\"order\":4, \"label\":\"Parent\",\"value\":\"PARENT\",I"disabled\":false, \"hidden\":false},{\"order\":5,\"label\":\"Partner\",\"value\":\"PARTNER\",\"disabled\":false,I"hidden\":false},{\"order\":6,\"label\":\"Sibling\",\"value\":\"SIBLING\",\"disabled\":false,\"hidden\":false},{\"order\":7,\"label\":\"Spouse\", \"value\":\"sPousE\",\"disabled\":false,\"hidden\":false}l,\"default\":\"}",\"value\":\"}",\"presentationRules\":[l, \"valueRules\": [{\"use\":\"USE_FIELD_GROUP_JSON\",\"jsonAttribute\":\"relationship\"}]},{\"fieldCode\":\"FIELD-BENEFICIARY-FIRST-NAME\",\"fieldLabel\":\"Beneficiary First Name\",\"arialabel\":\"\",\"helpText\":\"\",\"placeholder\":\"Enter first name\",I"presentationorder\":3,\"usage\":\"input\",I"hidden\":false,\"disabled\":false,\"required\":true, \"fieldtype\":\"first-name\",I"maxlength\":5o,I"default\":\"}",\"value\":\"}",\"exposition\":[l,\"presentationRules\":[]l,\"valueRules\":[{\"use\":\"USE_FIELD_GROUP_JSON\",\"jsonAttribute\":\"firstName\"}]},{\"fieldCode\":\"FIELD-BENEFICIARY-MIDDLE-NAME\",\"fieldLabel\":\"Beneficiary Middle Name\",\"arialabel\":\"\",\"helpText\":\"\",\"placeholder\":\"Enter middle name\",I"presentationorder\":3,\"usage\":\"input\",I"hidden\":false,\"disabled\":false,\"required\":false,\"fieldType\":\"text\",I"maxlength\":3o,I"default\":\"}",I"value\":\"}",\"presentationRules\":[l,\"valueRules\":[{\"use\":\"USE_FIELD_GROUP_JSON\",\"jsonAttribute\":\"middleName\"}]},{\"fieldCode\":\"FIELD-BENEFICIARY-LAST-NAME\",\"fieldLabel\":\"Beneficiary Last Name\",\"arialabel\":\"\",\"helpText\":\"\",\"placeholder\":\"Enter last name\",I"presentationorder\":3,\"usage\":\"input\",I"hidden\":false,\"disabled\":false,\"required\":true, \"fieldType\":\"last-name\",I"maxlength\":5o,I"default\":\"}",\"value\":\"}",\"exposition\":[l,\"presentationRules\":[l,\"valueRules\":[{\"use\":\"USE_FIELD_GROUP_JSON\",\"jsonAttribute\":\"lastName\"}]},{\"fieldCode\":\"FIELD-BENEFICIARY-SUFFIX\",\"fieldLabel\":\"Suffix(optional)\",\"arialabel\":\"}",\"helpText\":\"}",\"placeholder\":\"Selectsuffix\",\"presentationorder\":4,\"usage\":\"input\",\"hidden\":false, \"disabled\":false,\"required\":false,\"fieldType\":\"single-select\",I"maxlength\":30,\"default\":\"}", \"value":\"}",I"exposition\": [l,\"presentationRules\":[l,\"options\":[{\"order\":1,\"label\":\"I\",\"value\":\"I\",\"disabled\":false, \"hidden\":false}, {\"order\":2,\"label\":\"II\",\"value\":\"II\",\"disabled\":false,\"hidden\":false},{\"order\":3,\"label\":\"III\",\"value\":\"III\",\"disabled\":false,\"hidden\":false},{\"order\":4,I"label\":\"Iv\",\"value\":\"Iv\",\"disabled\":false,I"hidden\":false},{\"order\":5,I"label\":\"v\",I"value\":\"v\",\"disabled\":false,I"hidden\":false},{\"order\":6,I"label\":\"JR\",\"value\":\"JR\",\"disabled\":false,I"hidden\":false}.{\"order\":7,I"label\":\"sR\",\"value\":\"sR\",\"disabled\":false,I"hidden\":false}l,I"valueRules\":[{\"use\":\"USE_FIELD_GROUP_JSON\",\"jsonAttribute\":\"suffix\"}]},{\"fieldCode\":\"FIELD-ADD-OTHER-BENEFICIARY\",\"fieldLabel\":\"+ Add Another Beneficiary\",\"arialabel\":\"\",\"helpText\":\"\",I"placeholder\":\"\",\"presentationorder\":15,I"usage\":\"input\",\"hidden\":false, \"disabled\":false, \"required\":false,\"fieldType\":\"expand\",\"default\":\"}",\"value\":\"false\",I"presentationRules\":[{\"field\":\"FIELD-ADD-OTHER-BENEFICIARY\",\"value\":\"true\",\"hidden\":true}]}], \"maxEntries\":4},{\"groupCode\":\"GROUP-SUBMIT-ADD-BENEFICIARIES\",I"groupTitle\":\"\", \"groupSubTitle\":\"\",\"groupType\":\"progress\",\"arialabel\":\"\", \"helpText\":\"}", \"isComplete\":false,\"presentationorder\":2, \"hidden\":false, \"disabled\":false,\"required\":false,\"dataFields\":[{\"fieldCode\":\"FIELD-SUBMIT-ADD-BENEFICIARIES\",\"fieldLabel\":\"\",\"arialabel\":\"}",\"helpText\":\"}",\"placeholder\":\"}",\"presentationorder\":1,\"hidden\":false,\"usage\":\"progress\", \"disabled\":false, \"required\":false,\"fieldType\":\"single-select\",I"maxlength\":30,\"default\":\"save\",I"value\":\"save\",I"options\":[{\"order\":1,\"label\":\"BAck\",\"value\":\"back\",\"hidden\":false,\"disabled\":false},{\"order\":2,I"label\":\"coNTINuE\",\"value\":\"save\",\"hidden\":false,\"disabled\":false}l,I"eXposition\":[]}]}l,\"fieldGroupCount\":2}]},{\"sectionCode\":\"SECTION-HEALTH-QUESTIONS\",\"sectionTitle\":\"HealthQuestions\",\"arialabel\":\"}",\"isComplete\":false,\"segmentCount\":1,\"segmentsComplete\":0,\"presentationorder\":2,\"hidden\":false,\"required\":true,\"segments\":[{\"segmentCode\":\"SEGMENT-HEALTH-QUESTIONS\", \"segmentTitle\":\"Health Status\",\"navigationTitle\":\"HealthStatus\",\"segmentSubTitle\":\"\",\"arialabel\":\"\",\"helpText\":\"}",\"progressItemCode\":\"PROGRESS-HEALTH-QuEsTIoNs\", \"isComplete\":false,\"presentationorder\":1,\"hidden\":false, \"required\":false,\"prefilled\":false,\"prefillsource\":\"}",\"exposition\":[{\"order\":1, \"content\":\"pleaseanswer a couple of questions about your health.llnllnThat's it-there are no other healthquestions to get your instant decision.\"}l,\"progressTo\":[l,\"fieldGroups\": [{\"groupCode\":\"GROUP-HEALTH-QUESTIONS\",\"groupTitle\":\"HealthStatus\", \"groupType\":\"basic\",I"presentationorder\":1,\"hidden\":false,\"required\":false,\"eXposition\":[],\"dataFields\":[{\"fieldCode\":\"FIELD-HEALTH-RETIREMENT\",\"fieldLabel\":\"Areyou unable to work or perform normal activities due to a chronic illness or permanent injury?\",\"arialabel\":\"}",I"helpText\":\"}",I"placeholder\":\"}", \"presentationorder\":1, I"usage\":\"input\",\"hidden\":false,\"disabled\":false,\"required\":true,\"fieldType\":\"single-select\",\"maxlength\":30,\"options\":[{\"hidden":false,\"labell":\"Yes\",\"order\":1,\"value\":\"true\"},{\"hidden\":false,I"label\":\"Nol",\"order\":2,I"value\":\"false\"}l, \"default\":\"}","value\":\"\",\"presentationRules\":[]},{\"fieldCode\":\"FIELD-HEALTH-MEDICAL-CHECK\",\"fieldLabel\":\"Have you, within the past 5 years, been treated for or diagnosed by amedical professional with the following:\",\"arialabel\":\"}",\"helpText\":\"}",\"placeholder\":\"}",\"presentationorder\":2,\"usage\":\"input\",\"hidden\":false,\"disabled\":false,\"required\":true,\"fieldType\":\"single-select\",\"maxLength\":30,\"valueRules\":[{\"use\":\"MODIFY_VALUE\",\"fieldCodes\":[\"FIELD-HEALTH-MEDICAL-OPTIONS\"],\"values\":[\"\"I],\"options\":[{\"hidden":false,\"labell":\"Yes\",\"order\":1,\"value\":\"true\"},{\"hidden\":false,I"label\":\"No\",\"order\":2,I"value\":\"false\"}l, \"default\":\"}","value\":\"\",\"presentationRules\":[{\"field\":\"FIELD-CURR-ADDR-

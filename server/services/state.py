@@ -3830,6 +3830,63 @@ def get_fresh_telemetry() -> Dict[str, Any]:
 
 _state_initialized = False
 
+def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Computes the live multipart part-header metadata, CODESCAN_FILE_START/END hierarchical progress,
+    and instance-data OCR steering guide from `document_lines`, and publishes them into
+    `latest_telemetry` and `orchestration_state`.
+    """
+    if not document_lines:
+        empty_hier = {
+            "bundle": {"is_multipart": bool(multipart_bundle_state.get("is_multipart")), "bundle_name": multipart_bundle_state.get("base_prefix") or "", "part_number": multipart_bundle_state.get("current_part") or 1, "total_parts": multipart_bundle_state.get("total_parts") or 1, "total_project_files": 0},
+            "part": {"part_number": multipart_bundle_state.get("current_part") or 1, "total_parts": multipart_bundle_state.get("total_parts") or 1, "files_captured": 0, "files_declared": 0, "part_size_kb_captured": 0.0, "part_size_kb_declared": 0.0, "lines_captured": 0, "lines_declared": latest_telemetry.get("target_total_lines") or 0, "chars_captured": 0, "chars_declared": 0, "overall_accuracy_pct": 100.0, "verified_files_count": 0, "mismatched_files_count": 0},
+            "active_file": None,
+        }
+        latest_telemetry["codescan_hierarchy"] = empty_hier
+        orchestration_state["codescan_hierarchy"] = empty_hier
+        return empty_hier
+    try:
+        from dag_nodes.markdown_tag_parser_node import (
+            verify_codescan_file_markers_and_metrics,
+            _build_frame_range_index,
+        )
+        pid = project_id or get_current_project_id()
+        max_k = max(int(k) for k in document_lines.keys())
+        md_lines = []
+        for ln_i in range(1, max_k + 1):
+            val = document_lines.get(ln_i, "")
+            md_lines.append(val.get("text", "") if isinstance(val, dict) else (val.text if hasattr(val, "text") else str(val)))
+        ranges = [
+            (int(f.get("top_line") or 0), int(f.get("bottom_line") or 0), str(f.get("frame_id") or ""))
+            for f in captured_frames.values()
+            if int(f.get("top_line") or 0) > 0 and int(f.get("bottom_line") or 0) >= int(f.get("top_line") or 0)
+        ]
+        cs_res = verify_codescan_file_markers_and_metrics(
+            md_lines,
+            project_id=pid,
+            self_heal=False,
+            recover_wrapped_from_png=False,
+            preloaded_frame_ranges=ranges,
+        )
+        part_hdr = cs_res.get("part_header_metadata", {})
+        hier = cs_res.get("hierarchical_progress", {})
+        guide = cs_res.get("ocr_steering_guide", {})
+        latest_telemetry["part_header_metadata"] = part_hdr
+        latest_telemetry["codescan_hierarchy"] = hier
+        latest_telemetry["ocr_steering_guide"] = guide
+        orchestration_state["part_header_metadata"] = part_hdr
+        orchestration_state["codescan_hierarchy"] = hier
+        orchestration_state["ocr_steering_guide"] = guide
+        if "document_assemble" in dag_state.get("nodes", {}):
+            dag_state["nodes"]["document_assemble"]["hierarchical_progress"] = hier
+            dag_state["nodes"]["document_assemble"]["part_header_metadata"] = part_hdr
+            dag_state["nodes"]["document_assemble"]["ocr_steering_guide"] = guide
+        return hier
+    except Exception as e:
+        print(f"[refresh_codescan_hierarchy_telemetry] note: {e}")
+        return latest_telemetry.get("codescan_hierarchy") or {}
+
+
 def load_persisted_state():
     global document_lines, captured_frames, recapture_queue, token_stats, latest_telemetry, _state_initialized
     _state_initialized = True
@@ -3921,6 +3978,7 @@ def load_persisted_state():
         load_diagnostics_trace()
         sync_resume_frontier_state()
         ensure_diagnostics_trace_backfilled()
+        refresh_codescan_hierarchy_telemetry()
     except Exception as e:
         print(f"Error loading diagnostics trace: {e}")
 
@@ -4138,5 +4196,10 @@ def update_dag_after_frame(frame_id: str, top_line: int, bottom_line: int):
         latest_telemetry["phase"] = "COMPLETED"
         latest_telemetry["is_pacing"] = False
         latest_telemetry["status_message"] = f"Document Pacing Complete: {bottom_line}/{target} lines transcribed ✔"
+
+    try:
+        refresh_codescan_hierarchy_telemetry()
+    except Exception:
+        pass
 
 load_persisted_state()

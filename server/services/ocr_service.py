@@ -116,8 +116,13 @@ async def process_frame_with_gemini(frame_id: str, image_path: Path, top_line: i
         blank_locked_set = {int(l["line_number"]) for l in gt_lines if l.get("blank_locked") is True and l.get("line_number") is not None}
 
         client = genai.Client(api_key=config.GEMINI_API_KEY)
+        steering_guide = state.orchestration_state.get("ocr_steering_guide") or state.latest_telemetry.get("ocr_steering_guide") or {}
+        steering_hint = str(steering_guide.get("steering_prompt_hint") or "").strip()
+        steering_prefix = f"{steering_hint}\n" if steering_hint else ""
         prompt = (
+            f"{steering_prefix}"
             "Extract code document lines verbatim using the synthetic [L<number>] tags and 1px horizontal row guide lines in the left gutter. "
+            "Preserve <!-- CODESCAN_FILE_START path=\"...\" type=\"...\" size=\"...\" lines=\"...\" chars=\"...\" --> and <!-- CODESCAN_FILE_END --> markers and part headers verbatim. "
             "Output ONLY JSON: {\"top_gutter_line\": <int>, \"bottom_gutter_line\": <int>, \"lines\": ["
             "{\"line_number\": <int>, \"gutter_number\": <int>, \"text\": \"<verbatim>\", \"is_blank\": <bool>, \"is_wrapped\": <bool>, \"wrapped_line_count\": <int>, \"flagged\": <bool>}]}"
         )
@@ -429,14 +434,19 @@ def call_minicpm_ollama_sync(
         else ""
     )
 
+    steering_guide = state.orchestration_state.get("ocr_steering_guide") or state.latest_telemetry.get("ocr_steering_guide") or {}
+    steering_hint = str(steering_guide.get("steering_prompt_hint") or "").strip()
+    steering_line = f"{steering_hint}\n" if steering_hint else ""
+
     prompt = (
         "You are an expert OCR transcription engine for code and markdown.\n"
+        f"{steering_line}"
         "Each row in the image is separated by a 1px horizontal guide line and labeled on the left edge with a synthetic tag [L<number>].\n"
         f"{non_blank_hint}"
         "Transcribe each row from top to bottom using its exact [L<number>] tag (format: '[L<number>]: <content>').\n"
         "If a row is blank, output ONLY '[L<number>]: '.\n"
         "DO NOT shift text across rows and DO NOT include the [L<number>] tag inside the code content.\n"
-        "Preserve indentation, symbols, brackets, and markdown verbatim.\n"
+        "Preserve indentation, symbols, brackets, <!-- CODESCAN_FILE_START ... --> / <!-- CODESCAN_FILE_END --> markers, and markdown verbatim.\n"
         "Output only the tagged lines:"
     )
     models = []

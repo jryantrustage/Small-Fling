@@ -151,6 +151,46 @@ export interface TelemetryData {
     bottom_line?: number;
     next_target_top?: number;
   };
+  codescan_hierarchy?: {
+    bundle?: {
+      name?: string;
+      is_multipart?: boolean;
+      total_project_files?: number;
+    };
+    part?: {
+      number?: number;
+      total_parts?: number;
+      files_captured?: number;
+      files_declared?: number;
+      size_kb_captured?: number;
+      size_kb_declared?: number;
+      lines_captured?: number;
+      lines_declared?: number;
+      chars_captured?: number;
+      chars_declared?: number;
+      overall_accuracy_pct?: number;
+    };
+    active_file?: {
+      index?: number;
+      total_in_part?: number;
+      path?: string;
+      short_name?: string;
+      type?: string;
+      expected_size?: number;
+      actual_size?: number;
+      expected_lines?: number;
+      actual_lines?: number;
+      expected_chars?: number;
+      actual_chars?: number;
+      distinct_accuracy_pct?: number;
+      lifecycle_status?: string;
+      start_md_line?: number;
+      end_md_line?: number | null;
+      source_frame_ids?: string[];
+    } | null;
+  };
+  part_header_metadata?: Record<string, any>;
+  ocr_steering_guide?: Record<string, any>;
 }
 
 export interface TelemetryToasterProps {

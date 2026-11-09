@@ -273,6 +273,7 @@ function AppContent() {
   const projectImportInputRef = useRef<HTMLInputElement>(null);
   const sidebarImportInputRef = useRef<HTMLInputElement>(null);
   const [showInspectorMetaPopover, setShowInspectorMetaPopover] = useState(false);
+  const [showHierarchyDetails, setShowHierarchyDetails] = useState(false);
   const [isInfoHovered, setIsInfoHovered] = useState(false);
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('local');
@@ -4210,6 +4211,19 @@ function AppContent() {
                     ? `Part ${multipartState.current_part || alignmentData.part_number || 1}${multipartState.total_parts || alignmentData.total_parts ? ` of ${multipartState.total_parts || alignmentData.total_parts}` : ''} (${alignmentData.file_name || activeProject?.name || ''})`
                     : (alignmentData.file_name || activeProject?.name || 'Single Markdown Document')}
                 </div>
+                {telemetry.codescan_hierarchy && (
+                  <div style={{ fontSize: '11px', fontFamily: 'monospace', color: '#cbd5e1', background: '#0f172a', border: '1px solid #1e293b', borderRadius: '6px', padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <div>
+                      Files: <strong>{telemetry.codescan_hierarchy.part?.files_captured ?? 0}/{telemetry.codescan_hierarchy.part?.files_declared ?? 0}</strong>
+                      {telemetry.codescan_hierarchy.bundle?.total_project_files ? ` (Proj: ${telemetry.codescan_hierarchy.bundle.total_project_files})` : ''} • Size: <strong>{telemetry.codescan_hierarchy.part?.size_kb_captured ?? 0}/{telemetry.codescan_hierarchy.part?.size_kb_declared ?? 0}KB</strong> • Chars: <strong>{(telemetry.codescan_hierarchy.part?.chars_captured ?? 0).toLocaleString()}/{(telemetry.codescan_hierarchy.part?.chars_declared ?? 0).toLocaleString()}</strong>
+                    </div>
+                    {telemetry.codescan_hierarchy.active_file?.path && (
+                      <div style={{ color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={telemetry.codescan_hierarchy.active_file.path}>
+                        ↳ [{telemetry.codescan_hierarchy.active_file.type || 'file'}] <strong>{telemetry.codescan_hierarchy.active_file.short_name || telemetry.codescan_hierarchy.active_file.path}</strong> • {telemetry.codescan_hierarchy.active_file.actual_size ?? 0}/{telemetry.codescan_hierarchy.active_file.expected_size ?? 0}B • {telemetry.codescan_hierarchy.active_file.actual_lines ?? 0}/{telemetry.codescan_hierarchy.active_file.expected_lines ?? 0}Ln • {telemetry.codescan_hierarchy.active_file.actual_chars ?? 0}/{telemetry.codescan_hierarchy.active_file.expected_chars ?? 0}Ch
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
                   <button
                     type="button"
@@ -4707,6 +4721,203 @@ function AppContent() {
                   />
                 </div>
               </div>
+
+              {/* Compact Hierarchical Progress Display (Bundle/Part Header Driver -> Active CODESCAN_FILE_START Task) */}
+              {(() => {
+                const h = telemetry.codescan_hierarchy;
+                const bundle = h?.bundle;
+                const part = h?.part;
+                const af = h?.active_file;
+                const steering = telemetry.ocr_steering_guide;
+                const isMultipart = Boolean(bundle?.is_multipart || multipartState.is_multipart || alignmentData.is_multipart);
+                const bundleName = bundle?.name || (multipartState as any).bundle_name || (multipartState as any).bundle_prefix || alignmentData.file_name || activeProject?.name || 'Markdown Scan';
+                const partNum = part?.number || multipartState.current_part || alignmentData.part_number || 1;
+                const totalParts = part?.total_parts || multipartState.total_parts || alignmentData.total_parts || 1;
+                const filesCaptured = part?.files_captured ?? 0;
+                const filesDeclared = part?.files_declared ?? 0;
+                const totalProjectFiles = bundle?.total_project_files ?? 0;
+                const sizeKbCaptured = part?.size_kb_captured ?? 0;
+                const sizeKbDeclared = part?.size_kb_declared ?? 0;
+                const linesCaptured = part?.lines_captured || documentData.total_lines || telemetry.current_bottom_line || 0;
+                const linesDeclared = part?.lines_declared || activeProject?.target_total_lines || telemetry.target_total_lines || 0;
+                const charsCaptured = part?.chars_captured ?? 0;
+                const charsDeclared = part?.chars_declared ?? 0;
+                const partAcc = part?.overall_accuracy_pct ?? 100;
+                const fileAcc = af?.distinct_accuracy_pct ?? partAcc;
+                const rescanTargets: any[] = steering?.rescan_targets || [];
+
+                return (
+                  <div style={{
+                    background: '#0d1117',
+                    borderBottom: '1px solid #21262d',
+                    padding: '3px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '2px',
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono, monospace)',
+                    lineHeight: 1.35,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap' }}>
+                      {/* Level 1: Bundle / Part Header Ground-Truth Driver */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flexWrap: 'wrap' }}>
+                        <span style={{
+                          background: isMultipart ? 'rgba(56, 189, 248, 0.14)' : 'rgba(0, 255, 157, 0.12)',
+                          border: `1px solid ${isMultipart ? 'rgba(56, 189, 248, 0.4)' : 'rgba(0, 255, 157, 0.35)'}`,
+                          color: isMultipart ? '#38bdf8' : '#00ff9d',
+                          padding: '0px 5px',
+                          borderRadius: '3px',
+                          fontWeight: 700,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {isMultipart ? `BUNDLE Pt ${partNum}/${totalParts}` : 'SINGLE MD'}
+                        </span>
+                        <span style={{ color: '#e6edf3', fontWeight: 700, maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={bundleName}>
+                          {bundleName}
+                        </span>
+                        {(filesDeclared > 0 || filesCaptured > 0) && (
+                          <span style={{ color: '#8b949e' }} title="Files in this part (Total project files)">
+                            • Files: <strong style={{ color: '#c9d1d9' }}>{filesCaptured}/{filesDeclared || filesCaptured}</strong>
+                            {totalProjectFiles > 0 ? ` (Tot: ${totalProjectFiles})` : ''}
+                          </span>
+                        )}
+                        {sizeKbDeclared > 0 && (
+                          <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Size (KB)">
+                            • Size: <strong style={{ color: '#c9d1d9' }}>{sizeKbCaptured}/{sizeKbDeclared}KB</strong>
+                          </span>
+                        )}
+                        <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Lines">
+                          • Ln: <strong style={{ color: '#00ff9d' }}>{linesCaptured.toLocaleString()}/{linesDeclared ? linesDeclared.toLocaleString() : '—'}</strong>
+                        </span>
+                        {charsDeclared > 0 && (
+                          <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Characters">
+                            • Chars: <strong style={{ color: '#c9d1d9' }}>{charsCaptured.toLocaleString()}/{charsDeclared.toLocaleString()}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Level 2: Active File Task (CODESCAN_FILE_START path, type, size, lines, chars) */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flexWrap: 'wrap' }}>
+                        {af && af.path ? (
+                          <>
+                            <ChevronRight size={11} color="#58a6ff" />
+                            <span style={{
+                              background: 'rgba(88, 166, 255, 0.14)',
+                              border: '1px solid rgba(88, 166, 255, 0.4)',
+                              color: '#58a6ff',
+                              padding: '0px 5px',
+                              borderRadius: '3px',
+                              fontWeight: 700,
+                              whiteSpace: 'nowrap'
+                            }} title={`Active File #${af.index || 1} of ${af.total_in_part || filesDeclared || 1}`}>
+                              File #{af.index || 1}/{af.total_in_part || filesDeclared || 1} {af.type ? `[${af.type}]` : ''}
+                            </span>
+                            <span
+                              style={{ color: '#f0f6fc', fontWeight: 700, maxWidth: '210px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                              title={`Full Path: ${af.path}\nClick to toggle steering & frame correlation details`}
+                              onClick={() => setShowHierarchyDetails(p => !p)}
+                            >
+                              {af.short_name || af.path}
+                            </span>
+                            <span style={{ color: '#8b949e' }} title={`File byte size: actual ${af.actual_size ?? 0} / expected ${af.expected_size ?? 0}`}>
+                              Sz:<strong style={{ color: af.expected_size && af.actual_size === af.expected_size ? '#00ff9d' : '#e6edf3' }}>{af.actual_size ?? 0}/{af.expected_size ?? 0}B</strong>
+                            </span>
+                            <span style={{ color: '#8b949e' }} title={`File lines: actual ${af.actual_lines ?? 0} / expected ${af.expected_lines ?? 0}`}>
+                              Ln:<strong style={{ color: af.expected_lines && af.actual_lines === af.expected_lines ? '#00ff9d' : '#e6edf3' }}>{af.actual_lines ?? 0}/{af.expected_lines ?? 0}</strong>
+                            </span>
+                            <span style={{ color: '#8b949e' }} title={`File chars: actual ${af.actual_chars ?? 0} / expected ${af.expected_chars ?? 0}`}>
+                              Ch:<strong style={{ color: af.expected_chars && af.actual_chars === af.expected_chars ? '#00ff9d' : '#e6edf3' }}>{af.actual_chars ?? 0}/{af.expected_chars ?? 0}</strong>
+                            </span>
+                            <span style={{
+                              padding: '0px 5px',
+                              borderRadius: '3px',
+                              fontWeight: 700,
+                              background: fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.14)' : 'rgba(255, 166, 87, 0.16)',
+                              color: fileAcc >= 99.9 ? '#00ff9d' : '#ffa657',
+                              border: `1px solid ${fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.4)' : 'rgba(255, 166, 87, 0.45)'}`
+                            }}>
+                              {fileAcc.toFixed(1)}%
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ color: '#8b949e' }}>
+                            OCR Acc: <strong style={{ color: partAcc >= 99 ? '#00ff9d' : '#ffa657' }}>{partAcc.toFixed(1)}%</strong>
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowHierarchyDetails(p => !p)}
+                          style={{
+                            background: showHierarchyDetails ? 'rgba(192, 132, 252, 0.2)' : 'rgba(48, 54, 61, 0.5)',
+                            border: `1px solid ${showHierarchyDetails ? '#c084fc' : '#30363d'}`,
+                            color: showHierarchyDetails ? '#c084fc' : '#8b949e',
+                            borderRadius: '3px',
+                            padding: '0px 5px',
+                            fontSize: '9.5px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                          title="Toggle full hierarchical path, correlated source frames, and OCR steering guide"
+                        >
+                          {showHierarchyDetails ? '▾ Steering' : `▸ Steering${rescanTargets.length > 0 ? ` (${rescanTargets.length})` : ''}`}
+                        </button>
+                      </div>
+                    </div>
+
+                    {showHierarchyDetails && (
+                      <div style={{
+                        marginTop: '2px',
+                        padding: '5px 8px',
+                        background: '#161b22',
+                        border: '1px solid #30363d',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '3px',
+                        fontSize: '9.5px',
+                        color: '#c9d1d9'
+                      }}>
+                        {af && af.path && (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>
+                              <strong style={{ color: '#58a6ff' }}>Active File Path:</strong> <code>{af.path}</code> ({af.type || 'unknown'}) • MD Ln {af.start_md_line ?? '?'}{af.end_md_line ? `..${af.end_md_line}` : '+'} • Status: <strong>{af.lifecycle_status || 'ACTIVE'}</strong>
+                            </span>
+                            {af.source_frame_ids && af.source_frame_ids.length > 0 && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                <strong style={{ color: '#a371f7' }}>Correlated Captures:</strong>
+                                {af.source_frame_ids.slice(-5).map((fid: string) => (
+                                  <button
+                                    key={fid}
+                                    type="button"
+                                    onClick={() => { setSelectedFrameId(fid); setInspectorMode('single'); }}
+                                    style={{
+                                      background: 'rgba(163, 113, 247, 0.15)',
+                                      border: '1px solid rgba(163, 113, 247, 0.4)',
+                                      color: '#d2a8ff',
+                                      borderRadius: '3px',
+                                      padding: '0px 4px',
+                                      fontSize: '9px',
+                                      cursor: 'pointer'
+                                    }}
+                                    title={`Open correlated screen capture ${fid}`}
+                                  >
+                                    {fid}
+                                  </button>
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {steering?.steering_prompt_hint && (
+                          <div style={{ color: '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={steering.steering_prompt_hint}>
+                            <strong style={{ color: '#00ff9d' }}>Instance Steering Guide:</strong> {steering.steering_prompt_hint}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div
                 className={`inspector-view-container ${inspectorMode === 'live' ? 'live-mode' : ''} ${inspectorMode === 'ocr_inspect' ? 'ocr-inspect-mode' : ''}`}

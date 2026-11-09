@@ -50,6 +50,8 @@ export interface PerformanceDiagnosis {
   };
   markdown_prompt: string;
   promptDataUri: string;
+  dagPositioningPrompt?: string;
+  telemetrySteeringPrompt?: string;
 }
 
 export type DagGroup =

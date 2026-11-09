@@ -17,13 +17,19 @@ export const AiPerformancePromptModal: React.FC<AiPerformancePromptModalProps> =
   nodeMeta,
   diagnosis
 }) => {
-  const [activeTab, setActiveTab] = useState<'formatted' | 'raw'>('formatted');
+  const [activeTab, setActiveTab] = useState<'formatted' | 'positioning' | 'steering' | 'raw'>('formatted');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
   const severityColor = diagnosis.severity === 'critical' ? '#f85149' : (diagnosis.severity === 'warning' ? '#ffa657' : '#00ff9d');
 
+  const getActivePromptText = () => {
+    if (activeTab === 'positioning' && diagnosis.dagPositioningPrompt) return diagnosis.dagPositioningPrompt;
+    if (activeTab === 'steering' && diagnosis.telemetrySteeringPrompt) return diagnosis.telemetrySteeringPrompt;
+    return diagnosis.markdown_prompt;
+  };
+
   const handleCopy = async () => {
-    const ok = await copyToClipboard(diagnosis.markdown_prompt);
+    const ok = await copyToClipboard(getActivePromptText());
     if (ok) {
       setCopiedPrompt(true);
       setTimeout(() => setCopiedPrompt(false), 2000);
@@ -31,11 +37,11 @@ export const AiPerformancePromptModal: React.FC<AiPerformancePromptModalProps> =
   };
 
   const handleDownload = () => {
-    const blob = new Blob([diagnosis.markdown_prompt], { type: 'text/markdown' });
+    const blob = new Blob([getActivePromptText()], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `ai-performance-resolution-prompt-${nodeMeta.id}.md`;
+    a.download = `ai-performance-resolution-prompt-${nodeMeta.id}-${activeTab}.md`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -72,6 +78,32 @@ export const AiPerformancePromptModal: React.FC<AiPerformancePromptModalProps> =
               }}
             >
               Formatted View
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('positioning')}
+              style={{
+                background: activeTab === 'positioning' ? 'rgba(0, 255, 157, 0.16)' : 'transparent',
+                border: `1px solid ${activeTab === 'positioning' ? '#00ff9d' : 'transparent'}`,
+                color: activeTab === 'positioning' ? '#00ff9d' : '#8b949e',
+                padding: '4px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+              }}
+              title="Prompt 1: DAG File Positioning & Optimal Character-Level OCR Acquisition"
+            >
+              Prompt 1: Positioning & OCR
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('steering')}
+              style={{
+                background: activeTab === 'steering' ? 'rgba(192, 132, 252, 0.18)' : 'transparent',
+                border: `1px solid ${activeTab === 'steering' ? '#c084fc' : 'transparent'}`,
+                color: activeTab === 'steering' ? '#c084fc' : '#8b949e',
+                padding: '4px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, cursor: 'pointer'
+              }}
+              title="Prompt 2: Single & Multi-Part Telemetry, Frame Correlation, & Steering Guide Re-Scan"
+            >
+              Prompt 2: Telemetry & Steering
             </button>
             <button
               type="button"
@@ -248,7 +280,7 @@ export const AiPerformancePromptModal: React.FC<AiPerformancePromptModalProps> =
             margin: 0,
             userSelect: 'text'
           }}>
-            {diagnosis.markdown_prompt}
+            {getActivePromptText()}
           </pre>
         )}
       </div>

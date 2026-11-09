@@ -469,10 +469,79 @@ export function discernNodePerformance(
     remediations.push('Maintain existing calibration parameters and continue monitoring loop timings.');
   }
 
-  const prompt = `# 🛠️ System Performance Degradation Resolution Prompt
+  const hierarchy = (dagStatus as any)?.codescan_hierarchy || {};
+  const steeringGuide = (dagStatus as any)?.ocr_steering_guide || {};
+  const activeFile = hierarchy?.active_file || steeringGuide?.active_file_driver || {};
+  const partInfo = hierarchy?.part || {};
+  const bundleInfo = hierarchy?.bundle || {};
+
+  const dagPositioningPrompt = `# 🎯 Prompt 1: DAG File Positioning & Optimal Character-Level OCR Acquisition
 
 ## Objective
-Analyze root cause of latency/performance in the Small-Fling pipeline and implement code/config optimizations.
+Fix and steer the DAG operation (\`eof_calibration\`, \`home_navigation\`, \`frame_acquire\`, \`local_ai_ocr\`, \`frame_ocr\`, \`arrow_down\`, \`verification_trigger\`) that positions the Markdown file for acquisition and optimal OCR processing to assure every character in the file is 100% accurately acquired.
+
+## Active Task Ground-Truth Context
+- **Scan Scope:** \`${steeringGuide?.scan_scope || (bundleInfo?.is_multipart ? 'multi_part_bundle' : 'single_markdown')}\`
+- **Bundle / Part:** \`${bundleInfo?.name || 'Markdown Scan'}\` — Part \`${partInfo?.number ?? 1}\` of \`${partInfo?.total_parts ?? 1}\` (Files in Part: \`${partInfo?.files_captured ?? 0}/${partInfo?.files_declared ?? 0}\`, Total Project Files: \`${bundleInfo?.total_project_files ?? 0}\`)
+- **Part Header Totals:** Size \`${partInfo?.size_kb_captured ?? 0} / ${partInfo?.size_kb_declared ?? 0} KB\` • Lines \`${partInfo?.lines_captured ?? dagStatus.current_bottom_line} / ${partInfo?.lines_declared ?? dagStatus.target_total_lines}\` • Chars \`${partInfo?.chars_captured ?? 0} / ${partInfo?.chars_declared ?? 0}\`
+- **Active File (\`CODESCAN_FILE_START\`):**
+  - \`path\`: \`${activeFile?.path || 'N/A'}\`
+  - \`type\`: \`${activeFile?.type || 'N/A'}\`
+  - \`size\`: \`${activeFile?.actual_size ?? 0} / ${activeFile?.expected_size ?? 0} B\`
+  - \`lines\`: \`${activeFile?.actual_lines ?? 0} / ${activeFile?.expected_lines ?? 0}\`
+  - \`chars\`: \`${activeFile?.actual_chars ?? 0} / ${activeFile?.expected_chars ?? 0}\`
+  - \`source_frame_ids\`: \`${(activeFile?.source_frame_ids || []).join(', ') || 'Pending'}\`
+
+## Required DAG Positioning & Optimal OCR Directives
+1. **Fullscreen Single-Pane Dark-Mode Viewport Enforcement (\`frame_acquire\` & \`alignment_engine.py\`)**:
+   - Ensure Teams Markdown editor on Display \`#${liveStatus.dagContext?.display_id ?? 'External Desktop'}\` is in **Fullscreen**, **Single-Pane Edit Mode**, and **Dark Mode** (\`gutter_bg_mean < 48.0\`) with soft keyboard suppressed (\`show_ime_with_hard_keyboard 0\`).
+   - Mask out the bottom-left floating \`Offline\` / \`Saving\` badge (\`x < 220, y > 0.88 * H\`) so it is never misread as gutter line \`205\`.
+2. **Part Header Calibration & EOF Reconciliation (\`eof_calibration\` & \`document_assemble\`)**:
+   - Parse top-of-file markers (\`# <bundle> (Part X of Y)\`, \`Part: **X of Y** | Files in this part: **N** (Total project files: **M**)\`, \`Part Size: **S KB** | Lines: **L** | Characters: **C**\`).
+   - Reconcile \`target_total_lines\` directly with \`Lines: **L**\` from the part header so EOF calibration is immune to bottom-gutter occlusion.
+3. **Deterministic Viewport Pacing & Multi-Page Wrapped Line Handling (\`arrow_down\` & \`verification_trigger\`)**:
+   - Advance \`target_top_line = bottom_line + 1\` with calibrated \`DPAD_DOWN\` steps for standard lines.
+   - When an ultra-long wrapped line (e.g. \`.svg\` \`<path d="M..."/>\` or minified bundle) spans multiple 1080p screens with \`gutter_numbers == []\` and \`text_rows >= 8\`, switch \`arrow_down\` to **Wrapped Continuation Page Advance Mode** (\`PAGE_DOWN\` / \`18x DPAD_DOWN\`) and concatenate distinct slices via \`_merge_wrapped_line_continuation()\` until accumulated characters match \`CODESCAN_FILE_START\` \`chars="..."\`.
+4. **Character-Exact Row Slicing & Steered VLM Decoding (\`frame_ocr\` & \`ocr_service.py\`)**:
+   - Slice each row horizontally from \`gutter_right_x + 12px\` to \`1916px\` with \`2x\` Lanczos upscaling and CLAHE normalization to preserve every glyph (\`|\`, \`;\`, \`_\`, \`"\`, \`<\`, \`>\`, \`\\\`, \`{\`, \`}\`).
+   - Inject \`ocr_steering_guide.steering_prompt_hint\` into the OCR prompt so decoding is anchored to \`path\`, \`type\`, \`size\`, \`lines\`, and \`chars\`.`;
+
+  const telemetrySteeringPrompt = `# 📡 Prompt 2: Single & Multi-Part Telemetry, Frame-to-OCR Correlation, & Instance-Data Steering Guide Re-Scan
+
+## Objective
+Enhance telemetry and tracking for both **single Markdown scans** and **multi-part Markdown bundle scans** so the OCR pipeline correlates every OCR result to its source screen capture (\`frame_id\`, \`filename\`, \`top_line..bottom_line\`, and row Y-coordinates) and executes targeted re-scans via the instance-data \`ocr_steering_guide\` to achieve 100% accurate Markdown reproduction.
+
+## 1. Dual-Level Ground-Truth Drivers
+1. **Top-of-File Part Header Driver (\`part_header_metadata\`)**:
+   - Tracks \`is_multipart\`, \`bundle_name\`, \`part_number\`, \`total_parts\`, \`files_in_part\`, \`total_project_files\`, \`part_size_kb\`, \`declared_lines\`, and \`declared_chars\`.
+   - Continuously audits captured totals against declared part attributes to compute \`overall_ocr_accuracy_pct\`.
+2. **Per-File Marker Driver (\`<!-- CODESCAN_FILE_START path="..." type="..." size="..." lines="..." chars="..." -->\` .. \`<!-- CODESCAN_FILE_END -->\`)**:
+   - Validates every embedded file for distinct metric equivalence:
+     - \`actual_lines == expected_lines\`
+     - \`actual_chars == expected_chars\`
+     - \`actual_size == expected_size\` (UTF-8 bytes with CRLF/LF normalization check)
+
+## 2. Bi-Directional Frame-to-OCR Correlation (\`source_frame_ids\`)
+- Every captured screen frame (\`f_<timestamp>\`) records its \`frame_id\`, \`filename\`, \`top_line\`, \`bottom_line\`, and per-row Y-coordinate map (\`line_y_map\`).
+- \`verify_codescan_file_markers_and_metrics()\` intersects each file's Markdown line span \`[start_md_line, end_md_line]\` with all frame \`[top_line, bottom_line]\` intervals to attach \`source_frame_ids\` to each file entry and to \`ocr_steering_guide.rescan_targets\`.
+
+## 3. Instance-Data Steering Guide (\`ocr_steering_guide\`) & Closed-Loop Re-Scan
+Embed \`ocr_steering_guide\` in \`state.latest_telemetry\`, \`state.orchestration_state\`, and \`blackboard.metadata\`:
+\`\`\`json
+${JSON.stringify({
+  scan_scope: steeringGuide?.scan_scope || (bundleInfo?.is_multipart ? 'multi_part_bundle' : 'single_markdown'),
+  goal: '100%_accurate_markdown_reproduction',
+  part_header_driver: steeringGuide?.part_header_driver || partInfo,
+  active_file_driver: steeringGuide?.active_file_driver || activeFile,
+  rescan_targets: (steeringGuide?.rescan_targets || []).slice(0, 3)
+}, null, 2)}
+\`\`\`
+- When \`ocr_steering_guide.requires_rescan == true\`, \`auto_rescan_mismatched_files_with_steering_guide()\` loads the correlated PNG screen captures (\`source_frame_ids\`), re-slices the exact row bands for \`md_line_range\`, runs steered OCR with \`steering_prompt_hint\`, updates \`lines_map\` in place, and re-verifies \`distinct_accuracy_pct == 100.0%\`.`;
+
+  const prompt = `# 🛠️ System Performance & 100% OCR Accuracy Steering Prompt
+
+## Objective
+Analyze root cause of latency/performance and steer DAG file positioning, frame-to-OCR correlation, and targeted re-scanning in the Small-Fling pipeline.
 
 ---
 
@@ -516,6 +585,14 @@ ${evidence.map(e => `- ${e}`).join('\n')}
 
 ## 🎯 Recommended Action Plan for AI
 ${remediations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+---
+
+${dagPositioningPrompt}
+
+---
+
+${telemetrySteeringPrompt}
 `;
 
   return {
@@ -538,6 +615,8 @@ ${remediations.map((r, i) => `${i + 1}. ${r}`).join('\n')}
       healing_pct
     },
     markdown_prompt: prompt.trim(),
-    promptDataUri: 'data:text/markdown;charset=utf-8,' + encodeURIComponent(prompt.trim())
+    promptDataUri: 'data:text/markdown;charset=utf-8,' + encodeURIComponent(prompt.trim()),
+    dagPositioningPrompt: dagPositioningPrompt.trim(),
+    telemetrySteeringPrompt: telemetrySteeringPrompt.trim()
   };
 }
