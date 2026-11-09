@@ -184,6 +184,78 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   const [connectIpInput, setConnectIpInput] = useState('');
   const [pairIpInput, setPairIpInput] = useState('');
   const [pairCodeInput, setPairCodeInput] = useState('');
+  const [isScanningMdns, setIsScanningMdns] = useState(false);
+  const [mdnsInfo, setMdnsInfo] = useState<{
+    pixel_8_connect_address?: string | null;
+    pixel_8_pairing_address?: string | null;
+    pixel_10_connect_address?: string | null;
+    pixel_10_pairing_address?: string | null;
+  } | null>(null);
+
+  const refreshMdnsPorts = useCallback(async (targetDev?: 'pixel_8' | 'pixel_10') => {
+    setIsScanningMdns(true);
+    try {
+      const res = await fetch(`${apiBase}/api/device/mdns-discovery`);
+      if (res.ok) {
+        const d = await res.json();
+        setMdnsInfo(d);
+        const dev = targetDev || activeConfigureDevice;
+        if (dev === 'pixel_8') {
+          if (d.pixel_8_connect_address) {
+            setConnectIpInput(d.pixel_8_connect_address);
+            setPixel8Ip(d.pixel_8_connect_address);
+          }
+          if (d.pixel_8_pairing_address) {
+            setPairIpInput(d.pixel_8_pairing_address);
+          }
+        } else if (dev === 'pixel_10') {
+          if (d.pixel_10_connect_address) {
+            setConnectIpInput(d.pixel_10_connect_address);
+            setPixel10Ip(d.pixel_10_connect_address);
+          }
+          if (d.pixel_10_pairing_address) {
+            setPairIpInput(d.pixel_10_pairing_address);
+          }
+        }
+      }
+    } catch {} finally {
+      setIsScanningMdns(false);
+    }
+  }, [apiBase, activeConfigureDevice, setPixel8Ip, setPixel10Ip]);
+
+  // Automatically sync live mDNS pairing/connect ports into inputs when open
+  useEffect(() => {
+    if (!activeConfigureDevice) return;
+    const p8Pair = mdnsInfo?.pixel_8_pairing_address || deviceInfo?.pixel_8_pairing_address;
+    const p8Conn = mdnsInfo?.pixel_8_connect_address || deviceInfo?.pixel_8_address;
+    const p10Pair = mdnsInfo?.pixel_10_pairing_address || deviceInfo?.pixel_10_pairing_address;
+    const p10Conn = mdnsInfo?.pixel_10_connect_address || deviceInfo?.pixel_10_address;
+
+    if (activeConfigureDevice === 'pixel_8') {
+      if (p8Pair) setPairIpInput(p8Pair);
+      if (p8Conn && !p8Conn.endsWith(':5555')) setConnectIpInput(p8Conn);
+    } else if (activeConfigureDevice === 'pixel_10') {
+      if (p10Pair) setPairIpInput(p10Pair);
+      if (p10Conn && !p10Conn.endsWith(':5555')) setConnectIpInput(p10Conn);
+    }
+  }, [
+    activeConfigureDevice,
+    mdnsInfo?.pixel_8_pairing_address,
+    mdnsInfo?.pixel_8_connect_address,
+    mdnsInfo?.pixel_10_pairing_address,
+    mdnsInfo?.pixel_10_connect_address,
+    deviceInfo?.pixel_8_pairing_address,
+    deviceInfo?.pixel_8_address,
+    deviceInfo?.pixel_10_pairing_address,
+    deviceInfo?.pixel_10_address,
+  ]);
+
+  // Clear local pairing code input only when pairing genuinely succeeds
+  useEffect(() => {
+    if (pairStatusMsg && pairStatusMsg.trim().startsWith('✔')) {
+      setPairCodeInput('');
+    }
+  }, [pairStatusMsg]);
 
   // Live Metadata & Process Telemetry
   const [meta, setMeta] = useState<LiveViewMeta | null>(null);
@@ -1176,348 +1248,674 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
 
                   <div className="device-cards-grid">
                     {/* Pixel 8 Selection Card */}
-                    <div
-                      className={`device-card ${deviceModel === 'pixel_8' ? 'selected' : ''} ${isP8Available && !isP8Disabled ? 'available' : 'unavailable'}`}
-                      style={isP8Disabled ? { opacity: 0.62, borderStyle: 'dashed' } : undefined}
-                      onClick={() => { if (!isP8Disabled) onSelectDevice('pixel_8'); }}
-                    >
-                      <div className="device-card-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Smartphone size={15} color={isP8Disabled ? '#64748b' : (isP8Available ? '#22c55e' : '#ef4444')} />
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>PIXEL 8</span>
-                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
-                              {deviceModel === 'pixel_8' && isFallbackDisabled && (
-                                <span style={{ fontSize: '9px', background: 'rgba(0,255,157,0.16)', border: '1px solid rgba(0,255,157,0.45)', color: '#00ff9d', padding: '0px 5px', borderRadius: '3px', fontWeight: 800 }}>
-                                  DEDICATED
+                    {(() => {
+                      const liveP8Connect = mdnsInfo?.pixel_8_connect_address || deviceInfo?.pixel_8_address || pixel8Ip;
+                      const liveP8Pair = mdnsInfo?.pixel_8_pairing_address || deviceInfo?.pixel_8_pairing_address || null;
+                      const displayP8Ip = (liveP8Connect && !liveP8Connect.endsWith(':5555')) ? liveP8Connect : (pixel8Ip || 'No IP configured');
+                      const isPairSuccess = Boolean(pairStatusMsg && pairStatusMsg.trim().startsWith('✔'));
+                      const isPairWarn = Boolean(pairStatusMsg && pairStatusMsg.trim().startsWith('⚠'));
+                      const isConnectSuccess = Boolean(connectStatusMsg && connectStatusMsg.trim().startsWith('✔'));
+                      const isUsingConnectPortForPair = Boolean(
+                        pairIpInput &&
+                        liveP8Connect &&
+                        pairIpInput.trim() === liveP8Connect.trim() &&
+                        (!liveP8Pair || liveP8Pair !== liveP8Connect)
+                      );
+
+                      return (
+                        <div
+                          className={`device-card ${deviceModel === 'pixel_8' ? 'selected' : ''} ${isP8Available && !isP8Disabled ? 'available' : 'unavailable'}`}
+                          style={isP8Disabled ? { opacity: 0.62, borderStyle: 'dashed' } : undefined}
+                          onClick={() => { if (!isP8Disabled) onSelectDevice('pixel_8'); }}
+                        >
+                          <div className="device-card-header" style={{ gap: '8px', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                              <Smartphone size={15} style={{ flexShrink: 0 }} color={isP8Disabled ? '#64748b' : (isP8Available ? '#22c55e' : '#ef4444')} />
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                                  <span style={{ whiteSpace: 'nowrap' }}>PIXEL 8</span>
+                                  <span style={{ fontSize: '10px', opacity: 0.8, whiteSpace: 'nowrap' }}>(49L)</span>
+                                  {deviceModel === 'pixel_8' && isFallbackDisabled && (
+                                    <span style={{ fontSize: '9px', background: 'rgba(0,255,157,0.16)', border: '1px solid rgba(0,255,157,0.45)', color: '#00ff9d', padding: '0px 5px', borderRadius: '3px', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                                      DEDICATED
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '10.5px', opacity: 0.9, fontFamily: 'var(--font-mono)', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
+                                  <span>{displayP8Ip}</span>
+                                  {liveP8Pair && (
+                                    <span style={{ fontSize: '9px', padding: '0px 5px', borderRadius: '3px', background: 'rgba(163, 113, 247, 0.2)', border: '1px solid rgba(163, 113, 247, 0.45)', color: '#d2a8ff', whiteSpace: 'nowrap' }}>
+                                      Pair Port: {liveP8Pair.split(':')[1]}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                              {isP8Disabled ? (
+                                <span className="device-status-badge unavailable" style={{ background: 'rgba(239, 68, 68, 0.16)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)', whiteSpace: 'nowrap' }}>
+                                  DISABLED
+                                </span>
+                              ) : (
+                                <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`} style={{ whiteSpace: 'nowrap' }}>
+                                  <span className="status-dot-mini" />
+                                  {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
                                 </span>
                               )}
-                            </div>
-                            <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
-                              {pixel8Ip || 'No IP configured'}
+                              <div
+                                className={`device-select-checkbox ${deviceModel === 'pixel_8' && !isP8Disabled ? 'checked' : ''}`}
+                                style={{ flexShrink: 0 }}
+                                title={isP8Disabled ? 'Pixel 8 is disabled in Small-Fling' : (deviceModel === 'pixel_8' ? 'Selected / Dedicated Device' : 'Click to select Pixel 8')}
+                              >
+                                {deviceModel === 'pixel_8' && !isP8Disabled && <Check size={12} strokeWidth={3} />}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {isP8Disabled ? (
-                            <span className="device-status-badge unavailable" style={{ background: 'rgba(239, 68, 68, 0.16)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
-                              DISABLED IN APP
-                            </span>
-                          ) : (
-                            <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`}>
-                              <span className="status-dot-mini" />
-                              {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
-                            </span>
-                          )}
-                          <div
-                            className={`device-select-checkbox ${deviceModel === 'pixel_8' && !isP8Disabled ? 'checked' : ''}`}
-                            title={isP8Disabled ? 'Pixel 8 is disabled in Small-Fling' : (deviceModel === 'pixel_8' ? 'Selected / Dedicated Device' : 'Click to select Pixel 8')}
-                          >
-                            {deviceModel === 'pixel_8' && !isP8Disabled && <Check size={12} strokeWidth={3} />}
-                          </div>
-                        </div>
-                      </div>
 
-                      <div className="device-card-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                        {!isP8Disabled && !isP8Available && pixel8Ip && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            onClick={() => onConnectAdbIp(pixel8Ip, 'pixel_8')}
-                            disabled={isConnectingIp}
-                          >
-                            {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
-                            <span>Connect</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          style={{ padding: '2px 8px', fontSize: '10px' }}
-                          onClick={() => {
-                            setActiveConfigureDevice(p => p === 'pixel_8' ? null : 'pixel_8');
-                            setConnectIpInput(pixel8Ip);
-                            setPairIpInput(pixel8Ip);
-                          }}
-                        >
-                          {activeConfigureDevice === 'pixel_8' ? 'Close' : 'Configure IP'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn-sm"
-                          style={{
-                            padding: '2px 8px',
-                            fontSize: '10px',
-                            background: isP8Disabled ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.14)',
-                            border: `1px solid ${isP8Disabled ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.4)'}`,
-                            color: isP8Disabled ? '#00ff9d' : '#fca5a5',
-                            cursor: 'pointer'
-                          }}
-                          onClick={() => handleDeviceDisableToggle('pixel_8', isP8Disabled)}
-                          title={isP8Disabled ? 'Re-enable Pixel 8 in Small-Fling' : 'Disable Pixel 8 in Small-Fling so it is never used as a fallback'}
-                        >
-                          {isP8Disabled ? '✔ Enable Pixel 8' : '🚫 Disable in App'}
-                        </button>
-                      </div>
-
-                      {activeConfigureDevice === 'pixel_8' && (
-                        <div className="device-configure-inline" onClick={e => e.stopPropagation()}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)' }}>PIXEL 8 WIRELESS ADB</span>
-                            <div className="adb-mode-tabs">
+                          <div className="device-card-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {!isP8Disabled && !isP8Available && displayP8Ip && (
                               <button
                                 type="button"
-                                className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`}
-                                onClick={() => setDeviceConfigTab('connect')}
+                                className="btn btn-sm"
+                                style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                onClick={() => onConnectAdbIp(displayP8Ip, 'pixel_8')}
+                                disabled={isConnectingIp}
                               >
-                                Connect
+                                {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
+                                <span>{isConnectingIp ? 'Connecting...' : 'Connect'}</span>
                               </button>
-                              <button
-                                type="button"
-                                className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`}
-                                onClick={() => setDeviceConfigTab('pair')}
-                              >
-                                Pair New
-                              </button>
-                            </div>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              style={{ padding: '2px 8px', fontSize: '10px' }}
+                              onClick={() => {
+                                const next = activeConfigureDevice === 'pixel_8' ? null : 'pixel_8';
+                                setActiveConfigureDevice(next);
+                                setConnectIpInput(displayP8Ip);
+                                setPairIpInput(liveP8Pair || displayP8Ip);
+                                if (next === 'pixel_8') {
+                                  refreshMdnsPorts('pixel_8');
+                                }
+                              }}
+                            >
+                              {activeConfigureDevice === 'pixel_8' ? 'Close' : 'Configure IP'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              style={{
+                                padding: '2px 8px',
+                                fontSize: '10px',
+                                marginLeft: 'auto',
+                                background: isP8Disabled ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.14)',
+                                border: `1px solid ${isP8Disabled ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.4)'}`,
+                                color: isP8Disabled ? '#00ff9d' : '#fca5a5',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap'
+                              }}
+                              onClick={() => handleDeviceDisableToggle('pixel_8', isP8Disabled)}
+                              title={isP8Disabled ? 'Re-enable Pixel 8 in Small-Fling' : 'Disable Pixel 8 in Small-Fling so it is never used as a fallback'}
+                            >
+                              {isP8Disabled ? '✔ Enable Pixel 8' : '🚫 Disable in App'}
+                            </button>
                           </div>
 
-                          {deviceConfigTab === 'connect' ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="192.168.86.87:37547"
-                                  value={connectIpInput}
-                                  onChange={e => { setConnectIpInput(e.target.value); setPixel8Ip(e.target.value); }}
-                                  onKeyDown={e => e.key === 'Enter' && onConnectAdbIp(connectIpInput, 'pixel_8')}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                                  onClick={() => onConnectAdbIp(connectIpInput, 'pixel_8')}
-                                  disabled={isConnectingIp || !connectIpInput.trim()}
-                                >
-                                  {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                                </button>
+                          {activeConfigureDevice === 'pixel_8' && (
+                            <div className="device-configure-inline" onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.04em', color: 'var(--text-muted)' }}>PIXEL 8 WIRELESS ADB</span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline"
+                                    style={{ padding: '1px 6px', fontSize: '9px', height: '19px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                    onClick={() => refreshMdnsPorts('pixel_8')}
+                                    disabled={isScanningMdns}
+                                    title="Query mDNS for live phone Connect & Pairing ports"
+                                  >
+                                    <RefreshCw size={9} className={isScanningMdns ? 'spin' : ''} />
+                                    <span>{isScanningMdns ? 'Scanning...' : 'Auto-Detect Port'}</span>
+                                  </button>
+                                </div>
+                                <div className="adb-mode-tabs">
+                                  <button
+                                    type="button"
+                                    className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setDeviceConfigTab('connect');
+                                      refreshMdnsPorts('pixel_8');
+                                    }}
+                                  >
+                                    Connect
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setDeviceConfigTab('pair');
+                                      refreshMdnsPorts('pixel_8');
+                                    }}
+                                  >
+                                    Pair New
+                                  </button>
+                                </div>
                               </div>
-                              {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{connectStatusMsg}</div>}
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="Pair IP:Port (e.g. 192.168.86.87:37547)"
-                                  value={pairIpInput}
-                                  onChange={e => setPairIpInput(e.target.value)}
-                                />
-                              </div>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="6-digit Pairing Code"
-                                  value={pairCodeInput}
-                                  onChange={e => setPairCodeInput(e.target.value)}
-                                  onKeyDown={e => e.key === 'Enter' && onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_8')}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
-                                  onClick={() => onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_8')}
-                                  disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
-                                >
-                                  {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
-                                </button>
-                              </div>
-                              {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{pairStatusMsg}</div>}
+
+                              {deviceConfigTab === 'connect' ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '9.5px', color: 'var(--text-muted)' }}>
+                                    <span style={{ fontWeight: 700 }}>WIRELESS DEBUGGING IP : PORT</span>
+                                    {liveP8Connect && (
+                                      <span style={{ color: '#00ff9d', fontFamily: 'var(--font-mono)' }}>
+                                        mDNS Live: {liveP8Connect}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="connect-ip-row">
+                                    <input
+                                      type="text"
+                                      className="connect-ip-input"
+                                      placeholder="192.168.86.85:40575"
+                                      value={connectIpInput}
+                                      onChange={e => { setConnectIpInput(e.target.value); setPixel8Ip(e.target.value); }}
+                                      onKeyDown={e => e.key === 'Enter' && onConnectAdbIp(connectIpInput, 'pixel_8')}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary"
+                                      style={{ padding: '2px 10px', height: '26px', fontSize: '10.5px', fontWeight: 700 }}
+                                      onClick={() => onConnectAdbIp(connectIpInput, 'pixel_8')}
+                                      disabled={isConnectingIp || !connectIpInput.trim()}
+                                    >
+                                      {isConnectingIp ? <Loader2 size={11} className="spin" /> : 'Connect'}
+                                    </button>
+                                  </div>
+
+                                  {connectStatusMsg && (
+                                    <div
+                                      style={{
+                                        marginTop: '2px',
+                                        padding: '7px 9px',
+                                        borderRadius: '6px',
+                                        background: isConnectSuccess ? 'rgba(16, 185, 129, 0.14)' : 'rgba(248, 81, 73, 0.15)',
+                                        border: `1px solid ${isConnectSuccess ? 'rgba(16, 185, 129, 0.5)' : 'rgba(248, 81, 73, 0.55)'}`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '7px'
+                                      }}
+                                    >
+                                      {isConnectSuccess ? (
+                                        <CheckCircle2 size={13} color="#00ff9d" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      ) : (
+                                        <AlertTriangle size={13} color="#ff7b72" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      )}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '10px', fontWeight: 800, color: isConnectSuccess ? '#00ff9d' : '#ff7b72', letterSpacing: '0.02em' }}>
+                                          {isConnectSuccess ? 'CONNECTED & VERIFIED ONLINE' : 'CONNECTION FAILED — DEVICE NOT ONLINE'}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: isConnectSuccess ? '#d1fae5' : '#ffdcd7', marginTop: '2px', lineHeight: 1.35, wordBreak: 'break-word' }}>
+                                          {connectStatusMsg.replace(/^[✔✕⚠]\s*/, '')}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                  {/* Live Phone Pairing Dialog Detector Strip */}
+                                  <div
+                                    style={{
+                                      padding: '6px 8px',
+                                      borderRadius: '5px',
+                                      background: liveP8Pair ? 'rgba(163, 113, 247, 0.14)' : 'rgba(210, 153, 34, 0.12)',
+                                      border: `1px solid ${liveP8Pair ? 'rgba(163, 113, 247, 0.45)' : 'rgba(210, 153, 34, 0.4)'}`,
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      gap: '6px',
+                                      fontSize: '9.5px'
+                                    }}
+                                  >
+                                    {liveP8Pair ? (
+                                      <>
+                                        <span style={{ color: '#e2c5ff', fontWeight: 600 }}>
+                                          🟢 Phone Pairing Popup Detected: <strong style={{ fontFamily: 'var(--font-mono)', color: '#fff' }}>{liveP8Pair}</strong>
+                                        </span>
+                                        {pairIpInput !== liveP8Pair && (
+                                          <button
+                                            type="button"
+                                            className="btn btn-sm"
+                                            style={{ padding: '1px 6px', fontSize: '9px', background: '#8957e5', color: '#fff', border: 'none' }}
+                                            onClick={() => setPairIpInput(liveP8Pair)}
+                                          >
+                                            Use {liveP8Pair.split(':')[1]}
+                                          </button>
+                                        )}
+                                      </>
+                                    ) : (
+                                      <span style={{ color: '#e3b341', lineHeight: 1.3 }}>
+                                        ⚠️ On Pixel 8, open <strong>Wireless debugging → Pair device with pairing code</strong> so its temporary pairing port appears on Wi-Fi.
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {isUsingConnectPortForPair && (
+                                    <div style={{ fontSize: '9.5px', color: '#ff7b72', background: 'rgba(248,81,73,0.12)', border: '1px solid rgba(248,81,73,0.35)', borderRadius: '4px', padding: '4px 7px' }}>
+                                      ⚠️ <strong>{pairIpInput}</strong> is the main Connect port, not the temporary Pairing popup port. Check the port shown inside the phone's pairing popup.
+                                    </div>
+                                  )}
+
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <label style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.03em' }}>
+                                      1. PAIRING IP : PORT (FROM PHONE POPUP)
+                                    </label>
+                                    <div className="connect-ip-row">
+                                      <input
+                                        type="text"
+                                        className="connect-ip-input"
+                                        placeholder="192.168.86.85:41143"
+                                        value={pairIpInput}
+                                        onChange={e => setPairIpInput(e.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <label style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.03em' }}>
+                                      2. 6-DIGIT WI-FI PAIRING CODE
+                                    </label>
+                                    <div className="connect-ip-row">
+                                      <input
+                                        type="text"
+                                        className="connect-ip-input"
+                                        style={{ letterSpacing: '0.12em', fontWeight: 700 }}
+                                        placeholder="608440"
+                                        maxLength={10}
+                                        value={pairCodeInput}
+                                        onChange={e => setPairCodeInput(e.target.value.replace(/\s+/g, ''))}
+                                        onKeyDown={e => e.key === 'Enter' && onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_8')}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ padding: '2px 10px', height: '26px', fontSize: '10.5px', fontWeight: 700, background: '#a371f7', borderColor: '#8957e5', whiteSpace: 'nowrap' }}
+                                        onClick={() => onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_8')}
+                                        disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
+                                      >
+                                        {isPairing ? <Loader2 size={11} className="spin" /> : 'Pair Device'}
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                  {pairStatusMsg && (
+                                    <div
+                                      style={{
+                                        marginTop: '2px',
+                                        padding: '8px 10px',
+                                        borderRadius: '6px',
+                                        background: isPairSuccess
+                                          ? 'rgba(16, 185, 129, 0.14)'
+                                          : isPairWarn
+                                          ? 'rgba(210, 153, 34, 0.15)'
+                                          : 'rgba(248, 81, 73, 0.16)',
+                                        border: `1px solid ${
+                                          isPairSuccess
+                                            ? 'rgba(16, 185, 129, 0.5)'
+                                            : isPairWarn
+                                            ? 'rgba(210, 153, 34, 0.5)'
+                                            : 'rgba(248, 81, 73, 0.6)'
+                                        }`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '8px'
+                                      }}
+                                    >
+                                      {isPairSuccess ? (
+                                        <CheckCircle2 size={14} color="#00ff9d" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      ) : (
+                                        <AlertTriangle size={14} color={isPairWarn ? '#e3b341' : '#ff7b72'} style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      )}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            fontSize: '10px',
+                                            fontWeight: 800,
+                                            letterSpacing: '0.03em',
+                                            color: isPairSuccess ? '#00ff9d' : isPairWarn ? '#e3b341' : '#ff7b72'
+                                          }}
+                                        >
+                                          {isPairSuccess
+                                            ? 'PAIRED & VERIFIED ONLINE'
+                                            : isPairWarn
+                                            ? 'PAIRED — CONNECT VERIFICATION NEEDED'
+                                            : 'PAIRING FAILED — DEVICE NOT PAIRED'}
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: '10px',
+                                            color: isPairSuccess ? '#d1fae5' : isPairWarn ? '#fde68a' : '#ffdcd7',
+                                            marginTop: '2px',
+                                            lineHeight: 1.38,
+                                            wordBreak: 'break-word'
+                                          }}
+                                        >
+                                          {pairStatusMsg.replace(/^[✔✕⚠]\s*/, '')}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
 
                     {/* Pixel 10 Selection Card */}
-                    <div
-                      className={`device-card ${deviceModel === 'pixel_10' ? 'selected' : ''} ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`}
-                      style={isP10Disabled ? { opacity: 0.68, borderStyle: 'dashed', borderColor: 'rgba(248, 81, 73, 0.45)', background: 'rgba(248, 81, 73, 0.04)' } : undefined}
-                      onClick={() => {
-                        if (isP10Disabled) return;
-                        onSelectDevice('pixel_10');
-                      }}
-                    >
-                      <div className="device-card-header">
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Smartphone size={15} color={isP10Disabled ? '#f85149' : (isP10Available ? '#22c55e' : '#ef4444')} />
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={isP10Disabled ? { textDecoration: 'line-through', color: '#8b949e' } : undefined}>PIXEL 10</span>
-                              <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
-                              {isP10Disabled && (
-                                <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(248, 81, 73, 0.2)', color: '#ff7b72', border: '1px solid rgba(248, 81, 73, 0.4)' }}>
-                                  DISABLED IN APP (RESERVED)
-                                </span>
-                              )}
-                              {!isP10Disabled && deviceModel === 'pixel_10' && disableDeviceFallback && (
-                                <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950', border: '1px solid rgba(63, 185, 80, 0.4)' }}>
-                                  DEDICATED
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
-                              {pixel10Ip || 'No IP configured'}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className={`device-status-badge ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`}>
-                            <span className="status-dot-mini" />
-                            {isP10Disabled ? 'DISABLED (NO FALLBACK)' : (isP10Available ? 'ONLINE' : 'NOT AVAILABLE')}
-                          </span>
-                          <div
-                            className={`device-select-checkbox ${deviceModel === 'pixel_10' && !isP10Disabled ? 'checked' : ''}`}
-                            style={isP10Disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
-                            title={isP10Disabled ? 'Enable Pixel 10 first to select it' : (deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10')}
-                          >
-                            {deviceModel === 'pixel_10' && !isP10Disabled && <Check size={12} strokeWidth={3} />}
-                          </div>
-                        </div>
-                      </div>
+                    {(() => {
+                      const liveP10Connect = mdnsInfo?.pixel_10_connect_address || deviceInfo?.pixel_10_address || pixel10Ip;
+                      const liveP10Pair = mdnsInfo?.pixel_10_pairing_address || deviceInfo?.pixel_10_pairing_address || null;
+                      const displayP10Ip = (liveP10Connect && !liveP10Connect.endsWith(':5555')) ? liveP10Connect : (pixel10Ip || 'No IP configured');
+                      const isPairSuccess = Boolean(pairStatusMsg && pairStatusMsg.trim().startsWith('✔'));
+                      const isPairWarn = Boolean(pairStatusMsg && pairStatusMsg.trim().startsWith('⚠'));
+                      const isConnectSuccess = Boolean(connectStatusMsg && connectStatusMsg.trim().startsWith('✔'));
 
-                      <div className="device-card-actions" onClick={e => e.stopPropagation()}>
-                        {!isP10Disabled && !isP10Available && pixel10Ip && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                            onClick={() => onConnectAdbIp(pixel10Ip, 'pixel_10')}
-                            disabled={isConnectingIp}
-                          >
-                            {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
-                            <span>Connect</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline"
-                          style={{ padding: '2px 8px', fontSize: '10px' }}
+                      return (
+                        <div
+                          className={`device-card ${deviceModel === 'pixel_10' ? 'selected' : ''} ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`}
+                          style={isP10Disabled ? { opacity: 0.72, borderStyle: 'dashed', borderColor: 'rgba(248, 81, 73, 0.45)', background: 'rgba(248, 81, 73, 0.04)' } : undefined}
                           onClick={() => {
-                            setActiveConfigureDevice(p => p === 'pixel_10' ? null : 'pixel_10');
-                            setConnectIpInput(pixel10Ip);
-                            setPairIpInput(pixel10Ip);
+                            if (isP10Disabled) return;
+                            onSelectDevice('pixel_10');
                           }}
                         >
-                          {activeConfigureDevice === 'pixel_10' ? 'Close' : 'Configure IP'}
-                        </button>
-                        {onToggleDisableDeviceModel && (
-                          <button
-                            type="button"
-                            className="btn btn-sm"
-                            style={{
-                              padding: '2px 8px',
-                              fontSize: '10px',
-                              marginLeft: 'auto',
-                              background: isP10Disabled ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.15)',
-                              border: `1px solid ${isP10Disabled ? 'rgba(63, 185, 80, 0.45)' : 'rgba(248, 81, 73, 0.4)'}`,
-                              color: isP10Disabled ? '#3fb950' : '#ff7b72',
-                              fontWeight: 700,
-                            }}
-                            onClick={() => onToggleDisableDeviceModel('pixel_10', !isP10Disabled)}
-                            title={isP10Disabled ? 'Re-enable Pixel 10 for Small-Fling' : 'Disable Pixel 10 in Small-Fling so another app on this laptop can use it exclusively without auto-switching'}
-                          >
-                            {isP10Disabled ? '✔ Enable Pixel 10' : '🚫 Disable in App (Reserve)'}
-                          </button>
-                        )}
-                      </div>
-
-                      {activeConfigureDevice === 'pixel_10' && (
-                        <div className="device-configure-inline" onClick={e => e.stopPropagation()}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-muted)' }}>PIXEL 10 WIRELESS ADB</span>
-                            <div className="adb-mode-tabs">
-                              <button
-                                type="button"
-                                className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`}
-                                onClick={() => setDeviceConfigTab('connect')}
+                          <div className="device-card-header" style={{ gap: '8px', alignItems: 'flex-start' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                              <Smartphone size={15} style={{ flexShrink: 0 }} color={isP10Disabled ? '#f85149' : (isP10Available ? '#22c55e' : '#ef4444')} />
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                                  <span style={{ whiteSpace: 'nowrap', ...(isP10Disabled ? { textDecoration: 'line-through', color: '#8b949e' } : {}) }}>PIXEL 10</span>
+                                  <span style={{ fontSize: '10px', opacity: 0.8, whiteSpace: 'nowrap' }}>(49L)</span>
+                                  {isP10Disabled && (
+                                    <span style={{ fontSize: '9px', padding: '0px 5px', borderRadius: '3px', background: 'rgba(248, 81, 73, 0.18)', color: '#ff7b72', border: '1px solid rgba(248, 81, 73, 0.4)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                      RESERVED
+                                    </span>
+                                  )}
+                                  {!isP10Disabled && deviceModel === 'pixel_10' && disableDeviceFallback && (
+                                    <span style={{ fontSize: '9px', padding: '0px 5px', borderRadius: '3px', background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950', border: '1px solid rgba(63, 185, 80, 0.4)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                                      DEDICATED
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '10.5px', opacity: 0.9, fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
+                                  {displayP10Ip}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                              <span className={`device-status-badge ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`} style={{ whiteSpace: 'nowrap' }}>
+                                <span className="status-dot-mini" />
+                                {isP10Disabled ? 'DISABLED' : (isP10Available ? 'ONLINE' : 'NOT AVAILABLE')}
+                              </span>
+                              <div
+                                className={`device-select-checkbox ${deviceModel === 'pixel_10' && !isP10Disabled ? 'checked' : ''}`}
+                                style={{ flexShrink: 0, ...(isP10Disabled ? { opacity: 0.35, cursor: 'not-allowed' } : {}) }}
+                                title={isP10Disabled ? 'Enable Pixel 10 first to select it' : (deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10')}
                               >
-                                Connect
-                              </button>
-                              <button
-                                type="button"
-                                className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`}
-                                onClick={() => setDeviceConfigTab('pair')}
-                              >
-                                Pair New
-                              </button>
+                                {deviceModel === 'pixel_10' && !isP10Disabled && <Check size={12} strokeWidth={3} />}
+                              </div>
                             </div>
                           </div>
 
-                          {deviceConfigTab === 'connect' ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="192.168.86.81:44587"
-                                  value={connectIpInput}
-                                  onChange={e => { setConnectIpInput(e.target.value); setPixel10Ip(e.target.value); }}
-                                  onKeyDown={e => e.key === 'Enter' && onConnectAdbIp(connectIpInput, 'pixel_10')}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  style={{ padding: '2px 8px', height: '24px', fontSize: '10px' }}
-                                  onClick={() => onConnectAdbIp(connectIpInput, 'pixel_10')}
-                                  disabled={isConnectingIp || !connectIpInput.trim()}
-                                >
-                                  {isConnectingIp ? <Loader2 size={10} className="spin" /> : 'Connect'}
-                                </button>
+                          <div className="device-card-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {!isP10Disabled && !isP10Available && displayP10Ip && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{ padding: '2px 8px', fontSize: '10px', background: '#238636', borderColor: '#2ea043', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                onClick={() => onConnectAdbIp(displayP10Ip, 'pixel_10')}
+                                disabled={isConnectingIp}
+                              >
+                                {isConnectingIp ? <Loader2 size={10} className="spin" /> : <Zap size={10} />}
+                                <span>{isConnectingIp ? 'Connecting...' : 'Connect'}</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline"
+                              style={{ padding: '2px 8px', fontSize: '10px' }}
+                              onClick={() => {
+                                const next = activeConfigureDevice === 'pixel_10' ? null : 'pixel_10';
+                                setActiveConfigureDevice(next);
+                                setConnectIpInput(displayP10Ip);
+                                setPairIpInput(liveP10Pair || displayP10Ip);
+                                if (next === 'pixel_10') {
+                                  refreshMdnsPorts('pixel_10');
+                                }
+                              }}
+                            >
+                              {activeConfigureDevice === 'pixel_10' ? 'Close' : 'Configure IP'}
+                            </button>
+                            {onToggleDisableDeviceModel && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{
+                                  padding: '2px 8px',
+                                  fontSize: '10px',
+                                  marginLeft: 'auto',
+                                  background: isP10Disabled ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.15)',
+                                  border: `1px solid ${isP10Disabled ? 'rgba(63, 185, 80, 0.45)' : 'rgba(248, 81, 73, 0.4)'}`,
+                                  color: isP10Disabled ? '#3fb950' : '#ff7b72',
+                                  fontWeight: 700,
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onClick={() => onToggleDisableDeviceModel('pixel_10', !isP10Disabled)}
+                                title={isP10Disabled ? 'Re-enable Pixel 10 for Small-Fling' : 'Disable Pixel 10 in Small-Fling so another app on this laptop can use it exclusively without auto-switching'}
+                              >
+                                {isP10Disabled ? '✔ Enable Pixel 10' : '🚫 Disable in App'}
+                              </button>
+                            )}
+                          </div>
+
+                          {activeConfigureDevice === 'pixel_10' && (
+                            <div className="device-configure-inline" onClick={e => e.stopPropagation()} style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '10px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 800, letterSpacing: '0.04em', color: 'var(--text-muted)' }}>PIXEL 10 WIRELESS ADB</span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline"
+                                    style={{ padding: '1px 6px', fontSize: '9px', height: '19px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                    onClick={() => refreshMdnsPorts('pixel_10')}
+                                    disabled={isScanningMdns}
+                                  >
+                                    <RefreshCw size={9} className={isScanningMdns ? 'spin' : ''} />
+                                    <span>{isScanningMdns ? 'Scanning...' : 'Auto-Detect Port'}</span>
+                                  </button>
+                                </div>
+                                <div className="adb-mode-tabs">
+                                  <button
+                                    type="button"
+                                    className={`adb-tab-btn ${deviceConfigTab === 'connect' ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setDeviceConfigTab('connect');
+                                      refreshMdnsPorts('pixel_10');
+                                    }}
+                                  >
+                                    Connect
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`adb-tab-btn pair-tab ${deviceConfigTab === 'pair' ? 'active' : ''}`}
+                                    onClick={() => {
+                                      setDeviceConfigTab('pair');
+                                      refreshMdnsPorts('pixel_10');
+                                    }}
+                                  >
+                                    Pair New
+                                  </button>
+                                </div>
                               </div>
-                              {connectStatusMsg && <div style={{ fontSize: '10px', color: connectStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{connectStatusMsg}</div>}
-                            </div>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="Pair IP:Port (e.g. 192.168.86.81:44587)"
-                                  value={pairIpInput}
-                                  onChange={e => setPairIpInput(e.target.value)}
-                                />
-                              </div>
-                              <div className="connect-ip-row">
-                                <input
-                                  type="text"
-                                  className="connect-ip-input"
-                                  placeholder="6-digit Pairing Code"
-                                  value={pairCodeInput}
-                                  onChange={e => setPairCodeInput(e.target.value)}
-                                  onKeyDown={e => e.key === 'Enter' && onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_10')}
-                                />
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  style={{ padding: '2px 8px', height: '24px', fontSize: '10px', background: '#a371f7', borderColor: '#8957e5' }}
-                                  onClick={() => onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_10')}
-                                  disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
-                                >
-                                  {isPairing ? <Loader2 size={10} className="spin" /> : 'Pair Device'}
-                                </button>
-                              </div>
-                              {pairStatusMsg && <div style={{ fontSize: '10px', color: pairStatusMsg.includes('✔') ? '#00ff9d' : '#ff7b72' }}>{pairStatusMsg}</div>}
+
+                              {deviceConfigTab === 'connect' ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                  <div className="connect-ip-row">
+                                    <input
+                                      type="text"
+                                      className="connect-ip-input"
+                                      placeholder="192.168.86.81:44587"
+                                      value={connectIpInput}
+                                      onChange={e => { setConnectIpInput(e.target.value); setPixel10Ip(e.target.value); }}
+                                      onKeyDown={e => e.key === 'Enter' && onConnectAdbIp(connectIpInput, 'pixel_10')}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary"
+                                      style={{ padding: '2px 10px', height: '26px', fontSize: '10.5px', fontWeight: 700 }}
+                                      onClick={() => onConnectAdbIp(connectIpInput, 'pixel_10')}
+                                      disabled={isConnectingIp || !connectIpInput.trim()}
+                                    >
+                                      {isConnectingIp ? <Loader2 size={11} className="spin" /> : 'Connect'}
+                                    </button>
+                                  </div>
+                                  {connectStatusMsg && (
+                                    <div
+                                      style={{
+                                        marginTop: '2px',
+                                        padding: '7px 9px',
+                                        borderRadius: '6px',
+                                        background: isConnectSuccess ? 'rgba(16, 185, 129, 0.14)' : 'rgba(248, 81, 73, 0.15)',
+                                        border: `1px solid ${isConnectSuccess ? 'rgba(16, 185, 129, 0.5)' : 'rgba(248, 81, 73, 0.55)'}`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '7px'
+                                      }}
+                                    >
+                                      {isConnectSuccess ? (
+                                        <CheckCircle2 size={13} color="#00ff9d" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      ) : (
+                                        <AlertTriangle size={13} color="#ff7b72" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      )}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '10px', fontWeight: 800, color: isConnectSuccess ? '#00ff9d' : '#ff7b72' }}>
+                                          {isConnectSuccess ? 'CONNECTED & VERIFIED ONLINE' : 'CONNECTION FAILED — DEVICE NOT ONLINE'}
+                                        </div>
+                                        <div style={{ fontSize: '10px', color: isConnectSuccess ? '#d1fae5' : '#ffdcd7', marginTop: '2px', lineHeight: 1.35 }}>
+                                          {connectStatusMsg.replace(/^[✔✕⚠]\s*/, '')}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <label style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.03em' }}>
+                                      1. PAIRING IP : PORT (FROM PHONE POPUP)
+                                    </label>
+                                    <div className="connect-ip-row">
+                                      <input
+                                        type="text"
+                                        className="connect-ip-input"
+                                        placeholder="192.168.86.81:44587"
+                                        value={pairIpInput}
+                                        onChange={e => setPairIpInput(e.target.value)}
+                                      />
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <label style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.03em' }}>
+                                      2. 6-DIGIT WI-FI PAIRING CODE
+                                    </label>
+                                    <div className="connect-ip-row">
+                                      <input
+                                        type="text"
+                                        className="connect-ip-input"
+                                        style={{ letterSpacing: '0.12em', fontWeight: 700 }}
+                                        placeholder="6-digit Pairing Code"
+                                        maxLength={10}
+                                        value={pairCodeInput}
+                                        onChange={e => setPairCodeInput(e.target.value.replace(/\s+/g, ''))}
+                                        onKeyDown={e => e.key === 'Enter' && onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_10')}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="btn btn-primary"
+                                        style={{ padding: '2px 10px', height: '26px', fontSize: '10.5px', fontWeight: 700, background: '#a371f7', borderColor: '#8957e5', whiteSpace: 'nowrap' }}
+                                        onClick={() => onPairAdb?.(pairIpInput, pairCodeInput, 'pixel_10')}
+                                        disabled={isPairing || !pairIpInput.trim() || !pairCodeInput.trim()}
+                                      >
+                                        {isPairing ? <Loader2 size={11} className="spin" /> : 'Pair Device'}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  {pairStatusMsg && (
+                                    <div
+                                      style={{
+                                        marginTop: '2px',
+                                        padding: '8px 10px',
+                                        borderRadius: '6px',
+                                        background: isPairSuccess
+                                          ? 'rgba(16, 185, 129, 0.14)'
+                                          : isPairWarn
+                                          ? 'rgba(210, 153, 34, 0.15)'
+                                          : 'rgba(248, 81, 73, 0.16)',
+                                        border: `1px solid ${
+                                          isPairSuccess
+                                            ? 'rgba(16, 185, 129, 0.5)'
+                                            : isPairWarn
+                                            ? 'rgba(210, 153, 34, 0.5)'
+                                            : 'rgba(248, 81, 73, 0.6)'
+                                        }`,
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '8px'
+                                      }}
+                                    >
+                                      {isPairSuccess ? (
+                                        <CheckCircle2 size={14} color="#00ff9d" style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      ) : (
+                                        <AlertTriangle size={14} color={isPairWarn ? '#e3b341' : '#ff7b72'} style={{ flexShrink: 0, marginTop: '1px' }} />
+                                      )}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div
+                                          style={{
+                                            fontSize: '10px',
+                                            fontWeight: 800,
+                                            letterSpacing: '0.03em',
+                                            color: isPairSuccess ? '#00ff9d' : isPairWarn ? '#e3b341' : '#ff7b72'
+                                          }}
+                                        >
+                                          {isPairSuccess
+                                            ? 'PAIRED & VERIFIED ONLINE'
+                                            : isPairWarn
+                                            ? 'PAIRED — CONNECT VERIFICATION NEEDED'
+                                            : 'PAIRING FAILED — DEVICE NOT PAIRED'}
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: '10px',
+                                            color: isPairSuccess ? '#d1fae5' : isPairWarn ? '#fde68a' : '#ffdcd7',
+                                            marginTop: '2px',
+                                            lineHeight: 1.38,
+                                            wordBreak: 'break-word'
+                                          }}
+                                        >
+                                          {pairStatusMsg.replace(/^[✔✕⚠]\s*/, '')}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Connected ADB Devices Selector (if multiple) */}

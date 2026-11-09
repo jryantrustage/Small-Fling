@@ -390,73 +390,321 @@ async def get_fullscreen_status(serial: Optional[str] = None, display_id: Option
         **status
     }
 
+@router.get("/api/device/mdns-discovery")
+async def get_mdns_discovery_endpoint():
+    """Returns live mDNS Wireless Debugging Connect (_adb-tls-connect._tcp) and Pairing (_adb-tls-pairing._tcp) addresses."""
+    info = await adb.discover_mdns_wireless_adb(force_refresh=True)
+    return {"status": "ok", **info}
+
+
 @router.post("/api/adb/connect")
 @router.post("/api/device/connect-ip")
 async def adb_connect(req: Request):
-    import asyncio, subprocess
+    from fastapi.responses import JSONResponse
     data = await req.json()
     addr = (data.get("address") or data.get("ip") or "").strip()
-    dev_model = (data.get("device_model") or data.get("model") or "").lower()
+    dev_model = (data.get("device_model") or data.get("model") or adb.current_device_model or "pixel_8").lower()
+    target_model = "pixel_10" if "10" in dev_model else "pixel_8"
+    dev_label = "Pixel 10" if target_model == "pixel_10" else "Pixel 8"
+
+    mdns_info = await adb.discover_mdns_wireless_adb(force_refresh=True)
+    live_connect_addr = (
+        mdns_info.get("pixel_10_connect_address")
+        if target_model == "pixel_10"
+        else mdns_info.get("pixel_8_connect_address")
+    )
+    live_pair_addr = (
+        mdns_info.get("pixel_10_pairing_address")
+        if target_model == "pixel_10"
+        else mdns_info.get("pixel_8_pairing_address")
+    )
+
+    if not addr and live_connect_addr:
+        addr = live_connect_addr
     if not addr:
         raise HTTPException(status_code=400, detail="Missing IP address/port")
 
-    # Associate given IP/port with device in cache
-    try:
-        cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
-        cdata = {}
-        if cache_file.exists():
-            try: cdata = json.loads(cache_file.read_text())
-            except Exception: pass
-        cdata["last_address"] = addr
-        if "8" in dev_model:
-            cdata["pixel_8_address"] = addr
-            adb.current_device_model = "pixel_8"
-        elif "10" in dev_model:
-            cdata["pixel_10_address"] = addr
-            adb.current_device_model = "pixel_10"
-        else:
-            if adb.current_device_model == "pixel_8": cdata["pixel_8_address"] = addr
-            elif adb.current_device_model == "pixel_10": cdata["pixel_10_address"] = addr
-        cache_file.write_text(json.dumps(cdata, indent=2))
-    except Exception: pass
+    # Build candidate connect addresses: if user passed a stale port or :5555, also try live mDNS _adb-tls-connect._tcp port
+    candidates = []
+    if addr.endswith(":5555") and live_connect_addr:
+        candidates.append(live_connect_addr)
+        candidates.append(addr)
+    else:
+        candidates.append(addr)
+        if live_connect_addr and live_connect_addr not in candidates:
+            candidates.append(live_connect_addr)
 
-    p = await asyncio.to_thread(subprocess.run, ["adb", "connect", addr], capture_output=True, text=True, timeout=8.0)
-    out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
-    is_success = (p.returncode == 0) and ("connected to" in out.lower() or "already connected" in out.lower())
+    used_addr = candidates[0]
+    out = ""
+    is_success = False
+
+    for cand in candidates:
+        used_addr = cand
+        p = await asyncio.to_thread(adb._exec_adb_sync, ["connect", cand], 6.0)
+        out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
+        out_low = out.lower()
+        cmd_ok = (
+            ("connected to" in out_low or "already connected" in out_low)
+            and "failed" not in out_low
+            and "cannot" not in out_low
+            and "refused" not in out_low
+            and "unable" not in out_low
+        )
+        if cmd_ok:
+            # Verify the device is genuinely online in `adb devices -l`
+            devs_res = await adb.list_adb_devices()
+            online_devs = [d for d in devs_res.get("devices", []) if d.get("status") == "device"]
+            keys = ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"] if target_model == "pixel_10" else ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"]
+            matched_online = next(
+                (d for d in online_devs if d.get("serial") == cand or any(k in (d.get("serial", "") + " " + d.get("model", "") + " " + d.get("raw", "")).lower() for k in keys)),
+                None,
+            )
+            if matched_online:
+                is_success = True
+                used_addr = matched_online.get("serial") or cand
+                break
+
     if is_success:
-        adb.target_adb_serial = addr
-        active = await adb.get_active_adb_serial(addr, force_refresh=True)
-        if active:
-            adb.target_adb_serial = active
-    return {"status": "ok" if is_success else "error", "output": out}
+        try:
+            cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+            cdata = {}
+            if cache_file.exists():
+                try:
+                    cdata = json.loads(cache_file.read_text())
+                except Exception:
+                    pass
+            cdata["last_address"] = used_addr
+            if target_model == "pixel_8":
+                cdata["pixel_8_address"] = used_addr
+                adb.current_device_model = "pixel_8"
+            else:
+                cdata["pixel_10_address"] = used_addr
+                adb.current_device_model = "pixel_10"
+            cache_file.write_text(json.dumps(cdata, indent=2))
+        except Exception:
+            pass
+
+        adb.target_adb_serial = used_addr
+        adb._active_serial_cache = used_addr
+        adb._active_serial_cache_ts = time.time()
+        info = await adb.get_device_info()
+        return {
+            "status": "ok",
+            "connected": True,
+            "address": used_addr,
+            "output": out,
+            "device_info": info,
+        }
+
+    needs_pairing = bool(live_connect_addr and ("failed to connect" in out.lower() or "certificate" in out.lower()))
+    if needs_pairing:
+        detail_msg = (
+            f"{dev_label} Wireless Debugging is online at {live_connect_addr}, "
+            f"but rejected the connection (requires Wireless Pairing). Switch to 'Pair New' to pair."
+        )
+    elif live_connect_addr and live_connect_addr != addr:
+        detail_msg = f"Could not connect to {addr}. Live {dev_label} port detected at {live_connect_addr} ({out or 'connection failed'})."
+    else:
+        detail_msg = f"Failed to connect to {used_addr}: {out or 'Device unreachable or Wireless Debugging is off.'}"
+
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "connected": False,
+            "needs_pairing": needs_pairing,
+            "address": used_addr,
+            "detected_connect_address": live_connect_addr,
+            "detected_pairing_address": live_pair_addr,
+            "detail": detail_msg,
+            "output": out,
+        },
+    )
+
 
 @router.post("/api/adb/pair")
 @router.post("/api/device/pair-ip")
 async def adb_pair(req: Request):
-    import asyncio, subprocess
+    from fastapi.responses import JSONResponse
     data = await req.json()
     addr = (data.get("address") or data.get("ip") or "").strip()
     code = (data.get("code") or "").strip()
-    dev_model = (data.get("device_model") or data.get("model") or "").lower()
-    if not addr or not code:
-        raise HTTPException(status_code=400, detail="Missing IP address or pairing code")
+    dev_model = (data.get("device_model") or data.get("model") or adb.current_device_model or "pixel_8").lower()
+    target_model = "pixel_10" if "10" in dev_model else "pixel_8"
+    dev_label = "Pixel 10" if target_model == "pixel_10" else "Pixel 8"
 
-    # Cache pairing address for target device
-    try:
-        cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
-        cdata = {}
-        if cache_file.exists():
-            try: cdata = json.loads(cache_file.read_text())
-            except Exception: pass
-        if "8" in dev_model: cdata["pixel_8_address"] = addr
-        elif "10" in dev_model: cdata["pixel_10_address"] = addr
-        cache_file.write_text(json.dumps(cdata, indent=2))
-    except Exception: pass
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing 6-digit pairing code")
 
-    p = await asyncio.to_thread(subprocess.run, ["adb", "pair", addr, code], capture_output=True, text=True, timeout=10.0)
-    out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
-    is_success = (p.returncode == 0) and ("successfully paired" in out.lower() or ("paired" in out.lower() and "fail" not in out.lower()))
-    return {"status": "ok" if is_success else "error", "output": out}
+    mdns_info = await adb.discover_mdns_wireless_adb(force_refresh=True)
+    live_pair_addr = (
+        mdns_info.get("pixel_10_pairing_address")
+        if target_model == "pixel_10"
+        else mdns_info.get("pixel_8_pairing_address")
+    )
+    live_connect_addr = (
+        mdns_info.get("pixel_10_connect_address")
+        if target_model == "pixel_10"
+        else mdns_info.get("pixel_8_connect_address")
+    )
+
+    # Build candidate pairing addresses:
+    # If the user entered the Connect port by mistake or an older pairing port, also try the live mDNS _adb-tls-pairing._tcp port!
+    pair_candidates = []
+    if addr and addr != live_connect_addr:
+        pair_candidates.append(addr)
+    if live_pair_addr and live_pair_addr not in pair_candidates:
+        pair_candidates.append(live_pair_addr)
+    if addr and addr not in pair_candidates:
+        pair_candidates.append(addr)
+
+    if not pair_candidates:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "status": "error",
+                "paired": False,
+                "connected": False,
+                "detected_pairing_address": None,
+                "detected_connect_address": live_connect_addr,
+                "detail": f"No pairing address provided and no active pairing dialog detected on {dev_label}. Open 'Pair device with pairing code' on the phone first.",
+                "output": "No pairing address available",
+            },
+        )
+
+    used_pair_addr = pair_candidates[0]
+    out = ""
+    is_paired = False
+
+    for cand in pair_candidates:
+        used_pair_addr = cand
+        p = await asyncio.to_thread(adb._exec_adb_sync, ["pair", cand, code], 10.0)
+        out = ((p.stdout or "") + ("\n" + p.stderr if p.stderr else "")).strip()
+        out_low = out.lower()
+        if (
+            p.returncode == 0
+            and "successfully paired" in out_low
+            and "failed" not in out_low
+            and "error" not in out_low
+            and "wrong password" not in out_low
+            and "unable" not in out_low
+        ):
+            is_paired = True
+            break
+
+    if is_paired:
+        # Refresh mDNS to get the live _adb-tls-connect._tcp port (NEVER use :5555 or the temporary pairing port!)
+        await asyncio.sleep(0.35)
+        mdns_after = await adb.discover_mdns_wireless_adb(force_refresh=True)
+        connect_addr = (
+            (mdns_after.get("pixel_10_connect_address") if target_model == "pixel_10" else mdns_after.get("pixel_8_connect_address"))
+            or live_connect_addr
+        )
+        is_connected = False
+        conn_out = ""
+
+        if connect_addr:
+            cp = await asyncio.to_thread(adb._exec_adb_sync, ["connect", connect_addr], 6.0)
+            conn_out = ((cp.stdout or "") + ("\n" + cp.stderr if cp.stderr else "")).strip()
+            conn_low = conn_out.lower()
+            if ("connected to" in conn_low or "already connected" in conn_low) and "failed" not in conn_low:
+                devs_res = await adb.list_adb_devices()
+                online_devs = [d for d in devs_res.get("devices", []) if d.get("status") == "device"]
+                keys = ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"] if target_model == "pixel_10" else ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"]
+                matched_online = next(
+                    (d for d in online_devs if d.get("serial") == connect_addr or any(k in (d.get("serial", "") + " " + d.get("model", "") + " " + d.get("raw", "")).lower() for k in keys)),
+                    None,
+                )
+                if matched_online:
+                    is_connected = True
+                    connect_addr = matched_online.get("serial") or connect_addr
+
+        # Save the real connect_addr (never the temporary pairing port!) to .devices_cache.json
+        if connect_addr:
+            try:
+                cache_file = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+                cdata = {}
+                if cache_file.exists():
+                    try:
+                        cdata = json.loads(cache_file.read_text())
+                    except Exception:
+                        pass
+                cdata["last_address"] = connect_addr
+                if target_model == "pixel_8":
+                    cdata["pixel_8_address"] = connect_addr
+                    adb.current_device_model = "pixel_8"
+                else:
+                    cdata["pixel_10_address"] = connect_addr
+                    adb.current_device_model = "pixel_10"
+                cache_file.write_text(json.dumps(cdata, indent=2))
+            except Exception:
+                pass
+
+        if is_connected and connect_addr:
+            adb.target_adb_serial = connect_addr
+            adb._active_serial_cache = connect_addr
+            adb._active_serial_cache_ts = time.time()
+
+        info = await adb.get_device_info()
+        return {
+            "status": "ok",
+            "paired": True,
+            "connected": is_connected,
+            "pair_address": used_pair_addr,
+            "connect_address": connect_addr,
+            "output": out,
+            "connect_output": conn_out,
+            "device_info": info,
+        }
+
+    # Pairing FAILED: build a crystal-clear diagnostic message
+    out_low = out.lower()
+    if "wrong password" in out_low or "connection was dropped" in out_low:
+        if live_pair_addr and addr and live_pair_addr != addr and used_pair_addr != live_pair_addr:
+            detail_msg = (
+                f"Pairing failed on {addr}: {dev_label}'s active pairing popup is on {live_pair_addr}. "
+                f"Use {live_pair_addr} and enter the current 6-digit code shown on the phone."
+            )
+        else:
+            detail_msg = (
+                f"Pairing rejected by {dev_label} ({used_pair_addr}): wrong 6-digit pairing code, "
+                f"or the pairing popup on the phone closed/regenerated."
+            )
+    elif addr == live_connect_addr and live_connect_addr:
+        detail_msg = (
+            f"{addr} is the main Wireless Debugging port, not the Pairing port. "
+            + (
+                f"Detected active Pairing port at {live_pair_addr} — please verify the 6-digit code on the phone."
+                if live_pair_addr
+                else f"On {dev_label}, tap 'Pair device with pairing code' to open the pairing port."
+            )
+        )
+    elif not live_pair_addr and ("cannot connect" in out_low or "refused" in out_low or "unable" in out_low or "protocol fault" in out_low):
+        detail_msg = (
+            f"Could not reach pairing service at {used_pair_addr}. No active pairing popup detected on {dev_label} — "
+            f"tap 'Pair device with pairing code' on the phone and keep the popup open."
+        )
+    elif live_pair_addr and live_pair_addr != addr:
+        detail_msg = (
+            f"Port {addr} is no longer active. {dev_label} pairing dialog is currently open at {live_pair_addr} — "
+            f"updated to {live_pair_addr}; confirm the 6-digit code on the phone and click Pair Device."
+        )
+    else:
+        detail_msg = f"Pairing failed on {used_pair_addr}: {out or 'No response from device pairing service.'}"
+
+    return JSONResponse(
+        status_code=400,
+        content={
+            "status": "error",
+            "paired": False,
+            "connected": False,
+            "pair_address": used_pair_addr,
+            "detected_pairing_address": live_pair_addr,
+            "detected_connect_address": live_connect_addr,
+            "detail": detail_msg,
+            "output": out,
+        },
+    )
 
 @router.post("/api/device/save-address")
 async def save_device_address(req: Request):

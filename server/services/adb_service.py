@@ -320,7 +320,7 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
 
         # If preferred model (e.g. Pixel 8) is not yet in active list, try background auto-connect instead of hijacking Pixel 10
         if not found_serial:
-            if pref not in disabled_devices and (now - _last_reconnect_ts > 8.0):
+            if pref not in disabled_devices and (now - _last_reconnect_ts > 20.0):
                 _last_reconnect_ts = now
                 reconn = await connect_device_for_model(pref)
                 if reconn:
@@ -335,79 +335,133 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
     except Exception:
         return None
 
-async def _scan_open_adb_ports_for_ip(ip: str, start_port: int = 30000, end_port: int = 49999) -> List[int]:
-    open_ports: List[int] = []
-    sem = asyncio.Semaphore(120)
+_mdns_cache: Dict[str, Any] = {}
+_mdns_cache_ts: float = 0.0
 
-    async def _probe(p: int) -> None:
-        async with sem:
+async def discover_mdns_wireless_adb(force_refresh: bool = False) -> Dict[str, Any]:
+    """
+    Discovers live Wireless Debugging Connect (_adb-tls-connect._tcp) and Pairing (_adb-tls-pairing._tcp)
+    endpoints via `adb mdns services` without opening raw TCP port scans that exhaust Windows select() FDs.
+    """
+    global _mdns_cache, _mdns_cache_ts
+    now = time.time()
+    if not force_refresh and _mdns_cache and (now - _mdns_cache_ts < 2.5):
+        return _mdns_cache
+
+    result: Dict[str, Any] = {
+        "pixel_8_connect_address": None,
+        "pixel_8_pairing_address": None,
+        "pixel_8_service_name": None,
+        "pixel_10_connect_address": None,
+        "pixel_10_pairing_address": None,
+        "pixel_10_service_name": None,
+        "services": [],
+    }
+    try:
+        p8_keys = ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"]
+        p10_keys = ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"]
+
+        mdns_res = await asyncio.to_thread(_exec_adb_sync, ["mdns", "services"], 2.5)
+        for line in (mdns_res.stdout or "").splitlines():
+            ls = line.strip()
+            if not ls or ls.lower().startswith("list of"):
+                continue
+            parts = ls.split()
+            if len(parts) < 3:
+                continue
+            svc_name, svc_type, addr = parts[0], parts[1], parts[-1]
+            if ":" not in addr:
+                continue
+            low = ls.lower()
+            dev_model = None
+            if any(k in low for k in p8_keys):
+                dev_model = "pixel_8"
+            elif any(k in low for k in p10_keys):
+                dev_model = "pixel_10"
+
+            entry = {
+                "service_name": svc_name,
+                "service_type": svc_type,
+                "address": addr,
+                "device_model": dev_model,
+            }
+            result["services"].append(entry)
+
+            if dev_model == "pixel_8":
+                result["pixel_8_service_name"] = svc_name
+                if "_adb-tls-pairing._tcp" in svc_type:
+                    result["pixel_8_pairing_address"] = addr
+                elif "_adb-tls-connect._tcp" in svc_type or "_adb._tcp" in svc_type:
+                    result["pixel_8_connect_address"] = addr
+            elif dev_model == "pixel_10":
+                result["pixel_10_service_name"] = svc_name
+                if "_adb-tls-pairing._tcp" in svc_type:
+                    result["pixel_10_pairing_address"] = addr
+                elif "_adb-tls-connect._tcp" in svc_type or "_adb._tcp" in svc_type:
+                    result["pixel_10_connect_address"] = addr
+
+        # Keep .devices_cache.json synchronized with the real _adb-tls-connect._tcp address
+        cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        if cf.exists() and (result["pixel_8_connect_address"] or result["pixel_10_connect_address"]):
             try:
-                _, w = await asyncio.wait_for(asyncio.open_connection(ip, p), timeout=0.22)
-                w.close()
-                try:
-                    await w.wait_closed()
-                except Exception:
-                    pass
-                open_ports.append(p)
+                cdata = json.loads(cf.read_text())
+                changed = False
+                if result["pixel_8_connect_address"] and cdata.get("pixel_8_address") != result["pixel_8_connect_address"]:
+                    cdata["pixel_8_address"] = result["pixel_8_connect_address"]
+                    if current_device_model == "pixel_8":
+                        cdata["last_address"] = result["pixel_8_connect_address"]
+                    changed = True
+                if result["pixel_10_connect_address"] and cdata.get("pixel_10_address") != result["pixel_10_connect_address"]:
+                    cdata["pixel_10_address"] = result["pixel_10_connect_address"]
+                    changed = True
+                if changed:
+                    cf.write_text(json.dumps(cdata, indent=2))
             except Exception:
                 pass
+    except Exception:
+        pass
 
-    candidate_ports = [5555] + list(range(start_port, end_port + 1))
-    await asyncio.gather(*(_probe(p) for p in candidate_ports))
-    return sorted(open_ports)
+    _mdns_cache = result
+    _mdns_cache_ts = now
+    return result
 
 async def connect_device_for_model(model_pref: str) -> Optional[str]:
     try:
-        keys = ["pixel_10", "mustang", "frankel", "pixel 10", "63100"] if model_pref == "pixel_10" else ["pixel_8", "husky", "shiba", "pixel 8", "39101"]
+        keys = ["pixel_10", "mustang", "frankel", "pixel 10", "63100", "192.168.86.81"] if model_pref == "pixel_10" else ["pixel_8", "husky", "shiba", "pixel 8", "39101", "192.168.86.85"]
         res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
         for line in res.stdout.splitlines()[1:]:
             parts = line.strip().split()
             if len(parts) >= 2 and parts[1] == "device" and any(k in line.lower() for k in keys):
                 return parts[0]
 
+        mdns_info = await discover_mdns_wireless_adb(force_refresh=True)
+        live_connect_addr = mdns_info.get("pixel_10_connect_address") if model_pref == "pixel_10" else mdns_info.get("pixel_8_connect_address")
+
         cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
-        cached_ip = "192.168.86.85" if model_pref == "pixel_8" else "192.168.86.81"
+        cached_addr = None
         if cf.exists():
             try:
                 cdata = json.loads(cf.read_text())
-                cached = cdata.get("pixel_10_address") if model_pref == "pixel_10" else cdata.get("pixel_8_address")
-                if cached:
-                    if ":" in cached:
-                        cached_ip = cached.split(":")[0]
-                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", cached], 4.0)
-                    if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
-                        return cached
+                cached_addr = cdata.get("pixel_10_address") if model_pref == "pixel_10" else cdata.get("pixel_8_address")
             except Exception:
                 pass
 
-        mdns_res = await asyncio.to_thread(_exec_adb_sync, ["mdns", "services"], 4.0)
-        for line in mdns_res.stdout.splitlines():
-            ls = line.strip()
-            if ("_adb-tls-connect._tcp" in ls or "_adb._tcp" in ls) and ":" in ls.split()[-1]:
-                addr = ls.split()[-1]
-                if any(k in ls.lower() for k in keys) or addr.startswith(cached_ip):
-                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 4.0)
-                    if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
-                        return addr
+        candidates = []
+        if live_connect_addr:
+            candidates.append(live_connect_addr)
+        if cached_addr and cached_addr not in candidates and not cached_addr.endswith(":5555"):
+            candidates.append(cached_addr)
 
-        # Scan cached_ip for dynamic Wireless Debugging TLS port (30000-49999)
-        open_ports = await _scan_open_adb_ports_for_ip(cached_ip)
-        for p in open_ports:
-            candidate = f"{cached_ip}:{p}"
-            if cf.exists():
-                try:
-                    cdata = json.loads(cf.read_text())
-                    if model_pref == "pixel_8":
-                        cdata["pixel_8_address"] = candidate
-                        cdata["last_address"] = candidate
-                    else:
-                        cdata["pixel_10_address"] = candidate
-                    cf.write_text(json.dumps(cdata, indent=2))
-                except Exception:
-                    pass
-            cres = await asyncio.to_thread(_exec_adb_sync, ["connect", candidate], 4.0)
-            if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
-                return candidate
+        for addr in candidates:
+            cres = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 3.5)
+            out_low = (cres.stdout or "").lower()
+            if ("connected to" in out_low or "already connected" in out_low) and "failed" not in out_low and "cannot" not in out_low:
+                # Verify device is actually online in `adb devices`
+                chk = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 2.5)
+                for line in (chk.stdout or "").splitlines()[1:]:
+                    parts = line.strip().split()
+                    if len(parts) >= 2 and parts[1] == "device" and (parts[0] == addr or any(k in line.lower() for k in keys)):
+                        return parts[0]
     except Exception as e:
         print(f"Error in connect_device_for_model({model_pref}): {e}")
     return None
@@ -3210,8 +3264,9 @@ async def get_device_info() -> Dict[str, Any]:
     if cf.exists():
         try: cdata = json.loads(cf.read_text())
         except Exception: pass
-    p8_addr = cdata.get("pixel_8_address", "")
-    p10_addr = cdata.get("pixel_10_address", "")
+    mdns_info = await discover_mdns_wireless_adb()
+    p8_addr = mdns_info.get("pixel_8_connect_address") or cdata.get("pixel_8_address", "")
+    p10_addr = mdns_info.get("pixel_10_connect_address") or cdata.get("pixel_10_address", "")
     p8_available = any(d.get("status") == "device" and (d.get("displayName") == "Pixel 8" or "8" in d.get("model", "").lower() or (p8_addr and p8_addr in d.get("serial", ""))) for d in devs)
     p10_available = any(d.get("status") == "device" and (d.get("displayName") == "Pixel 10" or "10" in d.get("model", "").lower() or (p10_addr and p10_addr in d.get("serial", ""))) for d in devs)
 
@@ -3225,6 +3280,9 @@ async def get_device_info() -> Dict[str, Any]:
         "devices": devs, "displays": {"desktop": bool(disp_map.get("desktop")), "phone": bool(disp_map.get("phone"))},
         "pixel_8_address": p8_addr,
         "pixel_10_address": p10_addr,
+        "pixel_8_pairing_address": mdns_info.get("pixel_8_pairing_address"),
+        "pixel_10_pairing_address": mdns_info.get("pixel_10_pairing_address"),
+        "mdns_discovery": mdns_info,
         "pixel_8_available": p8_available,
         "pixel_10_available": p10_available,
         "cached_addresses": cdata

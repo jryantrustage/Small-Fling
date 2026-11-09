@@ -343,6 +343,22 @@ export interface DeviceInfoData {
   devices: DeviceItem[];
   pixel_8_address?: string;
   pixel_10_address?: string;
+  pixel_8_pairing_address?: string | null;
+  pixel_10_pairing_address?: string | null;
+  mdns_discovery?: {
+    pixel_8_connect_address?: string | null;
+    pixel_8_pairing_address?: string | null;
+    pixel_8_service_name?: string | null;
+    pixel_10_connect_address?: string | null;
+    pixel_10_pairing_address?: string | null;
+    pixel_10_service_name?: string | null;
+    services?: Array<{
+      service_name: string;
+      service_type: string;
+      address: string;
+      device_model?: string | null;
+    }>;
+  };
   pixel_8_available?: boolean;
   pixel_10_available?: boolean;
   cached_addresses?: {

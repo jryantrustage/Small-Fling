@@ -28,8 +28,7 @@
             "subProcess": true,
             "preLaunchTask": "ports: clean server",
             "env": {
-                "PYTHONUNBUFFERED": "1",
-                "UVICORN_RELOAD": "1"
+                "PYTHONUNBUFFERED": "1"
             }
         },
         {

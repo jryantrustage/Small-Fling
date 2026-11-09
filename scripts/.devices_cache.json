@@ -1,7 +1,7 @@
 {
-  "last_address": "192.168.86.85:35681",
-  "pixel_8_address": "192.168.86.85:35681",
-  "pixel_10_address": "192.168.86.81:40061",
+  "last_address": "192.168.86.85:40575",
+  "pixel_8_address": "192.168.86.85:40575",
+  "pixel_10_address": "192.168.86.81:40633",
   "selected_device_model": "pixel_8",
   "disable_device_fallback": true,
   "disabled_devices": [

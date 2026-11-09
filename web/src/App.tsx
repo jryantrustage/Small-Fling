@@ -1147,55 +1147,102 @@ function AppContent() {
     if (!target) return;
     setIsConnectingIp(true);
     const devLabel = targetModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
-    setConnectStatusMsg(`Connecting ${devLabel} (${target})...`);
+    setConnectStatusMsg(`⏳ Connecting to ${devLabel} (${target})...`);
     try {
-      localStorage.setItem('mc_last_adb_target', target);
-      if (targetModel === 'pixel_8') {
-        setPixel8Ip(target);
-        localStorage.setItem('mc_pixel_8_address', target);
-      } else {
-        setPixel10Ip(target);
-        localStorage.setItem('mc_pixel_10_address', target);
-      }
-
       const res = await api('/api/device/connect-ip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ip: target, device_model: targetModel })
       });
-      const d = await res.json();
-      if (res.ok) {
-        setConnectStatusMsg(`Connected to ${devLabel} (${target}) ✔`);
-        const info = await apiJson<DeviceInfoData>('/api/device/info');
-        if (info) setDeviceInfo(info);
-      } else { setConnectStatusMsg(`Error: ${d.detail || d.output || 'Failed'}`); }
-    } catch (e: any) { setConnectStatusMsg(`Connect failed: ${e.message}`); }
-    finally { setIsConnectingIp(false); }
+      const d = await res.json().catch(() => ({}));
+      const isOk = res.ok && d.status === 'ok' && d.connected !== false;
+      const effectiveAddr = d.address || d.detected_connect_address || target;
+      if (effectiveAddr && !effectiveAddr.endsWith(':5555')) {
+        if (targetModel === 'pixel_8') {
+          setPixel8Ip(effectiveAddr);
+          localStorage.setItem('mc_pixel_8_address', effectiveAddr);
+        } else {
+          setPixel10Ip(effectiveAddr);
+          localStorage.setItem('mc_pixel_10_address', effectiveAddr);
+        }
+      }
+
+      if (isOk) {
+        setConnectStatusMsg(`✔ Connected to ${devLabel} (${d.address || target})`);
+        if (d.device_info) {
+          setDeviceInfo(d.device_info);
+        } else {
+          const info = await apiJson<DeviceInfoData>('/api/device/info');
+          if (info) setDeviceInfo(info);
+        }
+        addTelemetryEvent('SYSTEM', `Connected to ${devLabel} at ${d.address || target} ✔`);
+      } else {
+        const rawNote = d.output && !String(d.detail || '').includes(d.output) ? ` [ADB: ${d.output}]` : '';
+        setConnectStatusMsg(`✕ ${d.detail || d.output || 'Connection failed'}${rawNote}`);
+      }
+    } catch (e: any) {
+      setConnectStatusMsg(`✕ Connect failed: ${e.message}`);
+    } finally {
+      setIsConnectingIp(false);
+    }
   };
 
   const handlePairAdb = async (ipToPair?: string, codeToPair?: string, model?: 'pixel_8' | 'pixel_10') => {
     const targetModel = model || deviceModel;
-    const target = (ipToPair || (targetModel === 'pixel_8' ? pixel8Ip : pixel10Ip)).trim();
+    const target = (ipToPair || (targetModel === 'pixel_8' ? (deviceInfo?.pixel_8_pairing_address || pixel8Ip) : (deviceInfo?.pixel_10_pairing_address || pixel10Ip))).trim();
     const code = (codeToPair || pairCodeInput).trim();
-    if (!target || !code) return;
+    if (!code) {
+      setPairStatusMsg('✕ Please enter the 6-digit pairing code shown on the phone.');
+      return;
+    }
     setIsPairing(true);
     const devLabel = targetModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
-    setPairStatusMsg(`Pairing ${devLabel} (${target})...`);
+    setPairStatusMsg(`⏳ Pairing ${devLabel} at ${target || 'auto-detected port'}...`);
     try {
       const res = await api('/api/device/pair-ip', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ip: target, code, device_model: targetModel })
       });
-      const d = await res.json();
-      if (res.ok) {
+      const d = await res.json().catch(() => ({}));
+      const isPaired = res.ok && d.status === 'ok' && d.paired === true;
+
+      const realConnectAddr = d.connect_address || d.detected_connect_address;
+      if (realConnectAddr && !realConnectAddr.endsWith(':5555')) {
+        if (targetModel === 'pixel_8') {
+          setPixel8Ip(realConnectAddr);
+          localStorage.setItem('mc_pixel_8_address', realConnectAddr);
+        } else {
+          setPixel10Ip(realConnectAddr);
+          localStorage.setItem('mc_pixel_10_address', realConnectAddr);
+        }
+      }
+
+      if (isPaired) {
         setPairCodeInput('');
-        setPairStatusMsg(`Paired ${devLabel} ✔`);
-        const host = target.split(':')[0];
-        handleConnectAdbIp(`${host}:5555`, targetModel);
-      } else { setPairStatusMsg(`Pairing failed: ${d.detail || d.output || 'Unknown error'}`); }
-    } catch (e: any) { setPairStatusMsg(`Error: ${e.message}`); }
-    finally { setIsPairing(false); }
+        if (d.device_info) {
+          setDeviceInfo(d.device_info);
+        } else {
+          const info = await apiJson<DeviceInfoData>('/api/device/info');
+          if (info) setDeviceInfo(info);
+        }
+        if (d.connected) {
+          setPairStatusMsg(`✔ Paired (${d.pair_address || target}) & Connected to ${devLabel} (${d.connect_address})!`);
+          setConnectStatusMsg(`✔ Connected to ${devLabel} (${d.connect_address})`);
+          addTelemetryEvent('SYSTEM', `Paired & connected ${devLabel} at ${d.connect_address} ✔`);
+        } else {
+          setPairStatusMsg(`⚠ Paired ${devLabel} (${d.pair_address || target}), but connect to ${d.connect_address || 'device'} needs retry: ${d.connect_output || 'Tap Connect'}`);
+        }
+      } else {
+        const rawNote = d.output && !String(d.detail || '').includes(d.output) ? ` [ADB: ${d.output}]` : '';
+        setPairStatusMsg(`✕ ${d.detail || d.output || 'Pairing failed — check the 6-digit code and port on the phone'}${rawNote}`);
+        addTelemetryEvent('ERROR', `${devLabel} pairing failed: ${d.detail || d.output || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      setPairStatusMsg(`✕ Network error during pairing: ${e.message}`);
+    } finally {
+      setIsPairing(false);
+    }
   };
 
   const isFetchingDeviceRef = useRef(false);
@@ -1320,6 +1367,14 @@ function AppContent() {
             }
             if (Array.isArray(devData?.disabled_devices)) {
               setDisabledDevices(devData.disabled_devices);
+            }
+            if (devData?.pixel_8_address && !String(devData.pixel_8_address).endsWith(':5555')) {
+              setPixel8Ip(devData.pixel_8_address);
+              try { localStorage.setItem('mc_pixel_8_address', devData.pixel_8_address); } catch {}
+            }
+            if (devData?.pixel_10_address && !String(devData.pixel_10_address).endsWith(':5555')) {
+              setPixel10Ip(devData.pixel_10_address);
+              try { localStorage.setItem('mc_pixel_10_address', devData.pixel_10_address); } catch {}
             }
             if (devData?.active_model) {
               const m = String(devData.active_model).toLowerCase();
