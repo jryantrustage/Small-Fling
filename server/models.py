@@ -133,6 +133,14 @@ class ReprocessRequest(BaseModel):
 class DeviceSelectRequest(BaseModel):
     device_model: Optional[str] = None
     serial: Optional[str] = None
+    disable_device_fallback: Optional[bool] = None
+    disabled_devices: Optional[List[str]] = None
+
+class DeviceFallbackPolicyRequest(BaseModel):
+    disable_device_fallback: Optional[bool] = None
+    disabled_devices: Optional[List[str]] = None
+    toggle_device_disabled: Optional[str] = None
+    disabled: Optional[bool] = None
 
 class AdbCommandRequest(BaseModel):
     command: str

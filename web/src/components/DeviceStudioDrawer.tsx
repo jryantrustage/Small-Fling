@@ -81,6 +81,10 @@ export interface DeviceStudioDrawerProps {
   onToggleProhibitKeyboard?: (prohibit?: boolean) => void;
   desktopVerification?: any;
   onVerifyDesktopMode?: () => void;
+  disableDeviceFallback?: boolean;
+  disabledDevices?: string[];
+  onToggleDisableFallback?: (disable: boolean) => void;
+  onToggleDisableDeviceModel?: (model: 'pixel_8' | 'pixel_10', disable?: boolean) => void;
 }
 
 export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
@@ -134,6 +138,10 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
   onToggleProhibitKeyboard,
   desktopVerification,
   onVerifyDesktopMode,
+  disableDeviceFallback,
+  disabledDevices,
+  onToggleDisableFallback,
+  onToggleDisableDeviceModel,
 }) => {
   // Tabs
   const [activeTab, setActiveTab] = useState<'kiosk' | 'device' | 'processes' | 'telemetry'>(initialTab);
@@ -1080,26 +1088,111 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
               )}
 
               {/* TAB 2: TARGET DEVICE & WIRELESS ADB */}
-              {activeTab === 'device' && (
+              {activeTab === 'device' && (() => {
+                const isFallbackDisabled = disableDeviceFallback ?? deviceInfo?.disable_device_fallback ?? true;
+                const effectiveDisabledList = disabledDevices ?? deviceInfo?.disabled_devices ?? [];
+                const isP8Disabled = effectiveDisabledList.includes('pixel_8');
+                const isP10Disabled = effectiveDisabledList.includes('pixel_10');
+
+                const handleFallbackToggle = async () => {
+                  const nextVal = !isFallbackDisabled;
+                  if (onToggleDisableFallback) {
+                    onToggleDisableFallback(nextVal);
+                    return;
+                  }
+                  try {
+                    await fetch(`${apiBase}/api/device/fallback-policy`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ disable_device_fallback: nextVal }),
+                    });
+                  } catch {}
+                };
+
+                const handleDeviceDisableToggle = async (targetModel: 'pixel_8' | 'pixel_10', currentlyDisabled: boolean) => {
+                  const nextDisabled = !currentlyDisabled;
+                  if (onToggleDisableDeviceModel) {
+                    onToggleDisableDeviceModel(targetModel, nextDisabled);
+                    return;
+                  }
+                  try {
+                    await fetch(`${apiBase}/api/device/fallback-policy`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ toggle_device_disabled: targetModel, disabled: nextDisabled }),
+                    });
+                  } catch {}
+                };
+
+                return (
                 <div className="studio-tab-pane">
+                  {/* Dedicated Device / Auto-Fallback Control Banner */}
+                  <div style={{
+                    background: isFallbackDisabled ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.12)',
+                    border: `1px solid ${isFallbackDisabled ? 'rgba(16, 185, 129, 0.4)' : 'rgba(245, 158, 11, 0.45)'}`,
+                    borderRadius: '8px',
+                    padding: '8px 10px',
+                    marginBottom: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isFallbackDisabled ? <Lock size={13} color="#00ff9d" /> : <Unlock size={13} color="#fbbf24" />}
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: isFallbackDisabled ? '#00ff9d' : '#fbbf24' }}>
+                          {isFallbackDisabled ? 'DEDICATED DEVICE MODE (No Auto-Fallback)' : 'AUTO-FALLBACK ENABLED'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleFallbackToggle}
+                        style={{
+                          padding: '3px 9px',
+                          borderRadius: '5px',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          background: isFallbackDisabled ? '#059669' : '#1f2937',
+                          border: `1px solid ${isFallbackDisabled ? '#10b981' : '#4b5563'}`,
+                          color: '#fff'
+                        }}
+                        title="When enabled, Small-Fling is strictly dedicated to the selected device and will never switch to the fallback device"
+                      >
+                        {isFallbackDisabled ? 'Fallback: DISABLED ✔' : 'Disable Auto-Fallback'}
+                      </button>
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#94a3b8', lineHeight: 1.35 }}>
+                      {isFallbackDisabled
+                        ? `Small-Fling is strictly locked to ${deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'} and will never switch to ${deviceModel === 'pixel_8' ? 'Pixel 10' : 'Pixel 8'} while you develop another app on this laptop.`
+                        : 'Small-Fling may fall back to another connected ADB device if the primary device disconnects.'}
+                    </div>
+                  </div>
+
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 2px' }}>
                     <div className="dropdown-section-title" style={{ padding: 0 }}>TARGET DEVICE</div>
-                    <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Click card to select & activate</span>
+                    <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>Click card to select & dedicate</span>
                   </div>
 
                   <div className="device-cards-grid">
                     {/* Pixel 8 Selection Card */}
                     <div
-                      className={`device-card ${deviceModel === 'pixel_8' ? 'selected' : ''} ${isP8Available ? 'available' : 'unavailable'}`}
-                      onClick={() => onSelectDevice('pixel_8')}
+                      className={`device-card ${deviceModel === 'pixel_8' ? 'selected' : ''} ${isP8Available && !isP8Disabled ? 'available' : 'unavailable'}`}
+                      style={isP8Disabled ? { opacity: 0.62, borderStyle: 'dashed' } : undefined}
+                      onClick={() => { if (!isP8Disabled) onSelectDevice('pixel_8'); }}
                     >
                       <div className="device-card-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Smartphone size={15} color={isP8Available ? '#22c55e' : '#ef4444'} />
+                          <Smartphone size={15} color={isP8Disabled ? '#64748b' : (isP8Available ? '#22c55e' : '#ef4444')} />
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>PIXEL 8</span>
                               <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
+                              {deviceModel === 'pixel_8' && isFallbackDisabled && (
+                                <span style={{ fontSize: '9px', background: 'rgba(0,255,157,0.16)', border: '1px solid rgba(0,255,157,0.45)', color: '#00ff9d', padding: '0px 5px', borderRadius: '3px', fontWeight: 800 }}>
+                                  DEDICATED
+                                </span>
+                              )}
                             </div>
                             <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
                               {pixel8Ip || 'No IP configured'}
@@ -1107,21 +1200,27 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`}>
-                            <span className="status-dot-mini" />
-                            {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
-                          </span>
+                          {isP8Disabled ? (
+                            <span className="device-status-badge unavailable" style={{ background: 'rgba(239, 68, 68, 0.16)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.4)' }}>
+                              DISABLED IN APP
+                            </span>
+                          ) : (
+                            <span className={`device-status-badge ${isP8Available ? 'available' : 'unavailable'}`}>
+                              <span className="status-dot-mini" />
+                              {isP8Available ? 'ONLINE' : 'NOT AVAILABLE'}
+                            </span>
+                          )}
                           <div
-                            className={`device-select-checkbox ${deviceModel === 'pixel_8' ? 'checked' : ''}`}
-                            title={deviceModel === 'pixel_8' ? 'Selected / Active Device' : 'Click to select Pixel 8'}
+                            className={`device-select-checkbox ${deviceModel === 'pixel_8' && !isP8Disabled ? 'checked' : ''}`}
+                            title={isP8Disabled ? 'Pixel 8 is disabled in Small-Fling' : (deviceModel === 'pixel_8' ? 'Selected / Dedicated Device' : 'Click to select Pixel 8')}
                           >
-                            {deviceModel === 'pixel_8' && <Check size={12} strokeWidth={3} />}
+                            {deviceModel === 'pixel_8' && !isP8Disabled && <Check size={12} strokeWidth={3} />}
                           </div>
                         </div>
                       </div>
 
-                      <div className="device-card-actions" onClick={e => e.stopPropagation()}>
-                        {!isP8Available && pixel8Ip && (
+                      <div className="device-card-actions" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        {!isP8Disabled && !isP8Available && pixel8Ip && (
                           <button
                             type="button"
                             className="btn btn-sm"
@@ -1144,6 +1243,22 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           }}
                         >
                           {activeConfigureDevice === 'pixel_8' ? 'Close' : 'Configure IP'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: '10px',
+                            background: isP8Disabled ? 'rgba(16, 185, 129, 0.16)' : 'rgba(239, 68, 68, 0.14)',
+                            border: `1px solid ${isP8Disabled ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.4)'}`,
+                            color: isP8Disabled ? '#00ff9d' : '#fca5a5',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => handleDeviceDisableToggle('pixel_8', isP8Disabled)}
+                          title={isP8Disabled ? 'Re-enable Pixel 8 in Small-Fling' : 'Disable Pixel 8 in Small-Fling so it is never used as a fallback'}
+                        >
+                          {isP8Disabled ? '✔ Enable Pixel 8' : '🚫 Disable in App'}
                         </button>
                       </div>
 
@@ -1231,16 +1346,30 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
 
                     {/* Pixel 10 Selection Card */}
                     <div
-                      className={`device-card ${deviceModel === 'pixel_10' ? 'selected' : ''} ${isP10Available ? 'available' : 'unavailable'}`}
-                      onClick={() => onSelectDevice('pixel_10')}
+                      className={`device-card ${deviceModel === 'pixel_10' ? 'selected' : ''} ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`}
+                      style={isP10Disabled ? { opacity: 0.68, borderStyle: 'dashed', borderColor: 'rgba(248, 81, 73, 0.45)', background: 'rgba(248, 81, 73, 0.04)' } : undefined}
+                      onClick={() => {
+                        if (isP10Disabled) return;
+                        onSelectDevice('pixel_10');
+                      }}
                     >
                       <div className="device-card-header">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <Smartphone size={15} color={isP10Available ? '#22c55e' : '#ef4444'} />
+                          <Smartphone size={15} color={isP10Disabled ? '#f85149' : (isP10Available ? '#22c55e' : '#ef4444')} />
                           <div>
                             <div style={{ fontWeight: 700, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span>PIXEL 10</span>
+                              <span style={isP10Disabled ? { textDecoration: 'line-through', color: '#8b949e' } : undefined}>PIXEL 10</span>
                               <span style={{ fontSize: '10px', opacity: 0.8 }}>(49L)</span>
+                              {isP10Disabled && (
+                                <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(248, 81, 73, 0.2)', color: '#ff7b72', border: '1px solid rgba(248, 81, 73, 0.4)' }}>
+                                  DISABLED IN APP (RESERVED)
+                                </span>
+                              )}
+                              {!isP10Disabled && deviceModel === 'pixel_10' && disableDeviceFallback && (
+                                <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(63, 185, 80, 0.2)', color: '#3fb950', border: '1px solid rgba(63, 185, 80, 0.4)' }}>
+                                  DEDICATED
+                                </span>
+                              )}
                             </div>
                             <div style={{ fontSize: '10px', opacity: 0.85, fontFamily: 'var(--font-mono)' }}>
                               {pixel10Ip || 'No IP configured'}
@@ -1248,21 +1377,22 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span className={`device-status-badge ${isP10Available ? 'available' : 'unavailable'}`}>
+                          <span className={`device-status-badge ${isP10Available && !isP10Disabled ? 'available' : 'unavailable'}`}>
                             <span className="status-dot-mini" />
-                            {isP10Available ? 'ONLINE' : 'NOT AVAILABLE'}
+                            {isP10Disabled ? 'DISABLED (NO FALLBACK)' : (isP10Available ? 'ONLINE' : 'NOT AVAILABLE')}
                           </span>
                           <div
-                            className={`device-select-checkbox ${deviceModel === 'pixel_10' ? 'checked' : ''}`}
-                            title={deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10'}
+                            className={`device-select-checkbox ${deviceModel === 'pixel_10' && !isP10Disabled ? 'checked' : ''}`}
+                            style={isP10Disabled ? { opacity: 0.35, cursor: 'not-allowed' } : undefined}
+                            title={isP10Disabled ? 'Enable Pixel 10 first to select it' : (deviceModel === 'pixel_10' ? 'Selected / Active Device' : 'Click to select Pixel 10')}
                           >
-                            {deviceModel === 'pixel_10' && <Check size={12} strokeWidth={3} />}
+                            {deviceModel === 'pixel_10' && !isP10Disabled && <Check size={12} strokeWidth={3} />}
                           </div>
                         </div>
                       </div>
 
                       <div className="device-card-actions" onClick={e => e.stopPropagation()}>
-                        {!isP10Available && pixel10Ip && (
+                        {!isP10Disabled && !isP10Available && pixel10Ip && (
                           <button
                             type="button"
                             className="btn btn-sm"
@@ -1286,6 +1416,25 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                         >
                           {activeConfigureDevice === 'pixel_10' ? 'Close' : 'Configure IP'}
                         </button>
+                        {onToggleDisableDeviceModel && (
+                          <button
+                            type="button"
+                            className="btn btn-sm"
+                            style={{
+                              padding: '2px 8px',
+                              fontSize: '10px',
+                              marginLeft: 'auto',
+                              background: isP10Disabled ? 'rgba(63, 185, 80, 0.16)' : 'rgba(248, 81, 73, 0.15)',
+                              border: `1px solid ${isP10Disabled ? 'rgba(63, 185, 80, 0.45)' : 'rgba(248, 81, 73, 0.4)'}`,
+                              color: isP10Disabled ? '#3fb950' : '#ff7b72',
+                              fontWeight: 700,
+                            }}
+                            onClick={() => onToggleDisableDeviceModel('pixel_10', !isP10Disabled)}
+                            title={isP10Disabled ? 'Re-enable Pixel 10 for Small-Fling' : 'Disable Pixel 10 in Small-Fling so another app on this laptop can use it exclusively without auto-switching'}
+                          >
+                            {isP10Disabled ? '✔ Enable Pixel 10' : '🚫 Disable in App (Reserve)'}
+                          </button>
+                        )}
                       </div>
 
                       {activeConfigureDevice === 'pixel_10' && (
@@ -1383,23 +1532,39 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         {deviceInfo.devices.map(dev => {
                           const active = deviceInfo.active_serial === dev.serial;
+                          const isDevP8 = dev.displayName === 'Pixel 8' || dev.model.toLowerCase().includes('pixel_8') || (pixel8Ip && dev.serial === pixel8Ip);
+                          const isDevP10 = dev.displayName === 'Pixel 10' || dev.model.toLowerCase().includes('pixel_10') || (pixel10Ip && dev.serial === pixel10Ip);
+                          const isDevDisabled = Boolean((isDevP8 && isP8Disabled) || (isDevP10 && isP10Disabled));
                           return (
                             <div
                               key={dev.serial}
-                              className={`kiosk-display-item ${active ? 'selected' : ''}`}
-                              onClick={() => onSelectSerial?.(dev.serial)}
-                              style={{ padding: '8px 12px' }}
+                              className={`kiosk-display-item ${active && !isDevDisabled ? 'selected' : ''}`}
+                              onClick={() => {
+                                if (isDevDisabled) return;
+                                onSelectSerial?.(dev.serial);
+                              }}
+                              style={{
+                                padding: '8px 12px',
+                                opacity: isDevDisabled ? 0.6 : 1,
+                                cursor: isDevDisabled ? 'not-allowed' : 'pointer',
+                                borderColor: isDevDisabled ? 'rgba(248, 81, 73, 0.35)' : undefined
+                              }}
                             >
-                              <Smartphone size={16} color={active ? '#00ff9d' : '#8b949e'} />
+                              <Smartphone size={16} color={isDevDisabled ? '#f85149' : (active ? '#00ff9d' : '#8b949e')} />
                               <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '12px', fontWeight: 600, color: active ? '#00ff9d' : 'var(--text-main)' }}>
-                                  {dev.displayName || dev.model.replace(/_/g, ' ')}
+                                <div style={{ fontSize: '12px', fontWeight: 600, color: isDevDisabled ? '#ff7b72' : (active ? '#00ff9d' : 'var(--text-main)'), display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span>{dev.displayName || dev.model.replace(/_/g, ' ')}</span>
+                                  {isDevDisabled && (
+                                    <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '4px', background: 'rgba(248, 81, 73, 0.18)', color: '#ff7b72', border: '1px solid rgba(248, 81, 73, 0.35)' }}>
+                                      DISABLED / RESERVED FOR OTHER APP
+                                    </span>
+                                  )}
                                 </div>
                                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                                   Serial: {dev.serial} • {dev.status}
                                 </div>
                               </div>
-                              {active && <Check size={14} color="#00ff9d" />}
+                              {active && !isDevDisabled && <Check size={14} color="#00ff9d" />}
                             </div>
                           );
                         })}
@@ -1572,7 +1737,8 @@ export const DeviceStudioDrawer: React.FC<DeviceStudioDrawerProps> = ({
                     </div>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* TAB 3: PROCESS TELEMETRY & ATTRIBUTES */}
               {activeTab === 'processes' && (

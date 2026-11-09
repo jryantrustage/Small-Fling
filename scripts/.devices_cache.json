@@ -1,0 +1,10 @@
+{
+  "last_address": "192.168.86.85:35681",
+  "pixel_8_address": "192.168.86.85:35681",
+  "pixel_10_address": "192.168.86.81:40061",
+  "selected_device_model": "pixel_8",
+  "disable_device_fallback": true,
+  "disabled_devices": [
+    "pixel_10"
+  ]
+}

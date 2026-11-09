@@ -7,7 +7,7 @@ import time
 
 import db
 from models import (
-    DeviceSelectRequest, AdbCommandRequest, AdbConnectRequest, AdbPairRequest,
+    DeviceSelectRequest, DeviceFallbackPolicyRequest, AdbCommandRequest, AdbConnectRequest, AdbPairRequest,
     DeviceProfileRequest, ApplyCharacteristicsRequest
 )
 from services import adb_service as adb
@@ -69,50 +69,75 @@ async def apply_device_characteristics_endpoint(req: ApplyCharacteristicsRequest
 
 @router.post("/api/device/select")
 async def select_device_api(req: DeviceSelectRequest):
+    if req.disable_device_fallback is not None:
+        adb.disable_device_fallback = bool(req.disable_device_fallback)
+    if req.disabled_devices is not None:
+        adb.disabled_devices = [str(x).lower() for x in req.disabled_devices if str(x).lower() in ("pixel_8", "pixel_10")]
+
     if req.device_model:
         dev = req.device_model.lower().strip()
         if "8" in dev:
             adb.current_device_model = "pixel_8"
+            if "pixel_8" in adb.disabled_devices:
+                adb.disabled_devices.remove("pixel_8")
         elif "10" in dev:
             adb.current_device_model = "pixel_10"
+            if "pixel_10" in adb.disabled_devices:
+                adb.disabled_devices.remove("pixel_10")
 
     # Reset active serial cache so new selection immediately activates
     adb._active_serial_cache = None
     adb._active_serial_cache_ts = 0.0
+    adb.save_device_dedication_settings()
 
     devs_res = await adb.list_adb_devices()
     connected_devs = devs_res.get("devices", [])
 
+    keys = ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"] if adb.current_device_model == "pixel_10" else ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"]
+    other_keys = ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"] if adb.current_device_model == "pixel_10" else ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"]
+
     matched = None
-    # 1. If explicit serial provided and matches an active device
+    # 1. If explicit serial provided and matches an active device (excluding opposite model when fallback disabled)
     if req.serial and req.serial.strip():
         ser_in = req.serial.strip()
-        matched = next((d for d in connected_devs if d["serial"] == ser_in or ser_in in d["serial"]), None)
-        # If port changed, match by IP prefix
+        for d in connected_devs:
+            m_str = (d["serial"] + " " + d.get("model", "") + " " + d.get("raw", "")).lower()
+            if adb.disable_device_fallback and any(ok in m_str for ok in other_keys):
+                continue
+            if d["serial"] == ser_in or ser_in in d["serial"]:
+                matched = d
+                break
         if not matched and ":" in ser_in:
             ip_pref = ser_in.split(":")[0]
-            matched = next((d for d in connected_devs if d["serial"].startswith(ip_pref)), None)
+            for d in connected_devs:
+                m_str = (d["serial"] + " " + d.get("model", "") + " " + d.get("raw", "")).lower()
+                if adb.disable_device_fallback and any(ok in m_str for ok in other_keys):
+                    continue
+                if d["serial"].startswith(ip_pref):
+                    matched = d
+                    break
 
     # 2. If no match yet, find connected device matching selected model
     if not matched:
-        keys = ["pixel_10", "mustang", "frankel"] if adb.current_device_model == "pixel_10" else ["pixel_8", "husky", "shiba"]
-        matched = next((d for d in connected_devs if any(k in (d.get("model", "") + " " + d.get("displayName", "") + " " + d.get("raw", "")).lower() for k in keys)), None)
+        matched = next((d for d in connected_devs if any(k in (d.get("serial", "") + " " + d.get("model", "") + " " + d.get("displayName", "") + " " + d.get("raw", "")).lower() for k in keys)), None)
 
     # 3. If still not matched, attempt wireless auto-connect for this model
     if not matched:
+        adb.target_adb_serial = req.serial.strip() if (req.serial and req.serial.strip()) else None
         ser_for_model = await adb.connect_device_for_model(adb.current_device_model)
         if ser_for_model:
             adb.target_adb_serial = ser_for_model
 
     if matched:
         adb.target_adb_serial = matched["serial"]
-        m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
-        if any(k in m for k in ["pixel_8", "husky", "shiba"]):
-            adb.current_device_model = "pixel_8"
-        elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
-            adb.current_device_model = "pixel_10"
+        if not adb.disable_device_fallback:
+            m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
+            if any(k in m for k in ["pixel_8", "husky", "shiba"]):
+                adb.current_device_model = "pixel_8"
+            elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
+                adb.current_device_model = "pixel_10"
 
-    active_ser = await adb.get_active_adb_serial(adb.target_adb_serial, force_refresh=True)
+    active_ser = await adb.get_active_adb_serial(adb.target_adb_serial if matched else None, force_refresh=True)
     if active_ser:
         adb.target_adb_serial = active_ser
         adb._active_serial_cache = active_ser
@@ -129,10 +154,15 @@ async def select_device_api(req: DeviceSelectRequest):
                 try: cdata = json.loads(cache_file.read_text())
                 except Exception: pass
             cdata["last_address"] = active_ser
+            cdata["selected_device_model"] = adb.current_device_model
+            cdata["disable_device_fallback"] = bool(adb.disable_device_fallback)
+            cdata["disabled_devices"] = list(adb.disabled_devices)
             if adb.current_device_model == "pixel_10": cdata["pixel_10_address"] = active_ser
             elif adb.current_device_model == "pixel_8": cdata["pixel_8_address"] = active_ser
             cache_file.write_text(json.dumps(cdata, indent=2))
         except Exception: pass
+    else:
+        adb.save_device_dedication_settings()
 
     profile = adb.DEVICE_PROFILES[adb.current_device_model]
     lpp = profile["lines_per_page"]
@@ -143,15 +173,51 @@ async def select_device_api(req: DeviceSelectRequest):
         orchestration_state["next_target_top"] = lpp + 1
         
     info = await get_device_info()
-    await adb.ensure_adb_keyboard_closed(adb.target_adb_serial)
-    await adb.calibrate_display_dpi(adb.target_adb_serial)
-    asyncio.create_task(adb.check_and_update_alignment(adb.target_adb_serial))
+    if active_ser:
+        await adb.ensure_adb_keyboard_closed(adb.target_adb_serial)
+        await adb.calibrate_display_dpi(adb.target_adb_serial)
+        asyncio.create_task(adb.check_and_update_alignment(adb.target_adb_serial))
 
-    latest_telemetry["status_message"] = f"Switched to {info.get('active_model')} ({lpp} Lines/Page) ✔"
+    latest_telemetry["status_message"] = f"Dedicated to {info.get('active_model')} ({'ONLINE ✔' if active_ser else 'Awaiting Connection'})"
     await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
     res_dict = dict(info)
     res_dict["device_info"] = info
     return res_dict
+
+
+@router.post("/api/device/fallback-policy")
+async def update_device_fallback_policy_api(req: DeviceFallbackPolicyRequest):
+    if req.disable_device_fallback is not None:
+        adb.disable_device_fallback = bool(req.disable_device_fallback)
+    if req.disabled_devices is not None:
+        adb.disabled_devices = [str(x).lower() for x in req.disabled_devices if str(x).lower() in ("pixel_8", "pixel_10")]
+    if req.toggle_device_disabled:
+        dev_key = req.toggle_device_disabled.lower().strip()
+        if "8" in dev_key:
+            dev_key = "pixel_8"
+        elif "10" in dev_key:
+            dev_key = "pixel_10"
+        if dev_key in ("pixel_8", "pixel_10"):
+            should_disable = req.disabled if req.disabled is not None else (dev_key not in adb.disabled_devices)
+            if should_disable:
+                if dev_key not in adb.disabled_devices:
+                    adb.disabled_devices.append(dev_key)
+                # If the user disabled the currently selected device, switch selection to the other device
+                if adb.current_device_model == dev_key:
+                    other_dev = "pixel_8" if dev_key == "pixel_10" else "pixel_10"
+                    if other_dev not in adb.disabled_devices:
+                        adb.current_device_model = other_dev
+            else:
+                if dev_key in adb.disabled_devices:
+                    adb.disabled_devices.remove(dev_key)
+
+    adb._active_serial_cache = None
+    adb._active_serial_cache_ts = 0.0
+    adb.save_device_dedication_settings()
+
+    info = await get_device_info()
+    await ws_manager.broadcast({"type": "device_selected", "data": info, "device_info": info, "orchestration": orchestration_state, "telemetry": latest_telemetry})
+    return {"status": "success", "device_info": info, **info}
 
 @router.get("/api/adb/devices")
 async def get_adb_devices():

@@ -278,8 +278,15 @@ function AppContent() {
   const [reprocessingFrameId, setReprocessingFrameId] = useState<string | null>(null);
   const [pipelineMode, setPipelineMode] = useState<'cloud' | 'local'>('local');
   const [deviceModel, setDeviceModel] = useState<'pixel_10' | 'pixel_8'>(() => {
-    try { return (localStorage.getItem('mc_target_device_model') as any) || 'pixel_8'; } catch { return 'pixel_8'; }
+    try {
+      const saved = localStorage.getItem('mc_target_device_model');
+      return (saved === 'pixel_8' || saved === 'pixel_10') ? saved : 'pixel_8';
+    } catch {
+      return 'pixel_8';
+    }
   });
+  const [disableDeviceFallback, setDisableDeviceFallback] = useState<boolean>(true);
+  const [disabledDevices, setDisabledDevices] = useState<string[]>(['pixel_10']);
   const [deviceInfo, setDeviceInfo] = useState<DeviceInfoData | null>(null);
   const [showStudioDrawer, setShowStudioDrawer] = useState(() => {
     try {
@@ -295,8 +302,8 @@ function AppContent() {
     setShowStudioDrawer(false);
     try { localStorage.setItem('mc_show_studio_drawer', 'false'); } catch {}
   };
-  const [pixel8Ip, setPixel8Ip] = useState(() => localStorage.getItem('mc_pixel_8_address') || '192.168.86.87:37547');
-  const [pixel10Ip, setPixel10Ip] = useState(() => localStorage.getItem('mc_pixel_10_address') || '192.168.86.81:44587');
+  const [pixel8Ip, setPixel8Ip] = useState(() => localStorage.getItem('mc_pixel_8_address') || '192.168.86.85:35681');
+  const [pixel10Ip, setPixel10Ip] = useState(() => localStorage.getItem('mc_pixel_10_address') || '192.168.86.81:40061');
   const [isConnectingIp, setIsConnectingIp] = useState(false);
   const [connectStatusMsg, setConnectStatusMsg] = useState('');
   const [pairCodeInput, setPairCodeInput] = useState('');
@@ -926,13 +933,81 @@ function AppContent() {
         const d = await res.json();
         const info = d.device_info || d;
         setDeviceInfo(info);
+        if (typeof info?.disable_device_fallback === 'boolean') setDisableDeviceFallback(info.disable_device_fallback);
+        if (Array.isArray(info?.disabled_devices)) setDisabledDevices(info.disabled_devices);
         if (info?.active_model) {
           const m = info.active_model.toLowerCase();
-          setDeviceModel(m.includes('pixel_8') ? 'pixel_8' : 'pixel_10');
+          const targetMod = m.includes('pixel_8') ? 'pixel_8' : 'pixel_10';
+          const disList: string[] = Array.isArray(info.disabled_devices) ? info.disabled_devices : disabledDevices;
+          if (!disList.includes(targetMod)) {
+            setDeviceModel(targetMod);
+            try { localStorage.setItem('mc_target_device_model', targetMod); } catch {}
+          }
         }
         setStreamKey(Date.now());
       }
     } catch {}
+  };
+
+  const handleToggleDisableFallback = async (disable: boolean) => {
+    setDisableDeviceFallback(disable);
+    try {
+      const res = await api('/api/device/fallback-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ disable_device_fallback: disable })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.device_info) setDeviceInfo(data.device_info);
+        addTelemetryEvent(
+          'SYSTEM',
+          disable
+            ? `Dedicated Device Mode ENABLED: Locked to ${deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'} (Auto-Fallback Disabled)`
+            : 'Auto-Fallback Mode ENABLED between connected devices'
+        );
+      }
+    } catch (err: any) {
+      addTelemetryEvent('ERROR', `Failed to update fallback policy: ${err.message}`);
+    }
+  };
+
+  const handleToggleDisableDeviceModel = async (model: 'pixel_8' | 'pixel_10', disabled?: boolean) => {
+    const nextDisabled = disabled !== undefined ? disabled : !disabledDevices.includes(model);
+    setDisabledDevices(prev => {
+      const s = new Set(prev);
+      if (nextDisabled) s.add(model);
+      else s.delete(model);
+      return Array.from(s);
+    });
+    try {
+      const res = await api('/api/device/fallback-policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ toggle_device_disabled: model, disabled: nextDisabled })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.disabled_devices)) setDisabledDevices(data.disabled_devices);
+        if (data.device_info) {
+          setDeviceInfo(data.device_info);
+          if (data.device_info.active_model) {
+            const nextMod = data.device_info.active_model.toLowerCase().includes('pixel_8') ? 'pixel_8' : 'pixel_10';
+            setDeviceModel(nextMod);
+            try { localStorage.setItem('mc_target_device_model', nextMod); } catch {}
+          }
+        }
+        const devLabel = model === 'pixel_8' ? 'Pixel 8' : 'Pixel 10';
+        addTelemetryEvent(
+          'SYSTEM',
+          nextDisabled
+            ? `${devLabel} DISABLED in Small-Fling (Reserved for other app — will never auto-connect or fallback)`
+            : `${devLabel} ENABLED in Small-Fling`
+        );
+      }
+    } catch (err: any) {
+      addTelemetryEvent('ERROR', `Failed to toggle device availability: ${err.message}`);
+    }
   };
 
   const handleCloseKeyboard = async () => {
@@ -1023,6 +1098,10 @@ function AppContent() {
   };
 
   const handleSelectDevice = async (dev: 'pixel_10' | 'pixel_8') => {
+    if (disabledDevices.includes(dev)) {
+      addTelemetryEvent('ERROR', `${dev === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'} is currently disabled in Small-Fling. Enable it first in the Device drawer if you wish to select it.`);
+      return;
+    }
     setDeviceModel(dev);
     try {
       localStorage.setItem('mc_target_device_model', dev);
@@ -1045,10 +1124,19 @@ function AppContent() {
       await api('/api/device/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_model: dev, serial: targetSerial || undefined })
+        body: JSON.stringify({
+          device_model: dev,
+          serial: targetSerial || undefined,
+          disable_device_fallback: disableDeviceFallback,
+          disabled_devices: disabledDevices
+        })
       });
       const info = await apiJson<DeviceInfoData>('/api/device/info');
-      if (info) setDeviceInfo(info);
+      if (info) {
+        setDeviceInfo(info);
+        if (typeof info.disable_device_fallback === 'boolean') setDisableDeviceFallback(info.disable_device_fallback);
+        if (Array.isArray(info.disabled_devices)) setDisabledDevices(info.disabled_devices);
+      }
       setStreamKey(Date.now());
     } catch {}
   };
@@ -1223,7 +1311,26 @@ function AppContent() {
         api('/api/device/alignment'),
         api('/api/device/desktop-mode')
       ]).then(async ([devRes, alignRes, deskRes]) => {
-        if (devRes.ok) { try { setDeviceInfo(await devRes.json()); } catch {} }
+        if (devRes.ok) {
+          try {
+            const devData = await devRes.json();
+            setDeviceInfo(devData);
+            if (typeof devData?.disable_device_fallback === 'boolean') {
+              setDisableDeviceFallback(devData.disable_device_fallback);
+            }
+            if (Array.isArray(devData?.disabled_devices)) {
+              setDisabledDevices(devData.disabled_devices);
+            }
+            if (devData?.active_model) {
+              const m = String(devData.active_model).toLowerCase();
+              const targetMod = m.includes('pixel_8') ? 'pixel_8' : 'pixel_10';
+              const disList: string[] = Array.isArray(devData?.disabled_devices) ? devData.disabled_devices : [];
+              if (!disList.includes(targetMod)) {
+                setDeviceModel(targetMod);
+              }
+            }
+          } catch {}
+        }
         if (alignRes.ok) { try { setAlignmentData(await alignRes.json()); } catch {} }
         if (deskRes.ok) {
           try {
@@ -2345,11 +2452,22 @@ function AppContent() {
             }
           } else if (msg.type === 'device_selected') {
             const newInfo = msg.device_info || msg.data;
-            if (newInfo?.active_serial) {
+            if (newInfo) {
               setDeviceInfo(newInfo);
+              if (typeof newInfo.disable_device_fallback === 'boolean') {
+                setDisableDeviceFallback(newInfo.disable_device_fallback);
+              }
+              if (Array.isArray(newInfo.disabled_devices)) {
+                setDisabledDevices(newInfo.disabled_devices);
+              }
               if (newInfo.active_model) {
                 const m = newInfo.active_model.toLowerCase();
-                setDeviceModel(m.includes('pixel_8') ? 'pixel_8' : 'pixel_10');
+                const targetMod = m.includes('pixel_8') ? 'pixel_8' : 'pixel_10';
+                const disList: string[] = Array.isArray(newInfo.disabled_devices) ? newInfo.disabled_devices : [];
+                if (!disList.includes(targetMod)) {
+                  setDeviceModel(targetMod);
+                  try { localStorage.setItem('mc_target_device_model', targetMod); } catch {}
+                }
               }
             } else {
               apiJson<DeviceInfoData>('/api/device/info').then(info => { if (info) setDeviceInfo(info); });
@@ -3033,13 +3151,13 @@ function AppContent() {
             }}
           />
 
-          {/* Device Target Pill (Pixel 8 / Pixel 10 with lock icon) */}
-          <div ref={deviceDropdownRef} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          {/* Device Target Pill (Pixel 8 / Pixel 10 with lock & fallback status) */}
+          <div ref={deviceDropdownRef} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
             <button
               type="button"
               className="device-target-pill"
               onClick={() => handleToggleStudio('device')}
-              title="Toggle Device & ADB Hardware Drawer (Click lock icon in Device Settings to lock/unlock hardware profile)"
+              title={`Toggle Device & ADB Hardware Drawer • ${disableDeviceFallback ? 'Dedicated Mode (Auto-Fallback Disabled)' : 'Auto-Fallback Enabled'}`}
             >
               <span
                 style={{
@@ -3053,7 +3171,23 @@ function AppContent() {
               <Smartphone size={12} color={isCurrentDeviceConnected ? '#00ff9d' : '#ef4444'} />
               <span>{deviceModel === 'pixel_8' ? 'Pixel 8' : 'Pixel 10'}</span>
               <span style={{ color: '#8b949e', fontSize: '10px' }}>({devLines}L)</span>
-              <Lock size={11} color={lockDeviceInput ? '#e3b341' : '#8b949e'} />
+              {disableDeviceFallback && (
+                <span
+                  style={{
+                    fontSize: '9px',
+                    padding: '1px 4px',
+                    borderRadius: '3px',
+                    background: 'rgba(63, 185, 80, 0.2)',
+                    color: '#3fb950',
+                    border: '1px solid rgba(63, 185, 80, 0.45)',
+                    fontWeight: 700
+                  }}
+                  title="Dedicated Device Mode: Auto-fallback to other devices is disabled"
+                >
+                  DEDICATED
+                </span>
+              )}
+              <Lock size={11} color={lockDeviceInput || disableDeviceFallback ? '#e3b341' : '#8b949e'} />
             </button>
           </div>
         </div>
@@ -5913,6 +6047,10 @@ function AppContent() {
                   onToggleProhibitKeyboard={handleToggleProhibitKeyboard}
                   desktopVerification={desktopVerification}
                   onVerifyDesktopMode={handleVerifyDesktopMode}
+                  disableDeviceFallback={disableDeviceFallback}
+                  disabledDevices={disabledDevices}
+                  onToggleDisableFallback={handleToggleDisableFallback}
+                  onToggleDisableDeviceModel={handleToggleDisableDeviceModel}
                 />
               </section>
             </>

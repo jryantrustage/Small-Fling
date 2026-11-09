@@ -335,6 +335,8 @@ export interface DeviceInfoData {
   active_serial: string | null;
   active_model: string;
   device_model: 'pixel_8' | 'pixel_10';
+  disable_device_fallback?: boolean;
+  disabled_devices?: string[];
   profile: DeviceProfile;
   available_profiles: DeviceProfile[];
   target_serial: string | null;

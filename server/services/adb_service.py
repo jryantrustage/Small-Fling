@@ -42,18 +42,50 @@ DEVICE_PROFILES = {
     }
 }
 
-def init_device_model_from_cache() -> str:
+def _load_device_dedication_from_cache() -> Tuple[str, bool, List[str]]:
+    model = "pixel_8"
+    disable_fallback = True
+    disabled_list: List[str] = ["pixel_10"]
     try:
         cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
         if cf.exists():
             c = json.loads(cf.read_text())
-            last, p10, p8 = c.get("last_address", ""), c.get("pixel_10_address", ""), c.get("pixel_8_address", "")
-            if last and last == p8: return "pixel_8"
-            if last and last == p10: return "pixel_10"
-    except Exception: pass
-    return "pixel_8"
+            if c.get("selected_device_model") in ("pixel_8", "pixel_10"):
+                model = c["selected_device_model"]
+            else:
+                last, p10, p8 = c.get("last_address", ""), c.get("pixel_10_address", ""), c.get("pixel_8_address", "")
+                if last and last == p8:
+                    model = "pixel_8"
+                elif last and last == p10 and not c.get("disable_device_fallback", True):
+                    model = "pixel_10"
+            if isinstance(c.get("disable_device_fallback"), bool):
+                disable_fallback = c["disable_device_fallback"]
+            if isinstance(c.get("disabled_devices"), list):
+                disabled_list = [str(x).lower() for x in c["disabled_devices"] if str(x).lower() in ("pixel_8", "pixel_10")]
+    except Exception:
+        pass
+    return model, disable_fallback, disabled_list
 
-current_device_model = init_device_model_from_cache()
+
+def save_device_dedication_settings() -> None:
+    try:
+        cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        cdata: Dict[str, Any] = {}
+        if cf.exists():
+            try:
+                cdata = json.loads(cf.read_text())
+            except Exception:
+                cdata = {}
+        cdata["selected_device_model"] = current_device_model
+        cdata["disable_device_fallback"] = bool(disable_device_fallback)
+        cdata["disabled_devices"] = list(disabled_devices)
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text(json.dumps(cdata, indent=2))
+    except Exception as e:
+        logger.warning(f"Failed to persist device dedication settings: {e}")
+
+
+current_device_model, disable_device_fallback, disabled_devices = _load_device_dedication_from_cache()
 target_adb_serial: Optional[str] = None
 
 def _exec_adb_sync(args: List[str], timeout: float = 4.0, text: bool = True) -> subprocess.CompletedProcess:
@@ -238,50 +270,64 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
                         return dev["serial"]
             return None
 
-        # Prioritize explicit target serial set by user in UI
+        pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
+        p8_keys = ["pixel_8", "husky", "shiba", "39101", "192.168.86.85"]
+        p10_keys = ["pixel_10", "mustang", "frankel", "63100", "192.168.86.81"]
+        keys = p8_keys if pref == "pixel_8" else p10_keys
+        other_keys = p10_keys if pref == "pixel_8" else p8_keys
+
+        # Filter out any device models explicitly disabled in Small-Fling (e.g. Pixel 10 reserved for another app)
+        filtered_active = []
+        for dev in active:
+            m_str = (dev["serial"] + " " + dev.get("model", "") + " " + dev.get("raw", "")).lower()
+            if "pixel_10" in disabled_devices and any(k in m_str for k in p10_keys):
+                continue
+            if "pixel_8" in disabled_devices and any(k in m_str for k in p8_keys):
+                continue
+            filtered_active.append(dev)
+        active = filtered_active
+
+        # Prioritize explicit target serial set by user in UI (only if not belonging to the opposite model when fallback disabled)
         if target_adb_serial:
             for dev in active:
+                m_str = (dev["serial"] + " " + dev.get("model", "") + " " + dev.get("raw", "")).lower()
+                if disable_device_fallback and any(ok in m_str for ok in other_keys):
+                    continue
                 if dev["serial"] == target_adb_serial or target_adb_serial in dev["serial"]:
                     found_serial = dev["serial"]
                     break
             if not found_serial and ":" in target_adb_serial:
                 ip_pfx = target_adb_serial.split(":")[0]
                 for dev in active:
+                    m_str = (dev["serial"] + " " + dev.get("model", "") + " " + dev.get("raw", "")).lower()
+                    if disable_device_fallback and any(ok in m_str for ok in other_keys):
+                        continue
                     if dev["serial"].startswith(ip_pfx):
                         found_serial = dev["serial"]
                         break
 
-        if not found_serial and len(active) > 1:
-            for dev in active:
-                s = dev["serial"]
-                if _display_map_cache.get(s, {}).get("desktop"):
-                    found_serial = s
-                    break
-
+        # Match preferred device model
         if not found_serial:
-            pref = "pixel_8" if "8" in current_device_model.lower() else "pixel_10"
-            p8_keys, p10_keys = ["pixel_8", "husky", "shiba"], ["pixel_10", "mustang", "frankel"]
-            keys = p8_keys if pref == "pixel_8" else p10_keys
-
             for dev in active:
-                m = (dev["model"] + " " + dev["raw"]).lower()
+                m = (dev["serial"] + " " + dev["model"] + " " + dev["raw"]).lower()
                 if any(k in m for k in keys):
                     found_serial = dev["serial"]
                     break
 
-        if not found_serial:
+        # Only consider fallback to other active devices if disable_device_fallback is False
+        if not found_serial and not disable_device_fallback and active:
             found_serial = active[0]["serial"]
 
-        if found_serial:
-            m = ""
-            for dev in active:
-                if dev["serial"] == found_serial:
-                    m = (dev.get("model", "") + " " + dev.get("raw", "")).lower()
-                    break
-            if any(k in m for k in ["pixel_8", "husky", "shiba"]):
-                current_device_model = "pixel_8"
-            elif any(k in m for k in ["pixel_10", "mustang", "frankel"]):
-                current_device_model = "pixel_10"
+        # If preferred model (e.g. Pixel 8) is not yet in active list, try background auto-connect instead of hijacking Pixel 10
+        if not found_serial:
+            if pref not in disabled_devices and (now - _last_reconnect_ts > 8.0):
+                _last_reconnect_ts = now
+                reconn = await connect_device_for_model(pref)
+                if reconn:
+                    _active_serial_cache = reconn
+                    _active_serial_cache_ts = time.time()
+                    return reconn
+            return None
 
         _active_serial_cache = found_serial
         _active_serial_cache_ts = now
@@ -289,9 +335,30 @@ async def get_active_adb_serial(requested_serial: Optional[str] = None, force_re
     except Exception:
         return None
 
+async def _scan_open_adb_ports_for_ip(ip: str, start_port: int = 30000, end_port: int = 49999) -> List[int]:
+    open_ports: List[int] = []
+    sem = asyncio.Semaphore(120)
+
+    async def _probe(p: int) -> None:
+        async with sem:
+            try:
+                _, w = await asyncio.wait_for(asyncio.open_connection(ip, p), timeout=0.22)
+                w.close()
+                try:
+                    await w.wait_closed()
+                except Exception:
+                    pass
+                open_ports.append(p)
+            except Exception:
+                pass
+
+    candidate_ports = [5555] + list(range(start_port, end_port + 1))
+    await asyncio.gather(*(_probe(p) for p in candidate_ports))
+    return sorted(open_ports)
+
 async def connect_device_for_model(model_pref: str) -> Optional[str]:
     try:
-        keys = ["pixel_10", "mustang", "frankel", "pixel 10"] if model_pref == "pixel_10" else ["pixel_8", "husky", "shiba", "pixel 8"]
+        keys = ["pixel_10", "mustang", "frankel", "pixel 10", "63100"] if model_pref == "pixel_10" else ["pixel_8", "husky", "shiba", "pixel 8", "39101"]
         res = await asyncio.to_thread(_exec_adb_sync, ["devices", "-l"], 3.0)
         for line in res.stdout.splitlines()[1:]:
             parts = line.strip().split()
@@ -299,24 +366,48 @@ async def connect_device_for_model(model_pref: str) -> Optional[str]:
                 return parts[0]
 
         cf = Path(__file__).resolve().parent.parent.parent / "scripts" / ".devices_cache.json"
+        cached_ip = "192.168.86.85" if model_pref == "pixel_8" else "192.168.86.81"
         if cf.exists():
             try:
                 cdata = json.loads(cf.read_text())
                 cached = cdata.get("pixel_10_address") if model_pref == "pixel_10" else cdata.get("pixel_8_address")
                 if cached:
-                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", cached], 5.0)
-                    if "connected" in cres.stdout.lower(): return cached
-            except Exception: pass
+                    if ":" in cached:
+                        cached_ip = cached.split(":")[0]
+                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", cached], 4.0)
+                    if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
+                        return cached
+            except Exception:
+                pass
 
         mdns_res = await asyncio.to_thread(_exec_adb_sync, ["mdns", "services"], 4.0)
         for line in mdns_res.stdout.splitlines():
             ls = line.strip()
             if ("_adb-tls-connect._tcp" in ls or "_adb._tcp" in ls) and ":" in ls.split()[-1]:
                 addr = ls.split()[-1]
-                cres = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 4.0)
-                if "connected" in cres.stdout.lower():
-                    chk = await asyncio.to_thread(_exec_adb_sync, ["-s", addr, "shell", "getprop ro.product.model"], 3.0)
-                    if any(k in (chk.stdout + " " + ls).lower() for k in keys): return addr
+                if any(k in ls.lower() for k in keys) or addr.startswith(cached_ip):
+                    cres = await asyncio.to_thread(_exec_adb_sync, ["connect", addr], 4.0)
+                    if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
+                        return addr
+
+        # Scan cached_ip for dynamic Wireless Debugging TLS port (30000-49999)
+        open_ports = await _scan_open_adb_ports_for_ip(cached_ip)
+        for p in open_ports:
+            candidate = f"{cached_ip}:{p}"
+            if cf.exists():
+                try:
+                    cdata = json.loads(cf.read_text())
+                    if model_pref == "pixel_8":
+                        cdata["pixel_8_address"] = candidate
+                        cdata["last_address"] = candidate
+                    else:
+                        cdata["pixel_10_address"] = candidate
+                    cf.write_text(json.dumps(cdata, indent=2))
+                except Exception:
+                    pass
+            cres = await asyncio.to_thread(_exec_adb_sync, ["connect", candidate], 4.0)
+            if "connected" in cres.stdout.lower() and "failed" not in cres.stdout.lower():
+                return candidate
     except Exception as e:
         print(f"Error in connect_device_for_model({model_pref}): {e}")
     return None
@@ -3089,11 +3180,13 @@ async def get_device_info() -> Dict[str, Any]:
     ser = await get_active_adb_serial()
     devs = (await list_adb_devices()).get("devices", [])
     matched = next((d for d in devs if d["serial"] == ser), None)
-    if matched:
+    if matched and not disable_device_fallback:
         m = (matched.get("model", "") + " " + matched.get("raw", "")).lower()
-        if any(k in m for k in ["pixel_10", "mustang", "frankel"]): current_device_model = "pixel_10"
-        elif any(k in m for k in ["pixel_8", "husky", "shiba"]): current_device_model = "pixel_8"
-    active_model = matched.get("model", current_device_model) if matched else current_device_model
+        if any(k in m for k in ["pixel_10", "mustang", "frankel"]) and "pixel_10" not in disabled_devices:
+            current_device_model = "pixel_10"
+        elif any(k in m for k in ["pixel_8", "husky", "shiba"]) and "pixel_8" not in disabled_devices:
+            current_device_model = "pixel_8"
+    active_model = ("Pixel 8" if current_device_model == "pixel_8" else "Pixel 10") if disable_device_fallback else (matched.get("model", current_device_model) if matched else current_device_model)
 
     available_profs = get_available_device_profiles()
     active_prof = next((p for p in available_profs if p.get("model_name") == current_device_model or p.get("id") == current_device_model or current_device_model in (p.get("id", "") + " " + p.get("model_name", ""))), None)
@@ -3125,7 +3218,9 @@ async def get_device_info() -> Dict[str, Any]:
     return {
         "status": "success", "connected": bool(ser), "active_serial": ser,
         "active_model": active_model.replace("_", " "), "device_model": current_device_model,
-        "profile": active_prof or DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_10"]),
+        "disable_device_fallback": bool(disable_device_fallback),
+        "disabled_devices": list(disabled_devices),
+        "profile": active_prof or DEVICE_PROFILES.get(current_device_model, DEVICE_PROFILES["pixel_8"]),
         "available_profiles": available_profs, "target_serial": target_adb_serial,
         "devices": devs, "displays": {"desktop": bool(disp_map.get("desktop")), "phone": bool(disp_map.get("phone"))},
         "pixel_8_address": p8_addr,
