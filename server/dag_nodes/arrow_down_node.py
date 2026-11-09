@@ -321,7 +321,7 @@ class ArrowDownPagerNode(BaseDagNode):
             not matched
             and actual_top
             and actual_top > 0
-            and max(1, target_top - 6) <= actual_top <= target_top
+            and max(1, target_top - 6) <= actual_top <= target_top + 2
             and actual_bot > prev_bottom
             and (actual_top > cur_top or target_top <= 2)
         ):
@@ -352,7 +352,7 @@ class ArrowDownPagerNode(BaseDagNode):
             settled_top = int(actual_top or char_track_line or prev_bottom)
             effective_bot = int(actual_bot or settled_top)
         else:
-            settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top + 4) else target_top
+            settled_top = int(actual_top) if (actual_top and 0 < actual_top <= target_top + 6) else target_top
 
         if eof_reached and effective_bot > 0:
             reconciled = state.reconcile_eof_total_lines_and_complete_project(

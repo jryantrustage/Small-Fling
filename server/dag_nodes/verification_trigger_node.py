@@ -49,8 +49,13 @@ class VerificationTriggerNode(BaseDagNode):
             or ((state.dag_state["nodes"].get("frame_ocr", {}).get("bottom_line") or 0) + 1)
             or 1
         )
+        char_track_active = bool(
+            n6_info.get("character_tracking_mode")
+            or state.orchestration_state.get("character_tracking_mode")
+        )
         n6_needs_check = (
             not eof_reached
+            and not (char_track_active and n6_info.get("reached") is True)
             and (
                 n6_info.get("status") in ("error", "prevented")
                 or n6_info.get("reached") is not True
@@ -65,9 +70,14 @@ class VerificationTriggerNode(BaseDagNode):
                 target_top=expected_target_top,
                 serial=serial,
                 display_id=disp_id,
-                use_page_keys=True,
+                use_page_keys=not char_track_active,
                 max_attempts=6,
-                caller_node="verification_trigger"
+                caller_node="verification_trigger",
+                character_tracking_mode=char_track_active,
+                character_tracking_line=int(state.orchestration_state.get("character_tracking_line") or expected_target_top),
+                bottom_text_anchor=str(state.orchestration_state.get("bottom_text_anchor") or ""),
+                target_top_text_anchor=str(state.orchestration_state.get("target_top_text_anchor") or ""),
+                bottom_anchor_window=state.orchestration_state.get("bottom_anchor_window") or [],
             )
             if nav_heal.get("reached"):
                 n6_info.update({

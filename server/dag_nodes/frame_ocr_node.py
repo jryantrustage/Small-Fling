@@ -122,11 +122,11 @@ class FrameOcrNode(BaseDagNode):
                 )
                 if heal_meta.get("character_tracking_mode"):
                     char_track_active = True
-            # Recover ONLY if there is a gap (t_det > expected_top) or if the viewport jumped backward (> 8 lines before expected_top).
-            # If expected_top - 8 <= t_det <= expected_top and b_det >= expected_top, it is a contiguous zero-gap overlap!
+            # Recover ONLY if there is a genuine gap (t_det > expected_top + 2) or if the viewport jumped backward (> 8 lines before expected_top).
+            # When t_det == expected_top + 1..2, the wrapped tail of expected_top sits in the blank-gutter rows above t_det!
             is_contiguous = (
                 t_det > 0
-                and max(1, expected_top - 8) <= t_det <= expected_top
+                and max(1, expected_top - 8) <= t_det <= expected_top + 2
                 and (b_det == 0 or b_det >= expected_top)
             )
             if (
@@ -193,13 +193,18 @@ class FrameOcrNode(BaseDagNode):
             )
             if heal_meta.get("character_tracking_mode"):
                 char_track_active = True
+            is_contiguous_else = (
+                top_ln > 0
+                and max(1, expected_top - 8) <= top_ln <= expected_top + 2
+                and (bot_ln == 0 or bot_ln >= expected_top)
+            )
             if (
                 not is_mock
                 and not char_track_active
                 and cfg.get("recover_gutter_range", True)
                 and expected_top > 0
                 and top_ln > 0
-                and top_ln != expected_top
+                and not is_contiguous_else
             ):
                 nav_res = await navigate_to_target_top_line(
                     target_top=expected_top,

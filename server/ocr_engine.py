@@ -133,17 +133,19 @@ def extract_numbers_from_slice(crop: np.ndarray, max_x_min: Optional[int] = None
     nums = []
     if not res: return nums
     for bbox, text, score in res:
-        clean = text.strip().replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
-        clean = re.sub(r'(\d)\s+(\d)', r'\1\2', clean)
-        if re.match(r'^\d+\.\d+', clean):
+        raw_t = text.strip()
+        if any(ch in raw_t for ch in ('.', ',', ':', ';', '-', '+', '=', '(', ')', '[', ']', '{', '}', '"', "'")):
             continue
-        if m := re.search(r'^(\d+)', clean):
+        clean = raw_t.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
+        clean = re.sub(r'(\d)\s+(\d)', r'\1\2', clean).strip()
+        if m := re.match(r'^(\d{1,6})$', clean):
             try:
                 n = int(m.group(1))
-                if 0 < n < 2000000:
+                if 0 < n < 500000:
                     pts = np.array(bbox)
                     x_min = int(np.min(pts[:, 0])) if pts.ndim == 2 else 0
-                    if max_x_min is not None and x_min > max_x_min:
+                    x_max = int(np.max(pts[:, 0])) if pts.ndim == 2 else 0
+                    if max_x_min is not None and (x_min > max_x_min or x_max > int(max_x_min * 1.14)):
                         continue
                     y_min = int(np.min(pts[:, 1])) if pts.ndim == 2 else 0
                     nums.append((y_min, n))
@@ -307,15 +309,15 @@ def clean_slice_numbers(nums: List[int]) -> List[int]:
         res.pop()
     return res
 
-def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple[int, int]:
+def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0, precomputed_gutter: Optional[List[Tuple[int, int]]] = None) -> Tuple[int, int]:
     """
     Rapidly extracts top line and bottom line from the editor gutter.
     Uses full-column sequence consensus on the primary gutter strip first so right-aligned
-    multi-digit numbers (up to x=99 at 220 DPI) are never truncated at x=90 and bottom-border
-    digits have sufficient padding for detection.
+    multi-digit numbers (up to x=89 at 220 DPI) are never truncated and code column 0 (x >= 96)
+    is strictly excluded.
     """
     if img is None: return 0, 0
-    gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+    gutter = precomputed_gutter if precomputed_gutter is not None else find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if len(gutter) >= 1:
         t_c, b_c = gutter[0][1], gutter[-1][1]
         if 0 < t_c <= b_c and (b_c - t_c) <= 75:
@@ -324,11 +326,20 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0) -> Tuple
     h, w = img.shape[:2]
     dpi_scale = (h / 1080.0) if h < 720 else 1.0
     scale_x = dpi_scale
-    norm_multiplier = max(0.4, (w / 1920.0) * dpi_factor)
 
-    # 1. Primary: standard fullscreen gutter with generous right padding (x <= 145) and x_min filter (x_min <= 96)
-    gutter_w = int(max(125.0, min(145.0, 145.0 * scale_x)))
-    max_gutter_xmin = int(96 * scale_x)
+    # Fast 0.05ms ink check: if the unobstructed gutter column (y=295..880, x=24..88) is blank dark background,
+    # this is a 0-gutter wrapped continuation screen — return (0, 0) immediately without redundant OCR!
+    chk_y1, chk_y2 = max(295, int(295 * dpi_scale)), min(h - 120, int(880 * dpi_scale))
+    chk_x1, chk_x2 = int(24 * scale_x), int(88 * scale_x)
+    if chk_y2 > chk_y1 and chk_x2 > chk_x1:
+        g_roi = img[chk_y1:chk_y2, chk_x1:chk_x2]
+        g_gray = cv2.cvtColor(g_roi, cv2.COLOR_BGR2GRAY) if g_roi.ndim == 3 else g_roi
+        if float(np.mean(g_gray)) < 48.0 and int(np.count_nonzero(g_gray > 65)) < 8:
+            return 0, 0
+
+    # 1. Primary: standard fullscreen gutter with right padding (x <= 138) and strict x_min filter (x_min <= 84)
+    gutter_w = int(max(122.0, min(138.0, 138.0 * scale_x)))
+    max_gutter_xmin = int(84 * scale_x)
     top_y1 = max(275, int(h * 0.255))
     top_y2 = min(h - 150, int(h * 0.65))
     top_crop = img[top_y1:top_y2, :gutter_w]
@@ -622,7 +633,11 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
     offline_bbox_in_gutter: List[int] = []
     offline_conf_in_gutter = 0.0
 
-    def _parse_ocr_candidates(ocr_results, max_x: Optional[int] = None) -> List[Tuple[int, int, int]]:
+    def _parse_ocr_candidates(
+        ocr_results,
+        max_x: Optional[int] = None,
+        max_end_x: Optional[int] = None,
+    ) -> List[Tuple[int, int, int]]:
         nonlocal offline_hit_in_gutter, offline_bbox_in_gutter, offline_conf_in_gutter
         cands = []
         if not ocr_results:
@@ -632,6 +647,7 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             low_clean = clean.lower()
             pts = np.array(bbox)
             x_min = int(np.min(pts[:, 0]))
+            x_max = int(np.max(pts[:, 0]))
             y_min = crop_top_y + int(np.min(pts[:, 1]))
             if y_min >= int(840 * scale_y) and any(k in low_clean for k in ("offline", "offlin", "ffline")):
                 offline_hit_in_gutter = True
@@ -639,13 +655,18 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
                 offline_bbox_in_gutter = [
                     x_min,
                     y_min,
-                    int(np.max(pts[:, 0]) - np.min(pts[:, 0])),
+                    int(x_max - x_min),
                     int(np.max(pts[:, 1]) - np.min(pts[:, 1])),
                 ]
                 continue
             if y_min < valid_min_y or y_min > valid_max_y:
                 continue
             if max_x is not None and x_min > max_x:
+                continue
+            if max_end_x is not None and x_max > max_end_x:
+                continue
+            # Reject decimal/float coordinates or punctuation (e.g. '205.143', '58.4777')
+            if any(ch in clean for ch in ('.', ',', ':', ';', '-', '+', '=', '(', ')', '[', ']', '{', '}', '"', "'")):
                 continue
             clean_num = clean.replace('B', '8').replace('S', '5').replace('O', '0').replace('o', '0').replace('I', '1').replace('l', '1').replace('/', '7').replace('|', '1')
             clean_num = re.sub(r'(\d)\s+(\d)', r'\1\2', clean_num).strip()
@@ -658,23 +679,48 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
                     pass
         return cands
 
-    # 1. Primary fast scan on the dedicated left gutter strip (x=0..145, filtering x_min <= 96)
-    primary_w = int(min(w, max(125, int(145 * scale_x))))
-    max_gutter_x = int(96 * scale_x)
+    # Fast 0.05ms ink check on the unobstructed gutter column (y=295..880, x=24..88):
+    # On 0-gutter wrapped continuation screens (e.g. wrapped SVG <path> lines), this region is
+    # 100% blank dark background (gutter_ink_px == 0, mean < 48). Return [] immediately in < 1ms!
+    chk_y1, chk_y2 = max(valid_min_y, int(295 * scale_y)), min(valid_max_y, int(880 * scale_y))
+    chk_x1, chk_x2 = int(24 * scale_x), int(88 * scale_x)
+    gutter_bg_mean = 30.0
+    gutter_ink_px = 100
+    if chk_y2 > chk_y1 and chk_x2 > chk_x1:
+        g_roi = img[chk_y1:chk_y2, chk_x1:chk_x2]
+        g_gray = cv2.cvtColor(g_roi, cv2.COLOR_BGR2GRAY) if g_roi.ndim == 3 else g_roi
+        gutter_bg_mean = float(np.mean(g_gray))
+        gutter_ink_px = int(np.count_nonzero(g_gray > 65))
+        if gutter_bg_mean < 48.0 and gutter_ink_px < 8:
+            cv_chk = detect_offline_editor_overlay(img, use_ocr=False)
+            _last_gutter_offline_info = {
+                "detected": bool(cv_chk.get("detected")),
+                "ocr_verified": False,
+                "badge_detected": bool(cv_chk.get("badge_detected")),
+                "bbox": cv_chk.get("bbox") or [int(22 * scale_x), h - int(140 * scale_y), int(112 * scale_x), int(36 * scale_y)],
+                "confidence": float(cv_chk.get("confidence", 0.0)),
+                "last_visible_gutter_line": 0,
+            }
+            return []
+
+    # 1. Primary fast scan on the dedicated left gutter strip (x=0..138, filtering x_min <= 84, x_max <= 94)
+    primary_w = int(min(w, max(122, int(138 * scale_x))))
+    max_gutter_x = int(84 * scale_x)
+    max_gutter_end_x = int(94 * scale_x)
     candidates = []
     try:
         res_primary, _ = ocr(img[crop_top_y:crop_bot_y, :primary_w])
-        candidates = _parse_ocr_candidates(res_primary, max_x=max_gutter_x)
+        candidates = _parse_ocr_candidates(res_primary, max_x=max_gutter_x, max_end_x=max_gutter_end_x)
     except Exception as e:
         print(f"[find_gutter_numbers_cluster] Primary strip error: {e}")
 
-    # 2. Fallback to wider scan ONLY if 0 candidates found in primary gutter AND a sidebar gutter
-    # with >= 5 strictly sequential (dn == 1) line numbers exists at x_min >= 220 * scale_x
-    if not candidates:
+    # 2. Fallback to wider scan ONLY if 0 candidates found in primary gutter AND the left column is NOT
+    # a dark fullscreen gutter (gutter_bg_mean >= 48 indicates a sidebar panel may be open)
+    if not candidates and gutter_bg_mean >= 48.0:
         sub_w = int(min(w, max(480, int(w * 0.45 * norm_multiplier))))
         try:
             res_wide, _ = ocr(img[crop_top_y:crop_bot_y, :sub_w])
-            raw_wide = _parse_ocr_candidates(res_wide, max_x=None)
+            raw_wide = _parse_ocr_candidates(res_wide, max_x=None, max_end_x=None)
             sidebar_cands = [c for c in raw_wide if c[0] >= int(220 * scale_x)]
             if len(sidebar_cands) >= 5:
                 s_sorted = sorted(sidebar_cands, key=lambda it: it[1])
@@ -1180,8 +1226,9 @@ def detect_line_wrap_state(img: np.ndarray, dpi_factor: float = 1.0, gutter: Opt
 def _compute_row_text_similarity(s_text: str, p_text: str, p_was_obstructed_left: bool = False) -> float:
     """
     Computes similarity between a current visual row s_text and a previous-page anchor row p_text.
-    Handles the ~3-character left prefix offset when p_text came from row 22/23 (cropped at x=140
-    to avoid the bottom-left Offline badge) and is now at an unobstructed upper row (cropped at x=104).
+    Handles the ~3..5-character left prefix offset when p_text came from row 22/23 (cropped at x=140
+    to avoid the bottom-left Offline badge) and is now at an unobstructed upper row (cropped at x=104),
+    as well as minor OCR digit/letter confusions on dense SVG path strings.
     """
     from difflib import SequenceMatcher
     a = re.sub(r"\s+", "", str(s_text or ""))
@@ -1192,11 +1239,34 @@ def _compute_row_text_similarity(s_text: str, p_text: str, p_was_obstructed_left
         return 1.0
     if len(b) >= 12 and (b in a or a in b):
         return min(1.0, max(len(b) / max(1, len(a)), 0.94))
-    best = SequenceMatcher(None, a, b).ratio()
-    if p_was_obstructed_left and len(a) > len(b):
-        for trim_left in (2, 3, 4, 5):
-            if len(a) > trim_left + 8:
-                r_trimmed = SequenceMatcher(None, a[trim_left:], b).ratio()
+
+    def _norm_ocr(txt: str) -> str:
+        return (
+            txt.replace("O", "0")
+            .replace("o", "0")
+            .replace("I", "1")
+            .replace("l", "1")
+            .replace(",", ".")
+            .replace(":", ".")
+        )
+
+    a_norm = _norm_ocr(a)
+    b_norm = _norm_ocr(b)
+    if a_norm == b_norm:
+        return 0.99
+    if len(b_norm) >= 12 and (b_norm in a_norm or a_norm in b_norm):
+        return min(0.98, max(len(b_norm) / max(1, len(a_norm)), 0.93))
+
+    sm = SequenceMatcher(None, a_norm, b_norm)
+    best = sm.ratio()
+    longest = sm.find_longest_match(0, len(a_norm), 0, len(b_norm))
+    if longest.size >= 18:
+        best = max(best, min(0.95, 0.72 + (longest.size / max(24.0, float(min(len(a_norm), len(b_norm))))) * 0.25))
+
+    if p_was_obstructed_left and len(a_norm) >= 12:
+        for trim_left in (1, 2, 3, 4, 5, 6, 7):
+            if len(a_norm) > trim_left + 8:
+                r_trimmed = SequenceMatcher(None, a_norm[trim_left:], b_norm).ratio()
                 if r_trimmed > best:
                     best = r_trimmed
     return best
@@ -1239,7 +1309,7 @@ def locate_character_anchor_row(
     best_score = 0.0
     best_max_single = 0.0
 
-    for k in range(-3, 23):
+    for k in range(-6, 24):
         weighted_sum = 0.0
         weight_total = 0.0
         max_single = 0.0
@@ -1254,9 +1324,8 @@ def locate_character_anchor_row(
             s_str = row_map[s_idx].get("text", "")
             if not s_str:
                 continue
-            # Only rows originally at index >= 4 (r=22, 23) came from behind the Offline badge
-            # unless enriched with full unobstructed strings (len >= 94)
-            was_obstructed = bool(w_idx >= 4 and len(p_str) <= 93)
+            # Rows originally at index >= 4 (r=22, 23) came from behind the Offline badge
+            was_obstructed = bool(w_idx >= 4)
             sim = _compute_row_text_similarity(s_str, p_str, p_was_obstructed_left=was_obstructed)
             w = 1.6 if rel in (-1, 0) else 1.0
             weighted_sum += sim * w
@@ -1270,20 +1339,20 @@ def locate_character_anchor_row(
             avg_score = weighted_sum / weight_total
             # Prefer candidates supported by multiple matching rows in the sliding window
             effective_score = avg_score + min(0.08, 0.025 * max(0, matched_rows - 1))
-            if effective_score > best_score and (max_single >= 0.62 or avg_score >= 0.58):
+            if effective_score > best_score and (max_single >= 0.60 or avg_score >= 0.56):
                 best_score = effective_score
                 best_max_single = max_single
                 best_k = k
 
-    # Enrich window[4..6] with unobstructed 96-char strings from cur_rows when best_k >= 0
+    # Enrich window[4..6] with unobstructed strings from cur_rows when best_k >= 0
     enriched_window = list(win)
-    if best_k is not None and best_score >= 0.60:
+    if best_k is not None and best_score >= 0.58:
         for offset in range(0, min(3, len(win) - target_top_win_idx)):
             s_idx = best_k + offset
             if 0 <= s_idx <= 21 and s_idx in row_map and len(row_map[s_idx].get("text", "")) >= 10:
                 enriched_window[target_top_win_idx + offset] = row_map[s_idx]["text"]
 
-    found = bool(best_k is not None and best_score >= 0.58)
+    found = bool(best_k is not None and best_score >= 0.56)
     return {
         "found": found,
         "target_top_row_idx": best_k if found else None,
@@ -1361,8 +1430,8 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
     h, w = img.shape[:2]
     gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
     if not gutter:
-        t, b = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor)
-        return t or 0, {"source": "fast_bounds", "bottom": b}
+        t, b = fast_detect_gutter_bounds(img, dpi_factor=dpi_factor, precomputed_gutter=gutter)
+        return t or 0, {"source": "fast_bounds", "bottom": b, "gutter": []}
 
     gutter = correct_gutter_sequence(gutter)
 
@@ -1438,6 +1507,7 @@ def detect_top_line_from_image(img: np.ndarray, target_top: Optional[int] = None
         "bottom_gutter_y": gutter[-1][0],
         "offline_overlay_detected": bool(_last_gutter_offline_info.get("detected")),
         "offline_info": dict(_last_gutter_offline_info),
+        "gutter": gutter,
     }
 
 def worker_detect_top_line(image_path: str, dpi_factor: float = 1.0, target_top: Optional[int] = None) -> int:

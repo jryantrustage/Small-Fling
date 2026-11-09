@@ -3772,7 +3772,7 @@ async def navigate_to_target_top_line(
         scale_y = h_img / 1080.0
 
         det_top, meta = detect_top_line_from_image(img, target_top=target_top, dpi_factor=dpi_factor)
-        gutter = find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
+        gutter = meta.get("gutter") if "gutter" in meta else find_gutter_numbers_cluster(img, dpi_factor=dpi_factor)
         row_pitch = float(meta.get("avg_pitch") or (27.0 * scale_y))
         top_row_y = float(meta.get("effective_top_row_y") or (304.0 * scale_y))
         max_top_row_y = int(meta.get("max_top_row_y") or (top_row_y + max(20.0 * scale_y, 0.75 * row_pitch)))
@@ -3857,7 +3857,13 @@ async def navigate_to_target_top_line(
 
             if loc.get("found") and loc.get("target_top_row_idx") is not None:
                 k_row = int(loc["target_top_row_idx"])
-                if k_row == 0:
+                # Accept k_row == 0 immediately, or after >=2 attempts accept -1 <= k_row <= 1 to prevent oscillation
+                is_char_aligned = bool(
+                    k_row == 0
+                    or (attempt >= 2 and -1 <= k_row <= 1)
+                    or (attempt >= 3 and -2 <= k_row <= 2)
+                )
+                if is_char_aligned:
                     if latest_snap:
                         modal_res = await resolve_and_dismiss_mini_modals(
                             serial=ser,
@@ -3888,7 +3894,7 @@ async def navigate_to_target_top_line(
                             anchor_preview=row0_txt,
                         )
                         actions_taken.append(
-                            f"Character Tracking aligned anchor+1 at row 0 (conf={loc.get('confidence')}) and detected Gutter Line {actual_top}..{actual_bot} on check {attempt}"
+                            f"Character Tracking aligned anchor+1 at row {k_row} (conf={loc.get('confidence')}) and detected Gutter Line {actual_top}..{actual_bot} on check {attempt}"
                         )
                         return {
                             "status": "ok",
@@ -3917,7 +3923,7 @@ async def navigate_to_target_top_line(
                             anchor_preview=row0_txt,
                         )
                         actions_taken.append(
-                            f"Character Tracking verified anchor+1 at row 0 for wrapped Line {tracked_ln} (conf={loc.get('confidence')}) on check {attempt}"
+                            f"Character Tracking verified anchor+1 at row {k_row} for wrapped Line {tracked_ln} (conf={loc.get('confidence')}) on check {attempt}"
                         )
                         return {
                             "status": "ok",
@@ -3960,6 +3966,91 @@ async def navigate_to_target_top_line(
                 await asyncio.sleep(0.18)
                 await dismiss_keyboard(ser, valid_d)
                 continue
+
+            # Fallback inside Character Tracking Mode when loc["found"] is False:
+            # 1) If gutter numbers have reappeared near tracked_ln / target_top (e.g. transitioning out of a
+            #    multi-page wrapped SVG line), accept the transition frame immediately so we NEVER press UpArrows
+            #    back into the 0-gutter wrapped block!
+            if gutter and first_g and tracked_ln <= first_g <= max(target_top, tracked_ln) + 6:
+                wrap_now = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=gutter)
+                still_wrapped_bot = bool(wrap_now.get("is_bottom_wrapped", False))
+                has_leading_wrapped_rows = bool(first_y > max_top_row_y)
+                keep_char_mode_for_capture = bool(still_wrapped_bot or has_leading_wrapped_rows)
+                actual_top = int(first_g)
+                actual_bot = int(last_g or actual_top)
+                row0_txt = str(loc.get("current_row0_text") or "")
+                state.orchestration_state["cursor_line"] = actual_bot if caret_pos == "bottom" else actual_top
+                state.sync_alignment_gutter_lines(
+                    actual_top,
+                    actual_bot,
+                    character_tracking_mode=keep_char_mode_for_capture,
+                    anchor_preview=row0_txt,
+                )
+                actions_taken.append(
+                    f"Character Tracking transitioned to Gutter Line {actual_top}..{actual_bot} (first_y={first_y}px) on check {attempt}"
+                )
+                return {
+                    "status": "ok",
+                    "reached": True,
+                    "character_tracking_mode": keep_char_mode_for_capture,
+                    "transitioned_to_gutter": True,
+                    "matched_anchor_text": row0_txt,
+                    "target_top": actual_top,
+                    "actual_top": actual_top,
+                    "actual_bottom": actual_bot,
+                    "arrows_pressed": total_arrows,
+                    "page_keys_pressed": total_page_keys,
+                    "attempts": min(attempt, max_attempts),
+                    "snapshot_bytes": latest_snap,
+                    "actions_taken": actions_taken,
+                }
+
+            # 2) If 0 gutter numbers are visible (still inside the multi-page wrapped line) and anchor match
+            #    had low confidence: if ArrowDownPagerNode already stepped 20 rows (caller_node == "arrow_down"),
+            #    trim 2 DownArrows on attempt 1 so r=22 lands at r=0 and accept on attempt >= 2!
+            if not gutter:
+                v_rows = loc.get("visual_rows") or []
+                non_empty_v = [r for r in v_rows if len((r.get("text") or "").strip()) >= 3]
+                if len(non_empty_v) >= 3:
+                    if attempt == 1 and total_arrows == 0:
+                        trim_step = 2 if caller_node == "arrow_down" else 22
+                        keys = " ".join(["20"] * trim_step)
+                        total_arrows += trim_step
+                        await run_adb_shell(f"input {disp_pfx}keyevent {keys} >/dev/null 2>&1", ser)
+                        caret_pos = "bottom"
+                        last_dir = "down"
+                        actions_taken.append(
+                            f"Attempt 1 [CharTrack Ln {tracked_ln}]: 0 gutter numbers, stepped {trim_step} Down(20) arrows for wrapped continuation"
+                        )
+                        await asyncio.sleep(0.18)
+                        await dismiss_keyboard(ser, valid_d)
+                        continue
+                    row0_txt = str(loc.get("current_row0_text") or (non_empty_v[0].get("text") if non_empty_v else ""))
+                    state.orchestration_state["cursor_line"] = tracked_ln
+                    state.sync_alignment_gutter_lines(
+                        tracked_ln,
+                        tracked_ln,
+                        character_tracking_mode=True,
+                        anchor_preview=row0_txt,
+                    )
+                    actions_taken.append(
+                        f"Character Tracking accepted wrapped continuation for Line {tracked_ln} ({len(non_empty_v)} visual rows) on check {attempt}"
+                    )
+                    return {
+                        "status": "ok",
+                        "reached": True,
+                        "character_tracking_mode": True,
+                        "is_wrapped_continuation": True,
+                        "matched_anchor_text": row0_txt,
+                        "target_top": tracked_ln,
+                        "actual_top": tracked_ln,
+                        "actual_bottom": tracked_ln,
+                        "arrows_pressed": total_arrows,
+                        "page_keys_pressed": total_page_keys,
+                        "attempts": min(attempt, max_attempts),
+                        "snapshot_bytes": latest_snap,
+                        "actions_taken": actions_taken,
+                    }
 
         if is_exact_or_wrapped_top or is_contiguous_overlap:
             # Ensure no mini-modal / toast popup contaminates the aligned viewport frame
@@ -4008,8 +4099,40 @@ async def navigate_to_target_top_line(
             }
 
         if not cur_t or cur_t <= 0:
-            # Viewport has 0 gutter numbers (overshot into a massive wrapped line without anchor match):
-            # Back up with UpArrows (19) so the gutter numbers above the wrapped line reappear!
+            # Viewport has 0 gutter numbers: check if this is a full-screen wrapped continuation of tracked_ln!
+            wrap_zero = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=[])
+            if wrap_zero.get("content_row_count", 0) >= 3:
+                eff_tracked = int(tracked_ln or max(1, target_top - 1))
+                row0_txt = str(wrap_zero.get("top_text_anchor") or "")
+                state.orchestration_state.update({
+                    "character_tracking_mode": True,
+                    "character_tracking_line": eff_tracked,
+                    "cursor_line": eff_tracked,
+                })
+                state.sync_alignment_gutter_lines(
+                    eff_tracked,
+                    eff_tracked,
+                    character_tracking_mode=True,
+                    anchor_preview=row0_txt,
+                )
+                actions_taken.append(
+                    f"Attempt {attempt}: 0 gutter numbers with {wrap_zero.get('content_row_count')} wrapped content rows -> auto-entered Character Tracking for Line {eff_tracked}"
+                )
+                return {
+                    "status": "ok",
+                    "reached": True,
+                    "character_tracking_mode": True,
+                    "is_wrapped_continuation": True,
+                    "matched_anchor_text": row0_txt,
+                    "target_top": eff_tracked,
+                    "actual_top": eff_tracked,
+                    "actual_bottom": eff_tracked,
+                    "arrows_pressed": total_arrows,
+                    "page_keys_pressed": total_page_keys,
+                    "attempts": min(attempt, max_attempts),
+                    "snapshot_bytes": latest_snap,
+                    "actions_taken": actions_taken,
+                }
             if attempt <= max_attempts:
                 backup_cnt = (caret_span + 18) if caret_pos == "bottom" else 18
                 keys = " ".join(["19"] * backup_cnt)
@@ -4018,7 +4141,7 @@ async def navigate_to_target_top_line(
                 caret_pos = "top"
                 last_dir = "up"
                 actions_taken.append(
-                    f"Attempt {attempt}: No gutter numbers visible (overshot into wrapped block) -> backed up {backup_cnt} Up(19) arrows toward Ln {target_top}"
+                    f"Attempt {attempt}: No gutter numbers visible -> backed up {backup_cnt} Up(19) arrows toward Ln {target_top}"
                 )
             await dismiss_keyboard(ser, valid_d)
             await asyncio.sleep(0.18)

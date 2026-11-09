@@ -161,8 +161,8 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             "timestamp": None
         }
 
-    # 1. OCR top 60% of image for structural header, title, and toolbar
-    top_limit_y = int(h * 0.60)
+    # 1. OCR top 28.5% of image for structural header, title, and toolbar (avoids OCRing dense editor code rows!)
+    top_limit_y = int(h * 0.285)
     top_crop = img[:top_limit_y, :]
     top_res, _ = ocr(top_crop)
     top_tokens = []
@@ -172,6 +172,18 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             bx1, by1 = int(pts[:, 0].min()), int(pts[:, 1].min())
             bw, bh = int(pts[:, 0].max() - bx1), int(pts[:, 1].max() - by1)
             top_tokens.append((bx1, by1, bw, bh, t.strip(), float(s)))
+    # Fallback to 42% height only if header/toolbar shifted down (e.g. call banner) and no title tokens found
+    if len(top_tokens) < 2:
+        top_limit_y = int(h * 0.42)
+        top_crop = img[:top_limit_y, :]
+        top_res, _ = ocr(top_crop)
+        top_tokens = []
+        if top_res:
+            for b, t, s in top_res:
+                pts = np.array(b)
+                bx1, by1 = int(pts[:, 0].min()), int(pts[:, 1].min())
+                bw, bh = int(pts[:, 0].max() - bx1), int(pts[:, 1].max() - by1)
+                top_tokens.append((bx1, by1, bw, bh, t.strip(), float(s)))
 
     # ---------------------------------------------------------
     # 1. BLUE BOX: Teams Logo / Header Dropdown ('Teams')
@@ -352,25 +364,36 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     scale_h = h / 1080.0
     dpi_scale = (h / 1080.0) if h < 720 else 1.0
 
-    # Gutter strip must be wide enough (~145px) to avoid slicing 4-, 5-, or 6-digit line numbers in half
-    # (e.g. 5-digit numbers at x=41..98 on 1280x1024 and 1920x1080), while filtering token start x <= ~98px.
-    gutter_num_w = int(min(w, max(130, int(148 * dpi_scale))))
-    max_gutter_start_x = int(max(96, 102 * dpi_scale))
+    # Gutter strip must be wide enough (~135px) to avoid slicing 4-, 5-, or 6-digit line numbers in half
+    # while strictly separating the right-aligned gutter column (x_min <= 84, x_max <= 94) from
+    # code column 0 (which starts at x >= 96 on 1280x1024 and 1920x1080).
+    gutter_num_w = int(min(w, max(124, int(138 * dpi_scale))))
+    max_gutter_start_x = int(max(80, 84 * dpi_scale))
+    max_gutter_end_x = int(max(92, 95 * dpi_scale))
     valid_min_y = max(tb_y2, int(290 * dpi_scale))
     valid_max_y = min(h - int(round(118 * dpi_scale)), int(945 * dpi_scale))
     gutter_lines = []
 
-    def _extract_gutter_tokens(crop_img, x_offset: int, y_offset: int, max_allowed_x: int = 9999):
+    def _extract_gutter_tokens(
+        crop_img,
+        x_offset: int,
+        y_offset: int,
+        max_allowed_x: int = 9999,
+        max_allowed_end_x: int = 9999,
+        target_list: list = None,
+    ):
         if crop_img.size == 0:
             return
+        out_list = target_list if target_list is not None else gutter_lines
         res, _ = ocr(crop_img)
         if not res:
             return
         for b, t, s in res:
             pts = np.array(b)
             bx1 = x_offset + int(pts[:, 0].min())
+            bx2 = x_offset + int(pts[:, 0].max())
             by1 = y_offset + int(pts[:, 1].min())
-            bw = int(pts[:, 0].max() - pts[:, 0].min())
+            bw = int(bx2 - bx1)
             bh = int(pts[:, 1].max() - pts[:, 1].min())
 
             # Ignore bottom-left Offline pill or tokens outside vertical editor bounds
@@ -381,8 +404,12 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             if by1 < valid_min_y or by1 > valid_max_y:
                 continue
 
-            # Spatial filter: token must start inside the gutter column
-            if bx1 > max_allowed_x:
+            # Spatial filter: token must start and end inside the gutter column (never inside code column 0 at x >= 96)
+            if bx1 > max_allowed_x or bx2 > max_allowed_end_x:
+                continue
+
+            # Reject decimal/float coordinates or punctuation (e.g. '205.143', '58.4777')
+            if any(ch in raw_t for ch in ('.', ',', ':', ';', '-', '+', '=', '(', ')', '[', ']', '{', '}', '"', "'")):
                 continue
 
             # Linguistic filter: gutter line numbers NEVER contain multiple letters (e.g. 'layout.ts', 'logger', 'exp')
@@ -403,19 +430,38 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
             clean = re.sub(r'(\d)\s+(\d)', r'\1\2', clean).strip()
             if m := re.match(r'^\s*(\d{1,6})\s*$', clean):
                 val = int(m.group(1))
-                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 and gl[1] == val for gl in gutter_lines):
+                if 1 <= val <= 999999 and not any(abs(gl[0] - by1) <= 10 and gl[1] == val for gl in out_list):
                     digits_str = m.group(1)
                     char_w = max(16, int(bw * (len(digits_str) / max(1, len(clean)))) + 6, len(digits_str) * int(10 * dpi_scale) + 6)
                     box = [max(0, bx1 - 3), max(0, by1 - 3), max(bw + 6, char_w), bh + 6]
-                    gutter_lines.append((by1, val, box))
+                    out_list.append((by1, val, box))
+
+    # Fast 0.05ms ink check on the unobstructed gutter column (y=295..880, x=24..88):
+    # If the left gutter is blank dark background (0 gutter numbers), skip Pass A & Pass B completely!
+    chk_y1, chk_y2 = max(valid_min_y, int(295 * dpi_scale)), min(valid_max_y, int(880 * dpi_scale))
+    chk_x1, chk_x2 = int(24 * dpi_scale), int(88 * dpi_scale)
+    gutter_bg_mean = 30.0
+    gutter_ink_px = 100
+    if chk_y2 > chk_y1 and chk_x2 > chk_x1:
+        g_roi = img[chk_y1:chk_y2, chk_x1:chk_x2]
+        g_gray = cv2.cvtColor(g_roi, cv2.COLOR_BGR2GRAY) if g_roi.ndim == 3 else g_roi
+        gutter_bg_mean = float(np.mean(g_gray))
+        gutter_ink_px = int(np.count_nonzero(g_gray > 65))
 
     # Pass A: Dedicated gutter strip wide enough for up to 6-digit line numbers
     crop_bot_y = min(h - int(h * 0.04), h - int(round(90 * dpi_scale)))
     narrow_strip = img[tb_y2:crop_bot_y, :gutter_num_w]
-    _extract_gutter_tokens(narrow_strip, 0, tb_y2, max_allowed_x=max_gutter_start_x)
+    if not (gutter_bg_mean < 48.0 and gutter_ink_px < 8):
+        _extract_gutter_tokens(
+            narrow_strip,
+            0,
+            tb_y2,
+            max_allowed_x=max_gutter_start_x,
+            max_allowed_end_x=max_gutter_end_x,
+        )
 
-    # 1.5x scaled strip ONLY if fewer than 3 gutter lines found on native resolution
-    if len(gutter_lines) < 3 and narrow_strip.size > 0:
+    # 1.5x scaled strip ONLY if between 1 and 2 gutter lines found on native resolution
+    if 0 < len(gutter_lines) < 3 and narrow_strip.size > 0:
         strip_scaled = cv2.resize(narrow_strip, (0, 0), fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         if strip_scaled.size > 0:
             res_scaled, _ = ocr(strip_scaled)
@@ -423,13 +469,16 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                 for b, t, s in res_scaled:
                     pts = np.array(b) / 1.5
                     bx1 = int(pts[:, 0].min())
+                    bx2 = int(pts[:, 0].max())
                     by1 = tb_y2 + int(pts[:, 1].min())
-                    bw = int(pts[:, 0].max() - pts[:, 0].min())
+                    bw = int(bx2 - bx1)
                     bh = int(pts[:, 1].max() - pts[:, 1].min())
                     raw_t = t.strip()
                     if by1 >= int(840 * dpi_scale) and any(k in raw_t.lower() for k in ("offline", "offlin", "ffline")):
                         continue
-                    if by1 < valid_min_y or by1 > valid_max_y or bx1 > max_gutter_start_x:
+                    if by1 < valid_min_y or by1 > valid_max_y or bx1 > max_gutter_start_x or bx2 > max_gutter_end_x:
+                        continue
+                    if any(ch in raw_t for ch in ('.', ',', ':', ';', '-', '+', '=', '(', ')', '[', ']', '{', '}', '"', "'")):
                         continue
                     letters = re.findall(r'[a-zA-Z]', raw_t)
                     if len(letters) >= 2 or (len(letters) == 1 and (len(raw_t) > 4 or letters[0] not in 'lIOSBo')):
@@ -453,11 +502,40 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                             box = [max(0, bx1 - 3), max(0, by1 - 3), max(bw + 6, char_w), bh + 6]
                             gutter_lines.append((by1, val, box))
 
-    # Pass B: Fallback wider search ONLY if no lines detected in margin (e.g. sidebar open)
-    if not gutter_lines:
+    # Pass B: Fallback wider search ONLY if sidebar is open (gutter_bg_mean >= 48) and >= 4 strictly sequential
+    # line numbers exist at a consistent X column. Never accept isolated numbers inside wrapped code/SVG!
+    if not gutter_lines and gutter_bg_mean >= 48.0:
         gutter_w = int(max(180, min(380, 240 * dpi_factor)))
         body_gutter = img[tb_y2:crop_bot_y, :gutter_w]
-        _extract_gutter_tokens(body_gutter, 0, tb_y2, max_allowed_x=gutter_w)
+        wide_cands = []
+        _extract_gutter_tokens(
+            body_gutter,
+            0,
+            tb_y2,
+            max_allowed_x=gutter_w,
+            max_allowed_end_x=gutter_w,
+            target_list=wide_cands,
+        )
+        if len(wide_cands) >= 4:
+            wide_cands.sort(key=lambda x: x[0])
+            seq_chain = []
+            for cand in wide_cands:
+                if not seq_chain:
+                    seq_chain = [cand]
+                else:
+                    prev_c = seq_chain[-1]
+                    if (
+                        cand[1] - prev_c[1] == 1
+                        and 14 <= (cand[0] - prev_c[0]) <= 42
+                        and abs(cand[2][0] - prev_c[2][0]) <= 24
+                    ):
+                        seq_chain.append(cand)
+                    elif cand[0] - prev_c[0] > 42:
+                        if len(seq_chain) >= 4:
+                            break
+                        seq_chain = [cand]
+            if len(seq_chain) >= 4:
+                gutter_lines.extend(seq_chain)
 
     # Also consult consensus-corrected gutter sequence from ocr_engine so single-digit misreads
     # or clipped digits never corrupt first_line_num / last_line_num
@@ -588,10 +666,24 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
     char_track_aligned = False
     if first_line_num <= 0 and dark_mode_active:
         try:
-            from ocr_engine import detect_line_wrap_state
             from services import state as _st
-            wrap_st = detect_line_wrap_state(img, dpi_factor=dpi_factor, gutter=[])
-            if wrap_st.get("is_wrapped_page") and wrap_st.get("content_row_count", 0) >= 3:
+            # Fast 0.1ms content-row ink check across the 22 unobstructed visual rows (y=309+r*27, x=104..w-40)
+            code_x1 = int(102 * dpi_scale)
+            code_x2 = max(code_x1 + 100, w - int(40 * dpi_scale))
+            pitch_y = 27.0 * dpi_scale
+            base_y = max(tb_y2 + 6, int(309 * dpi_scale))
+            ink_rows = 0
+            for r_idx in range(22):
+                ry1 = int(round(base_y + r_idx * pitch_y - 10 * dpi_scale))
+                ry2 = int(round(base_y + r_idx * pitch_y + 10 * dpi_scale))
+                if ry2 >= h - int(115 * dpi_scale):
+                    break
+                r_crop = img[max(0, ry1):min(h, ry2), code_x1:code_x2]
+                if r_crop.size > 0:
+                    r_gray = cv2.cvtColor(r_crop, cv2.COLOR_BGR2GRAY) if r_crop.ndim == 3 else r_crop
+                    if int(np.count_nonzero(r_gray > 65)) >= 18:
+                        ink_rows += 1
+            if ink_rows >= 3:
                 tracked_ln = int(
                     _st.orchestration_state.get("character_tracking_line")
                     or _st.latest_telemetry.get("current_bottom_line")
@@ -745,6 +837,7 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
         "missing": missing_reasons,
         "first_line_number": first_line_num,
         "last_line_number": last_line_num,
+        "character_tracking_mode": bool(char_track_aligned),
         "file_name": file_name,
         "multipart_info": multipart_info,
         "is_multipart": bool(multipart_info.get("is_multipart")),
