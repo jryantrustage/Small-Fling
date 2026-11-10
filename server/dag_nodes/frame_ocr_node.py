@@ -231,10 +231,13 @@ class FrameOcrNode(BaseDagNode):
             if bot_ln < top_ln or (bot_ln - top_ln) > 75:
                 bot_ln = top_ln if char_track_active else (top_ln + lpp - 1)
 
-            if not lines_detected or not any(bool((l.get("text") or "").strip()) for l in lines_detected):
-                full_scan = await ocr_svc.scan_image_with_minicpm(temp_calib, expected_top=top_ln, live_capture=True)
-                if full_scan.get("lines"):
-                    lines_detected = full_scan["lines"]
+            n4_node_pre = state.dag_state.get("nodes", {}).get("local_ai_ocr", {})
+            n4_lines_pre = n4_node_pre.get("lines") or []
+            if (not lines_detected or not any(bool((l.get("text") or "").strip()) for l in lines_detected)) and n4_lines_pre:
+                n4_min_p = min((int(l.get("line_number", 0)) for l in n4_lines_pre if l.get("line_number")), default=0)
+                n4_max_p = max((int(l.get("line_number", 0)) for l in n4_lines_pre if l.get("line_number")), default=0)
+                if abs(n4_min_p - top_ln) <= 2 and abs(n4_max_p - bot_ln) <= 2:
+                    lines_detected = [dict(l) for l in n4_lines_pre]
 
             with open(temp_calib, "rb") as f:
                 snap = f.read()
@@ -577,14 +580,23 @@ class FrameOcrNode(BaseDagNode):
         try:
             from ocr_engine import detect_offline_editor_overlay, _last_gutter_offline_info
             img_wrap = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
-            wrap_info = detect_line_wrap_state(img_wrap, dpi_factor=dpi_factor)
-            bottom_anchor_text = wrap_info.get("bottom_text_anchor", "")
-            top_anchor_text = wrap_info.get("top_text_anchor", "")
-            target_top_anchor_text = wrap_info.get("target_top_text_anchor", "")
-            bottom_anchor_window = wrap_info.get("bottom_anchor_window", [])
-            is_wrapped_page = wrap_info.get("is_wrapped_page", False)
-            is_bottom_wrapped = bool(wrap_info.get("is_bottom_wrapped", False))
             blackboard.latest_frame_bgr = img_wrap
+            ws_gcnt = int(ws_ver.get("gutter_count", 0) or 0)
+            ws_bot_extra = int(ws_ver.get("bottom_wrapped_extra_rows", 0) or 0)
+            if ws_gcnt >= 1 and ws_bot_extra == 0 and not is_wrap_continuation_page:
+                # Fast path: bottom row has a verified gutter number and 0 wrapped extra rows below it
+                top_anchor_text = str((lines_detected[0].get("text") or "") if lines_detected else "")
+                bottom_anchor_text = str((lines_detected[-1].get("text") or "") if lines_detected else "")
+                is_wrapped_page = any(bool(l.get("is_wrapped")) for l in (lines_detected or []))
+                is_bottom_wrapped = False
+            else:
+                wrap_info = detect_line_wrap_state(img_wrap, dpi_factor=dpi_factor)
+                bottom_anchor_text = wrap_info.get("bottom_text_anchor", "")
+                top_anchor_text = wrap_info.get("top_text_anchor", "")
+                target_top_anchor_text = wrap_info.get("target_top_text_anchor", "")
+                bottom_anchor_window = wrap_info.get("bottom_anchor_window", [])
+                is_wrapped_page = wrap_info.get("is_wrapped_page", False)
+                is_bottom_wrapped = bool(wrap_info.get("is_bottom_wrapped", False))
             offline_overlay_detected = bool(_last_gutter_offline_info.get("detected"))
             if not offline_overlay_detected and img_wrap is not None:
                 off_chk = detect_offline_editor_overlay(img_wrap, use_ocr=False)

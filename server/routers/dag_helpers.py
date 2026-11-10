@@ -404,10 +404,21 @@ async def recover_gutter_bounds_with_healing(
             )
 
     if top_ln > 0 and bot_ln >= top_ln:
+        if char_track_active:
+            char_track_active = False
+            state.orchestration_state["character_tracking_mode"] = False
+            if "frame_ocr" in state.dag_state.get("nodes", {}):
+                state.dag_state["nodes"]["frame_ocr"]["character_tracking_mode"] = False
+        is_contiguous_heal = bool(
+            expected_top
+            and expected_top > 0
+            and max(1, expected_top - 6) <= top_ln <= expected_top + 2
+            and (bot_ln == 0 or bot_ln >= expected_top)
+        )
         if (
             expected_top
             and expected_top > 0
-            and top_ln != expected_top
+            and not is_contiguous_heal
             and not char_track_active
             and not (serial and "mock" in str(serial).lower())
         ):

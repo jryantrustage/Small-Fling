@@ -381,7 +381,8 @@ _ollama_unreachable_until: float = 0.0
 def call_minicpm_ollama_sync(
     image_path: Path,
     expected_top: Optional[int] = None,
-    ground_truth_lines: Optional[List[Dict[str, Any]]] = None
+    ground_truth_lines: Optional[List[Dict[str, Any]]] = None,
+    timeout_override: Optional[int] = None,
 ) -> Tuple[str, str]:
     """
     Synchronous worker for invoking MiniCPM-V vision models via Ollama with Row-Anchored Visual Prompting.
@@ -450,7 +451,8 @@ def call_minicpm_ollama_sync(
         "Output only the tagged lines:"
     )
     models = []
-    for cand in [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]:
+    cand_models = [config.OLLAMA_VISION_MODEL] if timeout_override else [config.OLLAMA_VISION_MODEL, "minicpm-v:latest", "minicpm-v"]
+    for cand in cand_models:
         if cand and cand not in models:
             models.append(cand)
     last_ex = None
@@ -464,7 +466,7 @@ def call_minicpm_ollama_sync(
         "num_batch": 512,
         "stop": ["<|endoftext|>", "<|im_end|>"]
     }
-    timeout_sec = max(config.OLLAMA_TIMEOUT, 180)
+    timeout_sec = int(timeout_override) if (timeout_override and timeout_override > 0) else max(config.OLLAMA_TIMEOUT, 180)
     for m in models:
         try:
             connection_stats["total_http_requests"] += 1
@@ -1323,7 +1325,8 @@ async def scan_image_with_minicpm(
             call_minicpm_ollama_sync,
             Path(image_path),
             expected_top or top_ln,
-            ground_truth_lines
+            ground_truth_lines,
+            22 if live_capture else None,
         )
         mcpm_lines, _, _, _, det_fn = parse_minicpm_output(raw_resp)
         if det_fn:

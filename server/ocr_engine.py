@@ -145,7 +145,7 @@ def extract_numbers_from_slice(crop: np.ndarray, max_x_min: Optional[int] = None
                     pts = np.array(bbox)
                     x_min = int(np.min(pts[:, 0])) if pts.ndim == 2 else 0
                     x_max = int(np.max(pts[:, 0])) if pts.ndim == 2 else 0
-                    if max_x_min is not None and (x_min > max_x_min or x_max > int(max_x_min * 1.14)):
+                    if max_x_min is not None and (x_min > max_x_min or x_max > int(max_x_min * 1.16)):
                         continue
                     y_min = int(np.min(pts[:, 1])) if pts.ndim == 2 else 0
                     nums.append((y_min, n))
@@ -327,19 +327,19 @@ def fast_detect_gutter_bounds(img: np.ndarray, dpi_factor: float = 1.0, precompu
     dpi_scale = (h / 1080.0) if h < 720 else 1.0
     scale_x = dpi_scale
 
-    # Fast 0.05ms ink check: if the unobstructed gutter column (y=295..880, x=24..88) is blank dark background,
+    # Fast 0.05ms ink check: if the unobstructed gutter column (y=295..880, x=24..94) is blank dark background,
     # this is a 0-gutter wrapped continuation screen — return (0, 0) immediately without redundant OCR!
     chk_y1, chk_y2 = max(295, int(295 * dpi_scale)), min(h - 120, int(880 * dpi_scale))
-    chk_x1, chk_x2 = int(24 * scale_x), int(88 * scale_x)
+    chk_x1, chk_x2 = int(24 * scale_x), int(94 * scale_x)
     if chk_y2 > chk_y1 and chk_x2 > chk_x1:
         g_roi = img[chk_y1:chk_y2, chk_x1:chk_x2]
         g_gray = cv2.cvtColor(g_roi, cv2.COLOR_BGR2GRAY) if g_roi.ndim == 3 else g_roi
         if float(np.mean(g_gray)) < 48.0 and int(np.count_nonzero(g_gray > 65)) < 8:
             return 0, 0
 
-    # 1. Primary: standard fullscreen gutter with right padding (x <= 138) and strict x_min filter (x_min <= 84)
-    gutter_w = int(max(122.0, min(138.0, 138.0 * scale_x)))
-    max_gutter_xmin = int(84 * scale_x)
+    # 1. Primary: standard fullscreen gutter with right padding (x <= 142) and strict x_min filter (x_min <= 90)
+    gutter_w = int(max(126.0, min(142.0, 142.0 * scale_x)))
+    max_gutter_xmin = int(90 * scale_x)
     top_y1 = max(275, int(h * 0.255))
     top_y2 = min(h - 150, int(h * 0.65))
     top_crop = img[top_y1:top_y2, :gutter_w]
@@ -604,6 +604,40 @@ def is_eof_reached_with_offline_awareness(
     return False, ""
 
 
+def _detect_dynamic_gutter_right(img: np.ndarray, scale_x: float = 1.0, scale_y: float = 1.0) -> int:
+    """
+    Dynamically detects the right edge X coordinate of right-aligned gutter digits
+    (e.g. x=73..89 for 3/4-digit files, x=95..99 for 5-digit files) followed by the
+    >=6px empty vertical separator channel before code column 0 (x >= 99 or x >= 109).
+    """
+    if img is None or img.size == 0:
+        return int(round(90 * scale_x))
+    h, w = img.shape[:2]
+    ed_top = max(0, int(round(295 * scale_y)))
+    ed_bot = min(h, int(round(943 * scale_y)), h - int(round(135 * scale_y)))
+    gutter_right = int(round(90 * scale_x))
+    try:
+        sep_probe_w = min(w, int(round(140 * scale_x)))
+        probe_strip = img[ed_top:ed_bot, 0:sep_probe_w]
+        if probe_strip.size > 0:
+            probe_gray = cv2.cvtColor(probe_strip, cv2.COLOR_BGR2GRAY) if probe_strip.ndim == 3 else probe_strip
+            probe_bg = int(np.median(probe_gray))
+            probe_fg = np.abs(probe_gray.astype(np.int16) - probe_bg) > 20
+            col_counts = probe_fg.sum(axis=0)
+            min_gx = int(round(52 * scale_x))
+            max_gx = min(sep_probe_w - 10, int(round(103 * scale_x)))
+            gap_w = max(5, int(round(7 * scale_x)))
+            found_gr = 0
+            for x_col in range(min_gx, max_gx):
+                if col_counts[x_col] >= 2 and np.all(col_counts[x_col + 1 : x_col + 1 + gap_w] <= 1):
+                    found_gr = x_col
+            if found_gr > 0:
+                gutter_right = found_gr
+    except Exception:
+        pass
+    return gutter_right
+
+
 def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> List[Tuple[int, int]]:
     """
     Finds the vertical gutter column of line numbers in an editor image.
@@ -679,11 +713,11 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
                     pass
         return cands
 
-    # Fast 0.05ms ink check on the unobstructed gutter column (y=295..880, x=24..88):
+    # Fast 0.05ms ink check on the unobstructed gutter column (y=295..880, x=24..94):
     # On 0-gutter wrapped continuation screens (e.g. wrapped SVG <path> lines), this region is
     # 100% blank dark background (gutter_ink_px == 0, mean < 48). Return [] immediately in < 1ms!
     chk_y1, chk_y2 = max(valid_min_y, int(295 * scale_y)), min(valid_max_y, int(880 * scale_y))
-    chk_x1, chk_x2 = int(24 * scale_x), int(88 * scale_x)
+    chk_x1, chk_x2 = int(24 * scale_x), int(94 * scale_x)
     gutter_bg_mean = 30.0
     gutter_ink_px = 100
     if chk_y2 > chk_y1 and chk_x2 > chk_x1:
@@ -703,10 +737,11 @@ def find_gutter_numbers_cluster(img: np.ndarray, dpi_factor: float = 1.0) -> Lis
             }
             return []
 
-    # 1. Primary fast scan on the dedicated left gutter strip (x=0..138, filtering x_min <= 84, x_max <= 94)
-    primary_w = int(min(w, max(122, int(138 * scale_x))))
-    max_gutter_x = int(84 * scale_x)
-    max_gutter_end_x = int(94 * scale_x)
+    # 1. Primary fast scan on the dedicated left gutter strip (adapts dynamically to 3/4/5-digit gutter widths)
+    gutter_right = _detect_dynamic_gutter_right(img, scale_x, scale_y)
+    primary_w = int(min(w, max(126, int(142 * scale_x))))
+    max_gutter_x = max(int(90 * scale_x), gutter_right - int(6 * scale_x))
+    max_gutter_end_x = max(int(102 * scale_x), gutter_right + int(4 * scale_x))
     candidates = []
     try:
         res_primary, _ = ocr(img[crop_top_y:crop_bot_y, :primary_w])
@@ -964,9 +999,10 @@ def extract_visual_editor_rows(
         if abs(gy0 - (y0 + r0 * pitch_y)) <= 9.0 * dpi_scale:
             y0 = gy0 - r0 * pitch_y
 
+    gutter_right = _detect_dynamic_gutter_right(img, dpi_scale, dpi_scale)
     gx1 = max(0, int(round(30 * dpi_scale)))
-    gx2 = min(w, int(round(99 * dpi_scale)))
-    code_x_normal = int(round(104 * dpi_scale))
+    gx2 = min(w, gutter_right + int(round(3 * dpi_scale)))
+    code_x_normal = gutter_right + int(round(6 * dpi_scale))
     code_x_badge = int(round(140 * dpi_scale))
     code_x_end = max(code_x_badge + 40, w - int(round(20 * dpi_scale)))
     max_row_yc = min(942.0 * dpi_scale, float(h) - 82.0 * dpi_scale)
@@ -2033,28 +2069,9 @@ def worker_scan_image(image_path: str, ollama_url: str = "", ollama_vision_model
     ed_top = max(gutter_roi_y1, int(round(295 * scale_y)))
     ed_bot = min(gutter_roi_y2, int(round(943 * scale_y)), h - int(round(135 * scale_y)))
 
-    # Dynamically detect the right edge of right-aligned gutter digits (e.g. x=73 for 3-digit files, x=96 for 5-digit files)
-    # followed by the >=8px empty vertical separator channel before code column 0
-    gutter_right = int(round(90 * scale_x))
-    try:
-        sep_probe_w = min(w, int(round(140 * scale_x)))
-        probe_strip = img[ed_top:ed_bot, 0:sep_probe_w]
-        if probe_strip.size > 0:
-            probe_gray = cv2.cvtColor(probe_strip, cv2.COLOR_BGR2GRAY) if probe_strip.ndim == 3 else probe_strip
-            probe_bg = int(np.median(probe_gray))
-            probe_fg = np.abs(probe_gray.astype(np.int16) - probe_bg) > 20
-            col_counts = probe_fg.sum(axis=0)
-            min_gx = int(round(52 * scale_x))
-            max_gx = min(sep_probe_w - 10, int(round(102 * scale_x)))
-            gap_w = max(5, int(round(8 * scale_x)))
-            found_gr = 0
-            for x_col in range(min_gx, max_gx):
-                if col_counts[x_col] >= 3 and np.all(col_counts[x_col + 1 : x_col + 1 + gap_w] <= 1):
-                    found_gr = x_col
-            if found_gr > 0:
-                gutter_right = found_gr
-    except Exception:
-        pass
+    # Dynamically detect the right edge of right-aligned gutter digits (e.g. x=73 for 3-digit files, x=98 for 5-digit files)
+    # followed by the >=7px empty vertical separator channel before code column 0
+    gutter_right = _detect_dynamic_gutter_right(img, scale_x, scale_y)
 
     gx_min = max(14, int(round(20 * scale_x)))
     gx_max = gutter_right + int(round(4 * scale_x))

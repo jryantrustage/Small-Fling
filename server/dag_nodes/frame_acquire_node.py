@@ -117,6 +117,12 @@ class FrameAcquireNode(BaseDagNode):
             state.orchestration_state.get("character_tracking_mode")
             or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_mode")
         )
+        if t_det > 0 and b_det >= t_det:
+            # Visible gutter numbers detected on screen — exit 0-gutter character tracking mode
+            char_track_mode = False
+            state.orchestration_state["character_tracking_mode"] = False
+            if "frame_ocr" in state.dag_state.get("nodes", {}):
+                state.dag_state["nodes"]["frame_ocr"]["character_tracking_mode"] = False
         tracked_ln = int(
             state.orchestration_state.get("character_tracking_line")
             or state.dag_state.get("nodes", {}).get("frame_ocr", {}).get("character_tracking_line")
@@ -124,12 +130,12 @@ class FrameAcquireNode(BaseDagNode):
         )
 
         # Ensure exact `last_line + 1` alignment on top of the next image capture & OCR when auto-resuming,
-        # OR whenever the viewport jumped outside the contiguous window [expected_top - 6, expected_top].
+        # OR whenever the viewport jumped outside the contiguous window [expected_top - 6, expected_top + 2].
         is_mock = bool(serial and "mock" in str(serial).lower())
         is_exact_match = (t_det == expected_top) or (char_track_mode and t_det == 0)
         is_contiguous_window = (
             t_det > 0
-            and max(1, expected_top - 6) <= t_det <= expected_top
+            and max(1, expected_top - 6) <= t_det <= expected_top + 2
             and (b_det == 0 or b_det >= expected_top)
         )
         needs_range_recovery = (
