@@ -647,6 +647,8 @@ def clear_key_events_telemetry() -> None:
     }
 
 DIAGNOSTICS_TRACE_FILE = DOCUMENT_FILE.parent / "project_diagnostics_trace.json"
+_DEFAULT_DIAGNOSTICS_TRACE_FILE = DIAGNOSTICS_TRACE_FILE
+_WORKSPACE_MIRROR_TRACE_FILE = Path(__file__).resolve().parents[2] / "storage" / "project_diagnostics_trace.json"
 total_dag2_loops_executed: int = 0
 
 project_diagnostics_trace: Dict[str, Any] = {
@@ -674,6 +676,12 @@ project_diagnostics_trace: Dict[str, Any] = {
     "total_auto_recoveries": 0,
     "total_downtime_ms": 0,
     "backfilled_up_to_frame_count": 0,
+    "metadata_driver_active": False,
+    "bundle_metadata_driver": {},
+    "part_metadata_driver": {},
+    "codescan_start_traces": [],
+    "active_codescan_file": None,
+    "process_accuracy": {},
     "stop_and_restart_log": [],
     "loop_runs": [],
     "lifecycle_events": []
@@ -705,8 +713,15 @@ def _parse_iso_to_ms(iso_str: Optional[str]) -> Optional[int]:
 def save_diagnostics_trace() -> None:
     try:
         DIAGNOSTICS_TRACE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        serialized = json.dumps(project_diagnostics_trace, indent=2, cls=NumpySafeJSONEncoder)
         with open(DIAGNOSTICS_TRACE_FILE, "w", encoding="utf-8") as f:
-            json.dump(project_diagnostics_trace, f, indent=2, cls=NumpySafeJSONEncoder)
+            f.write(serialized)
+        if DIAGNOSTICS_TRACE_FILE == _DEFAULT_DIAGNOSTICS_TRACE_FILE and _WORKSPACE_MIRROR_TRACE_FILE.parent.exists():
+            try:
+                with open(_WORKSPACE_MIRROR_TRACE_FILE, "w", encoding="utf-8") as fm:
+                    fm.write(serialized)
+            except Exception:
+                pass
     except Exception as e:
         print(f"[save_diagnostics_trace] Error: {e}")
 
@@ -728,15 +743,112 @@ def load_diagnostics_trace() -> None:
         except Exception as e:
             print(f"[load_diagnostics_trace] Error: {e}")
 
+def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any]:
+    proj = None
+    if project_id:
+        try:
+            proj = db.get_project(project_id)
+        except Exception:
+            proj = None
+    p_num = int((proj or {}).get("part_number") or multipart_bundle_state.get("current_part") or 0)
+    pred_parts = list(multipart_bundle_state.get("predetermined_parts") or [])
+    pred_match = next((p for p in pred_parts if int(p.get("part_number") or 0) == p_num), None) if p_num > 0 else None
+    p_hdr = dict((proj or {}).get("part_header") or {}) if proj else {}
+
+    files_in_part = int(
+        (pred_match or {}).get("files_in_part")
+        or (proj or {}).get("declared_files_in_part")
+        or p_hdr.get("files_in_part")
+        or 0
+    )
+    total_proj_files = int(
+        (pred_match or {}).get("total_project_files")
+        or (proj or {}).get("total_project_files")
+        or p_hdr.get("total_project_files")
+        or (multipart_bundle_state.get("bundle_totals") or {}).get("total_project_files")
+        or 0
+    )
+    part_size_kb = round(
+        float(
+            (pred_match or {}).get("part_size_kb")
+            or (proj or {}).get("declared_part_size_kb")
+            or p_hdr.get("part_size_kb")
+            or 0.0
+        ),
+        2,
+    )
+    part_size_bytes = int(
+        (pred_match or {}).get("part_size_bytes")
+        or (proj or {}).get("declared_part_size_bytes")
+        or p_hdr.get("part_size_bytes")
+        or (round(part_size_kb * 1024.0) if part_size_kb > 0 else 0)
+    )
+    declared_lines = int(
+        (pred_match or {}).get("declared_lines")
+        or (proj or {}).get("declared_part_lines")
+        or p_hdr.get("declared_lines")
+        or 0
+    )
+    declared_chars = int(
+        (pred_match or {}).get("declared_chars")
+        or (proj or {}).get("declared_part_chars")
+        or p_hdr.get("declared_chars")
+        or 0
+    )
+    tot_parts = int(
+        (proj or {}).get("total_parts")
+        or multipart_bundle_state.get("total_parts")
+        or p_hdr.get("total_parts")
+        or 0
+    )
+    fn = str(
+        (pred_match or {}).get("file_name")
+        or (proj or {}).get("part_file_name")
+        or p_hdr.get("file_name")
+        or ""
+    ).strip()
+    b_name = str(
+        (proj or {}).get("bundle_name")
+        or multipart_bundle_state.get("base_prefix")
+        or p_hdr.get("bundle_name")
+        or ""
+    ).strip()
+    if not (files_in_part or declared_lines or declared_chars or part_size_kb or p_num):
+        return {}
+    return {
+        "has_part_header": bool(declared_lines > 0 or files_in_part > 0 or declared_chars > 0 or part_size_kb > 0),
+        "is_multipart": bool(tot_parts > 1 or multipart_bundle_state.get("is_multipart")),
+        "bundle_id": str((proj or {}).get("bundle_id") or multipart_bundle_state.get("bundle_id") or ""),
+        "bundle_name": b_name,
+        "file_name": fn,
+        "file_part_tag": str((pred_match or {}).get("file_part_tag") or p_hdr.get("file_part_tag") or (f"part{p_num}" if p_num > 0 and tot_parts > 1 else "")),
+        "part_title_tag": str((pred_match or {}).get("part_title_tag") or p_hdr.get("part_title_tag") or (f"(Part {p_num} of {tot_parts})" if p_num > 0 and tot_parts > 0 else "")),
+        "part_number": max(1, p_num) if p_num else 1,
+        "total_parts": max(1, tot_parts) if tot_parts else 1,
+        "files_in_part": files_in_part,
+        "total_project_files": total_proj_files,
+        "part_size_kb": part_size_kb,
+        "part_size_bytes": part_size_bytes,
+        "declared_lines": declared_lines,
+        "declared_chars": declared_chars,
+    }
+
 def reset_project_diagnostics_trace(project_id: Optional[str] = None, project_name: Optional[str] = None, target_total_lines: int = 0) -> None:
     global project_diagnostics_trace, total_dag2_loops_executed
     now = datetime.now()
     now_ms = int(now.timestamp() * 1000)
     total_dag2_loops_executed = 0
+
+    existing_bundle_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
+    if not existing_bundle_drv and multipart_bundle_state.get("bundle_totals"):
+        existing_bundle_drv = dict(multipart_bundle_state.get("bundle_totals") or {})
+    hydrated_part_drv = _hydrate_part_driver_for_project(project_id)
+    eff_target_lines = int(target_total_lines or hydrated_part_drv.get("declared_lines") or 0)
+
     project_diagnostics_trace.update({
         "project_id": project_id,
         "project_name": project_name,
-        "target_total_lines": target_total_lines,
+        "target_total_lines": eff_target_lines,
         "project_started_at_iso": now.isoformat(),
         "project_started_at_ms": now_ms,
         "first_line_acquired_at_iso": None,
@@ -758,13 +870,19 @@ def reset_project_diagnostics_trace(project_id: Optional[str] = None, project_na
         "total_auto_recoveries": 0,
         "total_downtime_ms": 0,
         "backfilled_up_to_frame_count": 0,
+        "metadata_driver_active": bool(existing_bundle_drv or hydrated_part_drv),
+        "bundle_metadata_driver": existing_bundle_drv,
+        "part_metadata_driver": hydrated_part_drv,
+        "codescan_start_traces": [],
+        "active_codescan_file": None,
+        "process_accuracy": {},
         "stop_and_restart_log": [],
         "loop_runs": [],
         "lifecycle_events": []
     })
     record_diagnostics_trace_event(
         event_type="PROJECT_INIT_START",
-        reason=f"Project '{project_name or project_id}' initialization started (Target: {target_total_lines or 'calibrating'} lines)",
+        reason=f"Project '{project_name or project_id}' initialization started (Target: {eff_target_lines or 'calibrating'} lines)",
         page_index=1,
         top_line=1
     )
@@ -885,6 +1003,344 @@ def record_diagnostics_trace_event(
         save_diagnostics_trace()
     return ev
 
+
+def update_bundle_metadata_driver_in_trace(
+    bundle_driver: Dict[str, Any],
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """
+    Records the aggregate multi-part bundle metadata driver (read from opening each part file
+    during [Bundle Detect]) into `project_diagnostics_trace.json`.
+    """
+    if not isinstance(bundle_driver, dict):
+        return project_diagnostics_trace.get("bundle_metadata_driver") or {}
+    merged = {
+        **(project_diagnostics_trace.get("bundle_metadata_driver") or {}),
+        **{k: v for k, v in bundle_driver.items() if v is not None},
+        "updated_at_iso": datetime.now().isoformat(),
+    }
+    project_diagnostics_trace["bundle_metadata_driver"] = merged
+    project_diagnostics_trace["metadata_driver_active"] = True
+    if persist:
+        save_diagnostics_trace()
+    return merged
+
+
+def update_part_metadata_driver_in_trace(
+    part_header: Dict[str, Any],
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """
+    Records the active part's content header detail attributes (`files_in_part`,
+    `total_project_files`, `part_size_kb`, `declared_lines`, `declared_chars`, `file_part_tag`,
+    `part_title_tag`) into `project_diagnostics_trace.json` as an authoritative metadata driver.
+    """
+    if not isinstance(part_header, dict):
+        return project_diagnostics_trace.get("part_metadata_driver") or {}
+    merged = {
+        **(project_diagnostics_trace.get("part_metadata_driver") or {}),
+        **{k: v for k, v in part_header.items() if v is not None},
+        "updated_at_iso": datetime.now().isoformat(),
+    }
+    project_diagnostics_trace["part_metadata_driver"] = merged
+    project_diagnostics_trace["metadata_driver_active"] = True
+    decl_lns = int(merged.get("declared_lines") or 0)
+    if decl_lns > 0 and int(project_diagnostics_trace.get("target_total_lines") or 0) <= 0:
+        project_diagnostics_trace["target_total_lines"] = decl_lns
+    if persist:
+        save_diagnostics_trace()
+    return merged
+
+
+def record_code_scan_start_trace(
+    tag_attrs: Dict[str, Any],
+    frame_id: Optional[str] = None,
+    page_index: Optional[int] = None,
+    loop_index: Optional[int] = None,
+    md_line: Optional[int] = None,
+    part_number: Optional[int] = None,
+    source_node: str = "frame_acquire",
+    persist: bool = True,
+) -> Dict[str, Any]:
+    """
+    Detects and records a `CODESCAN_FILE_START` (`Code_Scan_Start`) marker and its 5 content
+    attributes (`path`, `type`, `size`, `lines`, `chars`) into `project_diagnostics_trace.json`
+    so the JSON trace acts as a live metadata driver for scan pacing and OCR verification.
+    """
+    if not isinstance(tag_attrs, dict):
+        return {}
+    now = datetime.now()
+    ts_iso = now.isoformat()
+    ts_ms = int(now.timestamp() * 1000)
+
+    resolved_part = int(
+        part_number
+        or tag_attrs.get("part_number")
+        or (project_diagnostics_trace.get("part_metadata_driver") or {}).get("part_number")
+        or multipart_bundle_state.get("current_part")
+        or 1
+    )
+    resolved_ln = int(md_line if md_line is not None else (tag_attrs.get("md_line") or tag_attrs.get("tag_start_md_line") or 0))
+    resolved_page = int(
+        page_index
+        if page_index is not None
+        else (tag_attrs.get("page_index") or latest_telemetry.get("current_page") or max(1, len(captured_frames)))
+    )
+    resolved_loop = int(
+        loop_index
+        if loop_index is not None
+        else (current_dag2_loop_index or total_dag2_loops_executed or resolved_page)
+    )
+    resolved_fid = str(
+        frame_id
+        or tag_attrs.get("frame_id")
+        or orchestration_state.get("last_acquired_frame_id")
+        or ""
+    )
+
+    path_val = str(tag_attrs.get("path") or "").strip()
+    norm_path_val = str(tag_attrs.get("normalized_path") or path_val).strip()
+    type_val = str(tag_attrs.get("type") or tag_attrs.get("ext") or "").strip()
+    size_val = int(tag_attrs.get("size") if tag_attrs.get("size") is not None else (tag_attrs.get("expected_size") or 0))
+    lines_val = int(tag_attrs.get("lines") if tag_attrs.get("lines") is not None else (tag_attrs.get("expected_lines") or 0))
+    chars_val = int(tag_attrs.get("chars") if tag_attrs.get("chars") is not None else (tag_attrs.get("expected_chars") or 0))
+    has_all = bool(
+        tag_attrs.get("has_all_attributes")
+        if tag_attrs.get("has_all_attributes") is not None
+        else (path_val and type_val and size_val >= 0 and lines_val >= 0 and chars_val >= 0)
+    )
+    canonical_tag = str(
+        tag_attrs.get("canonical_tag")
+        or (
+            f'<!-- CODESCAN_FILE_START path="{path_val}" type="{type_val}" '
+            f'size="{size_val}" lines="{lines_val}" chars="{chars_val}" -->'
+            if path_val
+            else ""
+        )
+    )
+
+    traces: List[Dict[str, Any]] = project_diagnostics_trace.setdefault("codescan_start_traces", [])
+    existing_entry: Optional[Dict[str, Any]] = None
+    for item in traces:
+        same_part = int(item.get("part_number") or 1) == resolved_part
+        ex_ln = int(item.get("md_line") or 0)
+        ex_norm = str(item.get("normalized_path") or item.get("path") or "").strip()
+        if same_part and (
+            (resolved_ln > 0 and ex_ln == resolved_ln)
+            or (norm_path_val and ex_norm == norm_path_val and (resolved_ln == 0 or ex_ln == 0 or abs(ex_ln - resolved_ln) <= 2))
+        ):
+            existing_entry = item
+            break
+
+    is_new_detection = existing_entry is None
+    if existing_entry is not None:
+        if path_val:
+            existing_entry["path"] = path_val
+            existing_entry["normalized_path"] = norm_path_val
+        if type_val:
+            existing_entry["type"] = type_val
+        if size_val > 0 or not existing_entry.get("size"):
+            existing_entry["size"] = size_val
+        if lines_val > 0 or not existing_entry.get("lines"):
+            existing_entry["lines"] = lines_val
+        if chars_val > 0 or not existing_entry.get("chars"):
+            existing_entry["chars"] = chars_val
+        if resolved_ln > 0:
+            existing_entry["md_line"] = resolved_ln
+        if resolved_fid:
+            existing_entry["frame_id"] = resolved_fid
+        existing_entry["has_all_attributes"] = bool(existing_entry.get("has_all_attributes") or has_all)
+        if canonical_tag and (has_all or not existing_entry.get("canonical_tag")):
+            existing_entry["canonical_tag"] = canonical_tag
+        existing_entry["code_scan_start"] = {
+            "path": existing_entry.get("path", ""),
+            "type": existing_entry.get("type", ""),
+            "size": int(existing_entry.get("size") or 0),
+            "lines": int(existing_entry.get("lines") or 0),
+            "chars": int(existing_entry.get("chars") or 0),
+        }
+        existing_entry["updated_at_iso"] = ts_iso
+        trace_record = existing_entry
+    else:
+        trace_record = {
+            "id": f"cs_start_p{resolved_part}_ln{resolved_ln}_{len(traces) + 1}",
+            "event_type": "CODE_SCAN_START",
+            "part_number": resolved_part,
+            "md_line": resolved_ln,
+            "path": path_val,
+            "normalized_path": norm_path_val,
+            "type": type_val,
+            "size": size_val,
+            "lines": lines_val,
+            "chars": chars_val,
+            "code_scan_start": {
+                "path": path_val,
+                "type": type_val,
+                "size": size_val,
+                "lines": lines_val,
+                "chars": chars_val,
+            },
+            "has_all_attributes": has_all,
+            "is_wrapped": bool(tag_attrs.get("is_wrapped", False)),
+            "canonical_tag": canonical_tag,
+            "frame_id": resolved_fid,
+            "page_index": resolved_page,
+            "loop_index": resolved_loop,
+            "source_node": source_node,
+            "detected_at_iso": ts_iso,
+            "detected_at_ms": ts_ms,
+            "updated_at_iso": ts_iso,
+            "status": "scanning_active",
+            "actual_size": 0,
+            "actual_lines": 0,
+            "actual_chars": 0,
+            "markers_paired": False,
+            "all_metrics_match": False,
+            "process_accuracy": {},
+        }
+        traces.append(trace_record)
+        if len(traces) > 2500:
+            del traces[0]
+
+    project_diagnostics_trace["active_codescan_file"] = trace_record
+    project_diagnostics_trace["metadata_driver_active"] = True
+
+    if is_new_detection:
+        ev_item = {
+            "id": f"ev_cs_{ts_ms}_{len(project_diagnostics_trace.get('lifecycle_events', [])) + 1}",
+            "timestamp_iso": ts_iso,
+            "timestamp_ms": ts_ms,
+            "event_type": "CODE_SCAN_START",
+            "loop_index": resolved_loop,
+            "page_index": resolved_page,
+            "top_line": resolved_ln or int(latest_telemetry.get("current_top_line") or 0),
+            "bottom_line": int(latest_telemetry.get("current_bottom_line") or resolved_ln or 0),
+            "target_top_line": int(orchestration_state.get("next_target_top") or 0),
+            "node_id": source_node,
+            "frame_id": resolved_fid,
+            "code_scan_start": {
+                "path": path_val,
+                "type": type_val,
+                "size": size_val,
+                "lines": lines_val,
+                "chars": chars_val,
+                "md_line": resolved_ln,
+                "part_number": resolved_part,
+            },
+            "reason": (
+                f"CODE_SCAN_START detected at Ln {resolved_ln}: path=\"{path_val}\" "
+                f"type=\"{type_val}\" size={size_val} lines={lines_val} chars={chars_val}"
+            ),
+            "recovery_action": None,
+            "downtime_ms": 0,
+            "downtime_formatted": None,
+        }
+        project_diagnostics_trace.setdefault("lifecycle_events", []).append(ev_item)
+        if len(project_diagnostics_trace["lifecycle_events"]) > 3000:
+            del project_diagnostics_trace["lifecycle_events"][0]
+
+    if persist:
+        save_diagnostics_trace()
+    return trace_record
+
+
+def reassign_codescan_trace_frame_id(
+    old_frame_id: str,
+    new_frame_id: str,
+    persist: bool = True,
+) -> None:
+    if not old_frame_id or not new_frame_id or old_frame_id == new_frame_id:
+        return
+    changed = False
+    for item in project_diagnostics_trace.get("codescan_start_traces", []):
+        if item.get("frame_id") == old_frame_id:
+            item["frame_id"] = new_frame_id
+            changed = True
+    for ev in project_diagnostics_trace.get("lifecycle_events", []):
+        if ev.get("frame_id") == old_frame_id:
+            ev["frame_id"] = new_frame_id
+            changed = True
+    if changed and persist:
+        save_diagnostics_trace()
+
+
+def sync_codescan_verification_to_trace(
+    verify_res: Dict[str, Any],
+    persist: bool = True,
+) -> None:
+    """
+    Synchronizes live `verify_codescan_file_markers_and_metrics` results (per-file actual vs
+    declared `size`, `lines`, `chars`, per-process accuracy, active file, part & bundle progress)
+    back into `project_diagnostics_trace.json` and `headless_telemetry_session`.
+    """
+    if not isinstance(verify_res, dict):
+        return
+    part_hdr = verify_res.get("part_header_metadata") or {}
+    hier = verify_res.get("hierarchical_progress") or {}
+    proc_acc = verify_res.get("process_accuracy") or part_hdr.get("process_accuracy") or {}
+    bundle_info = hier.get("bundle") or {}
+
+    if part_hdr.get("has_part_header") or part_hdr.get("declared_lines") or part_hdr.get("files_in_part"):
+        update_part_metadata_driver_in_trace(part_hdr, persist=False)
+    if bundle_info:
+        update_bundle_metadata_driver_in_trace(bundle_info, persist=False)
+    if proc_acc:
+        project_diagnostics_trace["process_accuracy"] = proc_acc
+        latest_telemetry["process_accuracy"] = proc_acc
+
+    resolved_part = int(part_hdr.get("part_number") or multipart_bundle_state.get("current_part") or 1)
+    for vf in verify_res.get("vfs_files") or []:
+        tag_ln = int(vf.get("tag_start_md_line") or vf.get("start_md_line") or 0)
+        fids = vf.get("source_frame_ids") or []
+        tr = record_code_scan_start_trace(
+            {
+                "path": vf.get("path", ""),
+                "normalized_path": vf.get("normalized_path", ""),
+                "type": vf.get("ext") or vf.get("type") or "",
+                "size": vf.get("expected_size", 0),
+                "lines": vf.get("expected_lines", 0),
+                "chars": vf.get("expected_chars", 0),
+                "has_all_attributes": ((vf.get("distinct_verification") or {}).get("markers") or {}).get("has_all_start_attributes", True),
+            },
+            frame_id=fids[0] if fids else None,
+            md_line=tag_ln,
+            part_number=resolved_part,
+            source_node="document_assemble",
+            persist=False,
+        )
+        if tr:
+            tr.update({
+                "actual_size": int(vf.get("actual_size") or 0),
+                "size_delta": int(vf.get("size_delta") or 0),
+                "size_matches": bool(vf.get("size_matches", False)),
+                "actual_lines": int(vf.get("actual_lines") or 0),
+                "line_count_delta": int(vf.get("line_count_delta") or 0),
+                "lines_matches": bool(vf.get("lines_matches", False)),
+                "actual_chars": int(vf.get("actual_chars") or 0),
+                "chars_delta": int(vf.get("chars_delta") or 0),
+                "chars_matches": bool(vf.get("chars_matches", False)),
+                "markers_paired": bool(vf.get("markers_paired", False)),
+                "all_metrics_match": bool(vf.get("all_metrics_match", False)),
+                "end_md_line": int(vf.get("end_md_line") or 0),
+                "source_frame_ids": fids,
+                "status": vf.get("lifecycle_status", "scanning_active"),
+                "process_accuracy": vf.get("process_accuracy") or proc_acc,
+            })
+
+    active_compact = hier.get("active_file")
+    if active_compact:
+        project_diagnostics_trace["active_codescan_file"] = active_compact
+
+    if isinstance(headless_telemetry_session, dict):
+        headless_telemetry_session["bundle_progress"] = bundle_info
+        headless_telemetry_session["part_progress"] = hier.get("part") or {}
+        headless_telemetry_session["active_codescan_file"] = active_compact
+        headless_telemetry_session["process_accuracy"] = proc_acc
+
+    if persist:
+        save_diagnostics_trace()
+
+
 def ensure_diagnostics_trace_backfilled() -> Dict[str, Any]:
     """
     Ensures project_diagnostics_trace has full historical coverage from the very first frame
@@ -901,11 +1357,13 @@ def ensure_diagnostics_trace_backfilled() -> Dict[str, Any]:
     proj_is_completed = str((proj or {}).get("status") or "").lower() == "completed"
 
     if pid and project_diagnostics_trace.get("project_id") not in (None, pid):
-        # Switched project: reset trace state from previous project before backfilling current project
+        # Switched project: preserve bundle_metadata_driver across parts of the same bundle and hydrate active part driver
+        hydrated_part = _hydrate_part_driver_for_project(pid)
+        existing_b_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
         project_diagnostics_trace.update({
             "project_id": pid,
             "project_name": (proj or {}).get("name") or f"Project {pid}",
-            "target_total_lines": int((proj or {}).get("target_total_lines") or 0),
+            "target_total_lines": int((proj or {}).get("target_total_lines") or hydrated_part.get("declared_lines") or 0),
             "first_line_acquired_at_iso": None,
             "first_line_acquired_at_ms": None,
             "first_frame_id": None,
@@ -921,12 +1379,23 @@ def ensure_diagnostics_trace_backfilled() -> Dict[str, Any]:
             "last_stop_at_ms": None,
             "last_stop_reason": None,
             "backfilled_up_to_frame_count": 0,
+            "metadata_driver_active": bool(existing_b_drv or hydrated_part),
+            "bundle_metadata_driver": existing_b_drv,
+            "part_metadata_driver": hydrated_part,
+            "codescan_start_traces": [],
+            "active_codescan_file": None,
+            "process_accuracy": {},
             "stop_and_restart_log": [],
             "loop_runs": [],
             "lifecycle_events": [],
         })
     elif pid and not project_diagnostics_trace.get("project_id"):
         project_diagnostics_trace["project_id"] = pid
+        if not project_diagnostics_trace.get("part_metadata_driver"):
+            hp = _hydrate_part_driver_for_project(pid)
+            if hp:
+                project_diagnostics_trace["part_metadata_driver"] = hp
+                project_diagnostics_trace["metadata_driver_active"] = True
 
     if proj:
         project_diagnostics_trace["project_name"] = proj.get("name") or proj.get("filename") or f"Project {pid}"
@@ -1245,6 +1714,20 @@ def record_dag2_loop_result(loop_record: Dict[str, Any]) -> None:
                 b_line
             )
 
+        page_cs_starts = [
+            {
+                "md_line": s.get("md_line"),
+                "path": s.get("path"),
+                "type": s.get("type"),
+                "size": s.get("size"),
+                "lines": s.get("lines"),
+                "chars": s.get("chars"),
+            }
+            for s in project_diagnostics_trace.get("codescan_start_traces", [])
+            if (fid and s.get("frame_id") == fid)
+            or (t_line and b_line and t_line <= int(s.get("md_line") or 0) <= b_line)
+        ]
+
         run_entry = {
             "loop_index": l_idx,
             "loop_id": loop_record.get("loop_id") or f"loop_{l_idx:04d}",
@@ -1265,6 +1748,9 @@ def record_dag2_loop_result(loop_record: Dict[str, Any]) -> None:
             "error_reason": error_reason,
             "recovery_applied": loop_record.get("recovery_applied"),
             "arrows_pressed": arr_cnt,
+            "codescan_starts_in_page": page_cs_starts,
+            "active_codescan_file": project_diagnostics_trace.get("active_codescan_file"),
+            "process_accuracy": project_diagnostics_trace.get("process_accuracy") or latest_telemetry.get("process_accuracy") or {},
             "node_timings": nds
         }
         project_diagnostics_trace["loop_runs"].append(run_entry)
@@ -1286,6 +1772,7 @@ def get_project_diagnostics_trace() -> Dict[str, Any]:
     target_total = int(
         latest_telemetry.get("target_total_lines")
         or project_diagnostics_trace.get("target_total_lines")
+        or (project_diagnostics_trace.get("part_metadata_driver") or {}).get("declared_lines")
         or 0
     )
     highest_line = max(
@@ -1300,6 +1787,7 @@ def get_project_diagnostics_trace() -> Dict[str, Any]:
     elapsed_ms = max(0, end_ms - start_ms) if start_ms else 0
     downtime_ms = int(project_diagnostics_trace.get("total_downtime_ms", 0) or 0)
     active_ms = max(0, elapsed_ms - downtime_ms)
+    cs_traces = project_diagnostics_trace.get("codescan_start_traces", [])
 
     return {
         **project_diagnostics_trace,
@@ -1308,12 +1796,14 @@ def get_project_diagnostics_trace() -> Dict[str, Any]:
         "total_captured_frames": len(captured_frames),
         "total_assembled_lines": len(document_lines),
         "completion_percent": comp_pct,
+        "codescan_starts_count": len(cs_traces),
         "loop_running": bool(getattr(sys.modules[__name__], "capture_loop_running", False)),
         "summary_metrics": {
             "total_loop_runs": len(runs),
             "successful_runs": len(succ_runs),
             "failed_runs": len(fail_runs),
             "auto_recovered_runs": len(rec_runs),
+            "total_codescan_starts": len(cs_traces),
             "total_stops": int(project_diagnostics_trace.get("total_stops", 0) or 0),
             "total_manual_restarts": int(project_diagnostics_trace.get("total_manual_restarts", 0) or 0),
             "total_auto_recoveries": int(project_diagnostics_trace.get("total_auto_recoveries", 0) or 0),
@@ -1871,6 +2361,7 @@ def start_headless_telemetry_session(operation_type: str = "headless_loop", targ
         or proj.get("total_lines", 0)
         or 0
     )
+    hier_init = latest_telemetry.get("codescan_hierarchy") or {}
     headless_telemetry_session = {
         "session_id": str(uuid.uuid4())[:8],
         "is_active": True,
@@ -1899,7 +2390,11 @@ def start_headless_telemetry_session(operation_type: str = "headless_loop", targ
         "finish_status_message": f"Headless {operation_type.replace('_', ' ')} in progress...",
         "recent_events": [f"[{time.strftime('%H:%M:%S')}] Headless {operation_type} session started"],
         "reconstructed_markdown_path": None,
-        "reconstructed_markdown_size": 0
+        "reconstructed_markdown_size": 0,
+        "bundle_progress": hier_init.get("bundle") or {},
+        "part_progress": hier_init.get("part") or {},
+        "active_codescan_file": latest_telemetry.get("active_codescan_file"),
+        "process_accuracy": latest_telemetry.get("process_accuracy") or {},
     }
     return headless_telemetry_session
 
@@ -1977,6 +2472,16 @@ def update_headless_telemetry_session(
         tot_f = headless_telemetry_session["total_frames_target"]
         pct = round(min(100.0, (headless_telemetry_session["frames_processed"] / tot_f) * 100), 1)
         headless_telemetry_session["completion_percent"] = pct
+
+    hier_cur = latest_telemetry.get("codescan_hierarchy") or {}
+    if hier_cur.get("bundle"):
+        headless_telemetry_session["bundle_progress"] = hier_cur["bundle"]
+    if hier_cur.get("part"):
+        headless_telemetry_session["part_progress"] = hier_cur["part"]
+    if latest_telemetry.get("active_codescan_file"):
+        headless_telemetry_session["active_codescan_file"] = latest_telemetry["active_codescan_file"]
+    if latest_telemetry.get("process_accuracy"):
+        headless_telemetry_session["process_accuracy"] = latest_telemetry["process_accuracy"]
 
     if event_msg:
         events = headless_telemetry_session.setdefault("recent_events", [])
@@ -3236,13 +3741,15 @@ def sync_multipart_state_from_alignment(
     proj_bundle_name = proj.get("bundle_name")
     proj_part_fn = str(proj.get("part_file_name") or "").strip()
 
+    has_explicit_align = bool(alignment_status is not None and not prefer_active_project)
+    use_proj_over_align = bool(prefer_active_project or (proj_part_num and not has_explicit_align))
     align = (alignment_status or {}) if prefer_active_project else (alignment_status or latest_alignment_status or {})
-    align_fn = "" if (prefer_active_project or proj_part_num) else (align.get("file_name") or "")
-    canonical_fn = proj_part_fn or _extract_canonical_filename_from_project_or_lines(proj, document_lines)
+    align_fn = "" if use_proj_over_align else (align.get("file_name") or "")
+    canonical_fn = (align_fn if has_explicit_align else "") or proj_part_fn or _extract_canonical_filename_from_project_or_lines(proj, document_lines)
     candidate_name = canonical_fn or align_fn or proj.get("name") or ""
 
-    mp_info = None if (prefer_active_project or proj_part_num) else align.get("multipart_info")
-    if (not mp_info or not mp_info.get("is_multipart")) and not (prefer_active_project or proj_part_num) and align.get("is_multipart") and align.get("part_number") is not None:
+    mp_info = None if use_proj_over_align else align.get("multipart_info")
+    if (not mp_info or not mp_info.get("is_multipart")) and not use_proj_over_align and align.get("is_multipart") and align.get("part_number") is not None:
         mp_info = dict(align)
     if not mp_info or not mp_info.get("is_multipart"):
         mp_info = parse_multipart_markdown_filename(candidate_name or canonical_fn)
@@ -3266,7 +3773,9 @@ def sync_multipart_state_from_alignment(
         multipart_bundle_state["is_multipart"] = True
         if mp_info.get("base_prefix"):
             multipart_bundle_state["base_prefix"] = mp_info["base_prefix"]
-        if proj_part_num is not None:
+        if has_explicit_align and mp_info.get("part_number") is not None:
+            multipart_bundle_state["current_part"] = int(mp_info["part_number"])
+        elif proj_part_num is not None:
             multipart_bundle_state["current_part"] = int(proj_part_num)
         elif mp_info.get("part_number") is not None:
             multipart_bundle_state["current_part"] = int(mp_info["part_number"])
@@ -3297,7 +3806,7 @@ def sync_multipart_state_from_alignment(
         multipart_bundle_state["is_multipart"] = True
         if proj_bundle_name and not multipart_bundle_state.get("base_prefix"):
             multipart_bundle_state["base_prefix"] = str(proj_bundle_name)
-        if proj_part_num:
+        if proj_part_num and not (has_explicit_align and mp_info and mp_info.get("part_number") is not None):
             multipart_bundle_state["current_part"] = int(proj_part_num)
         if proj_total_parts and not multipart_bundle_state.get("total_parts"):
             multipart_bundle_state["total_parts"] = int(proj_total_parts)
@@ -3328,7 +3837,12 @@ def sync_multipart_state_from_alignment(
         if avail:
             multipart_bundle_state["available_parts"] = avail
             multipart_bundle_state["total_parts"] = max(multipart_bundle_state.get("total_parts") or 0, max(avail))
-        cur_p = int(proj_part_num or multipart_bundle_state.get("current_part") or 1)
+        explicit_align_part = (
+            int(mp_info["part_number"])
+            if (has_explicit_align and mp_info and mp_info.get("part_number") is not None)
+            else None
+        )
+        cur_p = int(explicit_align_part or proj_part_num or multipart_bundle_state.get("current_part") or 1)
         multipart_bundle_state["current_part"] = cur_p
         next_candidates = [p for p in predetermined if int(p.get("part_number") or 0) > cur_p]
         if next_candidates:
@@ -3341,6 +3855,7 @@ def sync_multipart_state_from_alignment(
 
         completed_part_nums = set()
         paused_part_nums = set()
+        bundle_proj_by_part: Dict[int, Dict[str, Any]] = {}
         if proj_bundle_id:
             try:
                 for bp in db.get_bundle_projects(str(proj_bundle_id)):
@@ -3349,6 +3864,7 @@ def sync_multipart_state_from_alignment(
                     bp_captured = max(int(bp.get("max_line") or 0), int(bp.get("line_count") or 0))
                     bp_status = str(bp.get("status") or "").lower()
                     if bp_num > 0:
+                        bundle_proj_by_part[bp_num] = bp
                         if bp_target > 0 and bp_captured >= bp_target - 4:
                             completed_part_nums.add(bp_num)
                         elif bp_status == "completed" and bp_target <= 0 and bp_captured > 0:
@@ -3362,18 +3878,68 @@ def sync_multipart_state_from_alignment(
                                     pass
             except Exception:
                 pass
+        sum_files = 0
+        max_proj_files = 0
+        sum_size_kb = 0.0
+        sum_lines = 0
+        sum_chars = 0
+        hdr_verified_cnt = 0
         for pt in predetermined:
             pno = int(pt.get("part_number") or 0)
             tot_for_label = int(multipart_bundle_state.get("total_parts") or len(predetermined) or 1)
             pt["scope_label"] = f"MD {pno} / {tot_for_label}"
+            bp_row = bundle_proj_by_part.get(pno) or {}
+            if bp_row:
+                if not pt.get("files_in_part") and bp_row.get("declared_files_in_part"):
+                    pt["files_in_part"] = int(bp_row["declared_files_in_part"])
+                if not pt.get("total_project_files") and bp_row.get("total_project_files"):
+                    pt["total_project_files"] = int(bp_row["total_project_files"])
+                if not pt.get("part_size_kb") and bp_row.get("declared_part_size_kb"):
+                    pt["part_size_kb"] = round(float(bp_row["declared_part_size_kb"]), 2)
+                if not pt.get("part_size_bytes") and bp_row.get("declared_part_size_bytes"):
+                    pt["part_size_kb"] = pt.get("part_size_kb") or round(int(bp_row["declared_part_size_bytes"]) / 1024.0, 2)
+                    pt["part_size_bytes"] = int(bp_row["declared_part_size_bytes"])
+                if not pt.get("declared_lines") and bp_row.get("declared_part_lines"):
+                    pt["declared_lines"] = int(bp_row["declared_part_lines"])
+                if not pt.get("declared_chars") and bp_row.get("declared_part_chars"):
+                    pt["declared_chars"] = int(bp_row["declared_part_chars"])
+                if bp_row.get("max_line") or bp_row.get("line_count"):
+                    pt["captured_lines"] = max(int(bp_row.get("max_line") or 0), int(bp_row.get("line_count") or 0))
+                if not pt.get("header_verified") and (
+                    pt.get("declared_lines") or pt.get("files_in_part") or pt.get("declared_chars")
+                ):
+                    pt["header_verified"] = True
+            sum_files += int(pt.get("files_in_part") or 0)
+            max_proj_files = max(max_proj_files, int(pt.get("total_project_files") or 0))
+            sum_size_kb += float(pt.get("part_size_kb") or 0.0)
+            sum_lines += int(pt.get("declared_lines") or 0)
+            sum_chars += int(pt.get("declared_chars") or 0)
+            if pt.get("header_verified"):
+                hdr_verified_cnt += 1
             if pno == cur_p:
                 pt["status"] = "scanning"
-            elif pno in completed_part_nums:
+            elif pno in completed_part_nums or (
+                pno < cur_p
+                and pno not in paused_part_nums
+                and int(bp_row.get("target_total_lines") or 0) <= 0
+                and not pt.get("header_verified")
+            ):
                 pt["status"] = "completed"
             elif pno in paused_part_nums:
                 pt["status"] = "paused"
             else:
                 pt["status"] = "pending"
+
+        multipart_bundle_state["bundle_totals"] = {
+            "total_parts": int(multipart_bundle_state.get("total_parts") or len(predetermined) or 1),
+            "total_project_files": max(max_proj_files, sum_files),
+            "sum_files_across_parts": sum_files,
+            "total_bundle_size_kb": round(sum_size_kb, 2),
+            "total_bundle_lines": sum_lines,
+            "total_bundle_chars": sum_chars,
+            "verified_headers_count": hdr_verified_cnt,
+            "all_parts_headers_read": bool(hdr_verified_cnt >= len(predetermined) and len(predetermined) > 0),
+        }
 
     active_fn_resolved = (
         proj_part_fn
@@ -3433,7 +3999,16 @@ async def activate_or_create_bundle_part_project(
     )
     eff_bundle_name = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle_name, flags=re.IGNORECASE).strip("_- ") or "Bundle"
     slug = re.sub(r"[^a-z0-9]+", "_", eff_bundle_name.lower()).strip("_") or "bundle"
-    eff_bundle_id = bundle_id or active_proj.get("bundle_id") or f"bundle_{slug}"
+    act_bid_str = str(active_proj.get("bundle_id") or "")
+    act_bname_slug = re.sub(r"[^a-z0-9]+", "_", str(active_proj.get("bundle_name") or active_proj.get("name") or "").lower()).strip("_")
+    act_matches_bundle = bool(
+        act_bid_str
+        and (
+            slug[:10] in act_bid_str.lower()
+            or (act_bname_slug and (slug[:10] in act_bname_slug or act_bname_slug[:10] in slug))
+        )
+    )
+    eff_bundle_id = bundle_id or (act_bid_str if act_matches_bundle else "") or f"bundle_{slug}"
     sibling_max_total = max(
         [
             int(p.get("total_parts") or p.get("part_number") or 0)
@@ -3504,8 +4079,15 @@ async def activate_or_create_bundle_part_project(
             part_file_name=eff_file_name,
         )
         db.append_project_filename(target_pid, eff_file_name)
-    elif active_pid and active_lines == 0 and active_frames == 0:
-        # Active project is empty placeholder: update it in place to represent target_part
+    elif (
+        active_pid
+        and active_lines == 0
+        and active_frames == 0
+        and not active_proj.get("bundle_id")
+        and int(active_proj.get("part_number") or 0) <= 0
+        and int(active_proj.get("declared_part_lines") or 0) <= 0
+    ):
+        # Active project is an unassigned empty placeholder: update it in place to represent target_part
         target_pid = active_pid
         db.update_project_bundle_metadata(
             project_id=target_pid,
@@ -3833,15 +4415,55 @@ _state_initialized = False
 def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Computes the live multipart part-header metadata, CODESCAN_FILE_START/END hierarchical progress,
-    and instance-data OCR steering guide from `document_lines`, and publishes them into
-    `latest_telemetry` and `orchestration_state`.
+    and instance-data OCR steering guide from `document_lines` (or pre-read [Bundle Detect] drivers
+    when `document_lines` is empty), and publishes them into `latest_telemetry` and `orchestration_state`.
     """
+    pid = project_id or get_current_project_id()
     if not document_lines:
+        try:
+            from dag_nodes.markdown_tag_parser_node import _resolve_authoritative_part_and_bundle_drivers
+            part_drv, bundle_drv = _resolve_authoritative_part_and_bundle_drivers({}, project_id=pid)
+        except Exception:
+            part_drv, bundle_drv = {}, {}
+        decl_lns = int(part_drv.get("declared_lines") or latest_telemetry.get("target_total_lines") or 0)
         empty_hier = {
-            "bundle": {"is_multipart": bool(multipart_bundle_state.get("is_multipart")), "bundle_name": multipart_bundle_state.get("base_prefix") or "", "part_number": multipart_bundle_state.get("current_part") or 1, "total_parts": multipart_bundle_state.get("total_parts") or 1, "total_project_files": 0},
-            "part": {"part_number": multipart_bundle_state.get("current_part") or 1, "total_parts": multipart_bundle_state.get("total_parts") or 1, "files_captured": 0, "files_declared": 0, "part_size_kb_captured": 0.0, "part_size_kb_declared": 0.0, "lines_captured": 0, "lines_declared": latest_telemetry.get("target_total_lines") or 0, "chars_captured": 0, "chars_declared": 0, "overall_accuracy_pct": 100.0, "verified_files_count": 0, "mismatched_files_count": 0},
-            "active_file": None,
+            "bundle": bundle_drv or {
+                "is_multipart": bool(multipart_bundle_state.get("is_multipart")),
+                "bundle_name": multipart_bundle_state.get("base_prefix") or "",
+                "part_number": multipart_bundle_state.get("current_part") or 1,
+                "total_parts": multipart_bundle_state.get("total_parts") or 1,
+                "total_project_files": int((multipart_bundle_state.get("bundle_totals") or {}).get("total_project_files") or 0),
+                "total_bundle_size_kb": float((multipart_bundle_state.get("bundle_totals") or {}).get("total_bundle_size_kb") or 0.0),
+                "total_bundle_lines": int((multipart_bundle_state.get("bundle_totals") or {}).get("total_bundle_lines") or 0),
+                "total_bundle_chars": int((multipart_bundle_state.get("bundle_totals") or {}).get("total_bundle_chars") or 0),
+            },
+            "part": {
+                "part_number": int(part_drv.get("part_number") or multipart_bundle_state.get("current_part") or 1),
+                "total_parts": int(part_drv.get("total_parts") or multipart_bundle_state.get("total_parts") or 1),
+                "file_name": part_drv.get("file_name") or multipart_bundle_state.get("active_file_name") or "",
+                "file_part_tag": part_drv.get("file_part_tag") or "",
+                "part_title_tag": part_drv.get("part_title_tag") or "",
+                "files_captured": 0,
+                "files_declared": int(part_drv.get("files_in_part") or 0),
+                "total_project_files": int(part_drv.get("total_project_files") or 0),
+                "size_kb_captured": 0.0,
+                "size_kb_declared": float(part_drv.get("part_size_kb") or 0.0),
+                "part_size_kb_captured": 0.0,
+                "part_size_kb_declared": float(part_drv.get("part_size_kb") or 0.0),
+                "lines_captured": 0,
+                "lines_declared": decl_lns,
+                "chars_captured": 0,
+                "chars_declared": int(part_drv.get("declared_chars") or 0),
+                "progress_pct": 0.0,
+                "overall_accuracy_pct": 100.0,
+                "verified_files_count": 0,
+                "mismatched_files_count": 0,
+            },
+            "active_file": project_diagnostics_trace.get("active_codescan_file"),
         }
+        if part_drv:
+            latest_telemetry["part_header_metadata"] = part_drv
+            orchestration_state["part_header_metadata"] = part_drv
         latest_telemetry["codescan_hierarchy"] = empty_hier
         orchestration_state["codescan_hierarchy"] = empty_hier
         return empty_hier
@@ -3850,7 +4472,6 @@ def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Di
             verify_codescan_file_markers_and_metrics,
             _build_frame_range_index,
         )
-        pid = project_id or get_current_project_id()
         max_k = max(int(k) for k in document_lines.keys())
         md_lines = []
         for ln_i in range(1, max_k + 1):
@@ -3871,16 +4492,21 @@ def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Di
         part_hdr = cs_res.get("part_header_metadata", {})
         hier = cs_res.get("hierarchical_progress", {})
         guide = cs_res.get("ocr_steering_guide", {})
+        proc_acc = cs_res.get("process_accuracy", {})
         latest_telemetry["part_header_metadata"] = part_hdr
         latest_telemetry["codescan_hierarchy"] = hier
         latest_telemetry["ocr_steering_guide"] = guide
+        latest_telemetry["process_accuracy"] = proc_acc
         orchestration_state["part_header_metadata"] = part_hdr
         orchestration_state["codescan_hierarchy"] = hier
         orchestration_state["ocr_steering_guide"] = guide
+        orchestration_state["process_accuracy"] = proc_acc
         if "document_assemble" in dag_state.get("nodes", {}):
             dag_state["nodes"]["document_assemble"]["hierarchical_progress"] = hier
             dag_state["nodes"]["document_assemble"]["part_header_metadata"] = part_hdr
             dag_state["nodes"]["document_assemble"]["ocr_steering_guide"] = guide
+            dag_state["nodes"]["document_assemble"]["process_accuracy"] = proc_acc
+        sync_codescan_verification_to_trace(cs_res, persist=True)
         return hier
     except Exception as e:
         print(f"[refresh_codescan_hierarchy_telemetry] note: {e}")

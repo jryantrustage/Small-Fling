@@ -140,10 +140,32 @@ class InitEndNode(BaseDagNode):
                     if t_fix > 0:
                         top_line = t_fix
 
-        # Evaluate if stuck on line 1 or partial scroll
+        # Resolve authoritative declared_lines from [Bundle Detect] part header driver if available
+        pid = blackboard.project_id or state.get_current_project_id()
+        proj_rec = db.get_project(pid) if pid else (db.get_active_project() or {})
+        part_drv = (state.project_diagnostics_trace or {}).get("part_metadata_driver") or {}
+        declared_lines = int(
+            (proj_rec or {}).get("declared_lines")
+            or (proj_rec or {}).get("declared_part_lines")
+            or part_drv.get("declared_lines")
+            or 0
+        )
+        if declared_lines <= 0:
+            active_part_num = int((proj_rec or {}).get("part_number") or part_drv.get("part_number") or 0)
+            for p_entry in (state.multipart_bundle_state.get("predetermined_parts") or []):
+                if active_part_num > 0 and int(p_entry.get("part_number") or 0) == active_part_num:
+                    declared_lines = int(p_entry.get("declared_lines") or p_entry.get("target_total_lines") or 0)
+                    break
+
+        # Evaluate if stuck on line 1 or partial scroll, guided by declared_lines metadata driver
         is_stuck = False
         if cfg.get("manual_total_lines", 0) > 0:
             total_lines = int(cfg["manual_total_lines"])
+        elif declared_lines > 0 and total_lines > 0 and abs(total_lines - declared_lines) <= 15:
+            total_lines = declared_lines
+            is_stuck = False
+        elif declared_lines > 0 and declared_lines < 500 and total_lines > 0 and abs(total_lines - declared_lines) <= 35:
+            is_stuck = False
         elif total_lines < 500 and (top_line <= 30 or total_lines <= 0):
             is_stuck = True
 
@@ -195,7 +217,11 @@ class InitEndNode(BaseDagNode):
                 rec_bot = recovered.get("total_lines", 0)
                 if rec_bot > total_lines: total_lines = rec_bot
                 if rec_top > 0: top_line = rec_top
-                if total_lines >= 500 or top_line > 30:
+                if declared_lines > 0 and total_lines > 0 and abs(total_lines - declared_lines) <= 15:
+                    total_lines = declared_lines
+                    is_stuck = False
+                    blackboard.actions_run.append("[Automated Event] Editor focus restored and EOF matched declared_lines ✔")
+                elif total_lines >= 500 or top_line > 30 or (0 < declared_lines < 500 and total_lines > 0):
                     is_stuck = False
                     blackboard.actions_run.append("[Automated Event] Editor focus restored and Ctrl+End navigated to EOF ✔")
 
@@ -209,26 +235,31 @@ class InitEndNode(BaseDagNode):
         offline_res = detect_offline_editor_overlay(snap_fixed or blackboard.current_image_bytes, use_ocr=True)
         offline_detected_at_init = bool(offline_res.get("detected"))
         offline_eof_line = total_lines if offline_detected_at_init else max(1, total_lines - 3)
+        driver_verified = bool(declared_lines > 0 and abs(total_lines - declared_lines) <= 5)
 
         blackboard.total_lines = total_lines
         blackboard.top_line = top_line
         blackboard.bottom_line = total_lines
 
-        pid = blackboard.project_id or state.get_current_project_id()
         if pid and total_lines > 0:
             db.update_project_target_lines(pid, total_lines)
 
+        driver_suffix = f" [Header Driver: {declared_lines:,} lines verified]" if driver_verified else (
+            f" [Declared Header: {declared_lines:,} lines]" if declared_lines > 0 else ""
+        )
         insight_msg = (
-            f"Calibrated {total_lines:,} total lines at EOF ('Offline' overlay present) ✔"
+            f"Calibrated {total_lines:,} total lines at EOF ('Offline' overlay present){driver_suffix} ✔"
             if offline_detected_at_init
-            else f"Calibrated {total_lines:,} total lines at EOF (or {offline_eof_line:,} if 'Offline' overlay appears) ✔"
+            else f"Calibrated {total_lines:,} total lines at EOF (or {offline_eof_line:,} if 'Offline' overlay appears){driver_suffix} ✔"
         )
         state.dag_state["nodes"]["init_end"].update({
             "status": "completed",
             "total_lines": total_lines,
+            "declared_lines": declared_lines,
+            "metadata_driver_verified": driver_verified,
             "offline_eof_line": offline_eof_line,
             "offline_overlay_detected": offline_detected_at_init,
-            "evaluator": "EOF Gutter Evaluator",
+            "evaluator": "EOF Gutter + Part Header Evaluator" if declared_lines > 0 else "EOF Gutter Evaluator",
             "telemetry_insight": insight_msg,
             "error": None
         })
@@ -242,6 +273,8 @@ class InitEndNode(BaseDagNode):
             bottom_line=total_lines,
             data={
                 "total_lines": total_lines,
+                "declared_lines": declared_lines,
+                "metadata_driver_verified": driver_verified,
                 "offline_eof_line": offline_eof_line,
                 "offline_overlay_detected": offline_detected_at_init,
                 "top_line": top_line,

@@ -37,6 +37,18 @@ export interface ProjectData {
   total_parts?: number;
   part_file_name?: string;
   is_bundle_part?: boolean;
+  declared_files_in_part?: number;
+  files_in_part?: number;
+  total_project_files?: number;
+  declared_part_size_kb?: number;
+  part_size_kb?: number;
+  declared_part_size_bytes?: number;
+  part_size_bytes?: number;
+  declared_part_lines?: number;
+  declared_lines?: number;
+  declared_part_chars?: number;
+  declared_chars?: number;
+  part_header?: Record<string, any> | null;
 }
 
 export interface ProjectBundleGroup {
@@ -84,6 +96,9 @@ export interface FrameData {
   custom_offset_y?: number;
   model_used?: string;
   arrow_count?: number;
+  detected_part_header?: Record<string, any> | null;
+  codescan_starts?: Array<Record<string, any>>;
+  codescan_ends?: Array<Record<string, any>>;
   token_usage?: {
     prompt_tokens: number;
     candidates_tokens: number;
@@ -192,6 +207,27 @@ export interface PredeterminedBundlePart {
   visual_row_index?: number;
   tap_coords?: [number, number];
   status?: 'completed' | 'scanning' | 'pending' | string;
+  project_id?: string;
+  files_in_part?: number;
+  total_project_files?: number;
+  part_size_kb?: number;
+  part_size_bytes?: number;
+  declared_lines?: number;
+  declared_chars?: number;
+  target_total_lines?: number;
+  part_title_tag?: string;
+  header_verified?: boolean;
+}
+
+export interface BundleTotalsSummary {
+  total_parts?: number;
+  inspected_parts_count?: number;
+  total_project_files?: number;
+  sum_files_across_parts?: number;
+  total_bundle_size_kb?: number;
+  total_bundle_size_bytes?: number;
+  total_bundle_lines?: number;
+  total_bundle_chars?: number;
 }
 
 export interface MultipartBundleState {
@@ -207,6 +243,7 @@ export interface MultipartBundleState {
   next_file_name?: string | null;
   available_parts?: number[];
   predetermined_parts?: PredeterminedBundlePart[];
+  bundle_totals?: BundleTotalsSummary;
   exported_parts?: MultipartExportRecord[];
   transition_status?: string;
   last_transition_message?: string;

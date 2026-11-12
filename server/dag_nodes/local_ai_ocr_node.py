@@ -16,6 +16,59 @@ from services import ocr_service as ocr_svc
 import db
 
 
+def _record_ocr_lines_codescan_markers(
+    lines_list: List[Dict[str, Any]],
+    frame_id_str: str,
+    page_idx_val: int,
+    source_node_name: str = "local_ai_ocr",
+    extra_line_numbers: Optional[List[int]] = None,
+) -> List[Dict[str, Any]]:
+    """Detect CODESCAN_FILE_START tags in OCR lines (or stitched document_lines) and upsert into project_diagnostics_trace.json."""
+    recorded: List[Dict[str, Any]] = []
+    try:
+        from dag_nodes.markdown_tag_parser_node import (
+            CODESCAN_START_RESILIENT_RE,
+            parse_codescan_start_attributes,
+        )
+        candidate_map: Dict[int, str] = {}
+        for idx, item in enumerate(lines_list or []):
+            try:
+                ln = int(re.sub(r"\D", "", str(item.get("line_number") or "")) or 0)
+            except Exception:
+                ln = 0
+            txt = str(item.get("text") or "")
+            if ln > 0 and ln in state.document_lines:
+                dl_val = state.document_lines[ln]
+                dl_txt = dl_val.get("text", "") if isinstance(dl_val, dict) else (dl_val.text if hasattr(dl_val, "text") else str(dl_val))
+                if len(dl_txt) >= len(txt):
+                    txt = dl_txt
+            key_ln = ln if ln > 0 else -(idx + 1)
+            candidate_map[key_ln] = txt
+        for extra_ln in (extra_line_numbers or []):
+            if extra_ln and extra_ln > 0 and extra_ln in state.document_lines:
+                dl_val = state.document_lines[extra_ln]
+                dl_txt = dl_val.get("text", "") if isinstance(dl_val, dict) else (dl_val.text if hasattr(dl_val, "text") else str(dl_val))
+                candidate_map[extra_ln] = dl_txt
+        for key_ln, txt in candidate_map.items():
+            m = CODESCAN_START_RESILIENT_RE.search(txt or "")
+            if m:
+                parsed = parse_codescan_start_attributes(m.group(1) or "")
+                md_ln = key_ln if key_ln > 0 else 0
+                parsed["md_line"] = md_ln
+                rec = state.record_code_scan_start_trace(
+                    parsed,
+                    frame_id=frame_id_str,
+                    page_index=page_idx_val,
+                    md_line=md_ln,
+                    source_node=source_node_name,
+                    persist=True,
+                )
+                recorded.append(rec)
+    except Exception as cs_ex:
+        print(f"[{source_node_name}] codescan trace note: {cs_ex}")
+    return recorded
+
+
 class LocalAiOcrNode(BaseDagNode):
     step = "4"
     id = "local_ai_ocr"
@@ -206,6 +259,13 @@ class LocalAiOcrNode(BaseDagNode):
                             "data": state.get_document_metrics()
                         })
 
+                cs_headless = _record_ocr_lines_codescan_markers(
+                    lines_detected,
+                    temp_calib.stem,
+                    int(blackboard.page_index or state.latest_telemetry.get("current_page") or 0),
+                    source_node_name="local_ai_ocr_headless",
+                )
+
                 if temp_calib.stem in state.captured_frames:
                     state.captured_frames[temp_calib.stem]["lines"] = lines_detected
                     state.captured_frames[temp_calib.stem]["bounding_boxes"] = raw_bboxes
@@ -213,6 +273,8 @@ class LocalAiOcrNode(BaseDagNode):
                     state.captured_frames[temp_calib.stem]["extracted_line_count"] = lines_count
                     state.captured_frames[temp_calib.stem]["status"] = "rescanned"
                     state.captured_frames[temp_calib.stem]["model_used"] = engine_name
+                    if cs_headless:
+                        state.captured_frames[temp_calib.stem]["codescan_starts"] = cs_headless
 
                 blackboard.ai_ocr_text = extracted_text
                 blackboard.preview_text = extracted_text[:300] + ("..." if len(extracted_text) > 300 else "")
@@ -412,6 +474,20 @@ class LocalAiOcrNode(BaseDagNode):
                     "data": state.get_document_metrics()
                 })
 
+        extra_lns: List[int] = []
+        if scan_res.get("leading_wrapped_continuation") and scan_res["leading_wrapped_continuation"].get("line_number"):
+            try:
+                extra_lns.append(int(scan_res["leading_wrapped_continuation"]["line_number"]))
+            except Exception:
+                pass
+        cs_recorded = _record_ocr_lines_codescan_markers(
+            lines_detected,
+            temp_calib.stem,
+            int(blackboard.page_index or state.latest_telemetry.get("current_page") or 0),
+            source_node_name="local_ai_ocr",
+            extra_line_numbers=extra_lns,
+        )
+
         if temp_calib.stem in state.captured_frames and lines_detected:
             state.captured_frames[temp_calib.stem].update({
                 "lines": lines_detected,
@@ -421,6 +497,8 @@ class LocalAiOcrNode(BaseDagNode):
                 "status": "processed",
                 "model_used": engine_name,
             })
+            if cs_recorded:
+                state.captured_frames[temp_calib.stem]["codescan_starts"] = cs_recorded
 
         blackboard.ai_ocr_text = extracted_text
         blackboard.preview_text = extracted_text[:300] + ("..." if len(extracted_text) > 300 else "")

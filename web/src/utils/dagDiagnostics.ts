@@ -37,13 +37,13 @@ export function filterNodeTelemetry(nodeId: string, ev: { message?: string; cate
 
   const matchers: Record<string, () => boolean> = {
     markdown_file_change: () => msg.includes('markdown_file_change') || msg.includes('file change') ||
-      msg.includes('folder') || msg.includes('multi-part') || msg.includes('part ') || msg.includes('bundle'),
+      msg.includes('bundle detect') || msg.includes('folder') || msg.includes('multi-part') || msg.includes('part ') || msg.includes('bundle'),
     init_end: () => msg.includes('init') || msg.includes('calibrat') || msg.includes('ctrl+end') ||
       msg.includes('end') || msg.includes('eof') || msg.includes('node 1') || msg.includes('total_lines'),
     reset_home: () => msg.includes('home') || msg.includes('ctrl+home') || msg.includes('node 2') ||
       msg.includes('line 1') || msg.includes('reset_home'),
     frame_acquire: () => msg.includes('frame_acquire') || msg.includes('capture') || msg.includes('screenshot') ||
-      msg.includes('grab') || msg.includes('node 3') || cat === 'FRAME',
+      msg.includes('grab') || msg.includes('codescan_start') || msg.includes('node 3') || cat === 'FRAME',
     local_ai_ocr: () => msg.includes('local_ai') || msg.includes('minicpm') || msg.includes('rapidocr') || msg.includes('onnx') ||
       msg.includes('ai ocr') || msg.includes('node 4') || msg.includes('node 3b') || msg.includes('verbatim'),
     frame_ocr: () => msg.includes('frame_ocr') || msg.includes('gutter') || msg.includes('line reader') ||
@@ -125,22 +125,28 @@ export function calculateNodeLiveStatus(
       const curPart = Number(nodeData.current_part || 1);
       const totParts = Number(nodeData.total_parts || (Array.isArray(nodeData.predetermined_parts) ? nodeData.predetermined_parts.length : 1) || 1);
       const filesCount = Array.isArray(nodeData.detected_files) ? nodeData.detected_files.length : (Array.isArray(nodeData.predetermined_parts) ? nodeData.predetermined_parts.length : 0);
+      const bundleTotals = nodeData.bundle_totals || {};
+      const totProjFiles = Number(nodeData.total_project_files || bundleTotals.total_project_files || bundleTotals.sum_files_across_parts || 0);
+      const totBundleKb = Number(nodeData.total_bundle_size_kb || bundleTotals.total_bundle_size_kb || 0);
+      const totBundleChars = Number(nodeData.total_bundle_chars || bundleTotals.total_bundle_chars || 0);
       const bundleDone = Boolean(nodeData.bundle_completed);
       const partLabel = nodeData.part_progress_label || `MD ${curPart} / ${totParts}`;
-      defaultEvaluator = 'Folder Queue & Part Switch Evaluator';
+      defaultEvaluator = 'Bundle Detect & Part Header Evaluator';
       metricLabel = healingStep || (
         isThisActive
-          ? (nodeData.mode === 'switch_next' ? `Switching ${partLabel}...` : 'Scanning Folder...')
-          : (filesCount > 0 || totParts > 1 ? `${partLabel} (${filesCount || totParts} Files)` : (isMfcDone ? partLabel : 'Scan Folder Queue'))
+          ? (nodeData.mode === 'switch_next' ? `Switching ${partLabel}...` : 'Inspecting Parts...')
+          : totProjFiles > 0
+            ? `${partLabel} • ${totProjFiles} Proj Files`
+            : (filesCount > 0 || totParts > 1 ? `${partLabel} (${filesCount || totParts} Parts)` : (isMfcDone ? partLabel : 'Bundle Detect'))
       );
       statusLabel = isThisActive
-        ? (nodeData.mode === 'switch_next' ? 'SWITCHING' : 'SCANNING')
-        : (isError ? 'FAILED' : (bundleDone ? 'BUNDLE EOF' : (isMfcDone ? (nodeData.mode === 'switch_next' ? 'SWITCHED' : 'QUEUED') : 'READY')));
+        ? (nodeData.mode === 'switch_next' ? 'SWITCHING' : 'DETECTING')
+        : (isError ? 'FAILED' : (bundleDone ? 'BUNDLE EOF' : (isMfcDone ? (nodeData.mode === 'switch_next' ? 'SWITCHED' : 'INSPECTED') : 'READY')));
       defaultInsight = bundleDone
-        ? `All ${totParts} bundle markdown files completed -> Handed off to Phase III`
+        ? `All ${totParts} bundle markdown parts completed -> Handed off to Phase III`
         : (isMfcDone
-            ? `Folder queue active (${partLabel}): ${nodeData.active_file_name || 'Fullscreen + Dark Mode verified'}`
-            : 'Scans Teams/OneDrive folder queue & switches markdown files on EOF');
+            ? `Bundle Detect (${partLabel}): ${nodeData.active_file_name || 'Verified'}${totProjFiles > 0 ? ` • ${totProjFiles} proj files, ${totBundleKb.toFixed(1)} KB, ${totBundleChars.toLocaleString()} chars` : ''}`
+            : 'Opens each part file in Teams/OneDrive folder & reads content detail attributes');
       color = isError ? '#ff7b72' : (isMfcDone ? '#00ff9d' : '#d2a8ff');
       break;
     }
@@ -167,10 +173,18 @@ export function calculateNodeLiveStatus(
     }
     case 'frame_acquire': {
       isDone = !isError && nodeData.status === 'completed';
-      defaultEvaluator = 'Display Frame Acquisition Evaluator';
-      metricLabel = healingStep || (isDone ? 'Frame Grab' : 'Grab Screen');
+      const csStarts = Array.isArray(nodeData.codescan_starts) ? nodeData.codescan_starts : [];
+      const partHdr = nodeData.detected_part_header;
+      defaultEvaluator = csStarts.length > 0 || partHdr ? 'Display Frame & CODESCAN Metadata Evaluator' : 'Display Frame Acquisition Evaluator';
+      metricLabel = healingStep || (
+        csStarts.length > 0
+          ? `Grab + ${csStarts.length} Tag`
+          : partHdr?.files_in_part
+            ? `Grab (${partHdr.files_in_part} files)`
+            : (isDone ? 'Frame Grab' : 'Grab Screen')
+      );
       statusLabel = isThisActive ? 'ACQUIRING' : (isError ? 'FAILED' : (isDone ? 'CAPTURED' : 'READY'));
-      defaultInsight = isDone ? 'Screen frame acquired and saved' : 'Awaiting frame grab trigger';
+      defaultInsight = isDone ? 'Screen frame acquired and CODESCAN metadata extracted' : 'Awaiting frame grab trigger';
       color = isError ? (healingStep ? '#ffa657' : '#ff7b72') : (isDone ? '#00ff9d' : '#00ff9d');
       break;
     }

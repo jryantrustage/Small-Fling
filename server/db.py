@@ -117,7 +117,14 @@ def init_db():
             ("bundle_name", "TEXT DEFAULT ''"),
             ("part_number", "INTEGER DEFAULT 0"),
             ("total_parts", "INTEGER DEFAULT 0"),
-            ("part_file_name", "TEXT DEFAULT ''")
+            ("part_file_name", "TEXT DEFAULT ''"),
+            ("declared_files_in_part", "INTEGER DEFAULT 0"),
+            ("total_project_files", "INTEGER DEFAULT 0"),
+            ("declared_part_size_kb", "REAL DEFAULT 0.0"),
+            ("declared_part_size_bytes", "INTEGER DEFAULT 0"),
+            ("declared_part_lines", "INTEGER DEFAULT 0"),
+            ("declared_part_chars", "INTEGER DEFAULT 0"),
+            ("part_header_json", "TEXT DEFAULT '{}'")
         ]
         for col_name, col_def in columns_to_add:
             if col_name not in existing_cols:
@@ -339,11 +346,40 @@ def _normalize_project_row(row: Any) -> Dict[str, Any]:
     raw_verified = int(d.get("verified_line_count") or 0)
     verified_cnt = raw_verified if raw_verified > 0 else line_cnt
     max_ln = int(d.get("max_line") or 0)
-    target_ln = int(d.get("target_total_lines") or 0)
+    decl_lines = int(d.get("declared_part_lines") or 0)
+    target_ln = int(d.get("target_total_lines") or 0) or decl_lines
+    if target_ln > 0 and int(d.get("target_total_lines") or 0) <= 0:
+        d["target_total_lines"] = target_ln
     d["frame_count"] = frame_cnt
     d["line_count"] = line_cnt
     d["verified_lines"] = verified_cnt
     d["total_lines"] = max(max_ln, line_cnt) if (max_ln > 0 or line_cnt > 0) else target_ln
+
+    decl_files = int(d.get("declared_files_in_part") or 0)
+    tot_proj_files = int(d.get("total_project_files") or 0)
+    decl_size_kb = round(float(d.get("declared_part_size_kb") or 0.0), 2)
+    decl_size_bytes = int(d.get("declared_part_size_bytes") or 0)
+    decl_chars = int(d.get("declared_part_chars") or 0)
+    try:
+        part_hdr_obj = json.loads(d.get("part_header_json") or "{}")
+        if not isinstance(part_hdr_obj, dict):
+            part_hdr_obj = {}
+    except Exception:
+        part_hdr_obj = {}
+
+    d["declared_files_in_part"] = decl_files
+    d["files_in_part"] = decl_files
+    d["total_project_files"] = tot_proj_files
+    d["declared_part_size_kb"] = decl_size_kb
+    d["part_size_kb"] = decl_size_kb
+    d["declared_part_size_bytes"] = decl_size_bytes
+    d["part_size_bytes"] = decl_size_bytes
+    d["declared_part_lines"] = decl_lines
+    d["declared_lines"] = decl_lines
+    d["declared_part_chars"] = decl_chars
+    d["declared_chars"] = decl_chars
+    d["part_header"] = part_hdr_obj
+
     b_meta = _infer_bundle_metadata(
         name=d.get("name") or "",
         description=d.get("description") or "",
@@ -716,6 +752,120 @@ def update_project_bundle_metadata(
         )
         conn.commit()
     return True
+
+
+def update_project_part_header_details(
+    project_id: str,
+    header_details: Dict[str, Any],
+    update_target_lines: bool = True,
+) -> Optional[Dict[str, Any]]:
+    if not project_id or not isinstance(header_details, dict):
+        return None
+    proj = get_project(project_id)
+    if not proj:
+        return None
+
+    files_in_part = int(header_details.get("files_in_part") or proj.get("declared_files_in_part") or 0)
+    total_proj_files = int(header_details.get("total_project_files") or proj.get("total_project_files") or 0)
+    part_size_kb = round(float(header_details.get("part_size_kb") or proj.get("declared_part_size_kb") or 0.0), 2)
+    part_size_bytes = int(header_details.get("part_size_bytes") or proj.get("declared_part_size_bytes") or 0)
+    declared_lines = int(header_details.get("declared_lines") or proj.get("declared_part_lines") or 0)
+    declared_chars = int(header_details.get("declared_chars") or proj.get("declared_part_chars") or 0)
+
+    existing_hdr = dict(proj.get("part_header") or {})
+    merged_hdr = {
+        **existing_hdr,
+        **{k: v for k, v in header_details.items() if v is not None},
+        "files_in_part": files_in_part,
+        "total_project_files": total_proj_files,
+        "part_size_kb": part_size_kb,
+        "part_size_bytes": part_size_bytes,
+        "declared_lines": declared_lines,
+        "declared_chars": declared_chars,
+        "updated_at": datetime.now().isoformat(),
+    }
+
+    cur_target = int(proj.get("target_total_lines") or 0)
+    new_target = cur_target
+    if update_target_lines and declared_lines > 0:
+        if cur_target <= 0 or abs(cur_target - declared_lines) <= 15 or header_details.get("force_target_lines"):
+            new_target = declared_lines
+
+    now = datetime.now().isoformat()
+    with get_connection() as conn:
+        c = conn.cursor()
+        try:
+            c.execute(
+                """
+                UPDATE projects
+                SET declared_files_in_part = ?,
+                    total_project_files = ?,
+                    declared_part_size_kb = ?,
+                    declared_part_size_bytes = ?,
+                    declared_part_lines = ?,
+                    declared_part_chars = ?,
+                    part_header_json = ?,
+                    target_total_lines = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (
+                    files_in_part,
+                    total_proj_files,
+                    part_size_kb,
+                    part_size_bytes,
+                    declared_lines,
+                    declared_chars,
+                    json.dumps(merged_hdr),
+                    new_target,
+                    now,
+                    project_id,
+                ),
+            )
+        except sqlite3.OperationalError:
+            init_db()
+            c.execute(
+                """
+                UPDATE projects
+                SET declared_files_in_part = ?,
+                    total_project_files = ?,
+                    declared_part_size_kb = ?,
+                    declared_part_size_bytes = ?,
+                    declared_part_lines = ?,
+                    declared_part_chars = ?,
+                    part_header_json = ?,
+                    target_total_lines = ?,
+                    updated_at = ?
+                WHERE id = ?;
+                """,
+                (
+                    files_in_part,
+                    total_proj_files,
+                    part_size_kb,
+                    part_size_bytes,
+                    declared_lines,
+                    declared_chars,
+                    json.dumps(merged_hdr),
+                    new_target,
+                    now,
+                    project_id,
+                ),
+            )
+        conn.commit()
+
+    if any(header_details.get(k) for k in ("bundle_id", "bundle_name", "part_number", "total_parts", "file_name", "part_file_name")):
+        try:
+            update_project_bundle_metadata(
+                project_id=project_id,
+                bundle_id=header_details.get("bundle_id"),
+                bundle_name=header_details.get("bundle_name"),
+                part_number=int(header_details["part_number"]) if header_details.get("part_number") else None,
+                total_parts=int(header_details["total_parts"]) if header_details.get("total_parts") else None,
+                part_file_name=header_details.get("part_file_name") or header_details.get("file_name"),
+            )
+        except Exception:
+            pass
+    return get_project(project_id)
 
 
 def append_project_filename(project_id: str, filename: str) -> str:

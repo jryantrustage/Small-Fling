@@ -26,8 +26,8 @@ class MarkdownFileChangeNode(BaseDagNode):
     step = "0"
     id = "markdown_file_change"
     node_id = "markdown_file_change"
-    title = "0. Markdown File Change (Folder Queue & Part Switch)"
-    short_name = "Markdown File Change"
+    title = "0. Bundle Detect (Part Content Details & Queue)"
+    short_name = "Bundle Detect"
     category = "markdown_file_change"
     accent_color = "#d2a8ff"
     default_position = {"x": 20.0, "y": 40.0}
@@ -35,6 +35,7 @@ class MarkdownFileChangeNode(BaseDagNode):
         "mode": "auto",  # "scan_folder" | "switch_next" | "navigate_to_part" | "auto"
         "onedrive_folder_path": list(DEFAULT_TEAMS_ONEDRIVE_PATH),
         "reopen_editor": True,
+        "inspect_part_contents": True,
         "ensure_fullscreen": True,
         "ensure_dark_mode": True,
         "ensure_edit_mode": True,
@@ -49,6 +50,7 @@ class MarkdownFileChangeNode(BaseDagNode):
             "pin_authentication_guard",
             "onedrive_folder_navigation",
             "folder_manifest_discovery",
+            "part_header_content_inspection",
             "fullscreen_dark_mode_guard",
         ]
 
@@ -70,7 +72,7 @@ class MarkdownFileChangeNode(BaseDagNode):
             else:
                 mode = "scan_folder"
 
-        node_state = state.dag_state["nodes"].get("markdown_file_change", {})
+        node_state = state.dag_state["nodes"].setdefault("markdown_file_change", {})
 
         if mode == "switch_next":
             from routers.dag_helpers import transition_to_next_multipart_project
@@ -81,6 +83,7 @@ class MarkdownFileChangeNode(BaseDagNode):
             )
             mp_state = state.sync_multipart_state_from_alignment()
             predetermined: List[Dict[str, Any]] = list(mp_state.get("predetermined_parts") or [])
+            bundle_totals: Dict[str, Any] = dict(mp_state.get("bundle_totals") or {})
             cur_part = int(mp_state.get("current_part") or 1)
             tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
             bundle_done = bool(trans_res.get("bundle_completed"))
@@ -97,6 +100,11 @@ class MarkdownFileChangeNode(BaseDagNode):
                 "next_file_name": mp_state.get("next_file_name"),
                 "detected_files": detected_files,
                 "predetermined_parts": predetermined,
+                "bundle_totals": bundle_totals,
+                "total_project_files": int(bundle_totals.get("total_project_files") or 0),
+                "total_bundle_size_kb": float(bundle_totals.get("total_bundle_size_kb") or 0.0),
+                "total_bundle_lines": int(bundle_totals.get("total_bundle_lines") or 0),
+                "total_bundle_chars": int(bundle_totals.get("total_bundle_chars") or 0),
                 "bundle_completed": bundle_done,
                 "fullscreen_verified": True,
                 "dark_mode_verified": True,
@@ -129,6 +137,7 @@ class MarkdownFileChangeNode(BaseDagNode):
                     "next_file_name": node_state.get("next_file_name"),
                     "detected_files": detected_files,
                     "predetermined_parts": predetermined,
+                    "bundle_totals": bundle_totals,
                     "bundle_completed": bundle_done,
                     "transition_result": trans_res,
                 },
@@ -136,6 +145,7 @@ class MarkdownFileChangeNode(BaseDagNode):
 
         # Default: mode == "scan_folder" or "navigate_to_part"
         reopen_editor = bool(cfg.get("reopen_editor", True))
+        inspect_contents = bool(cfg.get("inspect_part_contents", True))
         if mode == "navigate_to_part":
             scan_res = await navigate_teams_onedrive_path_to_markdown(
                 serial=serial,
@@ -152,6 +162,7 @@ class MarkdownFileChangeNode(BaseDagNode):
                 display_id=disp_id,
                 reopen_editor=reopen_editor,
                 force_rescan=True,
+                inspect_part_contents=inspect_contents,
             )
             if scan_res.get("status") != "success" and not scan_res.get("predetermined_parts"):
                 nav_fallback = await navigate_teams_onedrive_path_to_markdown(
@@ -159,7 +170,7 @@ class MarkdownFileChangeNode(BaseDagNode):
                     display_id=disp_id,
                     bundle_folder_name=active_proj.get("bundle_name"),
                     target_file_name=active_proj.get("part_file_name"),
-                    target_part_number=active_proj.get("part_number"),
+                    target_part_number=active_proj.get("target_part_number") or active_proj.get("part_number"),
                     folder_path=cfg.get("onedrive_folder_path") or list(DEFAULT_TEAMS_ONEDRIVE_PATH),
                     open_editor=reopen_editor,
                 )
@@ -178,17 +189,48 @@ class MarkdownFileChangeNode(BaseDagNode):
 
         mp_state = state.sync_multipart_state_from_alignment()
         predetermined = list(mp_state.get("predetermined_parts") or [])
+        bundle_totals = dict(mp_state.get("bundle_totals") or scan_res.get("bundle_totals") or {})
         cur_part = int(mp_state.get("current_part") or 1)
         tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
         part_label = f"MD {cur_part} / {tot_parts}" if tot_parts > 0 else f"MD {cur_part}"
         detected_files = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
 
-        passed = bool(scan_res.get("status") == "success" or len(detected_files) > 0)
+        tot_proj_files = int(bundle_totals.get("total_project_files") or bundle_totals.get("sum_files_across_parts") or 0)
+        tot_size_kb = float(bundle_totals.get("total_bundle_size_kb") or 0.0)
+        tot_lines = int(bundle_totals.get("total_bundle_lines") or 0)
+        tot_chars = int(bundle_totals.get("total_bundle_chars") or 0)
+
+        node_state.update({
+            "mode": "scan_folder",
+            "current_part": cur_part,
+            "total_parts": tot_parts,
+            "part_progress_label": part_label,
+            "active_file_name": mp_state.get("last_opened_file") or (detected_files[0] if detected_files else None),
+            "next_file_name": mp_state.get("next_file_name"),
+            "detected_files": detected_files,
+            "predetermined_parts": predetermined,
+            "bundle_totals": bundle_totals,
+            "total_project_files": tot_proj_files,
+            "total_bundle_size_kb": tot_size_kb,
+            "total_bundle_lines": tot_lines,
+            "total_bundle_chars": tot_chars,
+            "bundle_completed": False,
+            "fullscreen_verified": bool(reopen_editor),
+            "dark_mode_verified": bool(reopen_editor),
+        })
+
+        passed = bool(scan_res.get("status") in ("success", "cached", "single_file") or len(detected_files) > 0)
+        metrics_suffix = (
+            f" | Project Files: {tot_proj_files:,} • Size: {tot_size_kb:,.1f} KB • Lines: {tot_lines:,} • Chars: {tot_chars:,}"
+            if (tot_proj_files > 0 or tot_lines > 0 or tot_chars > 0)
+            else ""
+        )
         detail = (
-            f"Queued {len(detected_files)} markdown files ({part_label}): {', '.join(detected_files[:4])}"
+            f"Bundle Detect inspected {len(detected_files)} markdown part(s) ({part_label}): {', '.join(detected_files[:4])}"
             + (f" (+{len(detected_files) - 4} more)" if len(detected_files) > 4 else "")
+            + metrics_suffix
             if detected_files
-            else f"Folder scan completed ({scan_res.get('status', 'done')})"
+            else f"Bundle Detect scan completed ({scan_res.get('status', 'done')}){metrics_suffix}"
         )
 
         return NodeExecutionResult(
@@ -198,8 +240,8 @@ class MarkdownFileChangeNode(BaseDagNode):
             evaluator={
                 "type": "markdown_file_change_scan_folder",
                 "passed": passed,
-                "expected": ">= 1 markdown file detected in Teams/OneDrive folder queue",
-                "actual": f"{len(detected_files)} files detected ({part_label})",
+                "expected": ">= 1 markdown part inspected with header detail attributes in Teams/OneDrive queue",
+                "actual": f"{len(detected_files)} files inspected ({part_label}){metrics_suffix}",
             },
             extra_node_fields={
                 "mode": "scan_folder",
@@ -210,6 +252,11 @@ class MarkdownFileChangeNode(BaseDagNode):
                 "next_file_name": mp_state.get("next_file_name"),
                 "detected_files": detected_files,
                 "predetermined_parts": predetermined,
+                "bundle_totals": bundle_totals,
+                "total_project_files": tot_proj_files,
+                "total_bundle_size_kb": tot_size_kb,
+                "total_bundle_lines": tot_lines,
+                "total_bundle_chars": tot_chars,
                 "bundle_completed": False,
                 "scan_result": scan_res,
             },

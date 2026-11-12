@@ -601,7 +601,8 @@ function AppContent() {
           serial: activeSer,
           project_id: activeProject?.id,
           reopen_editor: reopenEditor,
-          force_rescan: true
+          force_rescan: true,
+          inspect_part_contents: true
         })
       });
       if (res.ok) {
@@ -624,10 +625,14 @@ function AppContent() {
           }
         }
         const partsCount = d.predetermined_parts?.length || d.multipart_state?.predetermined_parts?.length || 0;
+        const bt = d.bundle_totals || d.multipart_state?.bundle_totals || {};
         if (partsCount > 0) {
+          const btSuffix = bt.total_project_files
+            ? ` • Total Project Files: ${bt.total_project_files} | Size: ${bt.total_bundle_size_kb ?? 0} KB | Lines: ${(bt.total_bundle_lines ?? 0).toLocaleString()} | Chars: ${(bt.total_bundle_chars ?? 0).toLocaleString()}`
+            : '';
           addTelemetryEvent(
             'SYSTEM',
-            `DAG Node 0 (Markdown File Change): Queued ${partsCount} markdown file(s) from Teams/OneDrive folder (MD 1 / ${partsCount}) ✔`,
+            `DAG Node 0 (Bundle Detect): Inspected ${partsCount} markdown part(s) (MD 1 / ${partsCount})${btSuffix} ✔`,
             d,
             'markdown_file_change'
           );
@@ -3509,7 +3514,7 @@ function AppContent() {
                     data-testid="scan-folder-bundle-btn"
                     onClick={() => handlePredetermineFolderBundle(true)}
                     disabled={isScanningFolderBundle}
-                    title="Take a screenshot of the Teams / OneDrive folder to predetermine all markdown files in the bundle"
+                    title="Bundle Detect: Open each part file in the Teams / OneDrive folder and read its content detail attributes (total project files, files in part, part size, lines, characters)"
                     style={{
                       padding: '2px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: 700, cursor: 'pointer',
                       border: '1px solid rgba(56, 189, 248, 0.45)',
@@ -3517,7 +3522,7 @@ function AppContent() {
                       color: '#38bdf8'
                     }}
                   >
-                    {isScanningFolderBundle ? 'Scanning...' : '📸 Scan Folder'}
+                    {isScanningFolderBundle ? 'Detecting...' : '📸 Bundle Detect'}
                   </button>
                   <button
                     type="button"
@@ -3534,6 +3539,34 @@ function AppContent() {
                 </div>
               </div>
 
+              {multipartState.bundle_totals && Boolean(
+                multipartState.bundle_totals.total_project_files ||
+                multipartState.bundle_totals.total_bundle_size_kb ||
+                multipartState.bundle_totals.total_bundle_chars
+              ) && (
+                <div
+                  data-testid="bundle-detect-totals-strip"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px',
+                    padding: '3px 8px', background: 'rgba(13, 17, 23, 0.92)', borderRadius: '6px',
+                    border: '1px solid rgba(56, 189, 248, 0.28)', fontSize: '9px', fontFamily: 'var(--font-mono, monospace)', color: '#c9d1d9'
+                  }}
+                >
+                  <span title="Total Project Files across entire multi-part bundle">
+                    Proj Files: <strong style={{ color: '#38bdf8' }}>{(multipartState.bundle_totals.total_project_files || multipartState.bundle_totals.sum_files_across_parts || 0).toLocaleString()}</strong>
+                  </span>
+                  <span title="Combined Bundle Size (KB)">
+                    Size: <strong style={{ color: '#d2a8ff' }}>{(multipartState.bundle_totals.total_bundle_size_kb || 0).toLocaleString()} KB</strong>
+                  </span>
+                  <span title="Combined Bundle Lines">
+                    Ln: <strong style={{ color: '#00ff9d' }}>{(multipartState.bundle_totals.total_bundle_lines || 0).toLocaleString()}</strong>
+                  </span>
+                  <span title="Combined Bundle Characters">
+                    Ch: <strong style={{ color: '#f0f6fc' }}>{(multipartState.bundle_totals.total_bundle_chars || 0).toLocaleString()}</strong>
+                  </span>
+                </div>
+              )}
+
               {Array.isArray(multipartState.predetermined_parts) && multipartState.predetermined_parts.length > 0 && (
                 <div
                   data-testid="predetermined-parts-strip"
@@ -3543,7 +3576,7 @@ function AppContent() {
                   }}
                 >
                   <span style={{ fontSize: '9.5px', color: '#a371f7', fontWeight: 700, marginRight: '2px' }}>
-                    Predetermined ({multipartState.predetermined_parts.length}):
+                    Parts ({multipartState.predetermined_parts.length}):
                   </span>
                   {multipartState.predetermined_parts.map(pt => {
                     const selectedPartNum = activeProject?.part_number || multipartState.current_part || alignmentData.part_number || 1;
@@ -3551,11 +3584,14 @@ function AppContent() {
                     const isScan = pt.part_number === selectedPartNum || st === 'scanning';
                     const isPaused = !isScan && st === 'paused';
                     const isDone = !isScan && !isPaused && st === 'completed';
+                    const ptDetailTooltip = pt.files_in_part || pt.declared_lines
+                      ? ` • ${pt.files_in_part ?? 0} files, ${pt.part_size_kb ?? 0} KB, ${(pt.declared_lines ?? 0).toLocaleString()} ln, ${(pt.declared_chars ?? 0).toLocaleString()} ch`
+                      : '';
                     return (
                       <span
                         key={pt.part_number}
                         onClick={() => handleActivateBundlePart(pt.part_number, pt.file_name, activeProject?.bundle_id, activeProject?.bundle_name, multipartState.total_parts || multipartState.predetermined_parts?.length)}
-                        title={`${pt.file_name} • Status: ${isScan ? 'ACTIVE' : isDone ? 'DONE' : isPaused ? 'PAUSED' : st.toUpperCase()}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''} (Click to activate)`}
+                        title={`${pt.file_name} • Status: ${isScan ? 'ACTIVE' : isDone ? 'DONE' : isPaused ? 'PAUSED' : st.toUpperCase()}${ptDetailTooltip}${pt.visual_row_index ? ` (Folder Row ${pt.visual_row_index})` : ''} (Click to activate)`}
                         style={{
                           fontSize: '9px',
                           fontWeight: 800,
@@ -3568,7 +3604,7 @@ function AppContent() {
                           border: `1px solid ${isDone ? 'rgba(0, 255, 157, 0.4)' : isScan ? 'rgba(56, 189, 248, 0.5)' : isPaused ? 'rgba(227, 179, 65, 0.45)' : '#30363d'}`
                         }}
                       >
-                        P{pt.part_number}{isDone ? '✓' : isScan ? '●' : isPaused ? '◐' : ''}
+                        P{pt.part_number}{pt.files_in_part ? `(${pt.files_in_part}f)` : ''}{isDone ? '✓' : isScan ? '●' : isPaused ? '◐' : ''}
                       </span>
                     );
                   })}
@@ -3768,9 +3804,19 @@ function AppContent() {
                                     gap: '4px',
                                     color: pt.part_number === curActivePartNum ? '#00ff9d' : '#c9d1d9'
                                   }}
+                                  title={
+                                    pt.files_in_part || pt.declared_lines
+                                      ? `${pt.file_name} • Files: ${pt.files_in_part ?? 0} | Size: ${pt.part_size_kb ?? 0} KB | Lines: ${(pt.declared_lines ?? 0).toLocaleString()} | Chars: ${(pt.declared_chars ?? 0).toLocaleString()}`
+                                      : pt.file_name
+                                  }
                                 >
                                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                     • {pt.file_name}
+                                    {Boolean(pt.files_in_part || pt.part_size_kb) && (
+                                      <span style={{ color: '#8b949e', marginLeft: '4px' }}>
+                                        ({pt.files_in_part ?? 0}f • {pt.part_size_kb ?? 0}KB{pt.declared_chars ? ` • ${(pt.declared_chars).toLocaleString()}ch` : ''})
+                                      </span>
+                                    )}
                                   </span>
                                   <span style={{ flexShrink: 0, color: '#a371f7', fontWeight: 700 }}>
                                     MD {pt.part_number} / {expectedTotal}
@@ -3984,7 +4030,7 @@ function AppContent() {
                                       </button>
                                     </div>
                                   </div>
-                                  <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px' }}>
+                                  <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9.5px', color: '#8b949e', marginTop: '3px', flexWrap: 'wrap' }}>
                                     <span style={{ color: '#58a6ff', fontWeight: 600 }}>{partCaptures} captures</span>
                                     <span>•</span>
                                     <span>
@@ -3994,6 +4040,16 @@ function AppContent() {
                                     </span>
                                     <span>•</span>
                                     <span style={{ color: '#00ff9d', fontWeight: 600 }}>{partVerifiedLines.toLocaleString()} verified</span>
+                                    {Boolean(part.files_in_part || predPt?.files_in_part || part.part_size_kb || predPt?.part_size_kb) && (
+                                      <>
+                                        <span>•</span>
+                                        <span style={{ color: '#d2a8ff', fontWeight: 600 }}>
+                                          {part.files_in_part || predPt?.files_in_part || 0} files
+                                          {Boolean(part.part_size_kb || predPt?.part_size_kb) ? ` • ${part.part_size_kb || predPt?.part_size_kb} KB` : ''}
+                                          {Boolean(part.declared_chars || predPt?.declared_chars) ? ` • ${(part.declared_chars || predPt?.declared_chars || 0).toLocaleString()} ch` : ''}
+                                        </span>
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                               );
@@ -4058,6 +4114,29 @@ function AppContent() {
                                     {queuedStatus === 'completed' ? 'DONE ✓' : isQueuedPartActive ? 'ACTIVE ●' : 'QUEUED ⏳'}
                                   </span>
                                 </div>
+                                {Boolean(predPt?.files_in_part || predPt?.declared_lines || predPt?.part_size_kb) && (
+                                  <div className="part-metrics-row" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', color: '#8b949e', marginTop: '2px', flexWrap: 'wrap' }}>
+                                    <span style={{ color: '#d2a8ff', fontWeight: 600 }}>{predPt?.files_in_part ?? 0} files</span>
+                                    {Boolean(predPt?.part_size_kb) && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{predPt?.part_size_kb} KB</span>
+                                      </>
+                                    )}
+                                    {Boolean(predPt?.declared_lines) && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{(predPt?.declared_lines ?? 0).toLocaleString()} lines</span>
+                                      </>
+                                    )}
+                                    {Boolean(predPt?.declared_chars) && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{(predPt?.declared_chars ?? 0).toLocaleString()} chars</span>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -4916,23 +4995,35 @@ function AppContent() {
                 const h = telemetry.codescan_hierarchy;
                 const bundle = h?.bundle;
                 const part = h?.part;
-                const af = h?.active_file;
+                const bt = multipartState.bundle_totals;
+                const partNum = part?.number || multipartState.current_part || alignmentData.part_number || activeProject?.part_number || 1;
+                const totalParts = part?.total_parts || multipartState.total_parts || alignmentData.total_parts || activeProject?.total_parts || 1;
+                const predCur = (multipartState.predetermined_parts || []).find(pt => pt.part_number === partNum);
+                const rawAf = h?.active_file || telemetry.active_codescan_file || telemetry.capture_telemetry?.active_codescan_file;
+                const af = rawAf && rawAf.path ? {
+                  ...rawAf,
+                  expected_size: rawAf.expected_size ?? rawAf.size ?? 0,
+                  expected_lines: rawAf.expected_lines ?? rawAf.lines ?? 0,
+                  expected_chars: rawAf.expected_chars ?? rawAf.chars ?? 0,
+                } : null;
+                const procAcc = telemetry.process_accuracy || part?.process_accuracy || af?.process_accuracy;
                 const steering = telemetry.ocr_steering_guide;
-                const isMultipart = Boolean(bundle?.is_multipart || multipartState.is_multipart || alignmentData.is_multipart);
+                const isMultipart = Boolean(bundle?.is_multipart || multipartState.is_multipart || alignmentData.is_multipart || totalParts > 1);
                 const bundleName = bundle?.name || (multipartState as any).bundle_name || (multipartState as any).bundle_prefix || alignmentData.file_name || activeProject?.name || 'Markdown Scan';
-                const partNum = part?.number || multipartState.current_part || alignmentData.part_number || 1;
-                const totalParts = part?.total_parts || multipartState.total_parts || alignmentData.total_parts || 1;
                 const filesCaptured = part?.files_captured ?? 0;
-                const filesDeclared = part?.files_declared ?? 0;
-                const totalProjectFiles = bundle?.total_project_files ?? 0;
+                const filesDeclared = part?.files_declared || activeProject?.files_in_part || predCur?.files_in_part || 0;
+                const bundleFilesCaptured = bundle?.bundle_files_captured ?? filesCaptured;
+                const totalProjectFiles = bundle?.total_project_files || bt?.total_project_files || bt?.sum_files_across_parts || activeProject?.total_project_files || predCur?.total_project_files || 0;
                 const sizeKbCaptured = part?.size_kb_captured ?? 0;
-                const sizeKbDeclared = part?.size_kb_declared ?? 0;
+                const sizeKbDeclared = part?.size_kb_declared || activeProject?.part_size_kb || predCur?.part_size_kb || 0;
+                const totalBundleSizeKb = bundle?.total_bundle_size_kb || bt?.total_bundle_size_kb || 0;
                 const linesCaptured = part?.lines_captured || documentData.total_lines || telemetry.current_bottom_line || 0;
-                const linesDeclared = part?.lines_declared || activeProject?.target_total_lines || telemetry.target_total_lines || 0;
+                const linesDeclared = part?.lines_declared || activeProject?.declared_lines || predCur?.declared_lines || activeProject?.target_total_lines || telemetry.target_total_lines || 0;
                 const charsCaptured = part?.chars_captured ?? 0;
-                const charsDeclared = part?.chars_declared ?? 0;
-                const partAcc = part?.overall_accuracy_pct ?? 100;
-                const fileAcc = af?.distinct_accuracy_pct ?? partAcc;
+                const charsDeclared = part?.chars_declared || activeProject?.declared_chars || predCur?.declared_chars || 0;
+                const totalBundleChars = bundle?.total_bundle_chars || bt?.total_bundle_chars || 0;
+                const partAcc = procAcc?.overall_accuracy_pct ?? part?.overall_accuracy_pct ?? 100;
+                const fileAcc = af?.distinct_accuracy_pct ?? af?.process_accuracy?.overall_accuracy_pct ?? partAcc;
                 const rescanTargets: any[] = steering?.rescan_targets || [];
 
                 return (
@@ -4964,28 +5055,29 @@ function AppContent() {
                         <span style={{ color: '#e6edf3', fontWeight: 700, maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={bundleName}>
                           {bundleName}
                         </span>
-                        {(filesDeclared > 0 || filesCaptured > 0) && (
-                          <span style={{ color: '#8b949e' }} title="Files in this part (Total project files)">
+                        {(filesDeclared > 0 || filesCaptured > 0 || totalProjectFiles > 0) && (
+                          <span style={{ color: '#8b949e' }} title="Files in this part (and Total Project Files across bundle)">
                             • Files: <strong style={{ color: '#c9d1d9' }}>{filesCaptured}/{filesDeclared || filesCaptured}</strong>
-                            {totalProjectFiles > 0 ? ` (Tot: ${totalProjectFiles})` : ''}
+                            {totalProjectFiles > 0 ? ` (Proj: ${bundleFilesCaptured}/${totalProjectFiles})` : ''}
                           </span>
                         )}
-                        {sizeKbDeclared > 0 && (
-                          <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Size (KB)">
+                        {(sizeKbDeclared > 0 || totalBundleSizeKb > 0) && (
+                          <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Size (KB) and Total Bundle Size">
                             • Size: <strong style={{ color: '#c9d1d9' }}>{sizeKbCaptured}/{sizeKbDeclared}KB</strong>
+                            {isMultipart && totalBundleSizeKb > 0 ? ` (Tot:${totalBundleSizeKb}KB)` : ''}
                           </span>
                         )}
                         <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Lines">
                           • Ln: <strong style={{ color: '#00ff9d' }}>{linesCaptured.toLocaleString()}/{linesDeclared ? linesDeclared.toLocaleString() : '—'}</strong>
                         </span>
-                        {charsDeclared > 0 && (
+                        {(charsDeclared > 0 || totalBundleChars > 0) && (
                           <span style={{ color: '#8b949e' }} title="Captured vs Declared Part Characters">
-                            • Chars: <strong style={{ color: '#c9d1d9' }}>{charsCaptured.toLocaleString()}/{charsDeclared.toLocaleString()}</strong>
+                            • Chars: <strong style={{ color: '#c9d1d9' }}>{charsCaptured.toLocaleString()}/{(charsDeclared || totalBundleChars).toLocaleString()}</strong>
                           </span>
                         )}
                       </div>
 
-                      {/* Level 2: Active File Task (CODESCAN_FILE_START path, type, size, lines, chars) */}
+                      {/* Level 2: Active File Task (CODESCAN_FILE_START path, type, size, lines, chars) & Process Accuracy */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, flexWrap: 'wrap' }}>
                         {af && af.path ? (
                           <>
@@ -5003,7 +5095,7 @@ function AppContent() {
                             </span>
                             <span
                               style={{ color: '#f0f6fc', fontWeight: 700, maxWidth: '210px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
-                              title={`Full Path: ${af.path}\nClick to toggle steering & frame correlation details`}
+                              title={`Full Path: ${af.path}\nClick to toggle per-process accuracy, steering & frame correlation details`}
                               onClick={() => setShowHierarchyDetails(p => !p)}
                             >
                               {af.short_name || af.path}
@@ -5017,20 +5109,27 @@ function AppContent() {
                             <span style={{ color: '#8b949e' }} title={`File chars: actual ${af.actual_chars ?? 0} / expected ${af.expected_chars ?? 0}`}>
                               Ch:<strong style={{ color: af.expected_chars && af.actual_chars === af.expected_chars ? '#00ff9d' : '#e6edf3' }}>{af.actual_chars ?? 0}/{af.expected_chars ?? 0}</strong>
                             </span>
-                            <span style={{
-                              padding: '0px 5px',
-                              borderRadius: '3px',
-                              fontWeight: 700,
-                              background: fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.14)' : 'rgba(255, 166, 87, 0.16)',
-                              color: fileAcc >= 99.9 ? '#00ff9d' : '#ffa657',
-                              border: `1px solid ${fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.4)' : 'rgba(255, 166, 87, 0.45)'}`
-                            }}>
-                              {fileAcc.toFixed(1)}%
+                            <span
+                              style={{
+                                padding: '0px 5px',
+                                borderRadius: '3px',
+                                fontWeight: 700,
+                                background: fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.14)' : 'rgba(255, 166, 87, 0.16)',
+                                color: fileAcc >= 99.9 ? '#00ff9d' : '#ffa657',
+                                border: `1px solid ${fileAcc >= 99.9 ? 'rgba(0, 255, 157, 0.4)' : 'rgba(255, 166, 87, 0.45)'}`
+                              }}
+                              title={
+                                procAcc
+                                  ? `Per-Process Marker Accuracy — Capture: ${procAcc.capture_accuracy_pct ?? 100}% | OCR: ${procAcc.ocr_accuracy_pct ?? 100}% | Line Pos: ${procAcc.position_accuracy_pct ?? 100}% | Assemble: ${procAcc.assembly_accuracy_pct ?? 100}%`
+                                  : 'Content marker accuracy'
+                              }
+                            >
+                              {Number(fileAcc).toFixed(1)}%
                             </span>
                           </>
                         ) : (
                           <span style={{ color: '#8b949e' }}>
-                            OCR Acc: <strong style={{ color: partAcc >= 99 ? '#00ff9d' : '#ffa657' }}>{partAcc.toFixed(1)}%</strong>
+                            Proc Acc: <strong style={{ color: partAcc >= 99 ? '#00ff9d' : '#ffa657' }}>{Number(partAcc).toFixed(1)}%</strong>
                           </span>
                         )}
                         <button
@@ -5046,7 +5145,7 @@ function AppContent() {
                             fontWeight: 700,
                             cursor: 'pointer'
                           }}
-                          title="Toggle full hierarchical path, correlated source frames, and OCR steering guide"
+                          title="Toggle full hierarchical path, per-process accuracy, correlated source frames, and OCR steering guide"
                         >
                           {showHierarchyDetails ? '▾ Steering' : `▸ Steering${rescanTargets.length > 0 ? ` (${rescanTargets.length})` : ''}`}
                         </button>
@@ -5066,10 +5165,20 @@ function AppContent() {
                         fontSize: '9.5px',
                         color: '#c9d1d9'
                       }}>
+                        {procAcc && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', color: '#93c5fd' }}>
+                            <strong style={{ color: '#d2a8ff' }}>Process Accuracy (Marker-Driven):</strong>
+                            <span>Capture: <strong>{procAcc.capture_accuracy_pct ?? 100}%</strong></span>
+                            <span>• OCR: <strong>{procAcc.ocr_accuracy_pct ?? 100}%</strong></span>
+                            <span>• Line Pos: <strong>{procAcc.position_accuracy_pct ?? 100}%</strong></span>
+                            <span>• Assemble: <strong>{procAcc.assembly_accuracy_pct ?? 100}%</strong></span>
+                            <span>• Overall: <strong style={{ color: '#00ff9d' }}>{procAcc.overall_accuracy_pct ?? 100}%</strong></span>
+                          </div>
+                        )}
                         {af && af.path && (
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
                             <span>
-                              <strong style={{ color: '#58a6ff' }}>Active File Path:</strong> <code>{af.path}</code> ({af.type || 'unknown'}) • MD Ln {af.start_md_line ?? '?'}{af.end_md_line ? `..${af.end_md_line}` : '+'} • Status: <strong>{af.lifecycle_status || 'ACTIVE'}</strong>
+                              <strong style={{ color: '#58a6ff' }}>Active CODESCAN_START:</strong> <code>{af.path}</code> (type=<code>{af.type || 'unknown'}</code>, size=<strong>{af.expected_size ?? 0}</strong>, lines=<strong>{af.expected_lines ?? 0}</strong>, chars=<strong>{af.expected_chars ?? 0}</strong>) • MD Ln {af.start_md_line ?? af.md_line ?? '?'}{af.end_md_line ? `..${af.end_md_line}` : '+'} • Status: <strong>{af.lifecycle_status || af.status || 'ACTIVE'}</strong>
                             </span>
                             {af.source_frame_ids && af.source_frame_ids.length > 0 && (
                               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>

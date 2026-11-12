@@ -946,6 +946,111 @@ async def exit_markdown_to_folder_list(
     }
 
 
+async def inspect_opened_part_header_details(
+    serial: Optional[str] = None,
+    display_id: Optional[int] = None,
+    expected_part_number: int = 1,
+    expected_file_name: str = "",
+    ensure_edit_mode: bool = False,
+    actions: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Captures the top-of-file content of an opened Markdown part in Microsoft Teams and parses
+    all part detail attributes (`file_part_tag`, `part_title_tag`, `part_number`, `total_parts`,
+    `files_in_part`, `total_project_files`, `part_size_kb`, `declared_lines`, `declared_chars`).
+    If header details are not immediately visible (e.g. scrolled mid-file) or `ensure_edit_mode=True`,
+    prepares Fullscreen + Dark Mode + Single-Pane Edit Mode, dispatches `Ctrl+Home` to Line 1,
+    and re-reads the top-of-file header.
+    Strictly preserves Dual-PIN separation (`_ensure_teams_authenticated_if_needed` uses Teams PIN 2992 ONLY on verified Teams PIN prompts).
+    """
+    from dag_nodes.markdown_tag_parser_node import extract_capture_image_metadata_markers
+    from services import state
+
+    act_log = actions if actions is not None else []
+    ser = await get_active_adb_serial(serial)
+    disp_id = display_id or await detect_external_display_id(ser)
+    disp_pfx = f"-d {disp_id} " if (disp_id and disp_id > 0) else ""
+    prepared_editor = False
+
+    if ensure_edit_mode:
+        prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+        act_log.extend(prep_res.get("actions", []))
+        prepared_editor = True
+        await run_adb_shell(f"input {disp_pfx}keycombination 113 122", ser, timeout=2.5)
+        await asyncio.sleep(0.55)
+        await dismiss_soft_keyboard_if_open(serial=ser, display_id=disp_id)
+
+    snap_hdr = await capture_external_screenshot(ser, bypass_lock=True)
+    snap_hdr = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_hdr, act_log)
+    extracted: Dict[str, Any] = {}
+    if snap_hdr:
+        try:
+            hdr_img_path = state.FRAMES_DIR / f"bundle_detect_part{max(1, int(expected_part_number or 1))}_header.png"
+            hdr_img_path.parent.mkdir(parents=True, exist_ok=True)
+            hdr_img_path.write_bytes(snap_hdr)
+        except Exception:
+            pass
+        extracted = await asyncio.to_thread(
+            extract_capture_image_metadata_markers,
+            snap_hdr,
+            1,
+            expected_file_name,
+            f"bundle_detect_part{max(1, int(expected_part_number or 1))}",
+            0,
+        )
+
+    part_hdr = dict((extracted or {}).get("part_header") or {})
+    has_rich_hdr = bool(
+        extracted.get("has_part_header")
+        and int(part_hdr.get("declared_lines") or 0) > 0
+        and (int(part_hdr.get("files_in_part") or 0) > 0 or int(part_hdr.get("declared_chars") or 0) > 0)
+    )
+
+    if not has_rich_hdr and not prepared_editor:
+        prep_res = await prepare_markdown_editor_window(serial=ser, display_id=disp_id)
+        act_log.extend(prep_res.get("actions", []))
+        prepared_editor = True
+        await run_adb_shell(f"input {disp_pfx}keycombination 113 122", ser, timeout=2.5)
+        await asyncio.sleep(0.65)
+        await dismiss_soft_keyboard_if_open(serial=ser, display_id=disp_id)
+        snap_hdr2 = await capture_external_screenshot(ser, bypass_lock=True)
+        snap_hdr2 = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_hdr2, act_log)
+        if snap_hdr2:
+            try:
+                hdr_img_path = state.FRAMES_DIR / f"bundle_detect_part{max(1, int(expected_part_number or 1))}_header.png"
+                hdr_img_path.parent.mkdir(parents=True, exist_ok=True)
+                hdr_img_path.write_bytes(snap_hdr2)
+            except Exception:
+                pass
+            extracted2 = await asyncio.to_thread(
+                extract_capture_image_metadata_markers,
+                snap_hdr2,
+                1,
+                expected_file_name,
+                f"bundle_detect_part{max(1, int(expected_part_number or 1))}",
+                0,
+            )
+            hdr2 = dict((extracted2 or {}).get("part_header") or {})
+            if hdr2.get("has_part_header") or int(hdr2.get("declared_lines") or 0) >= int(part_hdr.get("declared_lines") or 0):
+                extracted = extracted2
+                part_hdr = hdr2
+
+    act_log.append(
+        f"[Bundle Detect] Read Part {expected_part_number} ('{part_hdr.get('file_name') or expected_file_name}'): "
+        f"files={part_hdr.get('files_in_part', 0)}/{part_hdr.get('total_project_files', 0)}, "
+        f"size={part_hdr.get('part_size_kb', 0.0)} KB, "
+        f"lines={part_hdr.get('declared_lines', 0):,}, "
+        f"chars={part_hdr.get('declared_chars', 0):,}"
+    )
+    return {
+        "has_part_header": bool(part_hdr.get("has_part_header")),
+        "part_header": part_hdr,
+        "title_bar_file_name": extracted.get("title_bar_file_name") or expected_file_name,
+        "codescan_starts": extracted.get("codescan_starts", []),
+        "prepared_editor": prepared_editor,
+    }
+
+
 async def predetermine_bundle_from_folder_screenshot(
     serial: Optional[str] = None,
     display_id: Optional[int] = None,
@@ -954,14 +1059,17 @@ async def predetermine_bundle_from_folder_screenshot(
     force_rescan: bool = False,
     disp_id: Optional[int] = None,
     reopen_current_file: Optional[bool] = None,
+    inspect_part_contents: bool = True,
 ) -> Dict[str, Any]:
     """
-    Predetermines the list of markdown files in a multi-part bundle during Project Initialization
-    by taking a screenshot of all files in the selected OneDrive / Teams folder before proceeding
-    with the scan.
-    - If already on the Teams folder view (Image 5), scans all files directly and opens Part 1 (or target_part_number).
-    - If inside the Teams Markdown editor, clicks Back Arrow to take the folder screenshot,
-      catalogs all parts (even if out of order on screen like part2..part9, part1), and re-opens the active markdown part.
+    [Bundle Detect] Phase:
+    1. Catalogs all markdown part files in the OneDrive / Microsoft Teams bundle folder.
+    2. Opens EACH part file (`Part 1 .. Part N`) and reads its content detail attributes
+       (`files_in_part`, `total_project_files`, `part_size_kb`, `declared_lines`, `declared_chars`,
+       `file_part_tag`, `part_title_tag`) before proceeding with the scan.
+    3. Stores per-part and bundle-wide totals into SQLite (`projects`), `state.multipart_bundle_state`,
+       and `project_diagnostics_trace.json` as authoritative metadata drivers.
+    4. Leaves the target uncompleted part open in Fullscreen + Dark Mode + Single-Pane Edit Mode at Line 1.
     """
     import db
     import re
@@ -1005,12 +1113,17 @@ async def predetermine_bundle_from_folder_screenshot(
         existing_pred = list(state.multipart_bundle_state.get("predetermined_parts") or [])
         existing_pfx = (state.multipart_bundle_state.get("base_prefix") or "").lower()
         open_pfx = (mp_open.get("base_prefix") or "").lower()
+        all_headers_already_verified = bool(
+            existing_pred
+            and all(bool(p.get("header_verified")) and int(p.get("declared_lines") or 0) > 0 for p in existing_pred)
+        )
         if (
             not force_rescan
             and existing_pred
+            and (not inspect_part_contents or all_headers_already_verified)
             and (not open_pfx or not existing_pfx or open_pfx[:8] in existing_pfx or existing_pfx[:8] in open_pfx)
         ):
-            # Already predetermined for this bundle (e.g. during Part 2..N initialization)
+            # Already predetermined with verified content details for all parts in this bundle
             cur_p = int(detected_open_part or state.multipart_bundle_state.get("current_part") or 1)
             for pt in existing_pred:
                 pno = int(pt.get("part_number") or 0)
@@ -1027,10 +1140,11 @@ async def predetermine_bundle_from_folder_screenshot(
                 "total_parts": state.multipart_bundle_state.get("total_parts") or len(existing_pred),
                 "available_parts": state.multipart_bundle_state.get("available_parts", []),
                 "predetermined_parts": existing_pred,
+                "bundle_totals": state.multipart_bundle_state.get("bundle_totals") or {},
                 "opened_file_name": detected_open_file,
                 "actions": actions,
             }
-        # Only exit to folder list if this is a multi-part file, force_rescan=True, or header filename is a Teams markdown
+        # Exit to folder list if this is a multi-part file, force_rescan=True, or header filename is a Teams markdown
         if force_rescan or mp_open.get("is_multipart") or align.get("back_button_coords"):
             exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
             actions.extend(exit_res.get("actions", []))
@@ -1062,23 +1176,37 @@ async def predetermine_bundle_from_folder_screenshot(
         except Exception:
             pass
 
-    predetermined_parts = folder_scan.get("predetermined_parts", [])
-    available_parts = folder_scan.get("available_parts", [])
-    total_parts = folder_scan.get("total_parts", 0)
+    predetermined_parts = list(folder_scan.get("predetermined_parts", []))
+    available_parts = list(folder_scan.get("available_parts", []))
+    total_parts = int(folder_scan.get("total_parts", 0) or 0)
     base_prefix = folder_scan.get("base_prefix") or folder_scan.get("folder_name") or ""
+    bundle_totals: Dict[str, Any] = {}
 
     if predetermined_parts:
         active_proj = db.get_active_project() or {}
         eff_tot = int(total_parts or len(predetermined_parts) or 1)
         eff_prefix = base_prefix or folder_scan.get("folder_name") or active_proj.get("bundle_name") or active_proj.get("name") or "Bundle"
         clean_bundle_slug = re.sub(r"[^a-z0-9]+", "_", str(eff_prefix).lower()).strip("_") or "bundle"
-        bundle_id = active_proj.get("bundle_id") or f"bundle_{clean_bundle_slug}"
+        act_bid_str = str(active_proj.get("bundle_id") or "")
+        act_bname_slug = re.sub(r"[^a-z0-9]+", "_", str(active_proj.get("bundle_name") or active_proj.get("name") or "").lower()).strip("_")
+        active_matches_bundle = bool(
+            act_bid_str
+            and (
+                clean_bundle_slug[:10] in act_bid_str.lower()
+                or (act_bname_slug and (clean_bundle_slug[:10] in act_bname_slug or act_bname_slug[:10] in clean_bundle_slug))
+            )
+        )
+        bundle_id = act_bid_str if active_matches_bundle else f"bundle_{clean_bundle_slug}"
 
-        # Identify which parts of this bundle are already completed (so clicking Scan Folder after Part 1 finishes opens Part 2!)
+        # Identify which parts of this bundle are already completed (so clicking Bundle Detect after Part 1 finishes opens Part 2!)
         completed_part_nums = {
             int(ep["part_number"])
             for ep in (state.multipart_bundle_state.get("exported_parts") or [])
             if ep.get("part_number") is not None
+            and (
+                not state.multipart_bundle_state.get("base_prefix")
+                or str(eff_prefix)[:8].lower() in str(state.multipart_bundle_state.get("base_prefix") or "").lower()
+            )
         }
         paused_part_nums = set()
         try:
@@ -1105,8 +1233,128 @@ async def predetermine_bundle_from_folder_screenshot(
 
         if available_parts and part_to_open not in available_parts:
             part_to_open = min(available_parts)
+
+        # Open EACH part file in the bundle to read its content details before proceeding!
+        # Inspect non-target parts first and `part_to_open` last so `part_to_open` remains open in Edit Mode at Line 1.
+        if inspect_part_contents:
+            sorted_parts = sorted(predetermined_parts, key=lambda p: int(p.get("part_number") or 999))
+            non_target_parts = [p for p in sorted_parts if int(p.get("part_number") or 0) != part_to_open]
+            final_target_parts = [p for p in sorted_parts if int(p.get("part_number") or 0) == part_to_open]
+            inspection_order = non_target_parts + final_target_parts
+
+            live_coords_by_part: Dict[int, List[int]] = {
+                int(p["part_number"]): list(p["tap_coords"])
+                for p in predetermined_parts
+                if p.get("part_number") is not None and p.get("tap_coords")
+            }
+
+            for idx_inspect, pt_item in enumerate(inspection_order, start=1):
+                pno = int(pt_item["part_number"])
+                p_fn = str(pt_item.get("file_name") or f"{eff_prefix}_part{pno}.md")
+                is_final_target = (idx_inspect == len(inspection_order)) and (pno == part_to_open) and bool(reopen_editor)
+
+                coords = live_coords_by_part.get(pno) or pt_item.get("tap_coords")
+                if not coords:
+                    continue
+                tx_i, ty_i = int(coords[0]), int(coords[1])
+
+                try:
+                    mfc_grp = state.dag_state.get("groups", {}).get("markdown_file_change")
+                    if isinstance(mfc_grp, dict):
+                        mfc_grp["progress"] = {
+                            "stage": (
+                                f"[Bundle Detect] Reading Part {pno}/{eff_tot} content details "
+                                f"({idx_inspect}/{len(inspection_order)}: '{p_fn}')..."
+                            ),
+                            "current": idx_inspect,
+                            "total": len(inspection_order),
+                        }
+                    await state.ws_manager.broadcast({"type": "dag_update", "dag": state.dag_state})
+                except Exception:
+                    pass
+
+                await run_adb_shell(f"input {disp_pfx}tap {tx_i} {ty_i}", ser, timeout=2.5)
+                actions.append(
+                    f"[Bundle Detect] Opened Part {pno}/{eff_tot} ('{p_fn}') at ({tx_i}, {ty_i}) to read content details"
+                )
+                await asyncio.sleep(1.75)
+
+                snap_check = await capture_external_screenshot(ser, bypass_lock=True)
+                snap_after = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_check, actions)
+                if snap_after and snap_after != snap_check:
+                    img_after = cv2.imdecode(np.frombuffer(snap_after, np.uint8), cv2.IMREAD_COLOR)
+                    if img_after is not None and scan_folder_markdown_files_cv(img_after).get("is_folder_view"):
+                        await run_adb_shell(f"input {disp_pfx}tap {tx_i} {ty_i}", ser, timeout=2.5)
+                        await asyncio.sleep(1.55)
+
+                hdr_res = await inspect_opened_part_header_details(
+                    serial=ser,
+                    display_id=disp_id,
+                    expected_part_number=pno,
+                    expected_file_name=p_fn,
+                    ensure_edit_mode=is_final_target,
+                    actions=actions,
+                )
+                p_hdr = hdr_res.get("part_header") or {}
+                if p_hdr.get("total_parts") and int(p_hdr["total_parts"]) > eff_tot:
+                    eff_tot = int(p_hdr["total_parts"])
+                    total_parts = eff_tot
+
+                pt_item.update({
+                    "file_name": p_hdr.get("file_name") or p_fn,
+                    "file_part_tag": p_hdr.get("file_part_tag") or f"part{pno}",
+                    "part_title_tag": p_hdr.get("part_title_tag") or f"(Part {pno} of {eff_tot})",
+                    "total_parts": eff_tot,
+                    "files_in_part": int(p_hdr.get("files_in_part") or pt_item.get("files_in_part") or 0),
+                    "total_project_files": int(p_hdr.get("total_project_files") or pt_item.get("total_project_files") or 0),
+                    "part_size_kb": round(float(p_hdr.get("part_size_kb") or pt_item.get("part_size_kb") or 0.0), 2),
+                    "part_size_bytes": int(p_hdr.get("part_size_bytes") or pt_item.get("part_size_bytes") or 0),
+                    "declared_lines": int(p_hdr.get("declared_lines") or pt_item.get("declared_lines") or 0),
+                    "declared_chars": int(p_hdr.get("declared_chars") or pt_item.get("declared_chars") or 0),
+                    "generated_at": p_hdr.get("generated_at") or pt_item.get("generated_at") or "",
+                    "header_verified": bool(hdr_res.get("has_part_header") or p_hdr.get("declared_lines")),
+                })
+
+                # Persist each part's content detail attributes into its own SQLite project row
+                try:
+                    part_proj_res = await state.activate_or_create_bundle_part_project(
+                        part_number=pno,
+                        file_name=pt_item["file_name"],
+                        bundle_id=bundle_id,
+                        bundle_name=eff_prefix,
+                        total_parts=eff_tot,
+                        broadcast=False,
+                    )
+                    part_pid = (part_proj_res or {}).get("project_id") or ((part_proj_res or {}).get("project") or {}).get("id")
+                    if part_pid:
+                        db.update_project_part_header_details(part_pid, pt_item, update_target_lines=True)
+                except Exception as part_db_err:
+                    print(f"[Bundle Detect] Part {pno} DB header save note: {part_db_err}")
+
+                if is_final_target:
+                    detected_open_file = pt_item["file_name"]
+                    state.multipart_bundle_state["last_opened_file"] = detected_open_file
+                else:
+                    exit_back = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
+                    actions.extend(exit_back.get("actions", []))
+                    back_scan = exit_back.get("folder_scan", {}) or {}
+                    for fp_upd in (back_scan.get("predetermined_parts") or []):
+                        fp_no = int(fp_upd.get("part_number") or 0)
+                        if fp_no > 0 and fp_upd.get("tap_coords"):
+                            live_coords_by_part[fp_no] = list(fp_upd["tap_coords"])
+
+        sum_files_in_parts = 0
+        max_total_proj_files = 0
+        sum_bundle_size_kb = 0.0
+        sum_bundle_size_bytes = 0
+        sum_bundle_lines = 0
+        sum_bundle_chars = 0
+        verified_cnt = 0
+
         for pt in predetermined_parts:
             pno = int(pt["part_number"])
+            pt["total_parts"] = eff_tot
+            pt["scope_label"] = f"MD {pno} / {eff_tot}"
             if pno == part_to_open:
                 pt["status"] = "scanning"
             elif pno in completed_part_nums:
@@ -1115,6 +1363,35 @@ async def predetermine_bundle_from_folder_screenshot(
                 pt["status"] = "paused"
             else:
                 pt["status"] = "pending"
+            sum_files_in_parts += int(pt.get("files_in_part") or 0)
+            max_total_proj_files = max(max_total_proj_files, int(pt.get("total_project_files") or 0))
+            sum_bundle_size_kb += float(pt.get("part_size_kb") or 0.0)
+            sum_bundle_size_bytes += int(pt.get("part_size_bytes") or round(float(pt.get("part_size_kb") or 0.0) * 1024.0))
+            sum_bundle_lines += int(pt.get("declared_lines") or 0)
+            sum_bundle_chars += int(pt.get("declared_chars") or 0)
+            if pt.get("header_verified"):
+                verified_cnt += 1
+
+        resolved_proj_files = max(max_total_proj_files, sum_files_in_parts)
+        for pt in predetermined_parts:
+            if resolved_proj_files > 0 and not pt.get("total_project_files"):
+                pt["total_project_files"] = resolved_proj_files
+
+        bundle_totals = {
+            "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
+            "bundle_id": bundle_id,
+            "bundle_name": eff_prefix,
+            "total_parts": eff_tot,
+            "total_project_files": resolved_proj_files,
+            "sum_files_across_parts": sum_files_in_parts,
+            "total_bundle_size_kb": round(sum_bundle_size_kb, 2),
+            "total_bundle_size_bytes": sum_bundle_size_bytes,
+            "total_bundle_lines": sum_bundle_lines,
+            "total_bundle_chars": sum_bundle_chars,
+            "verified_headers_count": verified_cnt,
+            "all_parts_headers_read": bool(verified_cnt >= len(predetermined_parts) and len(predetermined_parts) > 0),
+            "parts": predetermined_parts,
+        }
 
         target_entry = next(
             (p for p in predetermined_parts if p["part_number"] == part_to_open),
@@ -1124,12 +1401,14 @@ async def predetermine_bundle_from_folder_screenshot(
 
         state.multipart_bundle_state.update({
             "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
+            "bundle_id": bundle_id,
             "base_prefix": eff_prefix,
             "folder_name": folder_scan.get("folder_name") or eff_prefix,
             "current_part": part_to_open,
             "total_parts": eff_tot,
             "available_parts": available_parts,
             "predetermined_parts": predetermined_parts,
+            "bundle_totals": bundle_totals,
             "active_file_name": target_fn,
             "next_part_number": (part_to_open + 1) if (part_to_open + 1) in available_parts else None,
             "next_file_name": next(
@@ -1138,9 +1417,9 @@ async def predetermine_bundle_from_folder_screenshot(
             ),
         })
 
-        # Synchronize the active project in SQLite (switching/creating Part K if Part 1 was already completed)
+        # Activate the target uncompleted part project in SQLite and persist its header details
         try:
-            await state.activate_or_create_bundle_part_project(
+            act_res = await state.activate_or_create_bundle_part_project(
                 part_number=part_to_open,
                 file_name=target_fn,
                 bundle_id=bundle_id,
@@ -1148,10 +1427,18 @@ async def predetermine_bundle_from_folder_screenshot(
                 total_parts=eff_tot,
                 broadcast=True,
             )
+            act_pid = (act_res or {}).get("project_id") or ((act_res or {}).get("project") or {}).get("id") or state.get_current_project_id()
+            if act_pid:
+                db.update_project_part_header_details(act_pid, target_entry, update_target_lines=True)
+            if int(target_entry.get("declared_lines") or 0) > 0:
+                state.latest_telemetry["target_total_lines"] = int(target_entry["declared_lines"])
+            state.update_bundle_metadata_driver_in_trace(bundle_totals, persist=False)
+            state.update_part_metadata_driver_in_trace(target_entry, persist=True)
+            state.refresh_codescan_hierarchy_telemetry(project_id=act_pid)
         except Exception as db_sync_err:
             print(f"[predetermine_bundle_from_folder_screenshot] DB bundle metadata sync warning: {db_sync_err}")
 
-        if reopen_editor:
+        if reopen_editor and not inspect_part_contents:
             tx, ty = target_entry["tap_coords"]
             await run_adb_shell(f"input {disp_pfx}tap {tx} {ty}", ser, timeout=2.5)
             actions.append(
@@ -1163,7 +1450,50 @@ async def predetermine_bundle_from_folder_screenshot(
             actions.extend(prep_res.get("actions", []))
             detected_open_file = target_entry["file_name"]
             state.multipart_bundle_state["last_opened_file"] = detected_open_file
-            state.sync_multipart_state_from_alignment()
+
+        state.latest_alignment_status.update({
+            "file_name": target_fn,
+            "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
+            "part_number": part_to_open,
+            "total_parts": eff_tot,
+            "bundle_prefix": eff_prefix,
+        })
+        state.sync_multipart_state_from_alignment(prefer_active_project=True)
+    elif inspect_part_contents and not folder_scan.get("is_folder_view"):
+        # Single-part standalone Markdown file open in editor: read its content header details as metadata driver
+        single_hdr_res = await inspect_opened_part_header_details(
+            serial=ser,
+            display_id=disp_id,
+            expected_part_number=1,
+            expected_file_name=detected_open_file,
+            ensure_edit_mode=reopen_editor,
+            actions=actions,
+        )
+        s_hdr = single_hdr_res.get("part_header") or {}
+        if s_hdr.get("has_part_header"):
+            cur_pid = state.get_current_project_id()
+            if cur_pid:
+                db.update_project_part_header_details(cur_pid, s_hdr, update_target_lines=True)
+            if int(s_hdr.get("declared_lines") or 0) > 0:
+                state.latest_telemetry["target_total_lines"] = int(s_hdr["declared_lines"])
+            bundle_totals = {
+                "is_multipart": False,
+                "bundle_name": s_hdr.get("bundle_name") or detected_open_file,
+                "total_parts": 1,
+                "total_project_files": int(s_hdr.get("total_project_files") or s_hdr.get("files_in_part") or 0),
+                "sum_files_across_parts": int(s_hdr.get("files_in_part") or 0),
+                "total_bundle_size_kb": float(s_hdr.get("part_size_kb") or 0.0),
+                "total_bundle_size_bytes": int(s_hdr.get("part_size_bytes") or 0),
+                "total_bundle_lines": int(s_hdr.get("declared_lines") or 0),
+                "total_bundle_chars": int(s_hdr.get("declared_chars") or 0),
+                "verified_headers_count": 1,
+                "all_parts_headers_read": True,
+                "parts": [s_hdr],
+            }
+            state.multipart_bundle_state["bundle_totals"] = bundle_totals
+            state.update_bundle_metadata_driver_in_trace(bundle_totals, persist=False)
+            state.update_part_metadata_driver_in_trace(s_hdr, persist=True)
+            state.refresh_codescan_hierarchy_telemetry(project_id=cur_pid)
 
     return {
         "status": "success" if predetermined_parts else "single_file",
@@ -1174,6 +1504,7 @@ async def predetermine_bundle_from_folder_screenshot(
         "total_parts": total_parts,
         "available_parts": available_parts,
         "predetermined_parts": predetermined_parts,
+        "bundle_totals": bundle_totals or state.multipart_bundle_state.get("bundle_totals") or {},
         "opened_file_name": detected_open_file,
         "folder_scan": folder_scan,
         "actions": actions,
@@ -1237,13 +1568,18 @@ async def select_and_open_next_markdown_part(
         max(available_parts) if available_parts else 0,
     )
 
-    # Update predetermined_parts with fresh folder_scan if available
+    # Update predetermined_parts with fresh folder_scan if available (preserving pre-read [Bundle Detect] content details!)
     if folder_scan.get("predetermined_parts"):
         by_part = {int(p["part_number"]): dict(p) for p in predetermined if p.get("part_number") is not None}
         for fp in folder_scan["predetermined_parts"]:
             pno = int(fp["part_number"])
-            prev_st = by_part.get(pno, {}).get("status", "pending")
-            by_part[pno] = {**fp, "status": "completed" if pno <= cur_part else prev_st}
+            existing_pt = by_part.get(pno, {})
+            prev_st = existing_pt.get("status", "pending")
+            by_part[pno] = {
+                **existing_pt,
+                **fp,
+                "status": "completed" if pno <= cur_part else prev_st,
+            }
         predetermined = [by_part[k] for k in sorted(by_part.keys())]
         state.multipart_bundle_state["predetermined_parts"] = predetermined
 
@@ -1371,6 +1707,33 @@ async def select_and_open_next_markdown_part(
 
     opened_name = prep_res.get("file_name") or target_filename
     resolved_total_parts = (total_parts or max(available_parts)) if available_parts else next_part
+
+    # Ensure next_part's content header details are verified & active in the metadata driver
+    next_pt_entry = next((p for p in predetermined if int(p.get("part_number") or 0) == next_part), None)
+    if next_pt_entry is not None and not next_pt_entry.get("header_verified"):
+        hdr_next = await inspect_opened_part_header_details(
+            serial=ser,
+            display_id=disp_id,
+            expected_part_number=next_part,
+            expected_file_name=opened_name,
+            ensure_edit_mode=False,
+            actions=actions,
+        )
+        nh = hdr_next.get("part_header") or {}
+        if nh.get("has_part_header"):
+            next_pt_entry.update({
+                "files_in_part": int(nh.get("files_in_part") or next_pt_entry.get("files_in_part") or 0),
+                "total_project_files": int(nh.get("total_project_files") or next_pt_entry.get("total_project_files") or 0),
+                "part_size_kb": round(float(nh.get("part_size_kb") or next_pt_entry.get("part_size_kb") or 0.0), 2),
+                "part_size_bytes": int(nh.get("part_size_bytes") or next_pt_entry.get("part_size_bytes") or 0),
+                "declared_lines": int(nh.get("declared_lines") or next_pt_entry.get("declared_lines") or 0),
+                "declared_chars": int(nh.get("declared_chars") or next_pt_entry.get("declared_chars") or 0),
+                "header_verified": True,
+            })
+    if next_pt_entry:
+        state.update_part_metadata_driver_in_trace(next_pt_entry, persist=True)
+        if int(next_pt_entry.get("declared_lines") or 0) > 0:
+            state.latest_telemetry["target_total_lines"] = int(next_pt_entry["declared_lines"])
     return {
         "status": "success",
         "transition_state": "opened_next_part",

@@ -288,7 +288,58 @@ class FrameAcquireNode(BaseDagNode):
         state.orchestration_state["last_acquired_frame_id"] = fid
         pid = blackboard.project_id or state.get_current_project_id()
 
-        # 6. Save to Database
+        # 6a. Detect part header detail attributes & CODESCAN_FILE_START / END markers during image capture
+        cap_part_header: Dict[str, Any] = {}
+        cap_codescan_starts = []
+        cap_codescan_ends = []
+        try:
+            from dag_nodes.markdown_tag_parser_node import extract_capture_image_metadata_markers
+            fallback_fn = str(state.latest_alignment_status.get("file_name") or "")
+            cap_meta = await asyncio.to_thread(
+                extract_capture_image_metadata_markers,
+                str(frame_path),
+                top_ln,
+                fallback_fn,
+                fid,
+                page_idx,
+            )
+            if isinstance(cap_meta, dict):
+                cap_codescan_starts = list(cap_meta.get("codescan_starts") or [])
+                cap_codescan_ends = list(cap_meta.get("codescan_ends") or [])
+                if cap_meta.get("has_part_header") and isinstance(cap_meta.get("detected_part_header"), dict):
+                    cap_part_header = dict(cap_meta["detected_part_header"])
+                    state.update_part_metadata_driver_in_trace(cap_part_header)
+                    state.latest_telemetry["part_header_metadata"] = cap_part_header
+                    if pid:
+                        try:
+                            db.update_project_part_header_details(pid, cap_part_header, update_target_lines=False)
+                        except Exception:
+                            pass
+                for cs_start in cap_codescan_starts:
+                    state.record_code_scan_start_trace(
+                        cs_start,
+                        frame_id=fid,
+                        page_index=page_idx,
+                        md_line=cs_start.get("md_line"),
+                        source_node="frame_acquire",
+                        persist=True,
+                    )
+                    state.latest_telemetry["active_codescan_file"] = {
+                        "path": cs_start.get("path", ""),
+                        "short_name": cs_start.get("short_name", ""),
+                        "type": cs_start.get("type", ""),
+                        "size": int(cs_start.get("size") or 0),
+                        "lines": int(cs_start.get("lines") or 0),
+                        "chars": int(cs_start.get("chars") or 0),
+                        "md_line": int(cs_start.get("md_line") or 0),
+                        "frame_id": fid,
+                        "page_index": page_idx,
+                        "status": "scanning_active",
+                    }
+        except Exception as cm_err:
+            print(f"[FrameAcquireNode] capture metadata marker detection note: {cm_err}")
+
+        # 6b. Save to Database
         if pid:
             try:
                 db.save_frame(
@@ -325,6 +376,9 @@ class FrameAcquireNode(BaseDagNode):
             "arrow_count": arr_count,
             "character_tracking_mode": char_track_mode,
             "is_wrapped_continuation": is_wrap_cont,
+            "detected_part_header": cap_part_header if cap_part_header else None,
+            "codescan_starts": cap_codescan_starts,
+            "codescan_ends": cap_codescan_ends,
         }
         state.captured_frames[fid] = frame_info
 
@@ -347,11 +401,22 @@ class FrameAcquireNode(BaseDagNode):
             "settle_delay_ms": int(settle_ms * 1000),
             "total_captures": total_caps,
             "page": page_idx,
+            "detected_part_header": cap_part_header if cap_part_header else None,
+            "codescan_starts": cap_codescan_starts,
+            "codescan_starts_count": len(cap_codescan_starts),
+            "codescan_ends_count": len(cap_codescan_ends),
+            "active_codescan_file": state.latest_telemetry.get("active_codescan_file"),
             "error": None
         }
         state.latest_telemetry["current_page"] = page_idx
         state.sync_alignment_gutter_lines(top_ln, bot_ln)
-        state.latest_telemetry["status_message"] = f"Frame #{page_idx} acquired ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB in {cap_duration_ms}ms) ✔"
+        marker_note = ""
+        if cap_codescan_starts:
+            first_cs = cap_codescan_starts[0]
+            marker_note = f" • CODESCAN_START {first_cs.get('short_name') or first_cs.get('path', '')} ({first_cs.get('lines', 0)} ln / {first_cs.get('chars', 0)} ch)"
+        elif cap_part_header and cap_part_header.get("files_in_part"):
+            marker_note = f" • Part {cap_part_header.get('part_number', '?')}/{cap_part_header.get('total_parts', '?')} ({cap_part_header.get('files_in_part')} files)"
+        state.latest_telemetry["status_message"] = f"Frame #{page_idx} acquired ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB in {cap_duration_ms}ms){marker_note} ✔"
 
         state.dag_state["nodes"]["frame_acquire"].update({
             "status": "completed",
@@ -360,8 +425,11 @@ class FrameAcquireNode(BaseDagNode):
             "frame_id": fid,
             "file_size": len(snap),
             "resolution": f"{w_px}x{h_px}",
-            "evaluator": "Display Frame Evaluator",
-            "telemetry_insight": f"Frame {page_idx} captured ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB, {cap_duration_ms}ms) ✔",
+            "detected_part_header": cap_part_header if cap_part_header else None,
+            "codescan_starts": cap_codescan_starts,
+            "codescan_ends": cap_codescan_ends,
+            "evaluator": "Display Frame & CODESCAN Metadata Evaluator" if (cap_codescan_starts or cap_part_header) else "Display Frame Evaluator",
+            "telemetry_insight": f"Frame {page_idx} captured ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB, {cap_duration_ms}ms){marker_note} ✔",
             "error": None
         })
 
@@ -387,7 +455,7 @@ class FrameAcquireNode(BaseDagNode):
             from routers.orchestration import emit_dag_telemetry_event
             await emit_dag_telemetry_event(
                 category="FRAME",
-                message=f"DAG 2 • Captured Frame {page_idx} ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB, {cap_duration_ms}ms)",
+                message=f"DAG 2 • Captured Frame {page_idx} ({w_px}x{h_px}, {round(len(snap)/1024, 1)} KB, {cap_duration_ms}ms){marker_note}",
                 dag="capture_entire_markdown",
                 node_id="frame_acquire",
                 serial=serial,
@@ -399,7 +467,7 @@ class FrameAcquireNode(BaseDagNode):
         return NodeExecutionResult(
             status="success",
             node_id=self.node_id,
-            message=f"Acquired external display frame {page_idx} ({w_px}x{h_px})",
+            message=f"Acquired external display frame {page_idx} ({w_px}x{h_px}){marker_note}",
             data={
                 "frame_id": fid,
                 "page": page_idx,
@@ -409,6 +477,9 @@ class FrameAcquireNode(BaseDagNode):
                 "bytes_size": len(snap),
                 "capture_ms": cap_duration_ms,
                 "top_line": top_ln,
-                "bottom_line": bot_ln
+                "bottom_line": bot_ln,
+                "detected_part_header": cap_part_header if cap_part_header else None,
+                "codescan_starts": cap_codescan_starts,
+                "codescan_ends": cap_codescan_ends,
             }
         )

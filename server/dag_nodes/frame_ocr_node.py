@@ -347,6 +347,9 @@ class FrameOcrNode(BaseDagNode):
         arrow_count = 0 if pidx == 1 else (state.orchestration_state.get("last_arrow_count") or state.dag_state["nodes"].get("arrow_down", {}).get("arrow_count") or 0)
         if cur_acquire_fid and cur_acquire_fid in state.captured_frames:
             old_rec = state.captured_frames[cur_acquire_fid]
+            prev_part_hdr = old_rec.get("detected_part_header")
+            prev_cs_starts = list(old_rec.get("codescan_starts") or [])
+            prev_cs_ends = list(old_rec.get("codescan_ends") or [])
             if is_duplicate and duplicate_fid and duplicate_fid != cur_acquire_fid and duplicate_fid in state.captured_frames:
                 # Current acquire is a duplicate of a prior frame; remove the redundant acquire record
                 state.captured_frames.pop(cur_acquire_fid, None)
@@ -355,6 +358,7 @@ class FrameOcrNode(BaseDagNode):
                 except Exception:
                     pass
                 fid = duplicate_fid
+                state.reassign_codescan_trace_frame_id(cur_acquire_fid, fid)
                 state.captured_frames[fid].update({
                     "top_line": top_ln,
                     "bottom_line": bot_ln,
@@ -365,6 +369,12 @@ class FrameOcrNode(BaseDagNode):
                     "arrow_count": arrow_count,
                     "is_wrapped_continuation": is_wrap_continuation_page,
                 })
+                if prev_part_hdr and not state.captured_frames[fid].get("detected_part_header"):
+                    state.captured_frames[fid]["detected_part_header"] = prev_part_hdr
+                if prev_cs_starts and not state.captured_frames[fid].get("codescan_starts"):
+                    state.captured_frames[fid]["codescan_starts"] = prev_cs_starts
+                if prev_cs_ends and not state.captured_frames[fid].get("codescan_ends"):
+                    state.captured_frames[fid]["codescan_ends"] = prev_cs_ends
                 frame_info = state.captured_frames[fid]
             elif old_rec.get("top_line") != top_ln or old_rec.get("bottom_line") != bot_ln or (is_wrap_continuation_page and "_wrap" not in cur_acquire_fid):
                 # Bounds were refined by Node 5; replace the Node 3 record so we never leave two rows or mismatched filenames
@@ -381,6 +391,7 @@ class FrameOcrNode(BaseDagNode):
                     fid = f"frame_{top_ln:05d}_{bot_ln:05d}_{now_str}"
                 else:
                     fid = f"frame_p{pidx:03d}_{now_str}"
+                state.reassign_codescan_trace_frame_id(cur_acquire_fid, fid)
                 fn = f"{fid}.png"
                 frame_path = state.FRAMES_DIR / fn
                 with open(frame_path, "wb") as f:
@@ -405,6 +416,9 @@ class FrameOcrNode(BaseDagNode):
                     "model_used": cfg.get("engine", "RapidOCR"),
                     "arrow_count": arrow_count,
                     "is_wrapped_continuation": is_wrap_continuation_page,
+                    "detected_part_header": prev_part_hdr,
+                    "codescan_starts": prev_cs_starts,
+                    "codescan_ends": prev_cs_ends,
                 }
                 state.captured_frames[fid] = frame_info
             else:
@@ -568,6 +582,21 @@ class FrameOcrNode(BaseDagNode):
                     is_wrapped=item.get("is_wrapped", False),
                     position_verified=True,
                 )
+
+        try:
+            from dag_nodes.local_ai_ocr_node import _record_ocr_lines_codescan_markers
+            lead_lns = [int(lead_cont["line_number"])] if (lead_cont and lead_cont.get("line_number")) else []
+            cs_ocr = _record_ocr_lines_codescan_markers(
+                lines_detected,
+                fid,
+                pidx,
+                source_node_name="frame_ocr",
+                extra_line_numbers=lead_lns,
+            )
+            if cs_ocr:
+                frame_info["codescan_starts"] = cs_ocr
+        except Exception as cs_f_err:
+            print(f"[FrameOcrNode] codescan trace note: {cs_f_err}")
 
         state.save_persisted_state()
         state.update_dag_after_frame(fid, top_ln, bot_ln)

@@ -33,6 +33,10 @@ export interface HeadlessTelemetryData {
   recent_events?: string[];
   reconstructed_markdown_path?: string | null;
   reconstructed_markdown_size?: number;
+  bundle_progress?: Record<string, any>;
+  part_progress?: Record<string, any>;
+  active_codescan_file?: Record<string, any> | null;
+  process_accuracy?: Record<string, any>;
 }
 
 interface HeadlessTelemetryModalProps {
@@ -516,6 +520,68 @@ export const HeadlessTelemetryModal: React.FC<HeadlessTelemetryModalProps> = ({
               <span>Line {targetLines > 0 ? targetLines.toLocaleString() : '?'}</span>
             </div>
           </div>
+
+          {/* Bundle & Part Metadata Driver + Active CODESCAN_FILE_START & Per-Process Accuracy */}
+          {(() => {
+            const bp = data.bundle_progress || {};
+            const pp = data.part_progress || {};
+            const af = data.active_codescan_file;
+            const pa = data.process_accuracy || {};
+            const hasMeta = Boolean(
+              bp.total_project_files || pp.files_declared || pp.size_kb_declared || pp.chars_declared || af?.path || pa.overall_accuracy_pct !== undefined
+            );
+            if (!hasMeta) return null;
+            return (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '8px',
+                  background: '#161b22',
+                  border: '1px solid rgba(163, 113, 247, 0.35)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px',
+                  fontSize: '11.5px',
+                  fontFamily: 'SFMono-Regular, Consolas, monospace'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    <span style={{ color: '#d2a8ff', fontWeight: 800 }}>
+                      {bp.is_multipart ? `BUNDLE Pt ${pp.number || 1}/${pp.total_parts || bp.total_parts || 1}` : 'PART DRIVER'}
+                    </span>
+                    {Boolean(pp.files_declared || bp.total_project_files) && (
+                      <span style={{ color: '#c9d1d9' }}>
+                        Files: <strong>{pp.files_captured ?? 0}/{pp.files_declared ?? 0}</strong>
+                        {bp.total_project_files ? ` (Proj Tot: ${bp.total_project_files})` : ''}
+                      </span>
+                    )}
+                    {Boolean(pp.size_kb_declared || bp.total_bundle_size_kb) && (
+                      <span style={{ color: '#c9d1d9' }}>
+                        • Size: <strong>{pp.size_kb_captured ?? 0}/{pp.size_kb_declared ?? 0} KB</strong>
+                        {bp.total_bundle_size_kb ? ` (Bundle: ${bp.total_bundle_size_kb} KB)` : ''}
+                      </span>
+                    )}
+                    {Boolean(pp.chars_declared || bp.total_bundle_chars) && (
+                      <span style={{ color: '#c9d1d9' }}>
+                        • Chars: <strong>{(pp.chars_captured ?? 0).toLocaleString()}/{(pp.chars_declared ?? 0).toLocaleString()}</strong>
+                      </span>
+                    )}
+                  </div>
+                  {pa.overall_accuracy_pct !== undefined && (
+                    <span style={{ color: '#00ff9d', fontWeight: 700 }}>
+                      Cap:{pa.capture_accuracy_pct ?? 100}% • OCR:{pa.ocr_accuracy_pct ?? 100}% • Pos:{pa.position_accuracy_pct ?? 100}% • Asm:{pa.assembly_accuracy_pct ?? 100}% • All:{pa.overall_accuracy_pct ?? 100}%
+                    </span>
+                  )}
+                </div>
+                {af && af.path && (
+                  <div style={{ color: '#93c5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={af.path}>
+                    ↳ <strong>CODESCAN_START</strong> [{af.type || 'file'}] <code>{af.path}</code> • size=<strong>{af.actual_size ?? af.size ?? 0}/{af.expected_size ?? af.size ?? 0}B</strong> • lines=<strong>{af.actual_lines ?? 0}/{af.expected_lines ?? af.lines ?? 0}</strong> • chars=<strong>{af.actual_chars ?? 0}/{af.expected_chars ?? af.chars ?? 0}</strong>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {/* 6-Card Telemetry Grid */}
           <div

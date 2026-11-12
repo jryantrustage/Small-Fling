@@ -169,10 +169,10 @@ export const NODES_METADATA: NodeMeta[] = [
   {
     id: 'markdown_file_change',
     step: '0',
-    shortName: 'Markdown File Change',
-    fullName: '0. MARKDOWN FILE CHANGE & FOLDER QUEUE',
-    subhead: 'Scan Folder Queue & Switch Part',
-    desc: 'Scans Teams/OneDrive folder to queue detected markdown files (MD 1 / N .. MD N / N), and on markdown completion switches to the next file, opens Fullscreen, and switches to Dark Mode before handing off to Phase I Initialize or Phase III Post-Capture Analysis.',
+    shortName: 'Bundle Detect',
+    fullName: '0. BUNDLE DETECT & PART CONTENT DETAILS',
+    subhead: 'Read Part Details & Queue',
+    desc: 'Opens each markdown part in the Teams/OneDrive folder queue (MD 1 / N .. MD N / N), reads part header details (total project files, files in part, part size, lines, chars) as metadata drivers, and switches parts in Fullscreen + Dark Mode.',
     group: 'markdown_file_change',
     accentColor: '#d2a8ff',
     hasConfig: true
@@ -435,10 +435,48 @@ export interface DiagnosticsLoopRunRecord {
   node_timings?: Record<string, number>;
 }
 
+export interface CodeScanStartTraceRecord {
+  path: string;
+  normalized_path?: string;
+  short_name?: string;
+  type: string;
+  size: number;
+  lines: number;
+  chars: number;
+  md_line?: number;
+  end_md_line?: number | null;
+  frame_id?: string;
+  page_index?: number;
+  source_node?: string;
+  detected_at_iso?: string;
+  status?: string;
+  actual_size?: number;
+  actual_lines?: number;
+  actual_chars?: number;
+  all_metrics_match?: boolean;
+  process_accuracy?: ProcessAccuracyMetrics;
+}
+
+export interface ProcessAccuracyMetrics {
+  capture_accuracy_pct?: number;
+  ocr_accuracy_pct?: number;
+  position_accuracy_pct?: number;
+  assembly_accuracy_pct?: number;
+  overall_accuracy_pct?: number;
+  verified_files_count?: number;
+  mismatched_files_count?: number;
+}
+
 export interface ProjectDiagnosticsTrace {
   project_id?: string | null;
   project_name?: string | null;
   target_total_lines: number;
+  metadata_driver_active?: boolean;
+  bundle_metadata_driver?: Record<string, any>;
+  part_metadata_driver?: Record<string, any>;
+  codescan_start_traces?: CodeScanStartTraceRecord[];
+  active_codescan_file?: Record<string, any> | null;
+  process_accuracy?: ProcessAccuracyMetrics;
   project_started_at_iso?: string | null;
   project_started_at_ms?: number | null;
   first_line_acquired_at_iso?: string | null;

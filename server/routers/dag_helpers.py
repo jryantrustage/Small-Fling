@@ -55,7 +55,7 @@ except ImportError:
 
 
 NODE_ALIAS_MAP = {
-    "node_0": "markdown_file_change", "markdown_file_change": "markdown_file_change", "file_change": "markdown_file_change", "scan_folder": "markdown_file_change",
+    "node_0": "markdown_file_change", "markdown_file_change": "markdown_file_change", "file_change": "markdown_file_change", "scan_folder": "markdown_file_change", "bundle_detect": "markdown_file_change",
     "node_1": "init_end", "node_1_end": "init_end", "init_end": "init_end",
     "node_2": "reset_home", "node_2_home": "reset_home", "reset_home": "reset_home",
     "node_3": "frame_acquire", "frame_acquire": "frame_acquire", "frame_capture": "frame_acquire", "capture": "frame_acquire",
@@ -1007,8 +1007,8 @@ async def execute_dag_group_markdown_file_change(
     state.dag_state.setdefault("groups", {})
     mfc_group = state.dag_state["groups"].setdefault("markdown_file_change", {
         "id": "markdown_file_change",
-        "title": "Markdown File Change",
-        "description": "Scans Teams/OneDrive folder queue (MD 1 / N .. MD N / N), switches to next markdown file on EOF, opens Fullscreen + Dark Mode before handing off to Phase I Initialize or Phase III Post-Capture Analyzer",
+        "title": "Bundle Detect",
+        "description": "Opens each part file in the Teams/OneDrive folder queue (MD 1 / N .. MD N / N), reads part header details (total project files, files in part, part size, lines, chars), and switches parts in Fullscreen + Dark Mode",
         "nodes": ["markdown_file_change"],
         "status": "idle",
         "progress": None,
@@ -1016,7 +1016,7 @@ async def execute_dag_group_markdown_file_change(
     mfc_node = state.dag_state.setdefault("nodes", {}).setdefault("markdown_file_change", {
         "id": "markdown_file_change",
         "group": "markdown_file_change",
-        "title": "0. Markdown File Change (Folder Queue & Part Switch)",
+        "title": "0. Bundle Detect (Part Content Details & Queue)",
         "status": "idle",
         "mode": mode,
         "current_part": 1,
@@ -1026,6 +1026,7 @@ async def execute_dag_group_markdown_file_change(
         "next_file_name": None,
         "detected_files": [],
         "predetermined_parts": [],
+        "bundle_totals": {},
         "bundle_completed": False,
         "fullscreen_verified": False,
         "dark_mode_verified": False,
@@ -1048,9 +1049,9 @@ async def execute_dag_group_markdown_file_change(
     state.dag_state["current_active_node"] = "markdown_file_change"
 
     stage_msg = (
-        "Switching to next markdown in bundle queue, maximizing Fullscreen & enabling Dark Mode..."
+        "Switching to next markdown part in bundle queue, maximizing Fullscreen & enabling Dark Mode..."
         if mode == "switch_next"
-        else "Scanning Teams / OneDrive folder to queue markdown files (MD 1 / N)..."
+        else "Bundle Detect: Opening each part file in Teams / OneDrive folder to read part content details..."
     )
     mfc_group["progress"] = {"percent": 25, "stage": stage_msg, "status": "running"}
     state.latest_telemetry["status_message"] = stage_msg
@@ -1073,6 +1074,7 @@ async def execute_dag_group_markdown_file_change(
             )
             mp_state = state.sync_multipart_state_from_alignment()
             predetermined = list(mp_state.get("predetermined_parts") or [])
+            bundle_totals = dict(mp_state.get("bundle_totals") or {})
             cur_part = int(mp_state.get("current_part") or 1)
             tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
             bundle_done = bool(trans_res.get("bundle_completed"))
@@ -1094,6 +1096,11 @@ async def execute_dag_group_markdown_file_change(
                 "next_file_name": mp_state.get("next_file_name"),
                 "detected_files": detected_files,
                 "predetermined_parts": predetermined,
+                "bundle_totals": bundle_totals,
+                "total_project_files": int(bundle_totals.get("total_project_files") or 0),
+                "total_bundle_size_kb": float(bundle_totals.get("total_bundle_size_kb") or 0.0),
+                "total_bundle_lines": int(bundle_totals.get("total_bundle_lines") or 0),
+                "total_bundle_chars": int(bundle_totals.get("total_bundle_chars") or 0),
                 "bundle_completed": bundle_done,
                 "fullscreen_verified": True,
                 "dark_mode_verified": True,
@@ -1168,7 +1175,7 @@ async def execute_dag_group_markdown_file_change(
                 state.dag_state["nodes"]["reset_home"]["verified"] = False
                 await emit_dag_telemetry_event(
                     category="SYSTEM",
-                    message=f"📂 Markdown File Change ({part_label}): Opened '{mfc_node.get('active_file_name')}' in Fullscreen + Dark Mode -> Handing off to Phase I Initialize...",
+                    message=f"📂 Bundle Detect ({part_label}): Opened '{mfc_node.get('active_file_name')}' in Fullscreen + Dark Mode -> Handing off to Phase I Initialize...",
                     dag="markdown_file_change",
                     level="success",
                     serial=active_serial,
@@ -1190,6 +1197,7 @@ async def execute_dag_group_markdown_file_change(
                 "part_progress_label": part_label,
                 "detected_files": detected_files,
                 "predetermined_parts": predetermined,
+                "bundle_totals": bundle_totals,
                 "transition": trans_res,
                 "project": active_proj_now,
                 "projects": updated_projects,
@@ -1198,13 +1206,14 @@ async def execute_dag_group_markdown_file_change(
                 "post_capture_analyzer": phase3_res,
             }
 
-        # Default: mode == 'scan_folder'
+        # Default: mode == 'scan_folder' (Bundle Detect: open each part file and read content details)
         scan_res = await predetermine_bundle_from_folder_screenshot(
             serial=active_serial,
             display_id=disp_id,
             target_part_number=payload.get("target_part_number"),
             reopen_editor=reopen_editor,
             force_rescan=force_rescan,
+            inspect_part_contents=bool(payload.get("inspect_part_contents", True)),
         )
         if reopen_editor and active_serial and "mock" not in str(active_serial).lower():
             try:
@@ -1218,15 +1227,26 @@ async def execute_dag_group_markdown_file_change(
                 print(f"[execute_dag_group_markdown_file_change] Fullscreen/Dark mode check note: {fs_err}")
 
         mp_state = state.sync_multipart_state_from_alignment()
+        state.refresh_codescan_hierarchy_telemetry()
         predetermined = list(mp_state.get("predetermined_parts") or [])
+        bundle_totals = dict(mp_state.get("bundle_totals") or scan_res.get("bundle_totals") or {})
         cur_part = int(mp_state.get("current_part") or 1)
         tot_parts = int(mp_state.get("total_parts") or len(predetermined) or 1)
         part_label = f"MD {cur_part} / {tot_parts}"
         detected_files = [str(p.get("file_name") or "") for p in predetermined if p.get("file_name")]
+        tot_proj_files = int(bundle_totals.get("total_project_files") or bundle_totals.get("sum_files_across_parts") or 0)
+        tot_size_kb = float(bundle_totals.get("total_bundle_size_kb") or 0.0)
+        tot_lines = int(bundle_totals.get("total_bundle_lines") or 0)
+        tot_chars = int(bundle_totals.get("total_bundle_chars") or 0)
 
         dur_ms = max(1, int((time.perf_counter() - t_start) * 1000))
         end_dt = datetime.now()
         passed = bool(scan_res.get("status") in ("success", "cached", "single_file") or len(detected_files) > 0)
+        metrics_summary = (
+            f" • Project Files: {tot_proj_files:,} | Size: {tot_size_kb:,.1f} KB | Lines: {tot_lines:,} | Chars: {tot_chars:,}"
+            if (tot_proj_files > 0 or tot_lines > 0 or tot_chars > 0)
+            else ""
+        )
 
         mfc_node.update({
             "status": "completed" if passed else "warning",
@@ -1239,6 +1259,11 @@ async def execute_dag_group_markdown_file_change(
             "next_file_name": mp_state.get("next_file_name"),
             "detected_files": detected_files,
             "predetermined_parts": predetermined,
+            "bundle_totals": bundle_totals,
+            "total_project_files": tot_proj_files,
+            "total_bundle_size_kb": tot_size_kb,
+            "total_bundle_lines": tot_lines,
+            "total_bundle_chars": tot_chars,
             "bundle_completed": False,
             "fullscreen_verified": bool(reopen_editor),
             "dark_mode_verified": bool(reopen_editor),
@@ -1255,22 +1280,21 @@ async def execute_dag_group_markdown_file_change(
             "evaluator": {
                 "type": "markdown_file_change_scan_folder",
                 "passed": passed,
-                "expected": "Detect Teams/OneDrive folder markdown files & populate MD 1 / N queue",
-                "actual": f"{len(detected_files)} markdown files queued ({part_label})",
+                "expected": "Open each bundle part file, read header content details & populate MD 1 / N queue",
+                "actual": f"{len(detected_files)} markdown parts inspected ({part_label}){metrics_summary}",
             },
         })
         mfc_group["status"] = "completed" if passed else "warning"
         mfc_group["progress"] = {
             "percent": 100,
-            "stage": f"Detected {len(detected_files)} markdown files in folder queue ({part_label}) ✔",
+            "stage": f"Bundle Detect inspected {len(detected_files)} markdown part(s) ({part_label}){metrics_summary} ✔",
             "status": "completed",
         }
         state.dag_state["current_active_node"] = None
         state.latest_telemetry["status_message"] = (
-            f"📂 Folder Scan Complete: {len(detected_files)} files queued ({part_label}) — "
-            f"{', '.join(detected_files[:3])}{'...' if len(detected_files) > 3 else ''}"
+            f"📂 Bundle Detect Complete: {len(detected_files)} parts inspected ({part_label}){metrics_summary}"
             if detected_files
-            else "📂 Folder Scan Complete"
+            else f"📂 Bundle Detect Complete{metrics_summary}"
         )
 
         updated_projects = db.get_projects()
@@ -1311,6 +1335,7 @@ async def execute_dag_group_markdown_file_change(
             "part_progress_label": part_label,
             "detected_files": detected_files,
             "predetermined_parts": predetermined,
+            "bundle_totals": bundle_totals,
             "project": active_proj_now,
             "projects": updated_projects,
             "multipart_state": mp_state,
@@ -1534,6 +1559,7 @@ async def execute_dag_group_initialize(
 
         active_pid = project_id or state.get_current_project_id()
         detected_fn = None
+        home_part_header: Optional[Dict[str, Any]] = None
         if active_pid:
             try:
                 home_img = state.FRAMES_DIR / "dag_node2_home.png"
@@ -1542,6 +1568,7 @@ async def execute_dag_group_initialize(
                 if home_img.exists():
                     from alignment_engine import detect_teams_markdown_alignment
                     from ocr_engine import worker_scan_image
+                    from dag_nodes.markdown_tag_parser_node import extract_capture_image_metadata_markers
                     align_home = await asyncio.to_thread(detect_teams_markdown_alignment, str(home_img))
                     if align_home and align_home.get("file_name"):
                         detected_fn = align_home.get("file_name")
@@ -1564,6 +1591,18 @@ async def execute_dag_group_initialize(
                                 if clean_t:
                                     detected_fn = clean_t + (".md" if not clean_t.endswith(".md") else "")
                                     break
+                    home_meta = await asyncio.to_thread(
+                        extract_capture_image_metadata_markers,
+                        str(home_img),
+                        1,
+                        detected_fn or "",
+                        "init_home",
+                        0,
+                    )
+                    if home_meta and home_meta.get("has_part_header"):
+                        home_part_header = dict(home_meta.get("detected_part_header") or {})
+                        if not detected_fn and home_part_header.get("file_name"):
+                            detected_fn = str(home_part_header["file_name"])
                     if detected_fn:
                         # Switch/create the target bundle part project BEFORE clearing project data so previous parts are preserved!
                         sw_res = await state.auto_switch_project_if_open_part_changed({"file_name": detected_fn})
@@ -1577,20 +1616,31 @@ async def execute_dag_group_initialize(
         state.orchestration_state["page"] = 1
         state.orchestration_state["last_arrow_count"] = 0
         state.orchestration_state["cursor_line"] = 1
+        if home_part_header and int(home_part_header.get("declared_lines") or 0) > 0:
+            decl_ln = int(home_part_header["declared_lines"])
+            if total_lines <= 0 or abs(total_lines - decl_ln) <= 15:
+                total_lines = decl_ln
+                state.latest_telemetry["target_total_lines"] = total_lines
+                state.dag_state["nodes"]["init_end"]["total_lines"] = total_lines
         if active_pid:
             try:
                 db.clear_project_data(active_pid)
                 db.update_project_target_lines(active_pid, total_lines)
+                if home_part_header:
+                    db.update_project_part_header_details(active_pid, home_part_header, update_target_lines=(total_lines <= 0))
             except Exception:
                 pass
         state.reset_project_diagnostics_trace(
             project_id=active_pid, project_name=f"Project {active_pid}" if active_pid else "Active Project", target_total_lines=total_lines
         )
+        if home_part_header:
+            state.update_part_metadata_driver_in_trace(home_part_header)
 
         if active_pid and detected_fn:
             try:
                 db.append_project_filename(active_pid, detected_fn)
                 mp_sync = state.sync_multipart_state_from_alignment()
+                state.refresh_codescan_hierarchy_telemetry()
                 updated_p = db.get_project(active_pid)
                 if updated_p:
                     await state.ws_manager.broadcast({"type": "project_updated", "project": updated_p, "projects": db.get_projects()})
@@ -1598,6 +1648,8 @@ async def execute_dag_group_initialize(
                 await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": mp_sync})
             except Exception as fe2:
                 print(f"[execute_dag_group_initialize] Post-clear filename sync note: {fe2}")
+        else:
+            state.refresh_codescan_hierarchy_telemetry()
 
         await state.ws_manager.broadcast({
             "type": "project_init_progress",

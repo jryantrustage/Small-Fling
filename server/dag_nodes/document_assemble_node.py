@@ -89,6 +89,7 @@ class DocumentAssembleNode(BaseDagNode):
         part_header_metadata: Dict[str, Any] = {}
         hierarchical_progress: Dict[str, Any] = {}
         ocr_steering_guide: Dict[str, Any] = {}
+        process_accuracy: Dict[str, Any] = {}
         try:
             from dag_nodes.markdown_tag_parser_node import (
                 verify_codescan_file_markers_and_metrics,
@@ -126,8 +127,12 @@ class DocumentAssembleNode(BaseDagNode):
             part_header_metadata = cs_res.get("part_header_metadata", {})
             hierarchical_progress = cs_res.get("hierarchical_progress", {})
             ocr_steering_guide = cs_res.get("ocr_steering_guide", {})
+            process_accuracy = cs_res.get("process_accuracy", {})
             if rescan_info.get("repairs"):
                 ocr_steering_guide["recent_auto_repairs"] = rescan_info["repairs"]
+
+            # Sync per-file content marker accuracy & CODESCAN_FILE_START driver state to project_diagnostics_trace.json
+            state.sync_codescan_verification_to_trace(cs_res, persist=True)
 
             # Reconcile target_total_lines with part_header_metadata["declared_lines"] if uncalibrated or skewed by Offline badge
             decl_part_lines = int(part_header_metadata.get("declared_lines") or 0)
@@ -145,6 +150,7 @@ class DocumentAssembleNode(BaseDagNode):
                 "part_header_metadata": part_header_metadata,
                 "hierarchical_progress": hierarchical_progress,
                 "ocr_steering_guide": ocr_steering_guide,
+                "process_accuracy": process_accuracy,
                 "markers_summary": {
                     "total_start_markers": ms["total_start_markers"],
                     "total_end_markers": ms["total_end_markers"],
@@ -178,6 +184,7 @@ class DocumentAssembleNode(BaseDagNode):
                         "chars_matches": f["chars_matches"],
                         "all_metrics_match": f["all_metrics_match"],
                         "distinct_accuracy_pct": f.get("distinct_accuracy_pct", 0.0),
+                        "process_accuracy": f.get("process_accuracy", {}),
                         "lifecycle_status": f.get("lifecycle_status", "scanning_active"),
                         "source_frame_ids": f.get("source_frame_ids", []),
                         "mismatch_reasons": f["mismatch_reasons"],
@@ -190,12 +197,15 @@ class DocumentAssembleNode(BaseDagNode):
             blackboard.metadata["part_header_metadata"] = part_header_metadata
             blackboard.metadata["hierarchical_progress"] = hierarchical_progress
             blackboard.metadata["ocr_steering_guide"] = ocr_steering_guide
+            blackboard.metadata["process_accuracy"] = process_accuracy
             state.latest_telemetry["part_header_metadata"] = part_header_metadata
             state.latest_telemetry["codescan_hierarchy"] = hierarchical_progress
             state.latest_telemetry["ocr_steering_guide"] = ocr_steering_guide
+            state.latest_telemetry["process_accuracy"] = process_accuracy
             state.orchestration_state["part_header_metadata"] = part_header_metadata
             state.orchestration_state["codescan_hierarchy"] = hierarchical_progress
             state.orchestration_state["ocr_steering_guide"] = ocr_steering_guide
+            state.orchestration_state["process_accuracy"] = process_accuracy
         except Exception as cs_err:
             print(f"[DocumentAssembleNode] codescan verification note: {cs_err}")
 
@@ -242,11 +252,13 @@ class DocumentAssembleNode(BaseDagNode):
         dms_brief = codescan_verification.get("distinct_metrics_summary", {})
         markers_suffix = ""
         if ms_brief.get("total_start_markers", 0) > 0:
+            acc_val = process_accuracy.get("overall_accuracy_pct", 100.0)
             markers_suffix = (
                 f" • Markers {ms_brief.get('paired_markers_count', 0)}/{ms_brief.get('total_start_markers', 0)} "
                 f"(Size:{dms_brief.get('size_matched_count', 0)} "
                 f"Lines:{dms_brief.get('lines_matched_count', 0)} "
-                f"Chars:{dms_brief.get('chars_matched_count', 0)})"
+                f"Chars:{dms_brief.get('chars_matched_count', 0)} "
+                f"Acc:{acc_val}%)"
             )
 
         state.dag_state["nodes"]["document_assemble"].update({
@@ -263,6 +275,7 @@ class DocumentAssembleNode(BaseDagNode):
             "part_header_metadata": part_header_metadata,
             "hierarchical_progress": hierarchical_progress,
             "ocr_steering_guide": ocr_steering_guide,
+            "process_accuracy": process_accuracy,
             "evaluator": "Document Integrity & CODESCAN Marker Evaluator",
             "healing_step": None if is_complete else "Capturing next page slice",
             "telemetry_insight": f"Master document: {captured_count}/{total_lines_target or '?'} lines stitched ({pct}%)" + markers_suffix + complete_suffix,
@@ -290,5 +303,6 @@ class DocumentAssembleNode(BaseDagNode):
                 "part_header_metadata": part_header_metadata,
                 "hierarchical_progress": hierarchical_progress,
                 "ocr_steering_guide": ocr_steering_guide,
+                "process_accuracy": process_accuracy,
             }
         )

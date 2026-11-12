@@ -65,8 +65,8 @@ interface RibbonStepConfig {
 }
 
 const RIBBON_STEPS: RibbonStepConfig[] = [
-  // Phase 0 — Markdown File Change (Folder Queue & Part Switch)
-  { id: 'markdown_file_change', stepNum: 0, label: '0. Markdown File Change', phase: 0 },
+  // Phase 0 — Bundle Detect (Part Content Details & Queue)
+  { id: 'markdown_file_change', stepNum: 0, label: '0. Bundle Detect', phase: 0 },
   // Phase I — Initialize
   { id: 'init_end', stepNum: 1, label: '1. EOF Total Lines', phase: 1 },
   { id: 'reset_home', stepNum: 2, label: '2. Home Line 1', phase: 1 },
@@ -226,6 +226,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
           mode: phase === 0 ? 'scan_folder' : undefined,
           reopen_editor: phase === 0 ? true : undefined,
           force_rescan: phase === 0 ? true : undefined,
+          inspect_part_contents: phase === 0 ? true : undefined,
           force_reset: forceReset ? true : false,
           resume_from_line: phase === 2 && frontierBottomLine > 0 ? autoResumeTopLine : undefined,
         }),
@@ -537,7 +538,7 @@ export const FlowDag: React.FC<FlowDagProps> = ({
   return (
     <div className="dag-pipeline-ribbon-wrapper" data-testid="interactive-dag-ribbon">
       <div className="dag-pipeline-ribbon">
-        {renderPhaseGroup(0, 'Markdown File Change', '#d2a8ff')}
+        {renderPhaseGroup(0, 'Phase 0 — Bundle Detect', '#d2a8ff')}
         <span className="dag-phase-divider">➔</span>
         {renderPhaseGroup(1, 'Phase I — Initialize', '#58a6ff')}
         <span className="dag-phase-divider">➔</span>

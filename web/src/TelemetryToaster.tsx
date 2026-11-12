@@ -37,6 +37,11 @@ export interface CaptureTelemetry {
   page?: number;
   active_dpi?: number;
   dpi_factor?: number;
+  detected_part_header?: Record<string, any> | null;
+  codescan_starts?: Array<Record<string, any>>;
+  codescan_starts_count?: number;
+  codescan_ends_count?: number;
+  active_codescan_file?: Record<string, any> | null;
   error?: string | null;
 }
 
@@ -112,7 +117,7 @@ const isEventForNode = (ev: TelemetryEvent, nodeId: string): boolean => {
 };
 
 const NODE_LABELS: Record<string, { step: string; name: string }> = {
-  markdown_file_change: { step: '0', name: 'Markdown File Change' },
+  markdown_file_change: { step: '0', name: 'Bundle Detect' },
   init_end: { step: '1', name: 'Determine Lines' },
   reset_home: { step: '2', name: 'Reset Line 1' },
   frame_acquire: { step: '3', name: 'Capture Screen' },
@@ -155,11 +160,22 @@ export interface TelemetryData {
     bundle?: {
       name?: string;
       is_multipart?: boolean;
+      total_parts?: number;
       total_project_files?: number;
+      bundle_files_captured?: number;
+      total_bundle_size_kb?: number;
+      bundle_size_kb_captured?: number;
+      total_bundle_lines?: number;
+      bundle_lines_captured?: number;
+      total_bundle_chars?: number;
+      bundle_chars_captured?: number;
+      parts_overview?: Array<Record<string, any>>;
     };
     part?: {
       number?: number;
       total_parts?: number;
+      part_label?: string;
+      file_name?: string;
       files_captured?: number;
       files_declared?: number;
       size_kb_captured?: number;
@@ -169,6 +185,7 @@ export interface TelemetryData {
       chars_captured?: number;
       chars_declared?: number;
       overall_accuracy_pct?: number;
+      process_accuracy?: Record<string, any>;
     };
     active_file?: {
       index?: number;
@@ -176,6 +193,11 @@ export interface TelemetryData {
       path?: string;
       short_name?: string;
       type?: string;
+      size?: number;
+      lines?: number;
+      chars?: number;
+      md_line?: number;
+      status?: string;
       expected_size?: number;
       actual_size?: number;
       expected_lines?: number;
@@ -183,6 +205,7 @@ export interface TelemetryData {
       expected_chars?: number;
       actual_chars?: number;
       distinct_accuracy_pct?: number;
+      process_accuracy?: Record<string, any>;
       lifecycle_status?: string;
       start_md_line?: number;
       end_md_line?: number | null;
@@ -191,6 +214,8 @@ export interface TelemetryData {
   };
   part_header_metadata?: Record<string, any>;
   ocr_steering_guide?: Record<string, any>;
+  active_codescan_file?: Record<string, any> | null;
+  process_accuracy?: Record<string, any>;
 }
 
 export interface TelemetryToasterProps {

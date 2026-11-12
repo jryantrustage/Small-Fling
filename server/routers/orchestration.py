@@ -453,7 +453,7 @@ async def reset_dag_connectors():
 async def run_dag_group_endpoint(group_id: str, payload: Optional[Dict[str, Any]] = None):
     payload = payload or {}
     serial = payload.get("serial")
-    if group_id in {"markdown_file_change", "file_change", "scan_folder", "dag_0", "group_0"}:
+    if group_id in {"markdown_file_change", "bundle_detect", "file_change", "scan_folder", "dag_0", "group_0"}:
         return await execute_dag_group_markdown_file_change(
             serial=serial,
             project_id=payload.get("project_id"),
@@ -645,6 +645,7 @@ async def api_transition_next_multipart(payload: Optional[Dict[str, Any]] = None
     return res
 @router.post("/api/dag/multipart/predetermine-folder")
 @router.post("/api/dag/multipart/scan-folder")
+@router.post("/api/dag/multipart/bundle-detect")
 async def api_predetermine_multipart_folder(payload: Optional[Dict[str, Any]] = None):
     payload = payload or {}
     res = await execute_dag_group_markdown_file_change(
