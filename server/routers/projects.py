@@ -370,6 +370,20 @@ async def create_project(req: ProjectCreateRequest):
         total_parts=req.total_parts or 0,
         part_file_name=req.part_file_name or ""
     )
+    new_proj_ref = req.bundle_name or req.bundle_id or req.part_file_name or req.name or ""
+    existing_mp_ref = (
+        state.multipart_bundle_state.get("base_prefix")
+        or state.multipart_bundle_state.get("folder_name")
+        or state.multipart_bundle_state.get("bundle_id")
+        or ""
+    )
+    if not existing_mp_ref or not state._identifiers_match_same_bundle(new_proj_ref, existing_mp_ref):
+        state.reset_multipart_and_codescan_state(
+            preserve_auto_chain=True,
+            clear_alignment_filename=False,
+            remove_manifest_png=False,
+            persist_trace=False,
+        )
     state.captured_frames.clear()
     state.document_lines.clear()
     state.recapture_queue.clear()
@@ -381,6 +395,11 @@ async def create_project(req: ProjectCreateRequest):
             temp_c.unlink()
         except Exception:
             pass
+    state.reset_project_diagnostics_trace(
+        project_id=new_proj["id"],
+        project_name=new_proj["name"],
+        target_total_lines=req.target_total_lines or 0,
+    )
     state.save_persisted_state()
     state.load_persisted_state()
 
@@ -437,7 +456,8 @@ async def create_project(req: ProjectCreateRequest):
         "type": "project_switched",
         "project": new_proj,
         "dag": state.dag_state,
-        "telemetry": state.latest_telemetry
+        "telemetry": state.latest_telemetry,
+        "multipart_state": state.multipart_bundle_state,
     })
 
     # Immediately ensure any pending ANR dialogs (e.g. Pixel Launcher isn't responding) are cleared
@@ -781,12 +801,38 @@ async def activate_project(project_id: str):
 async def delete_project_bundle(bundle_id: str):
     parts = db.get_bundle_projects(bundle_id)
     part_ids = {p.get("id") for p in parts if p.get("id")}
+    bundle_names_deleted = {
+        str(p.get("bundle_name") or p.get("part_file_name") or p.get("name") or "")
+        for p in parts
+    } | {str(bundle_id)}
     if state.get_current_project_id() in part_ids and getattr(state, "capture_loop_running", False):
         state.capture_loop_running = False
 
     deleted_ids = db.delete_bundle_projects(bundle_id)
     from routers.frames_document import clear_ocr_inspect_cache, _doc_payload
     clear_ocr_inspect_cache()
+
+    for tmp_file in ["dag_node3_capture_temp.png", "dag_node1_end.png"]:
+        tmp_p = state.FRAMES_DIR / tmp_file
+        if tmp_p.exists():
+            try:
+                tmp_p.unlink()
+            except Exception:
+                pass
+
+    mp_ref_now = (
+        state.multipart_bundle_state.get("bundle_id")
+        or state.multipart_bundle_state.get("base_prefix")
+        or state.multipart_bundle_state.get("folder_name")
+        or ""
+    )
+    if not db.get_active_project() or any(state._identifiers_match_same_bundle(dn, mp_ref_now) for dn in bundle_names_deleted if dn):
+        state.reset_multipart_and_codescan_state(
+            preserve_auto_chain=True,
+            clear_alignment_filename=True,
+            remove_manifest_png=True,
+            persist_trace=True,
+        )
 
     state.captured_frames.clear()
     state.document_lines.clear()
@@ -796,15 +842,53 @@ async def delete_project_bundle(bundle_id: str):
     active_pid = active_proj["id"] if active_proj else None
     all_projects = db.get_projects()
 
+    if not active_proj:
+        for node_data in state.dag_state.get("nodes", {}).values():
+            node_data.update({
+                "status": "idle",
+                "is_active": False,
+                "error": None,
+                "total_lines": 0,
+            })
+        for grp_data in state.dag_state.get("groups", {}).values():
+            grp_data.update({
+                "status": "idle",
+                "progress": None,
+            })
+        state.dag_state["current_active_node"] = None
+        state.dag_state["current_active_group"] = None
+        state.latest_telemetry["target_total_lines"] = 0
+        state.latest_telemetry["current_top_line"] = 0
+        state.latest_telemetry["current_bottom_line"] = 0
+        state.latest_telemetry["current_page"] = 0
+        state.orchestration_state["eof_reached"] = False
+        state.orchestration_state["manual_attention_required"] = False
+        state.orchestration_state["halt_reason"] = None
+        state.orchestration_state["status"] = "IDLE"
+
     try:
         for d_pid in deleted_ids:
             await state.ws_manager.broadcast({
                 "type": "project_deleted",
                 "project_id": d_pid,
                 "active_project": active_proj,
-                "projects": all_projects
+                "projects": all_projects,
+                "multipart_state": state.multipart_bundle_state,
+                "telemetry": state.latest_telemetry,
+                "dag": state.dag_state,
             })
-        await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
+        await state.ws_manager.broadcast({
+            "type": "project_switched",
+            "project": active_proj,
+            "projects": all_projects,
+            "multipart_state": state.multipart_bundle_state,
+            "telemetry": state.latest_telemetry,
+            "dag": state.dag_state,
+        })
+        await state.ws_manager.broadcast({
+            "type": "multipart_transition_status",
+            "multipart_state": state.multipart_bundle_state,
+        })
         await state.ws_manager.broadcast({
             "type": "frames_purged" if not active_proj else "frame_deleted",
             "frames": db.get_frames(active_pid)
@@ -821,12 +905,24 @@ async def delete_project_bundle(bundle_id: str):
         "deleted_bundle_id": bundle_id,
         "deleted_project_ids": deleted_ids,
         "active_project": active_proj,
-        "projects": all_projects
+        "projects": all_projects,
+        "multipart_state": state.multipart_bundle_state,
+        "telemetry": state.latest_telemetry,
+        "dag": state.dag_state,
     }
 
 @router.delete("/api/projects/{project_id}")
 async def delete_project(project_id: str):
     was_current = (state.get_current_project_id() == project_id)
+    deleted_proj_info = db.get_project(project_id) or {}
+    deleted_bundle_id = str(deleted_proj_info.get("bundle_id") or "")
+    deleted_bundle_ref = (
+        deleted_proj_info.get("bundle_name")
+        or deleted_bundle_id
+        or deleted_proj_info.get("part_file_name")
+        or deleted_proj_info.get("name")
+        or ""
+    )
     if was_current and getattr(state, "capture_loop_running", False):
         state.capture_loop_running = False
 
@@ -849,6 +945,26 @@ async def delete_project(project_id: str):
                 calib_p.unlink()
             except Exception:
                 pass
+
+    remaining_in_bundle = db.get_bundle_projects(deleted_bundle_id) if deleted_bundle_id else []
+    mp_ref_now = (
+        state.multipart_bundle_state.get("bundle_id")
+        or state.multipart_bundle_state.get("base_prefix")
+        or state.multipart_bundle_state.get("folder_name")
+        or ""
+    )
+    if not db.get_active_project() or (
+        not remaining_in_bundle
+        and deleted_bundle_ref
+        and mp_ref_now
+        and state._identifiers_match_same_bundle(deleted_bundle_ref, mp_ref_now)
+    ):
+        state.reset_multipart_and_codescan_state(
+            preserve_auto_chain=True,
+            clear_alignment_filename=True,
+            remove_manifest_png=True,
+            persist_trace=True,
+        )
 
     state.captured_frames.clear()
     state.document_lines.clear()
@@ -879,24 +995,12 @@ async def delete_project(project_id: str):
         state.orchestration_state["manual_attention_required"] = False
         state.orchestration_state["halt_reason"] = None
         state.orchestration_state["status"] = "IDLE"
-        if hasattr(state, "project_diagnostics_trace") and isinstance(state.project_diagnostics_trace, dict):
-            state.project_diagnostics_trace.update({
-                "project_id": None,
-                "project_name": "",
-                "target_total_lines": 0,
-                "highest_line_acquired": 0,
-                "is_completed": False,
-                "current_status": "IDLE",
-                "last_stop_reason": None,
-                "backfilled_up_to_frame_count": 0,
-                "stop_and_restart_log": [],
-                "loop_runs": [],
-                "lifecycle_events": [],
-            })
-            try:
-                state.save_diagnostics_trace()
-            except Exception:
-                pass
+        state.reset_multipart_and_codescan_state(
+            preserve_auto_chain=True,
+            clear_alignment_filename=True,
+            remove_manifest_png=True,
+            persist_trace=True,
+        )
         state.save_persisted_state()
 
     all_projects = db.get_projects()
@@ -906,9 +1010,23 @@ async def delete_project(project_id: str):
             "type": "project_deleted",
             "project_id": project_id,
             "active_project": active_proj,
-            "projects": all_projects
+            "projects": all_projects,
+            "multipart_state": state.multipart_bundle_state,
+            "telemetry": state.latest_telemetry,
+            "dag": state.dag_state,
         })
-        await state.ws_manager.broadcast({"type": "project_switched", "project": active_proj})
+        await state.ws_manager.broadcast({
+            "type": "project_switched",
+            "project": active_proj,
+            "projects": all_projects,
+            "multipart_state": state.multipart_bundle_state,
+            "telemetry": state.latest_telemetry,
+            "dag": state.dag_state,
+        })
+        await state.ws_manager.broadcast({
+            "type": "multipart_transition_status",
+            "multipart_state": state.multipart_bundle_state,
+        })
         await state.ws_manager.broadcast({
             "type": "frames_purged" if not active_proj else "frame_deleted",
             "frames": db.get_frames(active_pid)
@@ -925,26 +1043,45 @@ async def delete_project(project_id: str):
         "status": "success",
         "deleted_project_id": project_id,
         "active_project": active_proj,
-        "projects": all_projects
+        "projects": all_projects,
+        "multipart_state": state.multipart_bundle_state,
+        "telemetry": state.latest_telemetry,
+        "dag": state.dag_state,
     }
 
 @router.post("/api/projects/{project_id}/abort")
 async def abort_project(project_id: str):
     if not db.abort_project(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    p_info = db.get_project(project_id) or {}
+    state.reset_project_diagnostics_trace(project_id=project_id, project_name=p_info.get("name"), target_total_lines=int(p_info.get("target_total_lines") or 0))
     state.load_persisted_state()
     active_proj = db.get_active_project()
-    await state.ws_manager.broadcast({"type": "project_aborted", "project_id": project_id, "active_project": active_proj})
-    return {"status": "success", "message": f"Project '{project_id}' aborted and data cleared."}
+    await state.ws_manager.broadcast({
+        "type": "project_aborted",
+        "project_id": project_id,
+        "active_project": active_proj,
+        "multipart_state": state.multipart_bundle_state,
+        "telemetry": state.latest_telemetry,
+    })
+    return {"status": "success", "message": f"Project '{project_id}' aborted and data cleared.", "multipart_state": state.multipart_bundle_state}
 
 @router.post("/api/projects/{project_id}/clear")
 async def clear_project_data(project_id: str):
     if not db.clear_project_data(project_id):
         raise HTTPException(status_code=404, detail="Project not found")
+    p_info = db.get_project(project_id) or {}
+    state.reset_project_diagnostics_trace(project_id=project_id, project_name=p_info.get("name"), target_total_lines=int(p_info.get("target_total_lines") or 0))
     state.load_persisted_state()
     active_proj = db.get_active_project()
-    await state.ws_manager.broadcast({"type": "project_cleared", "project_id": project_id, "active_project": active_proj})
-    return {"status": "success", "message": f"Project '{project_id}' data cleared."}
+    await state.ws_manager.broadcast({
+        "type": "project_cleared",
+        "project_id": project_id,
+        "active_project": active_proj,
+        "multipart_state": state.multipart_bundle_state,
+        "telemetry": state.latest_telemetry,
+    })
+    return {"status": "success", "message": f"Project '{project_id}' data cleared.", "multipart_state": state.multipart_bundle_state}
 
 def _find_frame_file(frame_id: str, filename: Optional[str] = None) -> Optional[Path]:
     raw_dirs = [state.FRAMES_DIR, db.FRAMES_DIR, config.FRAMES_DIR, getattr(db, "STORAGE_FRAMES_DIR", None)]

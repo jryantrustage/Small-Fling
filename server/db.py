@@ -270,9 +270,9 @@ def _infer_bundle_metadata(
     t_parts = int(total_parts or 0)
     p_fn = (part_file_name or "").strip()
 
-    # Check description for "Part X of Y"
+    # Check description for "Part X of Y" or "Part X/Y"
     if t_parts <= 0 and raw_desc:
-        m_tot = re.search(r"Part\s*(\d+)\s*of\s*(\d+)", raw_desc, re.IGNORECASE)
+        m_tot = re.search(r"Part\s*(\d+)\s*(?:of|/)\s*(\d+)", raw_desc, re.IGNORECASE)
         if m_tot:
             if p_num <= 0:
                 p_num = int(m_tot.group(1))
@@ -720,16 +720,28 @@ def update_project_bundle_metadata(
     total_parts: Optional[int] = None,
     part_file_name: Optional[str] = None,
 ) -> bool:
+    import re
     proj = get_project(project_id)
     if not proj:
         return False
+    cur_desc = str(proj.get("description") or "")
+    eff_pnum = part_number if part_number is not None else int(proj.get("part_number") or 0)
+    eff_tparts = total_parts if total_parts is not None else int(proj.get("total_parts") or 0)
+    if eff_tparts and int(eff_tparts) > 0 and cur_desc:
+        p_disp = max(1, int(eff_pnum or 1))
+        cur_desc = re.sub(
+            r"Part\s*\d+\s*(?:of|/)\s*\d+",
+            f"Part {p_disp}/{int(eff_tparts)}",
+            cur_desc,
+            flags=re.IGNORECASE,
+        )
     b_meta = _infer_bundle_metadata(
         name=proj.get("name") or "",
-        description=proj.get("description") or "",
+        description=cur_desc,
         bundle_id=bundle_id if bundle_id is not None else (proj.get("bundle_id") or ""),
         bundle_name=bundle_name if bundle_name is not None else (proj.get("bundle_name") or ""),
-        part_number=part_number if part_number is not None else int(proj.get("part_number") or 0),
-        total_parts=total_parts if total_parts is not None else int(proj.get("total_parts") or 0),
+        part_number=eff_pnum,
+        total_parts=eff_tparts,
         part_file_name=part_file_name if part_file_name is not None else (proj.get("part_file_name") or ""),
     )
     with get_connection() as conn:
@@ -737,10 +749,11 @@ def update_project_bundle_metadata(
         c.execute(
             """
             UPDATE projects
-            SET bundle_id = ?, bundle_name = ?, part_number = ?, total_parts = ?, part_file_name = ?, updated_at = ?
+            SET description = ?, bundle_id = ?, bundle_name = ?, part_number = ?, total_parts = ?, part_file_name = ?, updated_at = ?
             WHERE id = ?;
             """,
             (
+                cur_desc,
                 b_meta["bundle_id"],
                 b_meta["bundle_name"],
                 b_meta["part_number"],

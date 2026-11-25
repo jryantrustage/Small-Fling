@@ -725,23 +725,261 @@ def save_diagnostics_trace() -> None:
     except Exception as e:
         print(f"[save_diagnostics_trace] Error: {e}")
 
+def _canonical_bundle_stem(raw: Any) -> str:
+    """
+    Normalizes any bundle_id, bundle_name, folder_name, or part file_name into a canonical
+    lowercase alphanumeric bundle stem (stripping leading 'bundle_' and trailing '_partN.md')
+    so cross-bundle comparisons never confuse e.g. 'DIXUI_impact_...' with 'matrix_main_...'.
+    """
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"\.(?:md|markdown|txt)$", "", s, flags=re.IGNORECASE).strip()
+    s = re.sub(r"^bundle[_\-\s]+", "", s, flags=re.IGNORECASE).strip()
+    s = re.sub(
+        r"[_\-\s]*(?:\(\s*)?(?:part|pt)[_\-\s#]*\d+(?:\s*(?:of|\.\.|/)\s*\d+)?(?:\s*\))?$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    ).strip()
+    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
+
+
+def _identifiers_match_same_bundle(a: Any, b: Any) -> bool:
+    """Returns True only when two non-empty bundle/project/file identifiers refer to the same bundle."""
+    sa = _canonical_bundle_stem(a)
+    sb = _canonical_bundle_stem(b)
+    if not sa or not sb:
+        return False
+    if sa == sb:
+        return True
+    min_len = min(len(sa), len(sb))
+    if min_len >= 8 and (sa.startswith(sb[:10]) or sb.startswith(sa[:10])):
+        return True
+    return False
+
+
+def reset_multipart_and_codescan_state(
+    preserve_auto_chain: bool = True,
+    clear_alignment_filename: bool = True,
+    remove_manifest_png: bool = False,
+    persist_trace: bool = True,
+) -> Dict[str, Any]:
+    """
+    Purges all in-memory and persisted multi-part bundle queues, exported_parts, alignment filenames,
+    DAG Node 0 queue metadata, live codescan telemetry, and diagnostics trace drivers so deleting/clearing
+    a project or switching to a new bundle never leaks stale parts or files from a previous project.
+    """
+    global _last_auto_switched_desktop_part, total_dag2_loops_executed
+    keep_auto_chain = bool(multipart_bundle_state.get("auto_chain_enabled", True)) if preserve_auto_chain else True
+    _last_auto_switched_desktop_part = None
+    total_dag2_loops_executed = 0
+
+    multipart_bundle_state.clear()
+    multipart_bundle_state.update({
+        "auto_chain_enabled": keep_auto_chain,
+        "is_multipart": False,
+        "bundle_id": None,
+        "folder_name": "",
+        "base_prefix": "",
+        "current_part": None,
+        "total_parts": None,
+        "next_part_number": None,
+        "next_file_name": None,
+        "available_parts": [],
+        "predetermined_parts": [],
+        "exported_parts": [],
+        "bundle_totals": {},
+        "active_file_name": "",
+        "last_opened_file": "",
+        "transition_status": "idle",
+        "last_transition_message": "",
+        "bundle_completed": False,
+        "updated_at": datetime.now().isoformat(),
+    })
+
+    if clear_alignment_filename and isinstance(latest_alignment_status, dict):
+        latest_alignment_status.update({
+            "file_name": "",
+            "is_multipart": False,
+            "part_number": None,
+            "total_parts": None,
+            "bundle_prefix": "",
+            "multipart_info": None,
+        })
+
+    for tel_key in (
+        "codescan_hierarchy",
+        "active_codescan_file",
+        "part_header_metadata",
+        "ocr_steering_guide",
+        "process_accuracy",
+    ):
+        latest_telemetry.pop(tel_key, None)
+        orchestration_state.pop(tel_key, None)
+
+    cap_tel = latest_telemetry.get("capture_telemetry")
+    if isinstance(cap_tel, dict):
+        cap_tel["detected_part_header"] = None
+        cap_tel["codescan_starts"] = []
+        cap_tel["codescan_starts_count"] = 0
+        cap_tel["codescan_ends_count"] = 0
+        cap_tel["active_codescan_file"] = None
+
+    mfc_node = dag_state.get("nodes", {}).get("markdown_file_change")
+    if isinstance(mfc_node, dict):
+        mfc_node.update({
+            "status": "idle",
+            "is_active": False,
+            "current_part": 1,
+            "total_parts": 1,
+            "part_progress_label": "MD 1 / 1",
+            "active_file_name": None,
+            "next_file_name": None,
+            "detected_files": [],
+            "predetermined_parts": [],
+            "bundle_totals": {},
+            "total_project_files": 0,
+            "total_bundle_size_kb": 0.0,
+            "total_bundle_lines": 0,
+            "total_bundle_chars": 0,
+            "bundle_completed": False,
+        })
+    doc_node = dag_state.get("nodes", {}).get("document_assemble")
+    if isinstance(doc_node, dict):
+        for dk in ("hierarchical_progress", "part_header_metadata", "ocr_steering_guide", "process_accuracy"):
+            doc_node.pop(dk, None)
+
+    if isinstance(project_diagnostics_trace, dict):
+        project_diagnostics_trace.update({
+            "project_id": None,
+            "project_name": "",
+            "target_total_lines": 0,
+            "first_line_acquired_at_iso": None,
+            "first_line_acquired_at_ms": None,
+            "first_frame_id": None,
+            "last_line_acquired_at_iso": None,
+            "last_line_acquired_at_ms": None,
+            "last_frame_id": None,
+            "highest_line_acquired": 0,
+            "completed_at_iso": None,
+            "completed_at_ms": None,
+            "is_completed": False,
+            "current_status": "IDLE",
+            "last_stop_at_iso": None,
+            "last_stop_at_ms": None,
+            "last_stop_reason": None,
+            "backfilled_up_to_frame_count": 0,
+            "metadata_driver_active": False,
+            "bundle_metadata_driver": {},
+            "part_metadata_driver": {},
+            "codescan_start_traces": [],
+            "active_codescan_file": None,
+            "process_accuracy": {},
+            "stop_and_restart_log": [],
+            "loop_runs": [],
+            "lifecycle_events": [],
+        })
+        if persist_trace:
+            save_diagnostics_trace()
+
+    if remove_manifest_png:
+        try:
+            mp_png = FRAMES_DIR / "bundle_folder_manifest.png"
+            if mp_png.exists():
+                mp_png.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+    return multipart_bundle_state
+
+
 def load_diagnostics_trace() -> None:
     global project_diagnostics_trace, total_dag2_loops_executed
-    cur_pid = get_current_project_id()
+    cur_proj = db.get_active_project()
+    cur_pid = cur_proj["id"] if cur_proj else None
+    cur_bundle_ref = (
+        (cur_proj or {}).get("bundle_name")
+        or (cur_proj or {}).get("bundle_id")
+        or (cur_proj or {}).get("part_file_name")
+        or (cur_proj or {}).get("name")
+        or ""
+    )
+
+    if not cur_pid:
+        # No active project exists (e.g. all projects were cleared): never resurrect a deleted project's trace from disk
+        project_diagnostics_trace.update({
+            "project_id": None,
+            "project_name": "",
+            "target_total_lines": 0,
+            "highest_line_acquired": 0,
+            "is_completed": False,
+            "current_status": "IDLE",
+            "metadata_driver_active": False,
+            "bundle_metadata_driver": {},
+            "part_metadata_driver": {},
+            "codescan_start_traces": [],
+            "active_codescan_file": None,
+            "process_accuracy": {},
+            "stop_and_restart_log": [],
+            "loop_runs": [],
+            "lifecycle_events": [],
+        })
+        return
+
     if DIAGNOSTICS_TRACE_FILE.exists():
         try:
             with open(DIAGNOSTICS_TRACE_FILE, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
                 if isinstance(loaded, dict):
                     loaded_pid = loaded.get("project_id")
-                    if not cur_pid or not loaded_pid or loaded_pid == cur_pid:
+                    if loaded_pid == cur_pid:
                         project_diagnostics_trace.update(loaded)
+                        # Guard against foreign bundle_metadata_driver inside trace
+                        b_drv = project_diagnostics_trace.get("bundle_metadata_driver") or {}
+                        b_drv_ref = b_drv.get("bundle_name") or b_drv.get("name") or b_drv.get("bundle_id") or ""
+                        if cur_bundle_ref and b_drv_ref and not _identifiers_match_same_bundle(cur_bundle_ref, b_drv_ref):
+                            project_diagnostics_trace["bundle_metadata_driver"] = {}
                         runs = project_diagnostics_trace.get("loop_runs", [])
                         if runs:
                             max_idx = max((r.get("loop_index", 0) or 0) for r in runs)
                             total_dag2_loops_executed = max(total_dag2_loops_executed, max_idx)
+                        return
         except Exception as e:
             print(f"[load_diagnostics_trace] Error: {e}")
+
+    # Active project differs from persisted trace's project_id: purge stale project-specific trace entries
+    if project_diagnostics_trace.get("project_id") != cur_pid:
+        existing_bdrv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
+        bdrv_ref = existing_bdrv.get("bundle_name") or existing_bdrv.get("name") or existing_bdrv.get("bundle_id") or ""
+        keep_bdrv = existing_bdrv if (cur_bundle_ref and bdrv_ref and _identifiers_match_same_bundle(cur_bundle_ref, bdrv_ref)) else {}
+        part_drv = _hydrate_part_driver_for_project(cur_pid)
+        project_diagnostics_trace.update({
+            "project_id": cur_pid,
+            "project_name": (cur_proj or {}).get("name") or "",
+            "target_total_lines": int((cur_proj or {}).get("target_total_lines") or part_drv.get("declared_lines") or 0),
+            "first_line_acquired_at_iso": None,
+            "first_line_acquired_at_ms": None,
+            "first_frame_id": None,
+            "last_line_acquired_at_iso": None,
+            "last_line_acquired_at_ms": None,
+            "last_frame_id": None,
+            "highest_line_acquired": 0,
+            "completed_at_iso": None,
+            "completed_at_ms": None,
+            "is_completed": False,
+            "current_status": "IDLE",
+            "backfilled_up_to_frame_count": 0,
+            "metadata_driver_active": bool(keep_bdrv or part_drv),
+            "bundle_metadata_driver": keep_bdrv,
+            "part_metadata_driver": part_drv,
+            "codescan_start_traces": [],
+            "active_codescan_file": None,
+            "process_accuracy": {},
+            "stop_and_restart_log": [],
+            "loop_runs": [],
+            "lifecycle_events": [],
+        })
 
 def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any]:
     proj = None
@@ -750,8 +988,25 @@ def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any
             proj = db.get_project(project_id)
         except Exception:
             proj = None
-    p_num = int((proj or {}).get("part_number") or multipart_bundle_state.get("current_part") or 0)
-    pred_parts = list(multipart_bundle_state.get("predetermined_parts") or [])
+    proj_ref = (
+        (proj or {}).get("bundle_name")
+        or (proj or {}).get("bundle_id")
+        or (proj or {}).get("part_file_name")
+        or (proj or {}).get("name")
+        or ""
+    )
+    mp_ref = (
+        multipart_bundle_state.get("base_prefix")
+        or multipart_bundle_state.get("folder_name")
+        or multipart_bundle_state.get("bundle_id")
+        or ""
+    )
+    mp_matches = bool(not proj_ref or not mp_ref or _identifiers_match_same_bundle(proj_ref, mp_ref))
+    p_num = int((proj or {}).get("part_number") or (multipart_bundle_state.get("current_part") if mp_matches else 0) or 0)
+    pred_parts = [
+        p for p in (multipart_bundle_state.get("predetermined_parts") or [])
+        if not proj_ref or _identifiers_match_same_bundle(proj_ref, p.get("base_prefix") or p.get("file_name") or mp_ref)
+    ] if mp_matches else []
     pred_match = next((p for p in pred_parts if int(p.get("part_number") or 0) == p_num), None) if p_num > 0 else None
     p_hdr = dict((proj or {}).get("part_header") or {}) if proj else {}
 
@@ -765,7 +1020,7 @@ def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any
         (pred_match or {}).get("total_project_files")
         or (proj or {}).get("total_project_files")
         or p_hdr.get("total_project_files")
-        or (multipart_bundle_state.get("bundle_totals") or {}).get("total_project_files")
+        or (((multipart_bundle_state.get("bundle_totals") or {}).get("total_project_files")) if mp_matches else 0)
         or 0
     )
     part_size_kb = round(
@@ -797,7 +1052,7 @@ def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any
     )
     tot_parts = int(
         (proj or {}).get("total_parts")
-        or multipart_bundle_state.get("total_parts")
+        or (multipart_bundle_state.get("total_parts") if mp_matches else 0)
         or p_hdr.get("total_parts")
         or 0
     )
@@ -809,7 +1064,7 @@ def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any
     ).strip()
     b_name = str(
         (proj or {}).get("bundle_name")
-        or multipart_bundle_state.get("base_prefix")
+        or (multipart_bundle_state.get("base_prefix") if mp_matches else "")
         or p_hdr.get("bundle_name")
         or ""
     ).strip()
@@ -817,8 +1072,8 @@ def _hydrate_part_driver_for_project(project_id: Optional[str]) -> Dict[str, Any
         return {}
     return {
         "has_part_header": bool(declared_lines > 0 or files_in_part > 0 or declared_chars > 0 or part_size_kb > 0),
-        "is_multipart": bool(tot_parts > 1 or multipart_bundle_state.get("is_multipart")),
-        "bundle_id": str((proj or {}).get("bundle_id") or multipart_bundle_state.get("bundle_id") or ""),
+        "is_multipart": bool(tot_parts > 1 or (mp_matches and multipart_bundle_state.get("is_multipart"))),
+        "bundle_id": str((proj or {}).get("bundle_id") or (multipart_bundle_state.get("bundle_id") if mp_matches else "") or ""),
         "bundle_name": b_name,
         "file_name": fn,
         "file_part_tag": str((pred_match or {}).get("file_part_tag") or p_hdr.get("file_part_tag") or (f"part{p_num}" if p_num > 0 and tot_parts > 1 else "")),
@@ -839,10 +1094,29 @@ def reset_project_diagnostics_trace(project_id: Optional[str] = None, project_na
     now_ms = int(now.timestamp() * 1000)
     total_dag2_loops_executed = 0
 
-    existing_bundle_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
-    if not existing_bundle_drv and multipart_bundle_state.get("bundle_totals"):
-        existing_bundle_drv = dict(multipart_bundle_state.get("bundle_totals") or {})
-    hydrated_part_drv = _hydrate_part_driver_for_project(project_id)
+    proj_obj = db.get_project(project_id) if project_id else None
+    new_bundle_ref = (
+        (proj_obj or {}).get("bundle_name")
+        or (proj_obj or {}).get("bundle_id")
+        or (proj_obj or {}).get("part_file_name")
+        or project_name
+        or ""
+    )
+    cand_bundle_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
+    if not cand_bundle_drv and multipart_bundle_state.get("bundle_totals"):
+        cand_bundle_drv = dict(multipart_bundle_state.get("bundle_totals") or {})
+    cand_drv_ref = (
+        cand_bundle_drv.get("bundle_name")
+        or cand_bundle_drv.get("name")
+        or cand_bundle_drv.get("bundle_id")
+        or multipart_bundle_state.get("base_prefix")
+        or ""
+    )
+    if cand_bundle_drv and new_bundle_ref and (not cand_drv_ref or _identifiers_match_same_bundle(new_bundle_ref, cand_drv_ref)):
+        existing_bundle_drv = cand_bundle_drv
+    else:
+        existing_bundle_drv = {}
+    hydrated_part_drv = _hydrate_part_driver_for_project(project_id) if project_id else {}
     eff_target_lines = int(target_total_lines or hydrated_part_drv.get("declared_lines") or 0)
 
     project_diagnostics_trace.update({
@@ -1357,9 +1631,22 @@ def ensure_diagnostics_trace_backfilled() -> Dict[str, Any]:
     proj_is_completed = str((proj or {}).get("status") or "").lower() == "completed"
 
     if pid and project_diagnostics_trace.get("project_id") not in (None, pid):
-        # Switched project: preserve bundle_metadata_driver across parts of the same bundle and hydrate active part driver
+        # Switched project: preserve bundle_metadata_driver ONLY across parts of the same bundle and hydrate active part driver
         hydrated_part = _hydrate_part_driver_for_project(pid)
-        existing_b_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
+        cand_b_drv = dict(project_diagnostics_trace.get("bundle_metadata_driver") or {})
+        proj_ref_b = (
+            (proj or {}).get("bundle_name")
+            or (proj or {}).get("bundle_id")
+            or (proj or {}).get("part_file_name")
+            or (proj or {}).get("name")
+            or ""
+        )
+        b_drv_ref = cand_b_drv.get("bundle_name") or cand_b_drv.get("name") or cand_b_drv.get("bundle_id") or ""
+        existing_b_drv = (
+            cand_b_drv
+            if (cand_b_drv and proj_ref_b and (not b_drv_ref or _identifiers_match_same_bundle(proj_ref_b, b_drv_ref)))
+            else {}
+        )
         project_diagnostics_trace.update({
             "project_id": pid,
             "project_name": (proj or {}).get("name") or f"Project {pid}",
@@ -1884,8 +2171,8 @@ dag_state: Dict[str, Any] = {
         "markdown_file_change": {
             "id": "markdown_file_change",
             "group": "markdown_file_change",
-            "title": "0. Markdown File Change (Folder Queue & Part Switch)",
-            "description": "Scans folder screenshot to queue all markdown parts (MD 1 / N .. MD N / N), and on part completion switches to the next file, opens Fullscreen, enables Edit Mode & Dark Mode before handing off to Phase I Initialize or Phase III Sandbox.",
+            "title": "0. Bundle Detect (Part Content Details & Queue)",
+            "description": "Opens each part file in the bundle to read its content detail attributes (total project files, files in part, part size, lines, characters), populates the MD 1 / N queue, and transitions between parts.",
             "status": "idle",
             "mode": "scan_folder",
             "current_part": 1,
@@ -1895,6 +2182,7 @@ dag_state: Dict[str, Any] = {
             "next_file_name": None,
             "detected_files": [],
             "predetermined_parts": [],
+            "bundle_totals": {},
             "bundle_completed": False,
             "fullscreen_verified": False,
             "dark_mode_verified": False,
@@ -3751,6 +4039,10 @@ def sync_multipart_state_from_alignment(
     mp_info = None if use_proj_over_align else align.get("multipart_info")
     if (not mp_info or not mp_info.get("is_multipart")) and not use_proj_over_align and align.get("is_multipart") and align.get("part_number") is not None:
         mp_info = dict(align)
+        if not mp_info.get("base_prefix") and align_fn:
+            parsed_align = parse_multipart_markdown_filename(align_fn)
+            if parsed_align.get("base_prefix"):
+                mp_info["base_prefix"] = parsed_align["base_prefix"]
     if not mp_info or not mp_info.get("is_multipart"):
         mp_info = parse_multipart_markdown_filename(candidate_name or canonical_fn)
     if (not mp_info or not mp_info.get("is_multipart")) and canonical_fn and canonical_fn != candidate_name:
@@ -3767,7 +4059,65 @@ def sync_multipart_state_from_alignment(
                 detected_total_parts = int(m_tot.group(2))
                 break
 
-    predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
+    # Determine target bundle reference so foreign predetermined_parts / exported_parts from an old bundle never leak
+    target_bundle_ref = (
+        (mp_info.get("base_prefix") if (has_explicit_align and mp_info and mp_info.get("base_prefix")) else "")
+        or (align_fn if has_explicit_align and align_fn else "")
+        or proj_bundle_name
+        or proj_bundle_id
+        or ((mp_info or {}).get("base_prefix") or "")
+        or candidate_name
+    )
+    proj_matches_target = bool(
+        not _canonical_bundle_stem(target_bundle_ref)
+        or not _canonical_bundle_stem(proj_bundle_name or proj_bundle_id or proj.get("name"))
+        or _identifiers_match_same_bundle(target_bundle_ref, proj_bundle_name or proj_bundle_id or proj.get("name"))
+    )
+    eff_proj_total_parts = proj_total_parts if proj_matches_target else None
+    eff_proj_part_num = proj_part_num if proj_matches_target else None
+    eff_proj_bundle_name = proj_bundle_name if proj_matches_target else None
+    eff_proj_bundle_id = proj_bundle_id if proj_matches_target else None
+
+    if _canonical_bundle_stem(target_bundle_ref):
+        raw_pred = list(multipart_bundle_state.get("predetermined_parts") or [])
+        predetermined = [
+            pt for pt in raw_pred
+            if not (pt.get("base_prefix") or pt.get("file_name"))
+            or _identifiers_match_same_bundle(target_bundle_ref, pt.get("base_prefix") or pt.get("file_name"))
+        ]
+        existing_mp_ref = (
+            multipart_bundle_state.get("base_prefix")
+            or multipart_bundle_state.get("folder_name")
+            or multipart_bundle_state.get("bundle_id")
+            or ""
+        )
+        if existing_mp_ref and not _identifiers_match_same_bundle(target_bundle_ref, existing_mp_ref):
+            multipart_bundle_state["base_prefix"] = ""
+            multipart_bundle_state["folder_name"] = ""
+            multipart_bundle_state["bundle_id"] = None
+            if not predetermined:
+                multipart_bundle_state["total_parts"] = None
+                multipart_bundle_state["available_parts"] = []
+            multipart_bundle_state["next_part_number"] = None
+            multipart_bundle_state["next_file_name"] = None
+            multipart_bundle_state["predetermined_parts"] = predetermined
+            multipart_bundle_state["bundle_totals"] = {}
+        elif len(predetermined) != len(raw_pred):
+            multipart_bundle_state["predetermined_parts"] = predetermined
+            multipart_bundle_state["available_parts"] = sorted(
+                {int(p["part_number"]) for p in predetermined if p.get("part_number") is not None}
+            )
+            multipart_bundle_state["total_parts"] = max(multipart_bundle_state["available_parts"]) if multipart_bundle_state["available_parts"] else (eff_proj_total_parts or None)
+        raw_exp = list(multipart_bundle_state.get("exported_parts") or [])
+        filtered_exp = [
+            ep for ep in raw_exp
+            if not (ep.get("base_prefix") or ep.get("file_name"))
+            or _identifiers_match_same_bundle(target_bundle_ref, ep.get("base_prefix") or ep.get("file_name"))
+        ]
+        if len(filtered_exp) != len(raw_exp):
+            multipart_bundle_state["exported_parts"] = filtered_exp
+    else:
+        predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
 
     if mp_info and mp_info.get("is_multipart"):
         multipart_bundle_state["is_multipart"] = True
@@ -3775,16 +4125,20 @@ def sync_multipart_state_from_alignment(
             multipart_bundle_state["base_prefix"] = mp_info["base_prefix"]
         if has_explicit_align and mp_info.get("part_number") is not None:
             multipart_bundle_state["current_part"] = int(mp_info["part_number"])
-        elif proj_part_num is not None:
-            multipart_bundle_state["current_part"] = int(proj_part_num)
+        elif eff_proj_part_num is not None:
+            multipart_bundle_state["current_part"] = int(eff_proj_part_num)
         elif mp_info.get("part_number") is not None:
             multipart_bundle_state["current_part"] = int(mp_info["part_number"])
         if mp_info.get("total_parts") is not None:
             multipart_bundle_state["total_parts"] = int(mp_info["total_parts"])
         elif detected_total_parts is not None:
-            multipart_bundle_state["total_parts"] = detected_total_parts
-        elif proj_total_parts:
-            multipart_bundle_state["total_parts"] = int(proj_total_parts)
+            multipart_bundle_state["total_parts"] = max(detected_total_parts, len(predetermined))
+        elif eff_proj_total_parts:
+            multipart_bundle_state["total_parts"] = max(
+                int(eff_proj_total_parts),
+                len(predetermined),
+                int(multipart_bundle_state.get("total_parts") or 0),
+            )
         if mp_info.get("next_part_number") is not None:
             multipart_bundle_state["next_part_number"] = int(mp_info["next_part_number"])
         if mp_info.get("next_file_name"):
@@ -3795,24 +4149,24 @@ def sync_multipart_state_from_alignment(
             if parsed_proj.get("is_multipart"):
                 multipart_bundle_state["is_multipart"] = True
                 multipart_bundle_state["base_prefix"] = parsed_proj.get("base_prefix") or multipart_bundle_state.get("base_prefix", "")
-                multipart_bundle_state["current_part"] = int(proj_part_num or parsed_proj.get("part_number") or 1)
+                multipart_bundle_state["current_part"] = int(eff_proj_part_num or parsed_proj.get("part_number") or 1)
                 if detected_total_parts is not None:
                     multipart_bundle_state["total_parts"] = detected_total_parts
                 multipart_bundle_state["next_part_number"] = parsed_proj.get("next_part_number")
                 multipart_bundle_state["next_file_name"] = parsed_proj.get("next_file_name")
 
     # Fallback to active project's bundle metadata or predetermined folder manifest
-    if proj_part_num or proj_bundle_id or predetermined:
+    if eff_proj_part_num or eff_proj_bundle_id or predetermined:
         multipart_bundle_state["is_multipart"] = True
-        if proj_bundle_name and not multipart_bundle_state.get("base_prefix"):
-            multipart_bundle_state["base_prefix"] = str(proj_bundle_name)
-        if proj_part_num and not (has_explicit_align and mp_info and mp_info.get("part_number") is not None):
-            multipart_bundle_state["current_part"] = int(proj_part_num)
-        if proj_total_parts and not multipart_bundle_state.get("total_parts"):
-            multipart_bundle_state["total_parts"] = int(proj_total_parts)
+        if eff_proj_bundle_name and not multipart_bundle_state.get("base_prefix"):
+            multipart_bundle_state["base_prefix"] = str(eff_proj_bundle_name)
+        if eff_proj_part_num and not (has_explicit_align and mp_info and mp_info.get("part_number") is not None):
+            multipart_bundle_state["current_part"] = int(eff_proj_part_num)
+        if eff_proj_total_parts and not multipart_bundle_state.get("total_parts"):
+            multipart_bundle_state["total_parts"] = int(eff_proj_total_parts)
 
-    eff_base_prefix = str(multipart_bundle_state.get("base_prefix") or proj_bundle_name or "").strip()
-    eff_tot_parts = int(multipart_bundle_state.get("total_parts") or proj_total_parts or 0)
+    eff_base_prefix = str(multipart_bundle_state.get("base_prefix") or eff_proj_bundle_name or "").strip()
+    eff_tot_parts = int(multipart_bundle_state.get("total_parts") or eff_proj_total_parts or 0)
     if eff_base_prefix:
         multipart_bundle_state["folder_name"] = eff_base_prefix
         multipart_bundle_state["onedrive_folder_path"] = ["OneDrive", "Markdowns", "ficus-platform", eff_base_prefix]
@@ -3986,7 +4340,7 @@ async def activate_or_create_bundle_part_project(
     target_part = max(1, int(part_number or 1))
     active_proj = db.get_active_project() or {}
     all_projs = db.get_projects()
-    predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
+    raw_predetermined = list(multipart_bundle_state.get("predetermined_parts") or [])
 
     mp_parsed = parse_multipart_markdown_filename(file_name) if file_name else {}
     eff_bundle_name = normalize_bundle_identifier_ocr(
@@ -4000,29 +4354,47 @@ async def activate_or_create_bundle_part_project(
     eff_bundle_name = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle_name, flags=re.IGNORECASE).strip("_- ") or "Bundle"
     slug = re.sub(r"[^a-z0-9]+", "_", eff_bundle_name.lower()).strip("_") or "bundle"
     act_bid_str = str(active_proj.get("bundle_id") or "")
-    act_bname_slug = re.sub(r"[^a-z0-9]+", "_", str(active_proj.get("bundle_name") or active_proj.get("name") or "").lower()).strip("_")
     act_matches_bundle = bool(
-        act_bid_str
-        and (
-            slug[:10] in act_bid_str.lower()
-            or (act_bname_slug and (slug[:10] in act_bname_slug or act_bname_slug[:10] in slug))
+        _identifiers_match_same_bundle(
+            eff_bundle_name,
+            act_bid_str or active_proj.get("bundle_name") or active_proj.get("name"),
         )
     )
     eff_bundle_id = bundle_id or (act_bid_str if act_matches_bundle else "") or f"bundle_{slug}"
+    mp_state_ref = (
+        multipart_bundle_state.get("base_prefix")
+        or multipart_bundle_state.get("folder_name")
+        or multipart_bundle_state.get("bundle_id")
+        or ""
+    )
+    mp_matches_bundle = bool(not mp_state_ref or _identifiers_match_same_bundle(eff_bundle_name, mp_state_ref))
+    predetermined = [
+        pt for pt in raw_predetermined
+        if _identifiers_match_same_bundle(eff_bundle_name, pt.get("base_prefix") or pt.get("file_name") or mp_state_ref)
+    ]
+    if not mp_matches_bundle:
+        multipart_bundle_state["predetermined_parts"] = []
+        multipart_bundle_state["available_parts"] = []
+        multipart_bundle_state["total_parts"] = int(total_parts or 0) or None
+        multipart_bundle_state["bundle_totals"] = {}
+        multipart_bundle_state["exported_parts"] = [
+            ep for ep in (multipart_bundle_state.get("exported_parts") or [])
+            if _identifiers_match_same_bundle(eff_bundle_name, ep.get("base_prefix") or ep.get("file_name"))
+        ]
     sibling_max_total = max(
         [
             int(p.get("total_parts") or p.get("part_number") or 0)
             for p in all_projs
             if str(p.get("bundle_id") or "") == eff_bundle_id
-            or (p.get("bundle_name") and eff_bundle_name[:8].lower() in str(p.get("bundle_name")).lower())
+            or _identifiers_match_same_bundle(eff_bundle_name, p.get("bundle_name") or p.get("bundle_id"))
         ]
         or [0]
     )
     eff_total_parts = max(
         int(total_parts or 0),
         int(mp_parsed.get("total_parts") or 0),
-        int(multipart_bundle_state.get("total_parts") or 0),
-        int(active_proj.get("total_parts") or 0),
+        int(multipart_bundle_state.get("total_parts") or 0) if mp_matches_bundle else 0,
+        int(active_proj.get("total_parts") or 0) if act_matches_bundle else 0,
         len(predetermined),
         sibling_max_total,
         target_part,
@@ -4200,6 +4572,114 @@ async def activate_or_create_bundle_part_project(
     }
 
 
+def sync_folder_view_bundle_manifest(alignment_status: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Synchronizes `multipart_bundle_state` (and upgrades any stale 1/1 SQLite project row)
+    when the Live Desktop monitor observes a Teams / OneDrive Folder View containing N part files
+    (e.g. `matrix_main_26-11-08-2-05pm_part1.md .. part3.md`).
+    Preserves any previously read `header_verified` detail attributes for matching part numbers.
+    """
+    global multipart_bundle_state
+    pred_incoming = list((alignment_status or {}).get("predetermined_parts") or [])
+    if not pred_incoming:
+        return {"multipart_state": multipart_bundle_state, "upgraded_projects": False}
+
+    folder_nm = str(alignment_status.get("folder_name") or alignment_status.get("base_prefix") or "").strip()
+    base_pfx = str(alignment_status.get("base_prefix") or folder_nm or "").strip()
+    avail = sorted({int(p["part_number"]) for p in pred_incoming if p.get("part_number") is not None})
+    tot_parts = max(int(alignment_status.get("total_parts") or 0), len(pred_incoming), max(avail) if avail else 1)
+
+    existing_ref = (
+        multipart_bundle_state.get("base_prefix")
+        or multipart_bundle_state.get("folder_name")
+        or multipart_bundle_state.get("bundle_id")
+        or ""
+    )
+    same_bundle = bool(existing_ref and base_pfx and _identifiers_match_same_bundle(base_pfx, existing_ref))
+    existing_by_part: Dict[int, Dict[str, Any]] = {}
+    if same_bundle:
+        for old_pt in (multipart_bundle_state.get("predetermined_parts") or []):
+            pno = int(old_pt.get("part_number") or 0)
+            if pno > 0:
+                existing_by_part[pno] = dict(old_pt)
+    elif existing_ref and base_pfx and not same_bundle:
+        reset_multipart_and_codescan_state(
+            preserve_auto_chain=True,
+            clear_alignment_filename=False,
+            remove_manifest_png=False,
+            persist_trace=True,
+        )
+
+    merged_parts: List[Dict[str, Any]] = []
+    for pt in pred_incoming:
+        pno = int(pt.get("part_number") or 0)
+        m_pt = dict(pt)
+        m_pt["total_parts"] = tot_parts
+        m_pt["scope_label"] = f"MD {pno} / {tot_parts}"
+        old_p = existing_by_part.get(pno)
+        if old_p:
+            for keep_k in (
+                "files_in_part",
+                "total_project_files",
+                "part_size_kb",
+                "part_size_bytes",
+                "declared_lines",
+                "declared_chars",
+                "file_part_tag",
+                "part_title_tag",
+                "generated_at",
+                "header_verified",
+                "status",
+            ):
+                if old_p.get(keep_k) and not m_pt.get(keep_k):
+                    m_pt[keep_k] = old_p[keep_k]
+        merged_parts.append(m_pt)
+
+    slug = re.sub(r"[^a-z0-9]+", "_", (base_pfx or folder_nm or "bundle").lower()).strip("_") or "bundle"
+    bundle_id = f"bundle_{slug}"
+
+    upgraded_projects = False
+    try:
+        for p_row in db.get_projects():
+            p_bid = str(p_row.get("bundle_id") or "")
+            p_bname = str(p_row.get("bundle_name") or p_row.get("name") or "")
+            p_num = int(p_row.get("part_number") or 0)
+            p_tot = int(p_row.get("total_parts") or 0)
+            if p_row.get("id") and _identifiers_match_same_bundle(base_pfx or folder_nm, p_bname or p_bid):
+                bundle_id = p_bid or bundle_id
+                if p_tot < tot_parts:
+                    db.update_project_bundle_metadata(
+                        project_id=p_row["id"],
+                        bundle_id=bundle_id,
+                        bundle_name=base_pfx or folder_nm,
+                        part_number=max(1, p_num or 1),
+                        total_parts=tot_parts,
+                        part_file_name=p_row.get("part_file_name") or f"{base_pfx or folder_nm}_part{max(1, p_num or 1)}.md",
+                    )
+                    upgraded_projects = True
+    except Exception as db_upg_err:
+        print(f"[sync_folder_view_bundle_manifest] DB upgrade note: {db_upg_err}")
+
+    cur_part = int(multipart_bundle_state.get("current_part") or (avail[0] if avail else 1))
+    if avail and cur_part not in avail:
+        cur_part = avail[0]
+
+    multipart_bundle_state.update({
+        "is_multipart": tot_parts > 1 or len(merged_parts) > 1,
+        "bundle_id": bundle_id,
+        "base_prefix": base_pfx or folder_nm,
+        "folder_name": folder_nm or base_pfx,
+        "current_part": cur_part,
+        "total_parts": tot_parts,
+        "available_parts": avail,
+        "predetermined_parts": merged_parts,
+        "next_part_number": (cur_part + 1) if (cur_part + 1) in avail else None,
+        "next_file_name": next((p.get("file_name") for p in merged_parts if int(p.get("part_number") or 0) == cur_part + 1), None),
+    })
+    mp_sync = sync_multipart_state_from_alignment(prefer_active_project=True)
+    return {"multipart_state": mp_sync, "upgraded_projects": upgraded_projects}
+
+
 async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
     When the Live Desktop OCR bounding box detects that a different markdown part of the bundle
@@ -4212,6 +4692,8 @@ async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Di
     if getattr(sys.modules[__name__], "capture_loop_running", False):
         return None
     align = alignment_status or latest_alignment_status or {}
+    if align.get("is_folder_view"):
+        return None
     align_fn = str(align.get("file_name") or "").strip()
     if not align_fn:
         return None
@@ -4237,17 +4719,26 @@ async def auto_switch_project_if_open_part_changed(alignment_status: Optional[Di
     else:
         _last_auto_switched_desktop_part = detected_part
 
-    if detected_part == active_part:
+    if detected_part == active_part and (not active_prefix or _identifiers_match_same_bundle(detected_prefix, active_prefix)):
         return None
-    if active_prefix and detected_prefix and active_prefix[:8].lower() != detected_prefix[:8].lower():
+    if active_prefix and detected_prefix and not _identifiers_match_same_bundle(active_prefix, detected_prefix):
         return None
 
+    act_matches_det = bool(active_prefix and _identifiers_match_same_bundle(detected_prefix, active_prefix))
+    mp_matches_det = bool(
+        multipart_bundle_state.get("base_prefix")
+        and _identifiers_match_same_bundle(detected_prefix, multipart_bundle_state.get("base_prefix"))
+    )
     return await activate_or_create_bundle_part_project(
         part_number=detected_part,
         file_name=mp.get("file_name") or align_fn,
-        bundle_id=active_proj.get("bundle_id"),
+        bundle_id=active_proj.get("bundle_id") if act_matches_det else None,
         bundle_name=detected_prefix or active_prefix,
-        total_parts=mp.get("total_parts") or multipart_bundle_state.get("total_parts") or active_proj.get("total_parts"),
+        total_parts=(
+            mp.get("total_parts")
+            or (multipart_bundle_state.get("total_parts") if mp_matches_det else None)
+            or (active_proj.get("total_parts") if act_matches_det else None)
+        ),
         broadcast=True,
     )
 
@@ -4419,6 +4910,10 @@ def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Di
     when `document_lines` is empty), and publishes them into `latest_telemetry` and `orchestration_state`.
     """
     pid = project_id or get_current_project_id()
+    if not pid and not document_lines and not multipart_bundle_state.get("predetermined_parts"):
+        latest_telemetry.pop("codescan_hierarchy", None)
+        orchestration_state.pop("codescan_hierarchy", None)
+        return {}
     if not document_lines:
         try:
             from dag_nodes.markdown_tag_parser_node import _resolve_authoritative_part_and_bundle_drivers
@@ -4426,6 +4921,12 @@ def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Di
         except Exception:
             part_drv, bundle_drv = {}, {}
         decl_lns = int(part_drv.get("declared_lines") or latest_telemetry.get("target_total_lines") or 0)
+        trace_pid = project_diagnostics_trace.get("project_id")
+        active_file_for_pid = (
+            project_diagnostics_trace.get("active_codescan_file")
+            if (not trace_pid or trace_pid == pid)
+            else None
+        )
         empty_hier = {
             "bundle": bundle_drv or {
                 "is_multipart": bool(multipart_bundle_state.get("is_multipart")),
@@ -4459,7 +4960,7 @@ def refresh_codescan_hierarchy_telemetry(project_id: Optional[str] = None) -> Di
                 "verified_files_count": 0,
                 "mismatched_files_count": 0,
             },
-            "active_file": project_diagnostics_trace.get("active_codescan_file"),
+            "active_file": active_file_for_pid,
         }
         if part_drv:
             latest_telemetry["part_header_metadata"] = part_drv
@@ -4558,6 +5059,21 @@ def load_persisted_state():
                         p["status"] = "active"
                     except Exception:
                         pass
+                # Clear per-project codescan telemetry before applying active project's saved telemetry
+                for stale_k in (
+                    "codescan_hierarchy",
+                    "active_codescan_file",
+                    "part_header_metadata",
+                    "ocr_steering_guide",
+                    "process_accuracy",
+                ):
+                    latest_telemetry.pop(stale_k, None)
+                    orchestration_state.pop(stale_k, None)
+                if isinstance(latest_telemetry.get("capture_telemetry"), dict):
+                    latest_telemetry["capture_telemetry"]["active_codescan_file"] = None
+                    latest_telemetry["capture_telemetry"]["detected_part_header"] = None
+                    latest_telemetry["capture_telemetry"]["codescan_starts"] = []
+
                 if tel.get("telemetry") and isinstance(tel["telemetry"], dict):
                     safe_tel = {
                         k: v for k, v in tel["telemetry"].items()
@@ -4585,6 +5101,12 @@ def load_persisted_state():
             else:
                 document_lines.clear()
                 captured_frames.clear()
+                reset_multipart_and_codescan_state(
+                    preserve_auto_chain=True,
+                    clear_alignment_filename=True,
+                    remove_manifest_png=False,
+                    persist_trace=True,
+                )
         finally:
             document_lines._suppress_tracking = False
             captured_frames._suppress_tracking = False

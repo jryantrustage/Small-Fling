@@ -119,16 +119,18 @@ class MarkdownFileChangeNode(BaseDagNode):
                 else f"File switch status: {trans_res.get('status')} ({trans_res.get('message', '')})"
             )
             return NodeExecutionResult(
-                passed=passed,
-                status="completed" if passed else "error",
-                detail=detail,
-                evaluator={
-                    "type": "markdown_file_change_switch",
+                status="success" if passed else "error",
+                node_id=self.node_id,
+                message=detail,
+                error=None if passed else detail,
+                data={
                     "passed": passed,
-                    "expected": "Next bundle markdown opened in Fullscreen + Dark Mode or Bundle EOF",
-                    "actual": detail,
-                },
-                extra_node_fields={
+                    "evaluator": {
+                        "type": "markdown_file_change_switch",
+                        "passed": passed,
+                        "expected": "Next bundle markdown opened in Fullscreen + Dark Mode or Bundle EOF",
+                        "actual": detail,
+                    },
                     "mode": "switch_next",
                     "current_part": cur_part,
                     "total_parts": tot_parts,
@@ -233,17 +235,39 @@ class MarkdownFileChangeNode(BaseDagNode):
             else f"Bundle Detect scan completed ({scan_res.get('status', 'done')}){metrics_suffix}"
         )
 
+        evaluator_obj = {
+            "type": "markdown_file_change_scan_folder",
+            "passed": passed,
+            "expected": ">= 1 markdown part inspected with header detail attributes in Teams/OneDrive queue",
+            "actual": f"{len(detected_files)} files inspected ({part_label}){metrics_suffix}",
+        }
+        node_state["evaluator"] = evaluator_obj
+
+        try:
+            all_projs_now = db.get_projects()
+            act_proj_now = db.get_active_project()
+            if act_proj_now:
+                await state.ws_manager.broadcast({
+                    "type": "project_updated",
+                    "project": act_proj_now,
+                    "projects": all_projs_now,
+                })
+            await state.ws_manager.broadcast({
+                "type": "multipart_transition_status",
+                "multipart_state": mp_state,
+                "projects": all_projs_now,
+            })
+        except Exception:
+            pass
+
         return NodeExecutionResult(
-            passed=passed,
-            status="completed" if passed else "warning",
-            detail=detail,
-            evaluator={
-                "type": "markdown_file_change_scan_folder",
+            status="success" if passed else "error",
+            node_id=self.node_id,
+            message=detail,
+            error=None if passed else detail,
+            data={
                 "passed": passed,
-                "expected": ">= 1 markdown part inspected with header detail attributes in Teams/OneDrive queue",
-                "actual": f"{len(detected_files)} files inspected ({part_label}){metrics_suffix}",
-            },
-            extra_node_fields={
+                "evaluator": evaluator_obj,
                 "mode": "scan_folder",
                 "current_part": cur_part,
                 "total_parts": tot_parts,

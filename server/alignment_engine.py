@@ -204,6 +204,136 @@ def detect_teams_markdown_alignment(img_input: Union[bytes, str, Path, np.ndarra
                 break
 
     # ---------------------------------------------------------
+    # 1b. TEAMS / ONEDRIVE FOLDER VIEW DETECTION
+    # Prevent mistaking Row 1 ('*_part1.md') of a Teams folder file list for an open single-part Markdown editor!
+    # When a folder list is displayed, scan ALL visible markdown part files (part1..partN) across the full height.
+    # ---------------------------------------------------------
+    has_folder_subtitle = any(
+        ("modified by" in tok[4].lower()) or bool(re.search(r"\b\d+(?:\.\d+)?\s*kb\b", tok[4], re.IGNORECASE))
+        for tok in top_tokens
+    )
+    has_editor_toolbar_tok = any(
+        any(k in tok[4].lower() for k in ("h1", "</>", "99"))
+        for tok in top_tokens
+    )
+    has_folder_hdr_above_md_row = (
+        any(
+            teams_bottom_y - 6 <= tok[1] < int(h * 0.19)
+            and tok[0] < int(w * 0.55)
+            and ".md" not in tok[4].lower()
+            and "team" not in tok[4].lower()
+            and len(re.sub(r"^[<←\- \t]+", "", tok[4]).strip()) >= 4
+            for tok in top_tokens
+        )
+        and any(
+            tok[1] >= int(h * 0.185) and (".md" in tok[4].lower() or "part" in tok[4].lower())
+            for tok in top_tokens
+        )
+        and not has_editor_toolbar_tok
+    )
+    if has_folder_subtitle or has_folder_hdr_above_md_row:
+        try:
+            from services.ui_automator_service import scan_folder_markdown_files_cv
+            folder_scan = scan_folder_markdown_files_cv(img)
+        except Exception:
+            folder_scan = {"is_folder_view": False}
+        if folder_scan.get("is_folder_view") and folder_scan.get("predetermined_parts"):
+            pred_parts = list(folder_scan.get("predetermined_parts") or [])
+            avail_parts = list(folder_scan.get("available_parts") or [])
+            tot_parts_f = int(folder_scan.get("total_parts") or len(pred_parts) or 1)
+            first_part_no = min(avail_parts) if avail_parts else 1
+            folder_nm = str(folder_scan.get("folder_name") or folder_scan.get("base_prefix") or "")
+            base_pfx = str(folder_scan.get("base_prefix") or folder_nm)
+            first_fn = next(
+                (str(p.get("file_name")) for p in pred_parts if int(p.get("part_number") or 0) == first_part_no and p.get("file_name")),
+                str(pred_parts[0].get("file_name") or folder_nm),
+            )
+            folder_hdr_box = [int(w * 0.06), teams_bottom_y + int(18 * dpi_factor), int(w * 0.38), int(28 * dpi_factor)]
+            for bx1, by1, bw, bh, t, _s in top_tokens:
+                if teams_bottom_y - 6 <= by1 < int(h * 0.19) and bx1 < int(w * 0.55) and ".md" not in t.lower() and "team" not in t.lower():
+                    folder_hdr_box = [max(0, bx1 - 6), max(0, by1 - 4), bw + 12, bh + 8]
+                    break
+            back_cx_f = max(25, int(folder_hdr_box[0] - 52 * (w / 1920.0)))
+            back_cy_f = int(folder_hdr_box[1] + folder_hdr_box[3] // 2)
+
+            def _clean_b(box):
+                return [int(round(float(box[0]))), int(round(float(box[1]))), int(round(float(box[2]))), int(round(float(box[3])))]
+
+            def _norm_b(box):
+                return [
+                    float(round(float(box[0]) / float(w), 4)),
+                    float(round(float(box[1]) / float(h), 4)),
+                    float(round(float(box[2]) / float(w), 4)),
+                    float(round(float(box[3]) / float(h), 4)),
+                ]
+
+            folder_label = f"{folder_nm} ({len(pred_parts)} parts)" if folder_nm else f"Folder ({len(pred_parts)} parts)"
+            folder_reason = f"Teams folder view ({len(pred_parts)} markdown part(s) visible) — click Bundle Detect to inspect & open Part 1"
+            return {
+                "status": "teams folder view detected",
+                "is_aligned": False,
+                "is_folder_view": True,
+                "folder_name": folder_nm,
+                "base_prefix": base_pfx,
+                "predetermined_parts": pred_parts,
+                "available_parts": avail_parts,
+                "reason": folder_reason,
+                "missing": [folder_reason],
+                "first_line_number": 0,
+                "last_line_number": 0,
+                "character_tracking_mode": False,
+                "file_name": first_fn,
+                "multipart_info": {
+                    "is_multipart": tot_parts_f > 1 or len(pred_parts) > 1,
+                    "file_name": first_fn,
+                    "base_prefix": base_pfx,
+                    "part_number": first_part_no,
+                    "total_parts": tot_parts_f,
+                    "next_part_number": (first_part_no + 1) if (first_part_no + 1) in avail_parts else None,
+                    "next_file_name": next((p.get("file_name") for p in pred_parts if p.get("part_number") == first_part_no + 1), None),
+                },
+                "is_multipart": tot_parts_f > 1 or len(pred_parts) > 1,
+                "part_number": first_part_no,
+                "total_parts": tot_parts_f,
+                "next_part_number": (first_part_no + 1) if (first_part_no + 1) in avail_parts else None,
+                "next_file_name": next((p.get("file_name") for p in pred_parts if p.get("part_number") == first_part_no + 1), None),
+                "back_button_coords": [back_cx_f, back_cy_f],
+                "boxes": {
+                    "teams_logo": {
+                        "name": "Teams Logo / Header",
+                        "color": "blue",
+                        "hex": "#3b82f6",
+                        "passed": bool(teams_detected),
+                        "status": "PASSED" if teams_detected else "FAILED",
+                        "detected_value": str(teams_text or "Teams"),
+                        "expected": "Header bar containing 'Teams'",
+                        "details": f"Found '{teams_text}' in top header" if teams_detected else "Teams header",
+                        "text": str(teams_text or "Teams"),
+                        "box_px": _clean_b(teams_box),
+                        "box_norm": _norm_b(teams_box),
+                    },
+                    "file_name": {
+                        "name": "Bundle Folder",
+                        "color": "yellow",
+                        "hex": "#eab308",
+                        "passed": True,
+                        "status": "PASSED",
+                        "detected_value": folder_label,
+                        "expected": "Bundle folder with markdown parts",
+                        "details": f"Detected Teams folder '{folder_nm}' with {len(pred_parts)} markdown part(s)",
+                        "text": folder_label,
+                        "box_px": _clean_b(folder_hdr_box),
+                        "box_norm": _norm_b(folder_hdr_box),
+                    },
+                },
+                "resolution": {"width": w, "height": h},
+                "orientation": "portrait" if h > w else "landscape",
+                "aspect_ratio": round(float(w) / float(h), 4) if h > 0 else 1.7778,
+                "dpi_factor": float(dpi_factor),
+                "dismissed": [],
+            }
+
+    # ---------------------------------------------------------
     # 2. YELLOW BOX: Markdown File Name (*.md)
     # ---------------------------------------------------------
     file_detected = False

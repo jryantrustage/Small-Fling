@@ -636,3 +636,359 @@ def test_marker_driven_process_accuracy_and_init_end_calibration(isolated_trace_
     ie_res = asyncio.run(ie_node.execute_core(ie_bb))
     assert ie_res.status == "success"
     assert ie_res.total_lines == 23392
+
+
+def test_clear_dixui_bundle_and_detect_3part_matrix_bundle_without_stale_leak(isolated_trace_and_multipart, monkeypatch):
+    """
+    Regression test:
+    1) Simulates an active 9-part DIXUI_impact_26-11-09-6-37am bundle with 9 predetermined_parts,
+       exported_parts (DIXUI part 1), active_codescan_file ('pdf.worker.js', 58,272 lines),
+       and persisted project_diagnostics_trace.json on disk.
+    2) Deletes/clears the entire DIXUI bundle via delete_project_bundle (and verifies load_persisted_state()
+       does NOT resurrect DIXUI from project_diagnostics_trace.json).
+    3) Runs [Bundle Detect] on the 3-part matrix_main_26-11-08-2-05pm folder and verifies:
+       - All 3 parts (Part 1, Part 2, Part 3) are detected and inspected (Part 1 is NOT skipped!).
+       - total_parts == 3, current_part == 1, opened_file_name == 'matrix_main_26-11-08-2-05pm_part1.md'.
+       - Zero DIXUI or pdf.worker.js references remain anywhere in multipart_bundle_state, dag_state,
+         latest_telemetry, or project_diagnostics_trace.json.
+    """
+    from routers import projects as projects_router
+
+    trace_file = isolated_trace_and_multipart
+
+    # 1. Seed previous 9-part DIXUI bundle + exported part 1 + pdf.worker.js trace on disk
+    dixui_p1 = db.create_project(
+        name="DIXUI_impact_26-11-09-6-37am_part1",
+        target_total_lines=32117,
+        bundle_id="bundle_dixui_impact_26_11_09_6_37am",
+        bundle_name="DIXUI_impact_26-11-09-6-37am",
+        part_number=1,
+        total_parts=9,
+        part_file_name="DIXUI_impact_26-11-09-6-37am_part1.md",
+    )
+    dixui_p2 = db.create_project(
+        name="DIXUI_impact_26-11-09-6-37am_part2",
+        target_total_lines=58272,
+        bundle_id="bundle_dixui_impact_26_11_09_6_37am",
+        bundle_name="DIXUI_impact_26-11-09-6-37am",
+        part_number=2,
+        total_parts=9,
+        part_file_name="DIXUI_impact_26-11-09-6-37am_part2.md",
+    )
+    state.multipart_bundle_state.update({
+        "is_multipart": True,
+        "bundle_id": "bundle_dixui_impact_26_11_09_6_37am",
+        "base_prefix": "DIXUI_impact_26-11-09-6-37am",
+        "folder_name": "DIXUI_impact_26-11-09-6-37am",
+        "current_part": 2,
+        "total_parts": 9,
+        "available_parts": list(range(1, 10)),
+        "predetermined_parts": [
+            {
+                "part_number": i,
+                "total_parts": 9,
+                "scope_label": f"MD {i} / 9",
+                "file_name": f"DIXUI_impact_26-11-09-6-37am_part{i}.md",
+                "base_prefix": "DIXUI_impact_26-11-09-6-37am",
+                "tap_coords": [300, 180 + i * 60],
+                "status": "completed" if i == 1 else ("scanning" if i == 2 else "pending"),
+            }
+            for i in range(1, 10)
+        ],
+        "exported_parts": [
+            {
+                "project_id": dixui_p1["id"],
+                "file_name": "DIXUI_impact_26-11-09-6-37am_part1.md",
+                "part_number": 1,
+                "base_prefix": "DIXUI_impact_26-11-09-6-37am",
+            }
+        ],
+    })
+    state.latest_alignment_status.update({
+        "file_name": "DIXUI_impact_26-11-09-6-37am_part2.md",
+        "is_multipart": True,
+        "part_number": 2,
+        "total_parts": 9,
+    })
+    state.update_bundle_metadata_driver_in_trace({
+        "is_multipart": True,
+        "bundle_id": "bundle_dixui_impact_26_11_09_6_37am",
+        "bundle_name": "DIXUI_impact_26-11-09-6-37am",
+        "total_parts": 9,
+        "total_project_files": 455,
+    })
+    state.record_code_scan_start_trace(
+        {
+            "path": r"C:\DevCode\DIXUI\public\pdfjs\pdf.worker.js",
+            "type": ".js",
+            "size": 1950706,
+            "lines": 58272,
+            "chars": 1950702,
+        },
+        frame_id="frame_dixui_001",
+        md_line=19,
+        part_number=2,
+        persist=True,
+    )
+    state.latest_telemetry["active_codescan_file"] = {"path": r"C:\DevCode\DIXUI\public\pdfjs\pdf.worker.js"}
+
+    # 2. Clear the entire DIXUI bundle
+    del_res = asyncio.run(projects_router.delete_project_bundle("bundle_dixui_impact_26_11_09_6_37am"))
+    assert del_res["status"] == "success"
+    assert del_res["active_project"] is None
+    assert del_res["projects"] == []
+    assert del_res["multipart_state"]["predetermined_parts"] == []
+    assert del_res["multipart_state"]["exported_parts"] == []
+    assert del_res["multipart_state"]["total_parts"] is None
+    assert state.latest_telemetry.get("active_codescan_file") is None
+    assert state.latest_telemetry.get("codescan_hierarchy") is None
+    assert state.project_diagnostics_trace["active_codescan_file"] is None
+    assert state.project_diagnostics_trace["bundle_metadata_driver"] == {}
+
+    # Reloading state when 0 projects exist must NOT resurrect DIXUI from disk
+    state.load_persisted_state()
+    assert state.multipart_bundle_state["predetermined_parts"] == []
+    assert state.project_diagnostics_trace["active_codescan_file"] is None
+    assert state.project_diagnostics_trace["bundle_metadata_driver"] == {}
+
+    # 3. Run [Bundle Detect] on the 3-part matrix_main_26-11-08-2-05pm folder
+    dummy_img = np.zeros((1024, 1280, 3), dtype=np.uint8)
+    _, enc = cv2.imencode(".png", dummy_img)
+    dummy_png = enc.tobytes()
+
+    matrix_manifest = {
+        "is_folder_view": True,
+        "folder_name": "matrix_main_26-11-08-2-05pm",
+        "base_prefix": "matrix_main_26-11-08-2-05pm",
+        "total_parts": 3,
+        "available_parts": [1, 2, 3],
+        "files": [
+            {"part_number": i, "file_name": f"matrix_main_26-11-08-2-05pm_part{i}.md", "tap_coords": [285, 140 + i * 90]}
+            for i in range(1, 4)
+        ],
+        "predetermined_parts": [
+            {
+                "part_number": i,
+                "total_parts": 3,
+                "scope_label": f"MD {i} / 3",
+                "file_name": f"matrix_main_26-11-08-2-05pm_part{i}.md",
+                "base_prefix": "matrix_main_26-11-08-2-05pm",
+                "tap_coords": [285, 140 + i * 90],
+                "status": "pending",
+            }
+            for i in range(1, 4)
+        ],
+    }
+
+    part_hdrs = {
+        1: {"has_part_header": True, "is_multipart": True, "file_name": "matrix_main_26-11-08-2-05pm_part1.md", "bundle_name": "matrix_main_26-11-08-2-05pm", "part_number": 1, "total_parts": 3, "files_in_part": 64, "total_project_files": 174, "part_size_kb": 980.0, "declared_lines": 21500, "declared_chars": 1003520},
+        2: {"has_part_header": True, "is_multipart": True, "file_name": "matrix_main_26-11-08-2-05pm_part2.md", "bundle_name": "matrix_main_26-11-08-2-05pm", "part_number": 2, "total_parts": 3, "files_in_part": 80, "total_project_files": 174, "part_size_kb": 1020.0, "declared_lines": 23392, "declared_chars": 1044109},
+        3: {"has_part_header": True, "is_multipart": True, "file_name": "matrix_main_26-11-08-2-05pm_part3.md", "bundle_name": "matrix_main_26-11-08-2-05pm", "part_number": 3, "total_parts": 3, "files_in_part": 30, "total_project_files": 174, "part_size_kb": 410.5, "declared_lines": 9108, "declared_chars": 420352},
+    }
+    inspected_during_detect = []
+    observed_queue_lengths_mid_detect = []
+
+    async def fake_serial(s=None):
+        return "TEST_DEVICE_01"
+
+    async def fake_disp(s=None):
+        return 2
+
+    async def fake_capture(s=None, **kwargs):
+        return dummy_png
+
+    async def fake_auth(ser, disp, snap, actions):
+        return snap
+
+    async def fake_adb_shell(cmd, ser=None, timeout=2.5):
+        return ""
+
+    async def fake_sleep(_sec):
+        return None
+
+    async def fake_inspect_header(serial=None, display_id=None, expected_part_number=None, expected_file_name="", ensure_edit_mode=False, actions=None):
+        pno = int(expected_part_number or 1)
+        inspected_during_detect.append(pno)
+        # Assert mid-inspection state NEVER shows 9 DIXUI parts or pdf.worker.js!
+        observed_queue_lengths_mid_detect.append(len(state.multipart_bundle_state.get("predetermined_parts") or []))
+        assert all("dixui" not in str(p.get("file_name", "")).lower() for p in (state.multipart_bundle_state.get("predetermined_parts") or []))
+        assert state.project_diagnostics_trace.get("active_codescan_file") is None
+        return {"has_part_header": True, "part_header": dict(part_hdrs[pno])}
+
+    async def fake_exit_folder(serial=None, display_id=None):
+        return {"status": "ok", "actions": ["Exited"], "folder_scan": matrix_manifest}
+
+    monkeypatch.setattr(ui_automator_service, "get_active_adb_serial", fake_serial)
+    monkeypatch.setattr(ui_automator_service, "detect_external_display_id", fake_disp)
+    monkeypatch.setattr(ui_automator_service, "capture_external_screenshot", fake_capture)
+    monkeypatch.setattr(ui_automator_service, "_ensure_teams_authenticated_if_needed", fake_auth)
+    monkeypatch.setattr(ui_automator_service, "scan_folder_markdown_files_cv", lambda _img: matrix_manifest)
+    monkeypatch.setattr(ui_automator_service, "run_adb_shell", fake_adb_shell)
+    monkeypatch.setattr(ui_automator_service, "inspect_opened_part_header_details", fake_inspect_header)
+    monkeypatch.setattr(ui_automator_service, "exit_markdown_to_folder_list", fake_exit_folder)
+    monkeypatch.setattr(ui_automator_service.asyncio, "sleep", fake_sleep)
+
+    detect_res = asyncio.run(
+        ui_automator_service.predetermine_bundle_from_folder_screenshot(
+            serial="TEST_DEVICE_01",
+            display_id=2,
+            reopen_editor=True,
+            force_rescan=True,
+            inspect_part_contents=True,
+        )
+    )
+
+    assert detect_res["status"] == "success"
+    assert detect_res["total_parts"] == 3
+    assert detect_res["current_part"] == 1
+    assert detect_res["opened_file_name"] == "matrix_main_26-11-08-2-05pm_part1.md"
+    assert sorted(inspected_during_detect) == [1, 2, 3]
+    assert observed_queue_lengths_mid_detect == [3, 3, 3]
+    assert len(state.multipart_bundle_state["predetermined_parts"]) == 3
+    assert state.multipart_bundle_state["total_parts"] == 3
+    assert all(p["total_parts"] == 3 for p in db.get_projects())
+    assert {int(p["part_number"]) for p in db.get_projects()} == {1, 2, 3}
+    trace_json_str = trace_file.read_text(encoding="utf-8").lower()
+    assert "dixui" not in trace_json_str
+    assert "pdf.worker.js" not in trace_json_str
+
+
+def test_teams_folder_view_3_parts_never_collapses_to_single_part(isolated_trace_and_multipart):
+    """
+    Regression test: When the 1280x1024 Live Desktop shows a Teams folder view ('matrix_main_26-11-08-2-05pm')
+    with 3 markdown files (part1.md, part2.md, part3.md), `detect_teams_markdown_alignment` must recognize
+    the folder view and detect all 3 parts (`total_parts == 3`), never mistaking Row 1 for an open 1/1 editor,
+    and `sync_folder_view_bundle_manifest` must upgrade any stale 1/1 SQLite project row to 1/3.
+    """
+    from alignment_engine import detect_teams_markdown_alignment
+
+    # Render synthetic 1280x1024 Teams dark-mode folder view matching the live Android Desktop layout
+    img = np.full((1024, 1280, 3), 18, dtype=np.uint8)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    # Top Teams app bar
+    cv2.putText(img, "Teams", (95, 72), font, 0.72, (235, 238, 245), 2, cv2.LINE_AA)
+    # Folder title header
+    cv2.putText(img, "matrix_main_26-11-08-2-05pm", (145, 165), font, 0.78, (245, 247, 250), 2, cv2.LINE_AA)
+    # Row 1 (sits inside top 28.5% crop y < 291!)
+    cv2.putText(img, "matrix_main_26-11-08-2-05pm_part1.md", (155, 242), font, 0.68, (235, 238, 245), 2, cv2.LINE_AA)
+    cv2.putText(img, "1018.84 KB, Modified by Ryan, Joseph on 11/9/26", (155, 270), font, 0.48, (165, 172, 182), 1, cv2.LINE_AA)
+    # Row 2 (below 28.5% crop!)
+    cv2.putText(img, "matrix_main_26-11-08-2-05pm_part2.md", (155, 342), font, 0.68, (235, 238, 245), 2, cv2.LINE_AA)
+    cv2.putText(img, "1023.22 KB, Modified by Ryan, Joseph on 11/8/26", (155, 370), font, 0.48, (165, 172, 182), 1, cv2.LINE_AA)
+    # Row 3 (below 28.5% crop!)
+    cv2.putText(img, "matrix_main_26-11-08-2-05pm_part3.md", (155, 442), font, 0.68, (235, 238, 245), 2, cv2.LINE_AA)
+    cv2.putText(img, "114.28 KB, Modified by Ryan, Joseph on 11/8/26", (155, 470), font, 0.48, (165, 172, 182), 1, cv2.LINE_AA)
+
+    ok, enc = cv2.imencode(".png", img)
+    assert ok
+    snap_bytes = enc.tobytes()
+
+    # Seed a stale 1/1 SQLite project row (reproducing the pre-fix state)
+    stale_proj = db.create_project(
+        name="matrix_main_26-11-08-2-05pm_part1",
+        description="Multi-Part Bundle Part 1/1 (matrix_main_26-11-08-2-05pm_part1.md)",
+        bundle_id="bundle_matrix_main_26_11_08_2_05pm",
+        bundle_name="matrix_main_26-11-08-2-05pm",
+        part_number=1,
+        total_parts=1,
+        part_file_name="matrix_main_26-11-08-2-05pm_part1.md",
+    )
+    assert stale_proj["total_parts"] == 1
+
+    align_res = detect_teams_markdown_alignment(snap_bytes)
+    assert align_res.get("is_folder_view") is True
+    assert align_res.get("is_aligned") is False
+    assert align_res.get("total_parts") == 3
+    assert align_res.get("available_parts") == [1, 2, 3]
+    assert len(align_res.get("predetermined_parts") or []) == 3
+    assert align_res.get("first_line_number") == 0
+
+    # Folder view must NOT trigger single-part auto-switch creation
+    sw = asyncio.run(state.auto_switch_project_if_open_part_changed(align_res))
+    assert sw is None
+
+    # Folder view manifest sync upgrades stale 1/1 SQLite row to 1/3 and populates predetermined_parts (1..3)
+    sync_out = state.sync_folder_view_bundle_manifest(align_res)
+    assert sync_out["upgraded_projects"] is True
+    mp = sync_out["multipart_state"]
+    assert mp["is_multipart"] is True
+    assert mp["total_parts"] == 3
+    assert len(mp["predetermined_parts"]) == 3
+    assert [p["scope_label"] for p in mp["predetermined_parts"]] == ["MD 1 / 3", "MD 2 / 3", "MD 3 / 3"]
+
+    upgraded_row = db.get_project(stale_proj["id"])
+    assert upgraded_row["total_parts"] == 3
+    assert "Part 1/3" in upgraded_row["description"]
+
+
+def test_markdown_file_change_node_execute_core_returns_valid_node_execution_result(isolated_trace_and_multipart, monkeypatch):
+    """
+    Regression test: Executing `MarkdownFileChangeNode.execute_core` directly (e.g. via `/api/dag/nodes/markdown_file_change/run`)
+    must return a valid `NodeExecutionResult` without `TypeError` and populate all 3 bundle parts.
+    """
+    from dag_nodes.markdown_file_change_node import MarkdownFileChangeNode
+    from dag_nodes import markdown_file_change_node as mfc_mod
+    from dag_nodes.base import DagBlackboard
+
+    fake_scan_res = {
+        "status": "success",
+        "is_multipart": True,
+        "folder_name": "matrix_main_26-11-08-2-05pm",
+        "base_prefix": "matrix_main_26-11-08-2-05pm",
+        "current_part": 1,
+        "total_parts": 3,
+        "available_parts": [1, 2, 3],
+        "opened_file_name": "matrix_main_26-11-08-2-05pm_part1.md",
+        "predetermined_parts": [
+            {"part_number": 1, "total_parts": 3, "scope_label": "MD 1 / 3", "file_name": "matrix_main_26-11-08-2-05pm_part1.md", "base_prefix": "matrix_main_26-11-08-2-05pm", "files_in_part": 64, "total_project_files": 174, "part_size_kb": 1018.84, "declared_lines": 21500, "declared_chars": 1003520, "header_verified": True},
+            {"part_number": 2, "total_parts": 3, "scope_label": "MD 2 / 3", "file_name": "matrix_main_26-11-08-2-05pm_part2.md", "base_prefix": "matrix_main_26-11-08-2-05pm", "files_in_part": 80, "total_project_files": 174, "part_size_kb": 1020.0, "declared_lines": 23392, "declared_chars": 1044109, "header_verified": True},
+            {"part_number": 3, "total_parts": 3, "scope_label": "MD 3 / 3", "file_name": "matrix_main_26-11-08-2-05pm_part3.md", "base_prefix": "matrix_main_26-11-08-2-05pm", "files_in_part": 30, "total_project_files": 174, "part_size_kb": 114.28, "declared_lines": 2600, "declared_chars": 117000, "header_verified": True},
+        ],
+        "bundle_totals": {
+            "total_parts": 3,
+            "total_project_files": 174,
+            "sum_files_across_parts": 174,
+            "total_bundle_size_kb": 2153.12,
+            "total_bundle_lines": 47492,
+            "total_bundle_chars": 2164629,
+            "verified_headers_count": 3,
+            "all_parts_headers_read": True,
+        },
+    }
+
+    async def fake_predetermine(**kwargs):
+        state.multipart_bundle_state.update({
+            "is_multipart": True,
+            "base_prefix": "matrix_main_26-11-08-2-05pm",
+            "folder_name": "matrix_main_26-11-08-2-05pm",
+            "current_part": 1,
+            "total_parts": 3,
+            "available_parts": [1, 2, 3],
+            "predetermined_parts": list(fake_scan_res["predetermined_parts"]),
+            "bundle_totals": dict(fake_scan_res["bundle_totals"]),
+            "last_opened_file": "matrix_main_26-11-08-2-05pm_part1.md",
+        })
+        return fake_scan_res
+
+    async def fake_ensure_max(*args, **kwargs):
+        return {"status": "ok"}
+
+    monkeypatch.setattr(mfc_mod, "predetermine_bundle_from_folder_screenshot", fake_predetermine)
+    monkeypatch.setattr(mfc_mod, "ensure_teams_maximized_and_dark_mode", fake_ensure_max)
+
+    node = MarkdownFileChangeNode()
+    bb = DagBlackboard(
+        active_serial="mock_serial",
+        display_id=4,
+        project_id="",
+        config={"mode": "scan_folder", "reopen_editor": True, "inspect_part_contents": True},
+    )
+    exec_res = asyncio.run(node.execute_core(bb))
+    out_dict = exec_res.to_dict()
+    assert exec_res.status == "success"
+    assert out_dict["passed"] is True
+    assert out_dict["total_parts"] == 3
+    assert len(out_dict["detected_files"]) == 3
+    assert out_dict["total_project_files"] == 174
+
+

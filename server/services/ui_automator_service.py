@@ -18,7 +18,7 @@ import config
 from services.adb_service import (
     run_adb_shell, get_active_adb_serial, detect_external_display_id,
     capture_external_screenshot, ensure_adb_keyboard_closed, auto_fix_viewport,
-    dismiss_keyboard
+    dismiss_keyboard, direct_hid_to_display
 )
 from ocr_engine import get_rapid_ocr
 
@@ -623,6 +623,7 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
 
     folder_name = ""
     raw_rows: List[List[Dict[str, Any]]] = []
+    subtitle_sizes: List[Tuple[float, float]] = []
     has_modified_by = False
 
     if res:
@@ -636,8 +637,14 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
             clean = str(txt).strip()
             if not clean:
                 continue
-            if "modified" in clean.lower() or "kb," in clean.lower() or "kb " in clean.lower():
+            if "modified" in clean.lower() or "kb," in clean.lower() or "kb " in clean.lower() or bool(re.search(r"\b\d+(?:\.\d+)?\s*kb\b", clean, re.IGNORECASE)):
                 has_modified_by = True
+                m_kb = re.search(r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*kb\b", clean, re.IGNORECASE)
+                if m_kb:
+                    try:
+                        subtitle_sizes.append(((by1 + by2) / 2.0, round(float(m_kb.group(1).replace(",", "")), 2)))
+                    except Exception:
+                        pass
                 continue
             tokens.append({
                 "x1": bx1, "y1": by1, "x2": bx2, "y2": by2,
@@ -684,12 +691,19 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
             cx, cy = (bx1 + bx2) // 2, (by1 + by2) // 2
             avg_score = sum(t["score"] for t in r_group) / len(r_group)
             mp = parse_multipart_markdown_filename(merged_txt)
+            matched_kb = 0.0
+            for sub_cy, sub_kb in subtitle_sizes:
+                if 0.0 < (sub_cy - cy) <= max(36.0, 48.0 * scale_y):
+                    matched_kb = sub_kb
+                    break
             files.append({
                 "file_name": mp.get("file_name") or merged_txt,
                 "raw_text": merged_txt,
                 "is_multipart": bool(mp.get("is_multipart")),
                 "base_prefix": mp.get("base_prefix") or "",
                 "part_number": mp.get("part_number"),
+                "part_size_kb": matched_kb,
+                "part_size_bytes": int(round(matched_kb * 1024.0)) if matched_kb > 0 else 0,
                 "bbox": [bx1, by1, bw, bh],
                 "tap_coords": [cx, cy],
                 "score": round(float(avg_score), 3)
@@ -781,6 +795,8 @@ def scan_folder_markdown_files_cv(img: np.ndarray) -> Dict[str, Any]:
             "scope_label": f"MD {int(pf['part_number'])} / {total_parts}",
             "file_name": pf["file_name"],
             "base_prefix": pf.get("base_prefix") or canonical_prefix or folder_name,
+            "part_size_kb": float(pf.get("part_size_kb") or 0.0),
+            "part_size_bytes": int(pf.get("part_size_bytes") or 0),
             "tap_coords": pf["tap_coords"],
             "bbox": pf["bbox"],
             "visual_row_index": pf.get("visual_row_index", idx + 1),
@@ -875,9 +891,16 @@ async def exit_markdown_to_folder_list(
                 }
 
     # Determine Back Arrow ('<-') coordinates depending on whether editor is fullscreen or floating
+    from services.adb_service import is_editor_full_screen
+    from alignment_engine import detect_teams_markdown_alignment
     fs_status = await is_editor_full_screen(ser, disp_id, image_bytes=snap)
     disp_w, disp_h = await get_display_dimensions(ser, disp_id)
     scale_x, scale_y = disp_w / 1920.0, disp_h / 1080.0
+
+    img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR) if snap else None
+    img_h, img_w = img.shape[:2] if img is not None else (disp_h, disp_w)
+    coord_sx = (disp_w / float(img_w)) if img_w > 0 else 1.0
+    coord_sy = (disp_h / float(img_h)) if img_h > 0 else 1.0
 
     if not fs_status.get("is_fullscreen", True) and fs_status.get("bounds"):
         bl, bt, br, bb = fs_status["bounds"]
@@ -886,24 +909,36 @@ async def exit_markdown_to_folder_list(
     else:
         back_x = int(48 * scale_x)
         back_y = int(151 * scale_y)
+        if img is not None:
+            try:
+                align_back = detect_teams_markdown_alignment(img)
+                b_coords = align_back.get("back_button_coords")
+                if b_coords and len(b_coords) == 2:
+                    back_x = int(round(b_coords[0] * coord_sx))
+                    back_y = int(round(b_coords[1] * coord_sy))
+            except Exception:
+                pass
 
     # Refine Back Arrow ('<-') centroid from screenshot bright glyph pixels
-    if snap:
-        img = cv2.imdecode(np.frombuffer(snap, np.uint8), cv2.IMREAD_COLOR)
-        if img is not None:
-            hi, wi = img.shape[:2]
-            rx1 = max(0, back_x - int(28 * scale_x))
-            rx2 = min(wi, back_x + int(32 * scale_x))
-            ry1 = max(0, back_y - int(26 * scale_y))
-            ry2 = min(hi, back_y + int(26 * scale_y))
-            roi = img[ry1:ry2, rx1:rx2]
-            if roi.size > 0:
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-                ys, xs = np.where(gray > 130)
-                if len(xs) >= 8:
-                    back_x = int(np.mean(xs) + rx1)
-                    back_y = int(np.mean(ys) + ry1)
+    if img is not None:
+        rx_c = int(round(back_x / max(0.1, coord_sx)))
+        ry_c = int(round(back_y / max(0.1, coord_sy)))
+        rx1 = max(0, rx_c - int(28 * (img_w / 1920.0)))
+        rx2 = min(img_w, rx_c + int(32 * (img_w / 1920.0)))
+        ry1 = max(0, ry_c - int(26 * (img_h / 1080.0)))
+        ry2 = min(img_h, ry_c + int(26 * (img_h / 1080.0)))
+        roi = img[ry1:ry2, rx1:rx2]
+        if roi.size > 0:
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            ys, xs = np.where(gray > 130)
+            if len(xs) >= 8:
+                back_x = int(round((np.mean(xs) + rx1) * coord_sx))
+                back_y = int(round((np.mean(ys) + ry1) * coord_sy))
 
+    try:
+        await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=disp_id, focus_coords=[back_x, back_y])
+    except Exception:
+        pass
     # Tap the Back Arrow ('<-') to exit markdown editor back to folder list
     await run_adb_shell(f"input {disp_pfx}tap {back_x} {back_y}", ser, timeout=2.5)
     actions.append(f"Tapped Back Arrow ('<-') at ({back_x}, {back_y}) on display #{disp_id} to exit markdown view")
@@ -1198,16 +1233,16 @@ async def predetermine_bundle_from_folder_screenshot(
         )
         bundle_id = act_bid_str if active_matches_bundle else f"bundle_{clean_bundle_slug}"
 
-        # Identify which parts of this bundle are already completed (so clicking Bundle Detect after Part 1 finishes opens Part 2!)
-        completed_part_nums = {
-            int(ep["part_number"])
-            for ep in (state.multipart_bundle_state.get("exported_parts") or [])
+        # Identify which parts of this bundle are already completed (strictly matching THIS bundle's prefix/id!)
+        matching_exported_parts = [
+            ep for ep in (state.multipart_bundle_state.get("exported_parts") or [])
             if ep.get("part_number") is not None
-            and (
-                not state.multipart_bundle_state.get("base_prefix")
-                or str(eff_prefix)[:8].lower() in str(state.multipart_bundle_state.get("base_prefix") or "").lower()
+            and state._identifiers_match_same_bundle(
+                eff_prefix,
+                ep.get("base_prefix") or ep.get("file_name") or "",
             )
-        }
+        ]
+        completed_part_nums = {int(ep["part_number"]) for ep in matching_exported_parts}
         paused_part_nums = set()
         try:
             for p_row in db.get_projects():
@@ -1217,7 +1252,10 @@ async def predetermine_bundle_from_folder_screenshot(
                 p_tot = int(p_row.get("target_total_lines") or 0)
                 p_cnt = max(int(p_row.get("max_line") or 0), int(p_row.get("line_count") or 0))
                 p_st = str(p_row.get("status") or "").lower()
-                if p_num > 0 and (p_bid == bundle_id or (p_bname and p_bname[:8].lower() == eff_prefix[:8].lower())):
+                if p_num > 0 and (
+                    p_bid == bundle_id
+                    or state._identifiers_match_same_bundle(eff_prefix, p_bname or p_bid)
+                ):
                     if (p_tot > 0 and p_cnt >= p_tot - 4) or (p_st == "completed" and p_tot <= 0 and p_cnt > 0):
                         completed_part_nums.add(p_num)
                     elif p_cnt > 0 or p_tot > 0:
@@ -1234,9 +1272,80 @@ async def predetermine_bundle_from_folder_screenshot(
         if available_parts and part_to_open not in available_parts:
             part_to_open = min(available_parts)
 
+        # Immediately replace any stale/previous bundle queue & diagnostics trace BEFORE inspecting parts
+        # so live UI updates during [Bundle Detect] never display an older project's parts (e.g. DIXUI 1..9 or pdf.worker.js)!
+        prev_mp_ref = (
+            state.multipart_bundle_state.get("base_prefix")
+            or state.multipart_bundle_state.get("folder_name")
+            or state.multipart_bundle_state.get("bundle_id")
+            or ""
+        )
+        prev_tr_ref = (
+            ((state.project_diagnostics_trace.get("bundle_metadata_driver") or {}).get("bundle_name"))
+            or state.project_diagnostics_trace.get("project_name")
+            or ""
+        )
+        if (prev_mp_ref and not state._identifiers_match_same_bundle(eff_prefix, prev_mp_ref)) or (
+            prev_tr_ref and not state._identifiers_match_same_bundle(eff_prefix, prev_tr_ref)
+        ) or state.project_diagnostics_trace.get("active_codescan_file"):
+            state.reset_multipart_and_codescan_state(
+                preserve_auto_chain=True,
+                clear_alignment_filename=True,
+                remove_manifest_png=False,
+                persist_trace=True,
+            )
+
+        initial_target_fn = next(
+            (p.get("file_name") for p in predetermined_parts if int(p.get("part_number") or 0) == part_to_open),
+            f"{eff_prefix}_part{part_to_open}.md",
+        )
+        state.multipart_bundle_state.update({
+            "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
+            "bundle_id": bundle_id,
+            "base_prefix": eff_prefix,
+            "folder_name": folder_scan.get("folder_name") or eff_prefix,
+            "current_part": part_to_open,
+            "total_parts": eff_tot,
+            "available_parts": available_parts,
+            "predetermined_parts": predetermined_parts,
+            "exported_parts": matching_exported_parts,
+            "bundle_totals": {
+                "is_multipart": len(predetermined_parts) > 1 or bool(available_parts),
+                "bundle_id": bundle_id,
+                "bundle_name": eff_prefix,
+                "total_parts": eff_tot,
+                "total_project_files": 0,
+                "sum_files_across_parts": 0,
+                "total_bundle_size_kb": 0.0,
+                "total_bundle_lines": 0,
+                "total_bundle_chars": 0,
+                "verified_headers_count": 0,
+                "all_parts_headers_read": False,
+                "parts": predetermined_parts,
+            },
+            "active_file_name": initial_target_fn,
+            "next_part_number": (part_to_open + 1) if (part_to_open + 1) in available_parts else None,
+            "next_file_name": next(
+                (p["file_name"] for p in predetermined_parts if p["part_number"] == part_to_open + 1),
+                None,
+            ),
+        })
+        try:
+            await state.ws_manager.broadcast({
+                "type": "multipart_transition_status",
+                "multipart_state": state.multipart_bundle_state,
+            })
+        except Exception:
+            pass
+
         # Open EACH part file in the bundle to read its content details before proceeding!
         # Inspect non-target parts first and `part_to_open` last so `part_to_open` remains open in Edit Mode at Line 1.
         if inspect_part_contents:
+            disp_w, disp_h = await get_display_dimensions(ser, disp_id)
+            img_h, img_w = img.shape[:2]
+            tap_sx = (disp_w / float(img_w)) if img_w > 0 else 1.0
+            tap_sy = (disp_h / float(img_h)) if img_h > 0 else 1.0
+
             sorted_parts = sorted(predetermined_parts, key=lambda p: int(p.get("part_number") or 999))
             non_target_parts = [p for p in sorted_parts if int(p.get("part_number") or 0) != part_to_open]
             final_target_parts = [p for p in sorted_parts if int(p.get("part_number") or 0) == part_to_open]
@@ -1256,7 +1365,8 @@ async def predetermine_bundle_from_folder_screenshot(
                 coords = live_coords_by_part.get(pno) or pt_item.get("tap_coords")
                 if not coords:
                     continue
-                tx_i, ty_i = int(coords[0]), int(coords[1])
+                tx_i = int(round(float(coords[0]) * tap_sx))
+                ty_i = int(round(float(coords[1]) * tap_sy))
 
                 try:
                     mfc_grp = state.dag_state.get("groups", {}).get("markdown_file_change")
@@ -1273,6 +1383,10 @@ async def predetermine_bundle_from_folder_screenshot(
                 except Exception:
                     pass
 
+                try:
+                    await direct_hid_to_display(ser, target_mode="desktop", ext_display_id=disp_id, focus_coords=[tx_i, ty_i])
+                except Exception:
+                    pass
                 await run_adb_shell(f"input {disp_pfx}tap {tx_i} {ty_i}", ser, timeout=2.5)
                 actions.append(
                     f"[Bundle Detect] Opened Part {pno}/{eff_tot} ('{p_fn}') at ({tx_i}, {ty_i}) to read content details"
@@ -1281,11 +1395,22 @@ async def predetermine_bundle_from_folder_screenshot(
 
                 snap_check = await capture_external_screenshot(ser, bypass_lock=True)
                 snap_after = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_check, actions)
-                if snap_after and snap_after != snap_check:
+                still_in_folder = False
+                if snap_after:
                     img_after = cv2.imdecode(np.frombuffer(snap_after, np.uint8), cv2.IMREAD_COLOR)
                     if img_after is not None and scan_folder_markdown_files_cv(img_after).get("is_folder_view"):
-                        await run_adb_shell(f"input {disp_pfx}tap {tx_i} {ty_i}", ser, timeout=2.5)
-                        await asyncio.sleep(1.55)
+                        still_in_folder = True
+                if still_in_folder:
+                    await run_adb_shell(f"input {disp_pfx}mouse tap {tx_i} {ty_i}", ser, timeout=2.5)
+                    actions.append(f"[Bundle Detect] Retried mouse tap on Part {pno}/{eff_tot} ('{p_fn}') at ({tx_i}, {ty_i})")
+                    await asyncio.sleep(1.55)
+                    snap_retry2 = await capture_external_screenshot(ser, bypass_lock=True)
+                    snap_retry2 = await _ensure_teams_authenticated_if_needed(ser, disp_id, snap_retry2, actions)
+                    if snap_retry2:
+                        img_r2 = cv2.imdecode(np.frombuffer(snap_retry2, np.uint8), cv2.IMREAD_COLOR)
+                        if img_r2 is not None and scan_folder_markdown_files_cv(img_r2).get("is_folder_view"):
+                            await run_adb_shell(f"input {disp_pfx}tap {tx_i} {ty_i}", ser, timeout=2.5)
+                            await asyncio.sleep(1.55)
 
                 hdr_res = await inspect_opened_part_header_details(
                     serial=ser,
@@ -1540,7 +1665,12 @@ async def select_and_open_next_markdown_part(
     actions: List[str] = []
 
     mp_info = parse_multipart_markdown_filename(current_file_name)
-    predetermined = list(state.multipart_bundle_state.get("predetermined_parts") or [])
+    prefix = (base_prefix or mp_info.get("base_prefix") or state.multipart_bundle_state.get("base_prefix") or "").lower()
+    raw_predetermined = list(state.multipart_bundle_state.get("predetermined_parts") or [])
+    predetermined = [
+        p for p in raw_predetermined
+        if not prefix or state._identifiers_match_same_bundle(prefix, p.get("base_prefix") or p.get("file_name"))
+    ]
     cur_part = (
         int(current_part_number)
         if (current_part_number is not None and int(current_part_number) > 0)
@@ -1551,20 +1681,29 @@ async def select_and_open_next_markdown_part(
         if (target_part_number is not None and int(target_part_number) > 0)
         else (cur_part + 1)
     )
-    prefix = (base_prefix or mp_info.get("base_prefix") or state.multipart_bundle_state.get("base_prefix") or "").lower()
 
     # Step 1: Exit current markdown view to Teams folder files list
     exit_res = await exit_markdown_to_folder_list(serial=ser, display_id=disp_id)
     actions.extend(exit_res.get("actions", []))
     folder_scan = exit_res.get("folder_scan", {})
+    scan_prefix = folder_scan.get("base_prefix") or folder_scan.get("folder_name") or prefix
+    if scan_prefix:
+        predetermined = [
+            p for p in predetermined
+            if state._identifiers_match_same_bundle(scan_prefix, p.get("base_prefix") or p.get("file_name"))
+        ]
     files = list(folder_scan.get("files", []))
     available_parts = sorted(
         set(folder_scan.get("available_parts", []))
         | {int(p["part_number"]) for p in predetermined if p.get("part_number") is not None}
     )
+    mp_matches_scan = bool(
+        not scan_prefix
+        or state._identifiers_match_same_bundle(scan_prefix, state.multipart_bundle_state.get("base_prefix") or "")
+    )
     total_parts = max(
         folder_scan.get("total_parts", 0),
-        state.multipart_bundle_state.get("total_parts") or 0,
+        (state.multipart_bundle_state.get("total_parts") or 0) if mp_matches_scan else 0,
         max(available_parts) if available_parts else 0,
     )
 
@@ -2144,9 +2283,16 @@ async def navigate_teams_onedrive_path_to_markdown(
         bundle_folder_name
         or state.multipart_bundle_state.get("base_prefix")
         or active_proj.get("bundle_name")
-        or "DIXUI_impact_26-11-05-9-43pm"
+        or ""
     )
-    eff_bundle = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle, flags=re.IGNORECASE).strip("_- ") or "DIXUI_impact_26-11-05-9-43pm"
+    eff_bundle = re.sub(r'[_\-\s]*part[_\-\s#]*\d+.*$', '', eff_bundle, flags=re.IGNORECASE).strip("_- ")
+    if not eff_bundle:
+        return {
+            "status": "error",
+            "success": False,
+            "message": "No bundle folder name specified or detected for OneDrive navigation",
+            "actions": actions,
+        }
     eff_file = normalize_bundle_identifier_ocr(
         target_file_name
         or active_proj.get("part_file_name")

@@ -4977,11 +4977,24 @@ async def check_and_update_alignment(
                 state.orchestration_state.update({"status": "PAUSED", "step_label": "PAUSED: teams markdown not aligned"})
                 state.latest_telemetry["status_message"] = f"⚠️ teams markdown not aligned ({res.get('reason')})"
 
-            # Automatically switch active bundle part from QUEUED -> ACTIVE when Live Desktop detects a different open part (e.g. part2.md)
+            # Automatically sync multi-part folder view manifest OR switch open bundle part when inside editor
             try:
-                if res.get("is_multipart") and res.get("part_number"):
-                    await state.auto_switch_project_if_open_part_changed(res)
-                mp_sync = state.sync_multipart_state_from_alignment()
+                if res.get("is_folder_view") and res.get("predetermined_parts"):
+                    folder_sync = state.sync_folder_view_bundle_manifest(res)
+                    mp_sync = folder_sync.get("multipart_state") or state.multipart_bundle_state
+                    if folder_sync.get("upgraded_projects"):
+                        import db as _db_mod
+                        act_p = _db_mod.get_active_project()
+                        if act_p:
+                            await state.ws_manager.broadcast({
+                                "type": "project_updated",
+                                "project": act_p,
+                                "projects": _db_mod.get_projects(),
+                            })
+                else:
+                    if res.get("is_multipart") and res.get("part_number"):
+                        await state.auto_switch_project_if_open_part_changed(res)
+                    mp_sync = state.sync_multipart_state_from_alignment()
             except Exception as mp_err:
                 print(f"[check_and_update_alignment] Multipart sync note: {mp_err}")
                 mp_sync = state.multipart_bundle_state

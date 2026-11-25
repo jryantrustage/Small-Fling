@@ -307,6 +307,12 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
     state.document_lines.clear()
     state.captured_frames.clear()
     state.recapture_queue.clear()
+    state.reset_multipart_and_codescan_state(
+        preserve_auto_chain=True,
+        clear_alignment_filename=True,
+        remove_manifest_png=True,
+        persist_trace=True,
+    )
     state.token_stats.update({
         "total_prompt_tokens": 0, "total_candidates_tokens": 0, "total_tokens": 0,
         "total_api_calls": 0, "estimated_cost_usd": 0.0,
@@ -327,10 +333,15 @@ async def reset_state(payload: Optional[ResetStateRequest] = None):
         state.dag_state["nodes"]["arrow_down"].update({"status": "idle"})
         state.dag_state["nodes"]["verification_trigger"].update({"status": "idle", "loop_count": 0, "is_complete": False})
     state.dag_state["current_active_node"] = None
+    await state.ws_manager.broadcast({"type": "multipart_transition_status", "multipart_state": state.multipart_bundle_state})
     await state.ws_manager.broadcast({"type": "dag_updated", "dag": state.dag_state, "telemetry": state.latest_telemetry})
 
     state.save_persisted_state()
-    return {"status": "success", "message": f"Reset to clean state (target {tlines} lines)."}
+    return {
+        "status": "success",
+        "message": f"Reset to clean state (target {tlines} lines).",
+        "multipart_state": state.multipart_bundle_state,
+    }
 
 # ─── ROUTER MOUNTING ────────────────────────────────────────────────────────
 

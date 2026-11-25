@@ -608,8 +608,14 @@ function AppContent() {
       if (res.ok) {
         const d = await res.json();
         if (d.multipart_state) setMultipartState(d.multipart_state);
-        if (Array.isArray(d.projects)) setProjects(d.projects);
+        if (Array.isArray(d.projects)) {
+          d.projects.forEach((p: any) => {
+            if (p?.id) deletedProjectIdsRef.current.delete(p.id);
+          });
+          setProjects(d.projects);
+        }
         if (d.project) {
+          if (d.project.id) deletedProjectIdsRef.current.delete(d.project.id);
           setActiveProject(d.project);
           const bid = d.project.bundle_id || (
             (d.base_prefix || d.folder_name || d.project.name)
@@ -639,6 +645,10 @@ function AppContent() {
         }
         setStreamKey(Date.now());
         await fetchData();
+      } else {
+        const errObj = await res.json().catch(() => ({}));
+        const errMsg = errObj?.detail?.message || errObj?.detail || errObj?.error || `HTTP ${res.status}`;
+        addTelemetryEvent('ERROR', `DAG Node 0 (Bundle Detect) failed: ${errMsg}`, errObj, 'markdown_file_change');
       }
     } catch (e) {
       console.error('Failed to predetermine folder bundle via markdown_file_change DAG group', e);
@@ -2009,12 +2019,42 @@ function AppContent() {
             ? delData.active_project
             : (filtered.find((p: any) => p.is_active) || filtered[0] || null);
           setActiveProject(nextAct);
+          if (delData?.multipart_state) {
+            setMultipartState(delData.multipart_state);
+          } else if (!nextAct) {
+            setMultipartState(prev => ({
+              ...prev,
+              is_multipart: false,
+              folder_name: '',
+              base_prefix: '',
+              current_part: undefined,
+              total_parts: undefined,
+              next_part_number: null,
+              next_file_name: null,
+              available_parts: [],
+              predetermined_parts: [],
+              exported_parts: [],
+              bundle_totals: undefined,
+            }));
+          }
+          if (delData?.telemetry) {
+            setTelemetry(delData.telemetry);
+          }
           if (!nextAct) {
             setFrames([]);
             setSelectedFrameId(null);
             setSelectedFrameIds(new Set());
             setSelectedLineNumbers(new Set());
             setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+            setAlignmentData(prev => ({ ...prev, file_name: '', part_number: undefined, total_parts: undefined, is_multipart: false }));
+            setTelemetry(prev => ({
+              ...prev,
+              codescan_hierarchy: undefined,
+              active_codescan_file: null,
+              part_header_metadata: undefined,
+              ocr_steering_guide: undefined,
+              process_accuracy: undefined,
+            }));
             setInspectorMode('live');
             setOcrInspectImageId('');
           }
@@ -2242,7 +2282,41 @@ function AppContent() {
         if (Array.isArray(delData?.projects)) {
           const filtered = delData.projects.filter((p: any) => p && !deletedProjectIdsRef.current.has(p.id));
           setProjects(filtered);
-          setActiveProject(delData.active_project || filtered.find((p: any) => p.is_active) || filtered[0] || null);
+          const nextAct = delData.active_project || filtered.find((p: any) => p.is_active) || filtered[0] || null;
+          setActiveProject(nextAct);
+          if (delData?.multipart_state) {
+            setMultipartState(delData.multipart_state);
+          } else if (!nextAct || wasActiveInBundle) {
+            setMultipartState(prev => ({
+              ...prev,
+              is_multipart: false,
+              folder_name: '',
+              base_prefix: '',
+              current_part: undefined,
+              total_parts: undefined,
+              next_part_number: null,
+              next_file_name: null,
+              available_parts: [],
+              predetermined_parts: [],
+              exported_parts: [],
+              bundle_totals: undefined,
+            }));
+          }
+          if (delData?.telemetry) {
+            setTelemetry(delData.telemetry);
+          } else if (!nextAct || wasActiveInBundle) {
+            setTelemetry(prev => ({
+              ...prev,
+              codescan_hierarchy: undefined,
+              active_codescan_file: null,
+              part_header_metadata: undefined,
+              ocr_steering_guide: undefined,
+              process_accuracy: undefined,
+            }));
+          }
+          if (!nextAct) {
+            setAlignmentData(prev => ({ ...prev, file_name: '', part_number: undefined, total_parts: undefined, is_multipart: false }));
+          }
         }
         addTelemetryEvent('SYSTEM', `Deleted project bundle "${label}"`);
       } else {
@@ -2431,6 +2505,20 @@ function AppContent() {
             } else {
               setProjects(p => p.filter(item => item.id !== msg.project_id));
             }
+            if (msg.multipart_state) {
+              setMultipartState(msg.multipart_state);
+            }
+            if (msg.telemetry) {
+              setTelemetry(p => ({
+                ...p,
+                ...msg.telemetry,
+                codescan_hierarchy: msg.telemetry.codescan_hierarchy,
+                active_codescan_file: msg.telemetry.active_codescan_file ?? null,
+                part_header_metadata: msg.telemetry.part_header_metadata,
+                ocr_steering_guide: msg.telemetry.ocr_steering_guide,
+                process_accuracy: msg.telemetry.process_accuracy,
+              }));
+            }
             if (activeProjectRef.current?.id === msg.project_id || !msg.active_project) {
               setActiveProject(msg.active_project || null);
               setInspectorMode('live');
@@ -2441,11 +2529,50 @@ function AppContent() {
                 setSelectedFrameIds(new Set());
                 setSelectedLineNumbers(new Set());
                 setDocumentData({ total_lines: 0, issue_count: 0, min_line: 0, max_line: 0, lines: [] });
+                setAlignmentData(prev => ({ ...prev, file_name: '', part_number: undefined, total_parts: undefined, is_multipart: false }));
+                if (!msg.multipart_state) {
+                  setMultipartState(prev => ({
+                    ...prev,
+                    is_multipart: false,
+                    folder_name: '',
+                    base_prefix: '',
+                    current_part: undefined,
+                    total_parts: undefined,
+                    next_part_number: null,
+                    next_file_name: null,
+                    available_parts: [],
+                    predetermined_parts: [],
+                    exported_parts: [],
+                    bundle_totals: undefined,
+                  }));
+                }
+                if (!msg.telemetry) {
+                  setTelemetry(prev => ({
+                    ...prev,
+                    codescan_hierarchy: undefined,
+                    active_codescan_file: null,
+                    part_header_metadata: undefined,
+                    ocr_steering_guide: undefined,
+                    process_accuracy: undefined,
+                  }));
+                }
               }
             }
           } else if (msg.type === 'project_switched' || msg.type === 'project_updated') {
             if (msg.type === 'project_updated' && msg.project?.id) {
-              setProjects(prev => prev.map(p => p.id === msg.project.id ? { ...p, ...msg.project } : p));
+              deletedProjectIdsRef.current.delete(msg.project.id);
+              if (Array.isArray(msg.projects)) {
+                msg.projects.forEach((p: any) => {
+                  if (p?.id) deletedProjectIdsRef.current.delete(p.id);
+                });
+                setProjects(msg.projects.filter((item: any) => item && !deletedProjectIdsRef.current.has(item.id)));
+              } else {
+                setProjects(prev =>
+                  prev.some(p => p.id === msg.project.id)
+                    ? prev.map(p => (p.id === msg.project.id ? { ...p, ...msg.project } : p))
+                    : [msg.project, ...prev]
+                );
+              }
               if (activeProjectRef.current?.id === msg.project.id || msg.project.is_active) {
                 setActiveProject(msg.project);
               }
@@ -2674,7 +2801,14 @@ function AppContent() {
             if (msg.multipart_state) {
               setMultipartState(msg.multipart_state);
             }
+            if (Array.isArray(msg.projects)) {
+              msg.projects.forEach((p: any) => {
+                if (p?.id) deletedProjectIdsRef.current.delete(p.id);
+              });
+              setProjects(msg.projects.filter((item: any) => item && !deletedProjectIdsRef.current.has(item.id)));
+            }
             if (msg.project) {
+              if (msg.project.id) deletedProjectIdsRef.current.delete(msg.project.id);
               setActiveProject(msg.project);
             }
             if (msg.type === 'multipart_transition_completed' || msg.type === 'multipart_bundle_completed') {
@@ -3084,6 +3218,34 @@ function AppContent() {
     : (telemetry.target_total_lines || headlessTelemetry?.target_total_lines || 0);
   const globalPercent = globalTargetLines > 0 ? Math.min(100, Math.round((globalCurrentLine / globalTargetLines) * 100)) : 0;
 
+  const normalizeBundleStemUI = useCallback((raw?: string | null): string => {
+    const s = String(raw || '')
+      .trim()
+      .replace(/\.(?:md|markdown|txt)$/i, '')
+      .replace(/^bundle[_\-\s]+/i, '')
+      .replace(/[_\-\s]*(?:\(\s*)?(?:part|pt)[_\-\s#]*\d+(?:\s*(?:of|\.\.|\/)\s*\d+)?(?:\s*\))?$/i, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+    return s;
+  }, []);
+
+  const doesMultipartMatchBundleUI = useCallback((bundleName?: string | null, bundleId?: string | null): boolean => {
+    const targetStem = normalizeBundleStemUI(bundleName || bundleId);
+    if (!targetStem) return true;
+    const mpStem = normalizeBundleStemUI(
+      multipartState.base_prefix ||
+      multipartState.folder_name ||
+      multipartState.predetermined_parts?.[0]?.base_prefix ||
+      multipartState.predetermined_parts?.[0]?.file_name ||
+      ''
+    );
+    if (!mpStem) return true;
+    if (targetStem === mpStem) return true;
+    const minLen = Math.min(targetStem.length, mpStem.length);
+    return minLen >= 8 && (targetStem.startsWith(mpStem.slice(0, 10)) || mpStem.startsWith(targetStem.slice(0, 10)));
+  }, [multipartState.base_prefix, multipartState.folder_name, multipartState.predetermined_parts, normalizeBundleStemUI]);
+
   const projectGroups = useMemo<ProjectBundleGroup[]>(() => {
     const groups: ProjectBundleGroup[] = [];
     const bundleMap = new Map<string, ProjectData[]>();
@@ -3096,8 +3258,9 @@ function AppContent() {
       if (m && m[1]) {
         return `bundle_${m[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
       }
-      if ((p.total_parts && p.total_parts > 1) || (p.id === activeProject?.id && (multipartState.is_multipart || (multipartState.predetermined_parts && multipartState.predetermined_parts.length > 0)))) {
-        const rawPrefix = p.bundle_name || multipartState.base_prefix || multipartState.folder_name || p.name || 'bundle';
+      const mpMatchesProj = doesMultipartMatchBundleUI(p.bundle_name || p.part_file_name || p.name, p.bundle_id);
+      if ((p.total_parts && p.total_parts > 1) || (p.id === activeProject?.id && mpMatchesProj && (multipartState.is_multipart || (multipartState.predetermined_parts && multipartState.predetermined_parts.length > 0)))) {
+        const rawPrefix = p.bundle_name || (mpMatchesProj ? (multipartState.base_prefix || multipartState.folder_name) : '') || p.name || 'bundle';
         return `bundle_${String(rawPrefix).trim().toLowerCase().replace(/[^a-z0-9]+/g, '_')}`;
       }
       return '';
@@ -3133,8 +3296,16 @@ function AppContent() {
         const projDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.project_download_count ?? 0), 0);
         const mdDl = sortedParts.reduce((acc, pt) => Math.max(acc, pt.markdown_download_count ?? 0), 0);
         const maxPartTotal = sortedParts.reduce((acc, pt) => Math.max(acc, pt.total_parts ?? 0, pt.part_number ?? 0), 0);
-        const expectedTotal = isActive
-          ? Math.max(sortedParts.length, maxPartTotal, multipartState.total_parts || 0, multipartState.predetermined_parts?.length || 0)
+        const mpMatchesGroup = doesMultipartMatchBundleUI(bName, p.bundle_id || bid);
+        const matchingPredLen = mpMatchesGroup
+          ? (multipartState.predetermined_parts || []).filter(pt => {
+              const ptStem = normalizeBundleStemUI(pt.base_prefix || pt.file_name);
+              const grpStem = normalizeBundleStemUI(bName || bid);
+              return !ptStem || !grpStem || ptStem === grpStem || (Math.min(ptStem.length, grpStem.length) >= 8 && (ptStem.startsWith(grpStem.slice(0, 10)) || grpStem.startsWith(ptStem.slice(0, 10))));
+            }).length
+          : 0;
+        const expectedTotal = (isActive && mpMatchesGroup)
+          ? Math.max(sortedParts.length, maxPartTotal, multipartState.total_parts || 0, matchingPredLen)
           : Math.max(sortedParts.length, maxPartTotal);
 
         groups.push({
@@ -3172,7 +3343,7 @@ function AppContent() {
       }
     }
     return groups;
-  }, [projects, activeProject?.id, multipartState.total_parts, multipartState.predetermined_parts]);
+  }, [projects, activeProject?.id, multipartState.total_parts, multipartState.predetermined_parts, doesMultipartMatchBundleUI, normalizeBundleStemUI]);
 
   // Automatically expand the active bundle card when folder scan populates predetermined_parts
   useEffect(() => {
@@ -3539,7 +3710,9 @@ function AppContent() {
                 </div>
               </div>
 
-              {multipartState.bundle_totals && Boolean(
+              {multipartState.bundle_totals &&
+                (!activeProject || doesMultipartMatchBundleUI(activeProject.bundle_name || activeProject.part_file_name || activeProject.name, activeProject.bundle_id)) &&
+                Boolean(
                 multipartState.bundle_totals.total_project_files ||
                 multipartState.bundle_totals.total_bundle_size_kb ||
                 multipartState.bundle_totals.total_bundle_chars
@@ -3567,7 +3740,9 @@ function AppContent() {
                 </div>
               )}
 
-              {Array.isArray(multipartState.predetermined_parts) && multipartState.predetermined_parts.length > 0 && (
+              {Array.isArray(multipartState.predetermined_parts) &&
+                multipartState.predetermined_parts.length > 0 &&
+                (!activeProject || doesMultipartMatchBundleUI(activeProject.bundle_name || activeProject.part_file_name || activeProject.name, activeProject.bundle_id)) && (
                 <div
                   data-testid="predetermined-parts-strip"
                   style={{
@@ -3618,8 +3793,12 @@ function AppContent() {
                 if (group.type === 'bundle') {
                   const isExpanded = expandedBundleIds.has(group.bundle_id);
                   const expectedTotal = Math.max(group.total_parts_count, group.expected_total_parts || group.total_parts_count);
-                  const predeterminedList = (group.is_active && Array.isArray(multipartState.predetermined_parts))
-                    ? multipartState.predetermined_parts
+                  const predeterminedList = (group.is_active && Array.isArray(multipartState.predetermined_parts) && doesMultipartMatchBundleUI(group.bundle_name, group.bundle_id))
+                    ? multipartState.predetermined_parts.filter(pt => {
+                        const ptStem = normalizeBundleStemUI(pt.base_prefix || pt.file_name);
+                        const grpStem = normalizeBundleStemUI(group.bundle_name || group.bundle_id);
+                        return !ptStem || !grpStem || ptStem === grpStem || (Math.min(ptStem.length, grpStem.length) >= 8 && (ptStem.startsWith(grpStem.slice(0, 10)) || grpStem.startsWith(ptStem.slice(0, 10))));
+                      })
                     : [];
 
                   // Resolve the markdown part currently selected or open on the Live Desktop
